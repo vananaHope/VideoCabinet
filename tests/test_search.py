@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sqlite3
 import unicodedata
@@ -43,6 +44,7 @@ def library(tmp_path):
     video = next(v for v in core.videos() if v.title == "야구 Lesson")
     core.request_subtitles(video.id)
     assert core.process_next_subtitle().state == "completed"
+    core.prepare_search()
     return core, video, transcriber
 
 
@@ -191,9 +193,14 @@ def test_pre_search_database_backfills_original_and_translation(tmp_path, with_t
         if old_search:
             db.executescript((fixtures / "search_85d4118.sql").read_text(encoding="utf-8"))
     core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=database)
+    # 색인 준비가 아직 시작되지 않아도 구 빌드의 함수 의존 트리거는 교체돼야 한다.
+    with sqlite3.connect(database) as db:
+        db.execute("UPDATE transcript_lines SET text='Legacy weight shift' WHERE id='legacy-line'")
+        db.execute("INSERT INTO transcript_lines VALUES ('before-ready', 'legacy-transcript', 1, 20, 22, 'New before ready')")
     original, = core.search("weightshift").results
     assert (original.source, original.start, original.missing) == ("transcript", 12.5, True)
     assert not core.search("weightshift").truncated
+    assert core.search("newbeforeready").results[0].start == 20
     if with_translation:
         translated, = core.search("체중 이동").results
         assert (translated.source, translated.start, translated.title) == ("translation", 12.5, "기존 영상")
@@ -322,3 +329,68 @@ def test_missing_and_excluded_state_and_title_changes_follow_library(library):
     assert not core.search("체중").results
     core.restore_video(video.id)
     assert core.search("새로운이름").results[0].missing
+
+
+@pytest.mark.parametrize("query", ["공통", "공통 자막"])
+def test_subtitles_stay_in_video_and_time_order_after_line_edits(library, query):
+    core, _, transcriber = library
+    transcriber.result = TranscriberResult("en", tuple(
+        TranscriptSegment(start, start + 1, "공통 자막 원어") for start in (10, 20, 30)))
+    videos = core.videos()
+    for video in reversed(videos):
+        core.request_subtitles(video.id)
+        core.process_next_subtitle()
+        with sqlite3.connect(core.database) as db:
+            db.executemany("INSERT INTO translation_lines VALUES (?, ?)",
+                           [(line.id, "공통 자막 번역") for line in core.transcript(video.id).lines])
+
+    def order():
+        return [(r.video_id, r.start, r.source) for r in core.search(query).results]
+
+    expected = sorted((video.id, start, source) for video in videos
+                      for start in (10, 20, 30) for source in ("transcript", "translation"))
+    assert order() == expected
+    first_line = core.transcript(videos[0].id).lines[0]
+    with sqlite3.connect(core.database) as db:
+        db.execute("UPDATE transcript_lines SET text=? WHERE id=?", ("공통 자막 원어 수정", first_line.id))
+        db.execute("UPDATE translation_lines SET text=? WHERE line_id=?", ("공통 자막 번역 수정", first_line.id))
+    assert order() == expected
+    with sqlite3.connect(core.database) as db:
+        db.execute("UPDATE transcript_lines SET start=35, end=36 WHERE id=?", (first_line.id,))
+    expected = sorted((vid, 35 if vid == videos[0].id and start == 10 else start, source)
+                      for vid, start, source in expected)
+    assert order() == expected
+
+
+def test_prepare_can_run_concurrently_before_search_and_preserves_backfill(library):
+    core, _, _ = library
+    reopened = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database)
+    assert not reopened.search_index_ready
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(reopened.prepare_search) for _ in range(3)]
+        for future in futures:
+            future.result(timeout=10)
+    assert reopened.search_index_ready
+    assert reopened.search("체중") == core.search("체중")
+
+
+def test_bulk_preparation_preserves_existing_results_and_later_external_edits(library):
+    core, video, transcriber = library
+    other = next(v for v in core.videos() if v.id != video.id)
+    transcriber.result = TranscriberResult("ko", tuple(
+        TranscriptSegment(i / 200, i / 200 + 1, f"대량체중 {i}") for i in range(10005)))
+    core.request_subtitles(other.id)
+    assert core.process_next_subtitle().state == "completed"
+    assert len(core.search("대량체중").results) == 500
+    assert core.search("대량체중").truncated
+    assert core.search("HELLO").results[0].video_id == video.id
+    last, = core.search("대량체중10004").results
+    assert last.start == 10004 / 200
+    line = core.transcript(other.id).lines[-1]
+    with sqlite3.connect(core.database) as db:
+        db.execute("UPDATE transcript_lines SET text=? WHERE id=?", ("대량갱신성공", line.id))
+    assert core.search("대량체중10004").results == ()
+    assert core.search("대량갱신성공").results[0].start == line.start
+    with sqlite3.connect(core.database) as db:
+        db.execute("DELETE FROM transcript_lines WHERE id=?", (line.id,))
+    assert core.search("대량갱신성공").results == ()

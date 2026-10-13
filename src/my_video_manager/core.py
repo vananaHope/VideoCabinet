@@ -191,6 +191,13 @@ class AppCore:
     def search(self, query: str) -> SearchResponse:
         return self._search.find(query, self.videos())
 
+    def prepare_search(self) -> None:
+        self._search.prepare()
+
+    @property
+    def search_index_ready(self) -> bool:
+        return self._search.ready
+
     def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:
         self.playback_location(video_id)
         return self._subtitles.request(video_id, spoken_language)

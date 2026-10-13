@@ -13,7 +13,7 @@ from .subtitle_ui import SubtitleControls
 from .translation_ui import TranslationControls
 from .highlight_ui import HighlightList, HighlightProgress, timestamp
 from .series_ui import SeriesEditor
-from .search_ui import SearchDialog
+from .search_ui import SearchDialog, SearchPreparation
 from .tag_ui import TagEditor, TagManager
 from .library_ui import LibraryControls
 from .reel_ui import ReelControls
@@ -143,6 +143,7 @@ class MainWindow(QMainWindow):
         self.list.itemActivated.connect(self.play)
         QApplication.instance().installEventFilter(self)
         self.refresh()
+        self.search_preparation = SearchPreparation(self.core, self)
 
     def refresh(self):
         tag_id = self.tag_filter.currentData()
@@ -243,7 +244,7 @@ class MainWindow(QMainWindow):
         self.play_video(item.data(Qt.ItemDataRole.UserRole))
 
     def show_search(self):
-        dialog = SearchDialog(self.core, self)
+        dialog = SearchDialog(self.core, self, preparation=self.search_preparation)
         if dialog.exec() and dialog.selected_result is not None:
             self.playback_list = dialog.video_ids
             result = dialog.selected_result
