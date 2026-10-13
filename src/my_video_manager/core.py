@@ -16,6 +16,8 @@ from .series import Series, SeriesStore, adjacent_video
 from .tags import Tag, Tags
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
+from .settings import Settings
+from .translation import Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ class CommandType(str, Enum):
     TOGGLE_SUBTITLES = "toggle_subtitles"
     PREVIOUS_VIDEO = "previous_video"
     NEXT_VIDEO = "next_video"
+    TOGGLE_SUBTITLE_LANGUAGE = "toggle_subtitle_language"
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,7 @@ DEFAULT_KEY_BINDINGS = {
     "/": Command(CommandType.TOGGLE_SUBTITLES),
     "PgUp": Command(CommandType.PREVIOUS_VIDEO),
     "PgDn": Command(CommandType.NEXT_VIDEO),
+    ".": Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE),
 }
 
 MIN_PLAYBACK_SPEED = 0.25
@@ -136,6 +140,8 @@ class AppCore:
         key_bindings: Mapping[str, Command] | None = None,
         viewing_settings: ViewingSettings | None = None,
         transcriber: Transcriber | None = None,
+        translator: Translator | None = None,
+        translation_batch_size: int = 30,
     ):
         self.database = (Path(database) if database is not None else default_data_directory() / "library.sqlite3").resolve()
         self.database.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +183,40 @@ class AppCore:
         self._viewings = ViewingStore(self._connect, clock, viewing_settings or ViewingSettings())
         self.playback.subscribe(ViewingRecorder(self._start_viewing, self._viewings.report, self._viewings.end))
         self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location)
+        self._settings = Settings(self._connect)
+        self._translations = Translations(self._connect, clock, self._subtitles, self._settings, translator,
+                                          batch_size=translation_batch_size)
+        self._subtitle_selection = SubtitleSelection(self._translations)
+        self.playback.subscribe(self._subtitle_selection)
+
+    @property
+    def translation_cli(self) -> str:
+        return self._settings.translation_cli
+
+    def set_translation_cli(self, cli: str) -> None:
+        self._settings.set_translation_cli(cli)
+
+    def request_translation(self, video_id: int, line_ids=None) -> TranslationQueueEntry | None:
+        """전체 또는 지정한 원어 줄 ID만 번역한다. 실패/보류 재요청은 완료한 묶음을 유지한다."""
+        return self._translations.request(video_id, line_ids)
+
+    def translation(self, video_id: int) -> Translation | None:
+        return self._translations.translation(video_id)
+
+    def translation_queue(self) -> tuple[TranslationQueueEntry, ...]:
+        return self._translations.queue()
+
+    def translation_ready(self) -> bool:
+        return self._translations.ready() is not None
+
+    def process_next_translation(self) -> TranslationQueueEntry | None:
+        return self._translations.process_next()
+
+    def stop_translation_processing(self) -> None:
+        self._translations.stop_processing()
+
+    def toggle_subtitle_language(self) -> tuple[bool, str]:
+        return self._subtitle_selection.toggle()
 
     def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:
         return self._subtitles.request(video_id, spoken_language)
@@ -185,7 +225,10 @@ class AppCore:
         return self._subtitles.queue()
 
     def process_next_subtitle(self) -> SubtitleQueueEntry | None:
-        return self._subtitles.process_next()
+        result = self._subtitles.process_next()
+        if result and result.state == "completed":
+            self._translations.enqueue_eligible()
+        return result
 
     def stop_subtitle_processing(self) -> None:
         self._subtitles.stop_processing()
@@ -195,11 +238,19 @@ class AppCore:
 
     def playback_subtitle(self, video_id: int) -> Path | None:
         transcript = self.transcript(video_id)
+        translated = self._subtitle_selection.video_id == video_id and self._subtitle_selection.translated
+        if translated:
+            translation = self.translation(video_id)
+            if translation is not None:
+                transcript = translation
+            else:
+                self._subtitle_selection.translated = False
+                translated = False
         if transcript is None or not transcript.lines:
             return None
         directory = self.database.parent / "playback-subtitles"
         directory.mkdir(exist_ok=True)
-        path = directory / f"{video_id}.srt"
+        path = directory / f"{video_id}{'-ko' if translated else ''}.srt"
         path.write_text(transcript_srt(transcript), encoding="utf-8")
         return path
 
