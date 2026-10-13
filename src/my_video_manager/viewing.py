@@ -104,6 +104,7 @@ class ViewingStatus:
     finished_count: int = 0
     resume_point: float | None = None
     stopped_percent: float | None = None
+    last_viewed_at: datetime | None = None
 
 
 def viewing_status(viewings: tuple[Viewing, ...], settings: ViewingSettings) -> ViewingStatus:
@@ -115,7 +116,8 @@ def viewing_status(viewings: tuple[Viewing, ...], settings: ViewingSettings) -> 
     point = last.last_position if abandoned and last is not None else None
     return ViewingStatus(finished, abandoned, finished_count >= settings.favorite_count,
                          finished_count, point,
-                         point / last.duration * 100 if point is not None else None)
+                         point / last.duration * 100 if point is not None else None,
+                         max((v.updated_at for v in viewings), default=None))
 
 
 class ViewingRecorder:
@@ -211,9 +213,21 @@ class ViewingStore:
     def list(self, video_id: int) -> tuple[Viewing, ...]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM viewings WHERE video_id=? ORDER BY id", (video_id,)).fetchall()
-        return tuple(self._active[row["id"]] if row["id"] in self._active else Viewing(
+        return tuple(self._from_row(row) for row in rows)
+
+    def status_map(self) -> dict[int, ViewingStatus]:
+        """시청 없는 영상도 포함하며 저장 전의 진행 중 시청을 즉시 반영한다."""
+        with self._connect() as db:
+            db.execute("BEGIN")
+            grouped = {row[0]: [] for row in db.execute("SELECT id FROM videos")}
+            for row in db.execute("SELECT * FROM viewings ORDER BY id"):
+                grouped[row["video_id"]].append(self._from_row(row))
+        return {vid: viewing_status(tuple(viewings), self.settings) for vid, viewings in grouped.items()}
+
+    def _from_row(self, row) -> Viewing:
+        return self._active[row["id"]] if row["id"] in self._active else Viewing(
             row["id"], row["video_id"], row["duration"], datetime.fromisoformat(row["started_at"]),
             datetime.fromisoformat(row["updated_at"]),
             datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None,
             tuple(tuple(pair) for pair in json.loads(row["intervals"])), row["last_position"],
-        ) for row in rows)
+        )

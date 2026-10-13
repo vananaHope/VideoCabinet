@@ -12,6 +12,7 @@ from .library import Library, Location, MediaInfo, MediaReader, ScanIssue, ScanR
 from .settings import Settings
 from .highlights import Highlight, Highlights
 from .key_bindings import KeyBinding, KeyBindings
+from .hidden_gems import HiddenGem, HiddenGems, select_hidden_gems
 from .playback import PlaybackHub
 from .reel import HighlightReel, ReelEntry, ReelPlayback, ReelSettings
 from .revisit import Revisits
@@ -106,7 +107,9 @@ class AppCore:
 
         self.playback = PlaybackHub()
         self._series = SeriesStore(self._connect)
-        self._highlights = Highlights(self._connect)
+        self._highlights = Highlights(self._connect, on_created=lambda db, hid:
+                                      self._hidden_gems.record_highlight_created(db, hid))
+        self._hidden_gems = HiddenGems(self._connect, clock, self.settings)
         self._tags = Tags(self._connect)
         self.playback.subscribe(self._highlights)
         self._highlight_commands = {
@@ -255,6 +258,22 @@ class AppCore:
     def search_index_ready(self) -> bool:
         return self._search.ready
 
+    def hidden_gems(self) -> tuple[HiddenGem, ...]:
+        return select_hidden_gems(
+            self.videos(), self.viewing_status_map(), self.video_tags_map(), self._series.list(),
+            self._hidden_gems.dismissed_ids(), self._hidden_gems.revisit_times(), now=self._clock(),
+            unwatched_days=self._hidden_gems.days("unwatched"), revisit_days=self._hidden_gems.days("revisit"))
+
+    def dismiss_video(self, video_id: int) -> None:
+        self._hidden_gems.set_dismissed(video_id, True)
+
+    def restore_dismissed_video(self, video_id: int) -> None:
+        self._hidden_gems.set_dismissed(video_id, False)
+
+    def dismissed_videos(self) -> tuple[Video, ...]:
+        ids = self._hidden_gems.dismissed_ids()
+        return tuple(v for v in self.videos() + self.excluded_videos() if v.id in ids)
+
     def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:
         self.playback_location(video_id)
         return self._subtitles.request(video_id, spoken_language)
@@ -396,6 +415,9 @@ class AppCore:
 
     def video_tags(self, video_id: int) -> tuple[Tag, ...]:
         return self._tags.attached("video", video_id)
+
+    def video_tags_map(self) -> dict[int, tuple[Tag, ...]]:
+        return self._tags.video_tags_map()
 
     def highlight_tags(self, highlight_id: int) -> tuple[Tag, ...]:
         return self._tags.attached("highlight", highlight_id)
@@ -566,6 +588,9 @@ class AppCore:
 
     def viewing_status(self, video_id: int) -> ViewingStatus:
         return viewing_status(self.viewings(video_id), self._viewings.settings)
+
+    def viewing_status_map(self) -> dict[int, ViewingStatus]:
+        return self._viewings.status_map()
 
     def resume_start(self, video_id: int) -> float:
         point = self.viewing_status(video_id).resume_point

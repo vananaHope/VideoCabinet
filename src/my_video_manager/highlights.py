@@ -21,8 +21,9 @@ class Highlight:
 
 
 class Highlights:
-    def __init__(self, connect):
+    def __init__(self, connect, *, on_created=None):
         self._connect = connect
+        self._on_created = on_created
         self._video_id = None
         self._duration = 0.0
         self._position = 0.0
@@ -156,4 +157,6 @@ class Highlights:
         with self._connect() as db:
             cursor = db.execute("INSERT INTO highlights (video_id, start, end) VALUES (?, ?, ?)",
                                 (self._video_id, start, end))
+            if self._on_created is not None:
+                self._on_created(db, cursor.lastrowid)
             return Highlight(cursor.lastrowid, self._video_id, start, end, None)

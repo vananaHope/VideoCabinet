@@ -20,6 +20,7 @@ from .reel_ui import ReelControls
 from .key_settings_ui import SettingsDialog, key_name
 from .key_display import display_keys
 from .tray import TrayControls
+from .hidden_gems_ui import HiddenGemControls
 
 from .review_ui import ReviewDialog, review_button
 
@@ -65,6 +66,8 @@ class MainWindow(QMainWindow):
 
         library = QWidget()
         layout = QVBoxLayout(library)
+        self.hidden_gems = HiddenGemControls(self)
+        layout.addWidget(self.hidden_gems)
         buttons = QHBoxLayout()
         self.add_button = QPushButton("감시 폴더 추가")
         self.scan_button = QPushButton("다시 검사")
@@ -154,6 +157,7 @@ class MainWindow(QMainWindow):
         self.search_preparation = SearchPreparation(self.core, self)
 
     def refresh(self):
+        self.hidden_gems.refresh()
         tag_id = self.tag_filter.currentData()
         self.tag_filter.blockSignals(True)
         self.tag_filter.clear()
@@ -171,8 +175,10 @@ class MainWindow(QMainWindow):
                          for s in self.core.series() for index, vid in enumerate(s.video_ids)}
         tag_id = self.tag_filter.currentData()
         videos = self.core.videos() if tag_id is None else self.core.videos_for_tag(tag_id)
+        statuses = self.core.viewing_status_map()
+        tags_by_video = self.core.video_tags_map()
         for row, video in enumerate(videos):
-            status = self.core.viewing_status(video.id)
+            status = statuses[video.id]
             label = "다 봄" if status.finished else f"보다 만 ({status.stopped_percent:.0f}%)" if status.abandoned else ""
             if status.favorite:
                 label += " · 즐겨 보는 영상"
@@ -183,7 +189,7 @@ class MainWindow(QMainWindow):
             if video.id in series_labels:
                 label += ("\n" if label else "") + "시리즈: " + series_labels[video.id]
             item = QListWidgetItem(QIcon(str(video.thumbnail)), video.title + (f"\n{label}" if label else ""))
-            tags = self.core.video_tags(video.id)
+            tags = tags_by_video.get(video.id, ())
             if tags:
                 item.setText(item.text() + "\n태그: " + ", ".join(tag.name for tag in tags))
             item.setData(Qt.ItemDataRole.UserRole, video.id)
