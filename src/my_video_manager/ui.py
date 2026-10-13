@@ -1,6 +1,6 @@
 """화면은 입력을 코어에 전달하고 결과를 표시한다."""
 
-from PySide6.QtCore import QEvent, QSize, Qt, QThread, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
 )
 
 from .adapters import MpvPlayer
-from .core import AppCore
+from .core import AppCore, CommandType
+from .highlight_ui import HighlightList, HighlightProgress, timestamp
 
 
 class ScanWorker(QThread):
@@ -27,10 +28,15 @@ class ScanWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, core: AppCore):
+    def __init__(self, core: AppCore, *, player_factory=MpvPlayer):
         super().__init__()
         self.core = core
         self.player = None
+        self.player_factory = player_factory
+        self._seek_pending = False
+        self.position_timer = QTimer(self)
+        self.position_timer.setInterval(100)
+        self.position_timer.timeout.connect(self.poll_position)
         self.worker = None
         self.setWindowTitle("영상 라이브러리")
         self.resize(1100, 720)
@@ -70,7 +76,15 @@ class MainWindow(QMainWindow):
         self.surface.setStyleSheet("background: black")
         self.surface.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         playback_layout.addWidget(self.surface, 1)
+        self.progress = HighlightProgress()
+        playback_layout.addWidget(self.progress)
+        self.position_label = QLabel()
+        playback_layout.addWidget(self.position_label)
+        self.highlights_button = QPushButton("하이라이트 목록 · 시각·메모 편집")
+        self.highlights_button.clicked.connect(self.show_highlights)
+        playback_layout.addWidget(self.highlights_button)
         playback_layout.addWidget(QLabel("Enter 재생/일시정지 · ←/→ 5초 · , 3초 뒤로 · ↑/↓ 속도 ±0.25"))
+        playback_layout.addWidget(QLabel("Insert 지점 · Delete 구간 시작/끝 · Home/End 이전/다음 · 노랑 지점 / 초록 구간 / 주황 열린 구간"))
         self.pages.addWidget(playback)
 
         self.add_button.clicked.connect(self.add_folder)
@@ -129,20 +143,72 @@ class MainWindow(QMainWindow):
 
     def play(self, item):
         try:
-            location = self.core.playback_location(item.data(Qt.ItemDataRole.UserRole))
+            video_id = item.data(Qt.ItemDataRole.UserRole)
+            location = self.core.playback_location(video_id)
+            self.end_playback()
             self.pages.setCurrentIndex(1)
             if self.player is None:
-                self.player = MpvPlayer(int(self.surface.winId()))
+                self.player = self.player_factory(int(self.surface.winId()))
             self.player.play(location.path)
+            self.core.playback.start(video_id, 0)
+            self._seek_pending = False
+            self.progress.duration = next(v.duration for v in self.core.videos() if v.id == video_id)
+            self.refresh_highlights()
+            self.position_timer.start()
             self.surface.setFocus()
         except Exception as error:
+            self.end_playback()
             self.pages.setCurrentIndex(0)
             QMessageBox.critical(self, "재생 실패", str(error))
 
-    def show_library(self):
+    def end_playback(self):
+        self.position_timer.stop()
+        if self.player and self.core.playback.session is not None:
+            self.sync_position()
+        self.core.playback.end()
         if self.player:
             self.player.close()
             self.player = None
+
+    def sync_position(self):
+        if self.player and self.core.playback.session is not None:
+            position = self.player.position()
+            if position is not None:
+                # mpv의 비동기 seek가 아직 이전 위치를 반환하면 표시만 유지한다.
+                # 처음 바뀐 위치까지의 간격은 재생된 구간으로 세지 않는다.
+                if not self._seek_pending or position != self.core.playback.position:
+                    self.core.playback.report(position, seeked=self._seek_pending)
+                    self._seek_pending = False
+                self.progress.position = position
+                self.progress.open_start = self.core.open_highlight_start
+                self.progress.update()
+                opened = self.core.open_highlight_start
+                suffix = f" · 구간 시작 {timestamp(opened)} — Delete로 끝내기" if opened is not None else ""
+                self.position_label.setText(f"{timestamp(position)} / {timestamp(self.progress.duration)}{suffix}")
+            return position
+        return None
+
+    def poll_position(self):
+        try:
+            self.sync_position()
+        except Exception as error:
+            self.position_timer.stop()
+            self.position_label.setText(f"재생 위치 확인 실패: {error}")
+
+    def refresh_highlights(self):
+        self.progress.highlights = self.core.highlights(self.core.playback.session.video_id)
+        self.progress.open_start = self.core.open_highlight_start
+        self.progress.position = self.core.playback.position
+        self.progress.update()
+
+    def show_highlights(self):
+        if self.core.playback.session is not None:
+            HighlightList(self.core, self.core.playback.session.video_id, self.progress.duration, self).exec()
+            self.refresh_highlights()
+            self.surface.setFocus()
+
+    def show_library(self):
+        self.end_playback()
         self.pages.setCurrentIndex(0)
         self.list.setFocus()
 
@@ -165,11 +231,27 @@ class MainWindow(QMainWindow):
             return True
         key = {Qt.Key.Key_Return: "Enter", Qt.Key.Key_Enter: "Enter", Qt.Key.Key_Left: "Left",
                Qt.Key.Key_Right: "Right", Qt.Key.Key_Up: "Up", Qt.Key.Key_Down: "Down",
-               Qt.Key.Key_Comma: ","}.get(event.key(), event.text())
+               Qt.Key.Key_Comma: ",", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
+               Qt.Key.Key_Home: "Home", Qt.Key.Key_End: "End"}.get(event.key(), event.text())
         command = self.core.command_for_key(key)
         if command and self.player:
             try:
-                self.player.execute(command)
+                if command.kind in (CommandType.POINT_HIGHLIGHT, CommandType.RANGE_HIGHLIGHT,
+                                    CommandType.PREVIOUS_HIGHLIGHT, CommandType.NEXT_HIGHLIGHT):
+                    if event.isAutoRepeat() or self.sync_position() is None:
+                        return True
+                    target = self.core.execute_highlight_command(command)
+                    if target is not None:
+                        self.player.seek_to(target)
+                        self._seek_pending = True
+                    self.refresh_highlights()
+                    self.sync_position()
+                else:
+                    if command.kind == CommandType.SEEK:
+                        self.sync_position()
+                    self.player.execute(command)
+                    if command.kind == CommandType.SEEK:
+                        self._seek_pending = True
             except Exception as error:
                 QMessageBox.warning(self, "재생 조작 실패", str(error))
             return True
@@ -180,7 +262,11 @@ class MainWindow(QMainWindow):
             self.status.setText("검사가 끝난 뒤 창을 닫아 주세요.")
             event.ignore()
             return
+        try:
+            self.end_playback()
+        except Exception as error:
+            QMessageBox.warning(self, "재생 종료 실패", str(error))
+            event.ignore()
+            return
         QApplication.instance().removeEventFilter(self)
-        if self.player:
-            self.player.close()
         event.accept()

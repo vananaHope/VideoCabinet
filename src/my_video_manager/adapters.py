@@ -81,5 +81,11 @@ class MpvPlayer:
         elif command.kind == CommandType.CHANGE_SPEED:
             self._player.speed = playback_speed(self._player.speed, command.amount)
 
+    def position(self) -> float | None:
+        return self._player.time_pos
+
+    def seek_to(self, position: float) -> None:
+        self._player.command("seek", position, "absolute+exact")
+
     def close(self) -> None:
         self._player.terminate()
