@@ -305,3 +305,20 @@ def test_metadata_results_are_also_bounded(library):
     response = core.search("공통태그")
     assert len(response.results) == 500 and response.truncated
     assert all(result.source == "tag" for result in response.results)
+
+
+def test_missing_and_excluded_state_and_title_changes_follow_library(library):
+    core, video, _ = library
+    core.rename_video(video.id, "새로운 이름")
+    assert core.search("새로운이름").results[0].source == "title"
+    assert all(result.source != "title" for result in core.search("Lesson").results)
+    video.locations[0].path.unlink()
+    core.scan()
+    result, = core.search("새로운이름").results
+    assert result.missing
+    assert core.search("체중").results[0].missing
+    core.exclude_video(video.id)
+    assert not core.search("새로운이름").results
+    assert not core.search("체중").results
+    core.restore_video(video.id)
+    assert core.search("새로운이름").results[0].missing

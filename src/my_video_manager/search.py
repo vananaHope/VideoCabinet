@@ -99,7 +99,7 @@ class Search:
         def add(video_id, source, text, start=None):
             video = by_id.get(video_id)
             if video is not None and key in search_key(text):
-                results.append(SearchResult(video_id, video.title, source, text, start, not video.locations))
+                results.append(SearchResult(video_id, video.title, source, text, start, video.missing))
             return len(results) > SEARCH_LIMIT
 
         def response():
