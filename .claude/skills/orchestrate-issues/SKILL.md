@@ -70,7 +70,7 @@ Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처�
 ### 6. PR과 병합
 
 1. 브랜치를 push하고 [pr-template.md](pr-template.md)로 PR을 만든다(`Closes #<n>`).
-2. `main`이 그사이 앞으로 갔으면, 해당 Codex 작업자에게 `main` 위로 rebase하고 테스트를 다시 돌리라고 맡긴다. 충돌 해결도 작업자가 한다.
+2. `main`이 그사이 앞으로 갔으면, 해당 Codex 작업자에게 `main` 위로 rebase하고 테스트를 다시 돌리라고 맡긴다. 충돌 해결도 작업자가 한다. "main 변경" 안내는 **진행 중인 Dispatch가 구현 작업일 때만** 보낸다. 검토 중인 이슈는 그 검토가 끝난 뒤 다음 구현 지시에 rebase를 넣는다(검토자에게 rebase 안내를 보내지 않는다).
 3. `gh pr merge <PR> --merge --subject "<한국어 제목> (#<n>)"`로 병합하고, 원격 브랜치를 지우고, 메인 저장소의 `main`을 pull한다.
 4. 작업자들을 `worker-release`로 정리한다. 재사용한 터미널은 `retained`(`user_takeover` 등)로 남을 수 있다. `worker-list --run <run> --terminal-state reclaimable`이 0이면 정리가 끝난 것이다.
 
