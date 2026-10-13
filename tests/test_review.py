@@ -617,3 +617,224 @@ def test_failed_range_retains_specific_retry_guidance_after_restart(setup):
     assert reopen().subtitle_queue()[0].retry_guidance == failed.retry_guidance
     core.request_subtitles(vid)
     assert core.process_next_subtitle().retry_guidance == "다시 요청하면 재시도합니다"
+
+
+@pytest.mark.parametrize("failures", [1, 2, 3])
+def test_range_preserves_translation_backoff_failure_and_completed_batches(setup, failures):
+    core, vid, transcriber, translator, time, reopen = setup
+    core.process_next_translation()
+    translator.error = TranslationError("usage_limit", "limit detail")
+    for attempt in range(failures):
+        if attempt:
+            time[0] += timedelta(minutes=16)
+        core.process_next_translation()
+    before = core.translation_queue()[0]
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 1, "added"),))
+    core.request_subtitle_range(vid, 25, 27)
+    core.process_next_subtitle()
+    core = reopen()
+    after = core.translation_queue()[0]
+    assert (after.state, after.retry_at, after.error, after.error_detail) == (
+        before.state, before.retry_at, before.error, before.error_detail)
+    assert (after.completed_lines, after.total_lines) == (2, 5)
+    item, = core.subtitle_queue_items()
+    assert (item.state, item.progress) == (after.state, .4)
+    assert core.process_next_translation() is None
+    for _ in range(3 - failures):
+        time[0] += timedelta(minutes=16)
+        core.process_next_translation()
+    assert core.subtitle_queue_items()[0].state == "failed"
+    assert core.process_next_translation() is None
+
+
+def test_range_queue_reports_progress_and_blocks_edits_until_translation(setup):
+    core, vid, transcriber, *_ = setup
+    finish(core)
+    original = core.transcript(vid)
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "new range"),))
+    original_call = transcriber.transcribe
+    def transcribe(*args, **kwargs):
+        assert kwargs["start"] == 10 and kwargs["duration"] == 10
+        kwargs["progress"](5)
+        item, = core.subtitle_queue_items()
+        assert (item.state, item.progress) == ("transcribing", .5)
+        for edit in (core.edit_transcript_line, core.edit_translation_line):
+            with pytest.raises(ValueError, match="재생성"):
+                edit(vid, original.lines[0].id, "blocked")
+        with pytest.raises(ValueError, match="재생성"):
+            core.request_subtitle_range(vid, 0, 1)
+        assert core.process_next_translation() is None
+        return original_call(*args, **kwargs)
+    transcriber.transcribe = transcribe
+    core.request_subtitle_range(vid, 10, 20)
+    assert core.subtitle_queue_items()[0].state == "queued"
+    assert core.process_next_subtitle().state == "completed"
+    assert core.subtitle_queue_items()[0].state == "queued"  # 새 줄 번역 대기
+    finish(core)
+    assert (core.subtitle_queue_items()[0].state, core.subtitle_queue_items()[0].progress) == ("completed", 1)
+
+
+@pytest.mark.parametrize("remove", [False, True])
+def test_active_range_cancellation_preserves_review_and_original_lines(setup, remove):
+    core, vid, transcriber, _, _, reopen = setup
+    finish(core)
+    core.edit_translation_line(vid, core.transcript(vid).lines[0].id, "protected")
+    before, translated = core.transcript(vid), core.translation(vid)
+    original_call = transcriber.transcribe
+    def cancel(*args, **kwargs):
+        if remove:
+            core.remove_from_subtitle_queue(vid)
+        else:
+            core.stop_subtitle_processing()
+        assert kwargs["cancellation"].is_set()
+        return original_call(*args, **kwargs)  # 취소를 무시한 응답도 저장하지 않는다.
+    transcriber.transcribe = cancel
+    core.request_subtitle_range(vid, 10, 20)
+    core.process_next_subtitle()
+    assert core.transcript(vid) == before
+    assert core.translation(vid) == translated
+    assert core.reviewed_line_count(vid) == 1
+    transcriber.transcribe = original_call
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "retried"),))
+    core = reopen()
+    if remove:
+        assert not core.subtitle_queue_items()
+        assert core.process_next_subtitle() is None
+    else:
+        assert core.subtitle_queue_items()[0].state == "queued"
+        assert core.process_next_subtitle().state == "completed"
+        assert transcriber.calls[-1]["start"] == 10
+        assert core.transcript(vid).lines[0] == before.lines[0]
+
+
+def test_interrupted_range_recovers_same_bounds_and_keeps_reviews(setup):
+    core, vid, transcriber, _, _, reopen = setup
+    finish(core)
+    before = core.transcript(vid)
+    core.edit_translation_line(vid, before.lines[0].id, "protected")
+    transcriber.error = KeyboardInterrupt()
+    core.request_subtitle_range(vid, 10, 20)
+    with pytest.raises(KeyboardInterrupt):
+        core.process_next_subtitle()
+    assert core.subtitle_queue_items()[0].state == "transcribing"
+    assert core.transcript(vid) == before
+    transcriber.error = None
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "recovered"),))
+    core = reopen()
+    assert core.subtitle_queue_items()[0].state == "queued"
+    core.process_next_subtitle()
+    assert (transcriber.calls[-1]["start"], transcriber.calls[-1]["duration"]) == (10, 10)
+    assert core.transcript(vid).lines[0] == before.lines[0]
+    assert core.review_lines(vid)[0].translation == "protected"
+
+
+def test_bulk_retry_preserves_failed_range_and_outside_review(setup):
+    core, vid, transcriber, _, _, reopen = setup
+    finish(core)
+    before = core.transcript(vid)
+    core.edit_translation_line(vid, before.lines[0].id, "protected")
+    transcriber.error = RuntimeError("range failure")
+    core.request_subtitle_range(vid, 10, 20)
+    core.process_next_subtitle()
+    assert core.subtitle_queue_items()[0].state == "failed"
+    core = reopen()
+    result = core.retry_failed_subtitles()
+    assert result.retried == 1 and not result.skipped
+    assert core.subtitle_queue_items()[0].state == "queued"
+    transcriber.error = None
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "retry"),))
+    core.process_next_subtitle()
+    assert (transcriber.calls[-1]["start"], transcriber.calls[-1]["duration"]) == (10, 10)
+    after = core.transcript(vid)
+    assert after.id == before.id
+    assert after.lines[0] == before.lines[0] and after.lines[-2:] == before.lines[-2:]
+    assert core.review_lines(vid)[0].translation == "protected"
+    finish(core)
+    assert core.subtitle_queue_items()[0].state == "completed"
+
+
+def test_range_request_registers_manual_fifo_priority_after_hidden_queue(setup, tmp_path):
+    core, vid, _, _, _, reopen = setup
+    finish(core)
+    core.remove_from_subtitle_queue(vid)
+    other_ids = []
+    for index in range(3):
+        path = tmp_path / f"queue{index}.mkv"
+        path.write_bytes(f"movie{index}".encode())
+        core.add_file(path)
+        other_ids.append(next(v.id for v in core.videos() if v.locations[0].path == path))
+    automatic, first, last = other_ids
+    core.request_automatic_subtitles(automatic)
+    core.request_subtitles(first)
+    core.request_subtitle_range(vid, 10, 20)
+    core.request_subtitles(last)
+    core = reopen()
+    assert [i.video_id for i in core.subtitle_queue_items()] == [first, vid, last, automatic]
+    core.promote_subtitle(automatic)
+    assert [i.video_id for i in core.subtitle_queue_items()] == [automatic, first, vid, last]
+
+
+@pytest.mark.parametrize("range_change", [False, True])
+def test_replacing_active_translation_request_discards_old_result_and_queues_new_id(setup, range_change):
+    core, vid, transcriber, translator, *_ = setup
+    finish(core)
+    line = core.transcript(vid).lines[1]
+    core.edit_transcript_line(vid, line.id, "first change")
+    def change():
+        assert core.subtitle_queue_items()[0].state == "translating"
+        if range_change:
+            transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "second change"),))
+            core.request_subtitle_range(vid, 10, 20)
+            core.process_next_subtitle()
+        else:
+            core.edit_transcript_line(vid, line.id, "second change")
+        assert core.subtitle_queue_items()[0].state == "queued"
+    translator.respond = change
+    assert core.process_next_translation() is None
+    assert core.subtitle_queue_items()[0].state == "queued"
+    assert "번역 first change" not in [r.translation for r in core.review_lines(vid)]
+    translator.respond = None
+    translator.calls.clear()
+    finish(core)
+    assert len(translator.calls) == 1 and len(translator.calls[0]) == 1
+    assert core.translation(vid).lines[1].text == "번역 second change"
+    assert core.subtitle_queue_items()[0].state == "completed"
+
+
+def test_manual_review_protects_line_while_queue_shows_translating(setup):
+    core, vid, _, translator, *_ = setup
+    line = core.transcript(vid).lines[0]
+    def review():
+        assert core.subtitle_queue_items()[0].state == "translating"
+        core.edit_translation_line(vid, line.id, "protected")
+    translator.respond = review
+    core.process_next_translation()
+    translator.respond = None
+    assert core.subtitle_queue_items()[0].state == "queued"
+    finish(core)
+    assert core.translation(vid).lines[0].text == "protected"
+    assert core.review_lines(vid)[0].translation_reviewed
+    assert core.subtitle_queue_items()[0].state == "completed"
+
+
+def test_failed_range_retry_reports_unscanned_missing_file_without_changing_request(setup):
+    core, vid, transcriber, *_ = setup
+    before = core.transcript(vid)
+    transcriber.error = RuntimeError("failed")
+    core.request_subtitle_range(vid, 10, 20)
+    core.process_next_subtitle()
+    path = core.video(vid).locations[0].path
+    contents = path.read_bytes()
+    path.unlink()
+    result = core.retry_failed_subtitles()
+    assert result.retried == 0 and result.skipped_count == 1
+    assert "파일 없음" in result.skipped[0].reason
+    assert core.subtitle_queue()[0].state == "failed"
+    assert core.transcript(vid) == before
+    path.write_bytes(contents)
+    core.add_file(path)
+    assert core.retry_failed_subtitles().retried == 1
+    transcriber.error = None
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "retried"),))
+    core.process_next_subtitle()
+    assert (transcriber.calls[-1]["start"], transcriber.calls[-1]["duration"]) == (10, 10)

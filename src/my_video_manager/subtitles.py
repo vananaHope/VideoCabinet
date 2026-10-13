@@ -160,6 +160,23 @@ class Subtitles:
             )
             return self._entry(db.execute("SELECT * FROM subtitle_queue WHERE id = ?", (cursor.lastrowid,)).fetchone())
 
+    def retry_failed(self, queue_id):
+        """같은 요청을 다시 대기시켜 구간 정보와 원어 지정을 보존한다."""
+        with self._connect() as db:
+            row = db.execute("SELECT video_id FROM subtitle_queue WHERE id = ? AND state = 'failed'", (queue_id,)).fetchone()
+        if row is None:
+            raise ValueError("실패한 자막 요청이 바뀌었습니다.")
+        # 위치 확인은 사라진 파일을 정리할 수 있으므로 쓰기 트랜잭션 밖에서 한다.
+        self._playback_location(row["video_id"])
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM subtitle_queue WHERE id = ? AND state = 'failed'", (queue_id,)).fetchone()
+            if row is None:
+                raise ValueError("실패한 자막 요청이 바뀌었습니다.")
+            self._order.request(db, row["video_id"], renew=True)
+            db.execute("UPDATE subtitle_queue SET state = 'queued', error = NULL, requested_at = ? WHERE id = ?",
+                       (self._clock().isoformat(), queue_id))
+
     def _entry(self, row):
         message, detail = row["error"], None
         if message:

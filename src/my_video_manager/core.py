@@ -119,7 +119,7 @@ class AppCore:
         self.playback.subscribe(ViewingRecorder(self._start_viewing, self._viewings.report, self._viewings.end))
         self._queue_order = QueueOrder(self._connect)
         self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location, self._queue_order)
-        self._review = Review(self._connect, clock, self._subtitles, self.playback_location)
+        self._review = Review(self._connect, clock, self._subtitles, self.playback_location, self._queue_order)
         self._subtitles.review = self._review
         self._translations = Translations(self._connect, clock, self._subtitles, self.settings, translator,
                                           batch_size=translation_batch_size, order=self._queue_order,
@@ -292,7 +292,7 @@ class AppCore:
         failed = [e for e in self.subtitle_queue() if e.state == "failed"]
         translated = [e for e in self.translation_queue() if e.state == "failed"]
         retried, skipped = set(), []
-        for entries, request in ((failed, lambda e: self.request_subtitles(e.video_id, e.spoken_language)),
+        for entries, request in ((failed, lambda e: self._subtitles.retry_failed(e.id)),
                                  (translated, lambda e: self.request_translation(e.video_id))):
             for entry in entries:
                 try:

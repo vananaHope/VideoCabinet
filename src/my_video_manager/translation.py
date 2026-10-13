@@ -194,9 +194,11 @@ class Translations:
                 db.execute("INSERT INTO translation_queue(id, video_id, transcript_id, requested_at) VALUES (?, ?, ?, ?)",
                            (queue_id, video_id, transcript.id, self._clock().isoformat()))
                 if old and preserve_state:
+                    # 새 ID를 실행하는 작업자는 아직 없다. 옛 실행 결과는 ID 검사로 버린다.
+                    state = "queued" if old["state"] == "translating" else old["state"]
                     db.execute("UPDATE translation_queue SET requested_at = ?, state = ?, retry_at = ?, "
                                "error_kind = ?, error_detail = ? WHERE id = ?",
-                               (old["requested_at"], old["state"], old["retry_at"], old["error_kind"], old["error_detail"], queue_id))
+                               (old["requested_at"], state, old["retry_at"], old["error_kind"], old["error_detail"], queue_id))
                     db.executemany("INSERT INTO translation_limit_attempts VALUES (?, ?, ?)",
                                    [(queue_id, r["cli"], r["attempts"]) for r in attempts])
                 db.executemany("INSERT INTO translation_targets VALUES (?, ?, ?)",

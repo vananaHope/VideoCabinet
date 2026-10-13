@@ -43,9 +43,10 @@ class ReviewPlayback:
 
 
 class Review:
-    def __init__(self, connect, clock, subtitles, playback_location):
+    def __init__(self, connect, clock, subtitles, playback_location, order):
         self._connect, self._clock = connect, clock
         self._subtitles, self._playback_location = subtitles, playback_location
+        self._order = order
         self.translations = None
         with connect() as db:
             db.executescript("""
@@ -99,7 +100,7 @@ class Review:
 
     @staticmethod
     def _editable(db, video_id):
-        if db.execute("SELECT 1 FROM subtitle_queue WHERE video_id = ? AND state = 'queued'",
+        if db.execute("SELECT 1 FROM subtitle_queue WHERE video_id = ? AND state IN ('queued', 'transcribing')",
                       (video_id,)).fetchone():
             raise ValueError("원어 자막 재생성이 끝난 뒤 검수하세요.")
 
@@ -163,6 +164,7 @@ class Review:
             transcript = db.execute("SELECT * FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
             if transcript is None:
                 raise ValueError("먼저 원어 자막을 만드세요.")
+            self._order.request(db, video_id, renew=True)
             db.execute("DELETE FROM subtitle_queue WHERE video_id = ?", (video_id,))
             language = transcript["spoken_language"]
             cursor = db.execute("INSERT INTO subtitle_queue(video_id, spoken_language, requested_at) VALUES (?, ?, ?)",
@@ -198,7 +200,7 @@ class Review:
                         for id_, s in new])
         language = db.execute("SELECT spoken_language FROM transcripts WHERE id = ?", (transcript_id,)).fetchone()[0]
         if new and language not in ("ko", "und"):
-            self.translations.request(pending.video_id, [id_ for id_, _ in new], connection=db)
+            self.translations.request(pending.video_id, [id_ for id_, _ in new], connection=db, preserve_state=True)
         self.translations.finish_ready(db, pending.video_id)
 
     def export(self, video_id, *, translated=False):
