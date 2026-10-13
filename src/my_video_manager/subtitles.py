@@ -45,7 +45,10 @@ class Transcriber(Protocol):
     def transcribe(self, path: Path, spoken_language: str | None, *,
                    cancellation: Event, progress: Callable[[float], None] | None = None,
                    start: float = 0, duration: float | None = None) -> TranscriberResult:
-        """취소 신호를 받으면 신속하게 정리하고 TranscriberCancelled를 발생시킨다."""
+        """구간은 start·duration 초로 지정하며 결과 시각은 구간 시작에 상대적이다.
+
+        취소 신호를 받으면 신속하게 정리하고 TranscriberCancelled를 발생시킨다.
+        """
         ...
 
 

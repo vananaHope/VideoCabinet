@@ -281,3 +281,69 @@ def test_blank_edits_and_stale_ids_do_not_change_review(setup):
             edit(vid, "missing", "value")
     core.edit_transcript_line(vid, line.id, line.text)
     assert core.reviewed_line_count(vid) == 0
+
+
+def test_review_scene_starts_at_line_and_same_video_reuses_viewing(setup):
+    core, vid, *_ = setup
+    first, second = core.transcript(vid).lines[1:3]
+    target = core.play_review_line(vid, first.id)
+    assert (target.video_id, target.start, target.action) == (vid, 10, "play")
+    assert core.playback.position == 10
+    assert core.playback.session.record_viewing
+    session = core.playback.session
+    target = core.play_review_line(vid, second.id)
+    assert (target.start, target.action) == (20, "seek")
+    assert core.playback.session is session
+    core.playback.report(target.start, seeked=True)
+    assert core.playback.position == 20
+    assert len(core.viewings(vid)) == 1
+
+
+def test_review_scene_leaves_reel_and_starts_normal_viewing(setup):
+    core, vid, *_ = setup
+    core.playback.start(vid, 0, record_viewing=False)
+    core.execute_highlight_command(core.command_for_key("Insert"))
+    highlight = core.highlights(vid)[0]
+    core.update_highlight(highlight.id, start=0, end=8, note="복습")
+    core.playback.end()
+    core.start_reel(highlight_id=highlight.id)
+    core.playback.report(3)
+    before = core.reel_entries()[0].last_revisited_at
+    assert before is not None
+    target = core.play_review_line(vid, core.transcript(vid).lines[2].id)
+    assert core.reel_playback is None
+    assert (target.action, target.start) == ("play", 20)
+    assert core.playback.session.record_viewing
+    assert core.playback.position == 20
+    assert len(core.viewings(vid)) == 1
+    assert core.reel_entries()[0].last_revisited_at == before
+
+
+def test_manual_review_of_all_remaining_targets_publishes_saved_batches(setup):
+    core, vid, _, _, _, reopen = setup
+    core.process_next_translation()
+    for line in core.transcript(vid).lines[2:]:
+        core.edit_translation_line(vid, line.id, "마지막 묶음 직접 검수")
+    assert not core.translation_queue()
+    translated = reopen().translation(vid)
+    assert len(translated.lines) == 4
+    assert translated.lines[0].text.startswith("번역 ")
+    assert translated.lines[2].text == "마지막 묶음 직접 검수"
+
+
+def test_core_range_passes_start_and_duration_to_process_adapter(setup, tmp_path):
+    import sys
+    from my_video_manager.transcription import FasterWhisperTranscriber
+    core, vid, *_ = setup
+    worker = tmp_path / "구간 어댑터.py"
+    worker.write_text('''
+import sys, json
+assert sys.argv[3] == 'en'
+assert list(map(float, sys.argv[4:])) == [10, 10]
+print(json.dumps({'spoken_language': 'en', 'segments': [{'start': 0.5, 'end': 2, 'text': 'range'}]}))
+''', encoding="utf-8")
+    core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database,
+                   transcriber=FasterWhisperTranscriber(tmp_path / "models", command=(sys.executable, str(worker))))
+    core.request_subtitle_range(vid, 10, 20)
+    assert core.process_next_subtitle().state == "completed"
+    assert core.transcript(vid).lines[1].start == 10.5
