@@ -56,6 +56,7 @@ class ReelControls:
 
     def open(self):
         self.window.end_playback()
+        self.window._return_to_gems = False
         self.shown = None
         self.window.pages.setCurrentWidget(self.page)
         self.refresh()

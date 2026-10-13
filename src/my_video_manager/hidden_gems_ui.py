@@ -1,6 +1,7 @@
 """숨겨진 보석 카드와 관심 없음 되돌리기. 도메인 판단은 AppCore에 맡긴다."""
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QMenu,
     QPushButton, QVBoxLayout, QWidget,
@@ -78,7 +79,8 @@ class HiddenGemControls(QWidget):
             self.label.setText(f"숨겨진 보석을 불러오지 못했어요: {error}")
             return
         for index, gem in enumerate(gems):
-            item = QListWidgetItem(self.window.thumbnail_icons.get(gem.video.thumbnail),
+            # 작은 카드의 디코딩 크기가 목록의 공유 아이콘에 남지 않게 분리한다.
+            item = QListWidgetItem(QIcon(str(gem.video.thumbnail)),
                                    f"{gem.video.title}\n{gem.reason}")
             item.setData(Qt.ItemDataRole.UserRole, gem.video.id)
             item.setToolTip(item.text())
