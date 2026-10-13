@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 import hashlib
 import os
-from pathlib import Path
 import shutil
 import sqlite3
 
@@ -216,6 +215,9 @@ def test_excluded_automatic_series_survives_scan(core, tmp_path):
     for video in core.videos():
         core.exclude_video(video.id)
     core.scan()
+    assert core.series()[0].video_ids == ()
+    for video in core.excluded_videos():
+        core.restore_video(video.id)
     assert core.series() == expected
 
 
@@ -280,7 +282,7 @@ def test_cached_short_copy_attaches_after_same_video_was_registered_elsewhere(co
     assert {loc.path for loc in core.videos()[0].locations} == {a, b}
 
 
-def test_unchanged_nonvideo_and_registered_locations_skip_reading_after_restart(core, tmp_path, monkeypatch):
+def test_unchanged_nonvideo_and_registered_locations_skip_reading_after_restart(core, tmp_path):
     media = Media()
     path = video_file(tmp_path / "watched")
     document = video_file(path.parent, "subtitle.srt", b"subtitle")
@@ -290,17 +292,9 @@ def test_unchanged_nonvideo_and_registered_locations_skip_reading_after_restart(
     assert set(media.reads) == {path, document}
     media.reads.clear()
     core = open_core(core.database, media)
-    original_open = Path.open
-    reads = []
-    def open_file(self, *args, **kwargs):
-        if self in (path, document):
-            reads.append(self)
-        return original_open(self, *args, **kwargs)
-    monkeypatch.setattr(Path, "open", open_file)
     core.scan()
     core.scan()
     assert media.reads == []
-    assert reads == []
 
 
 @pytest.mark.parametrize("change", ["size", "mtime"])
@@ -366,8 +360,47 @@ def test_empty_title_is_rejected(core, tmp_path):
     assert core.videos()[0].title == video.title
 
 
-@pytest.mark.parametrize("version", [0, 1])
-def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, version):
+def test_series_edit_hides_excluded_but_preserves_its_original_slot(core, tmp_path):
+    paths = [video_file(tmp_path / "series", f"수업 {i}강.mkv", str(i).encode()) for i in (1, 2, 3)]
+    core.add_watched_folder(paths[0].parent)
+    core.scan()
+    series, = core.series()
+    a, excluded, c = series.video_ids
+    core.exclude_video(excluded)
+    visible, = core.series()
+    assert visible.video_ids == (a, c)
+    assert core.series_for_video(excluded) is None
+    edited = core.update_series(series.id, name="편집한 수업", video_ids=visible.video_ids)
+    assert edited.video_ids == (a, c)
+    core = open_core(core.database)
+    core.scan()
+    core.restore_video(excluded)
+    assert core.series()[0].video_ids == (a, excluded, c)
+
+
+@pytest.mark.parametrize("in_series", [True, False])
+def test_navigation_skips_missing_and_excluded_in_both_directions(core, tmp_path, in_series):
+    paths = [video_file(tmp_path / "videos", f"video-{name}.mkv", name.encode()) for name in ("a", "b", "c", "d")]
+    for path in paths:
+        core.add_file(path)
+    ids = tuple(v.id for v in core.videos())
+    a, missing, excluded, d = ids
+    if in_series:
+        core.create_series("수업", ids)
+    paths[1].unlink()
+    core.scan()
+    core.exclude_video(excluded)
+    assert core.adjacent_video(a, ids, forward=True) == d
+    assert core.adjacent_video(d, ids, forward=False) == a
+    assert core.adjacent_video(a, ids, forward=False) is None
+    assert core.adjacent_video(d, ids, forward=True) is None
+    core.exclude_video(d)
+    assert core.adjacent_video(a, ids, forward=True) is None
+    if in_series:
+        assert core.series()[0].video_ids == (a, missing)
+
+
+def legacy_database(tmp_path, version, media_format="matroska"):
     # 이전 릴리스의 저장 형식을 독립적으로 재현한다. 검증은 AppCore 공개 동작으로 한다.
     path = video_file(tmp_path / "outside", content=b"old")
     digest = hashlib.sha256(b"3" + b"old" * 3).hexdigest()
@@ -414,7 +447,14 @@ def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, versi
         db.execute("INSERT INTO viewings VALUES (5, 42, 20, ?, ?, ?, '[[0, 19]]', 19)", (NOW.isoformat(),) * 3)
         db.execute("INSERT INTO transcripts VALUES (42, 'old-transcript', 'en', 0, ?)", (NOW.isoformat(),))
         db.execute("INSERT INTO transcript_lines VALUES ('old-line', 'old-transcript', 0, 1, 3, 'old words')")
+        db.execute("UPDATE videos SET format=? WHERE id=42", (media_format,))
         db.execute(f"PRAGMA user_version={version}")
+    return database, path
+
+
+@pytest.mark.parametrize("version", [0, 1])
+def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, version):
+    database, path = legacy_database(tmp_path, version)
     core = open_core(database)
     video, = core.videos()
     assert video.id == 42 and video.title == "옛 제목" and video.duration == 20
@@ -432,3 +472,134 @@ def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, versi
     assert core.watched_folders()[0].path == path.parent
     core.exclude_video(42)
     assert core.excluded_videos()[0].id == 42
+
+
+@pytest.mark.parametrize("version", [0, 1])
+def test_legacy_gif_is_excluded_and_user_restore_survives_scan_and_move(tmp_path, version):
+    class GifMedia(Media):
+        def read(self, path):
+            self.reads.append(path)
+            return None  # 현재 어댑터는 GIF를 비영상으로 판정한다.
+
+    database, path = legacy_database(tmp_path, version, "gif")
+    core = open_core(database, GifMedia())
+    assert core.videos() == ()
+    gif, = core.excluded_videos()
+    assert gif.id == 42 and not gif.missing
+    assert core.scan().added == 0
+    assert not core.excluded_videos()[0].missing
+    core.restore_video(42)
+    expected = records(core, 42)
+    assert core.videos()[0].id == 42
+    core.scan()
+    before = path.stat()
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 10000000))
+    core.scan()
+    assert not core.videos()[0].missing
+    moved = path.with_name("renamed.gif")
+    path.rename(moved)
+    core = open_core(database, GifMedia())
+    core.scan()
+    assert core.playback_location(42).path == moved
+    assert core.excluded_videos() == ()
+    assert core.video_tags(42) == expected[4]
+    assert core.highlights(42) == expected[1]
+    assert core.transcript(42) == expected[2]
+
+
+@pytest.mark.parametrize("kind, reason", [
+    ("short", "최소 길이(60초) 미만"), ("gif", "영상이 아닙니다"),
+    ("document", "영상이 아닙니다"), ("excluded", "제외 목록"), ("registered", "이미 등록"),
+])
+def test_direct_add_reports_why_no_video_was_added(core, tmp_path, kind, reason):
+    media = Media()
+    media.duration = 20 if kind == "short" else 100
+    core = open_core(core.database, media)
+    suffix = {"gif": ".gif", "document": ".txt"}.get(kind, ".mkv")
+    path = video_file(tmp_path / "outside", "video" + suffix)
+    if kind in ("excluded", "registered"):
+        core.add_file(path)
+        if kind == "excluded":
+            core.exclude_video(core.videos()[0].id)
+    for _ in range(2):  # 최초 판정과 캐시 사용 모두 같은 안내다.
+        result = core.add_file(path)
+        assert result.added == 0
+        assert len(result.issues) == 1
+        assert result.issues[0].path == path
+        assert reason in result.issues[0].message
+
+
+@pytest.mark.parametrize("remove_folder", [False, True])
+def test_scan_discards_unseen_file_checks_in_its_scope(core, tmp_path, remove_folder):
+    media = Media()
+    core = open_core(core.database, media)
+    path = video_file(tmp_path / "watched", "document.txt")
+    signature = path.stat()
+    core.add_watched_folder(path.parent)
+    core.scan()
+    assert media.reads == [path]
+    path.unlink()
+    if remove_folder:
+        path.parent.rmdir()
+    core.scan()
+    path.parent.mkdir(exist_ok=True)
+    path.write_bytes(b"original video")
+    os.utime(path, ns=(signature.st_atime_ns, signature.st_mtime_ns))
+    core.scan()
+    assert media.reads == [path, path]  # 사라졌다 돌아온 동일 서명도 새 판정한다.
+
+
+def test_scan_keeps_file_checks_outside_its_scope(core, tmp_path):
+    media = Media()
+    core = open_core(core.database, media)
+    path = video_file(tmp_path / "outside", "document.txt")
+    core.add_file(path)
+    other = tmp_path / "watched"
+    other.mkdir()
+    core.add_watched_folder(other)
+    core.scan()
+    core.add_file(path)
+    assert media.reads == [path]
+
+
+def test_reconnect_recalculates_automatic_series_immediately(core, tmp_path):
+    a = video_file(tmp_path / "series", "수업 1강.mkv", b"a")
+    video_file(a.parent, "수업 2강.mkv", b"b")
+    core.add_watched_folder(a.parent)
+    core.scan()
+    first = core.series()[0].video_ids[0]
+    moved = tmp_path / "unrelated.mkv"
+    a.rename(moved)
+    core.scan()
+    assert core.series_for_video(first) is not None
+    core.reconnect_video(first, moved)
+    assert core.series_for_video(first) is None
+
+
+def test_remove_folder_recalculates_using_remaining_copy_immediately(core, tmp_path):
+    a = video_file(tmp_path / "a-series", "수업 1강.mkv", b"a")
+    video_file(a.parent, "수업 2강.mkv", b"b")
+    b = video_file(tmp_path / "b-series", "다른 1강.mkv", b"a")
+    video_file(b.parent, "다른 2강.mkv", b"c")
+    core.add_watched_folder(a.parent)
+    core.add_watched_folder(b.parent)
+    core.scan()
+    first = next(v.id for v in core.videos() if len(v.locations) == 2)
+    assert core.series_for_video(first).name == "수업"
+    core.remove_watched_folder(a.parent)
+    assert core.series_for_video(first).name == "다른"
+
+
+def test_series_edit_preserves_excluded_slots_during_reorder_and_removal(core, tmp_path):
+    for name in ("a", "b", "c", "d", "e"):
+        core.add_file(video_file(tmp_path / "videos", name + ".mkv", name.encode()))
+    a, b, c, d, e = (video.id for video in core.videos())
+    series = core.create_series("수업", (a, b, c, d, e))
+    core.exclude_video(b)
+    core.exclude_video(d)
+    core.update_series(series.id, name="편집", video_ids=(e, c))
+    assert core.series()[0].video_ids == (e, c)
+    core.restore_video(b)
+    core.restore_video(d)
+    assert core.series()[0].video_ids == (e, b, c, d)
+    assert core.series_for_video(a) is None

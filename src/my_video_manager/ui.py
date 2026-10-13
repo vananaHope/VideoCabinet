@@ -204,10 +204,10 @@ class MainWindow(QMainWindow):
 
     def scan_completed(self, result):
         self.refresh()
-        self.status.setText(f"영상 {result.added}개 등록 · 전체 {self.list.count()}개 · 오류 {len(result.issues)}개")
+        self.status.setText(f"영상 {result.added}개 등록 · 전체 {self.list.count()}개 · 안내 {len(result.issues)}개")
         if result.issues:
-            dialog = QMessageBox(QMessageBox.Icon.Warning, "일부 파일 검사 실패",
-                                 "나머지 영상은 등록했습니다. 자세히 보기에서 실패한 위치를 확인하세요.", parent=self)
+            dialog = QMessageBox(QMessageBox.Icon.Information, "검사·추가 안내",
+                                 "\n".join(issue.message for issue in result.issues[:3]), parent=self)
             dialog.setDetailedText("\n".join(f"{i.path}: {i.message}" for i in result.issues))
             dialog.exec()
 

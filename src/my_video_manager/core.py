@@ -1,6 +1,6 @@
 """UI/재생 엔진과 독립된 앱 코어의 공개 경계."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -260,6 +260,7 @@ class AppCore:
 
     def remove_watched_folder(self, path: Path) -> None:
         self._library.remove_watched_folder(path)
+        self._series.regroup(self.videos() + self.excluded_videos())
 
     def add_file(self, path: Path) -> ScanResult:
         result = self._library.add_file(path)
@@ -268,6 +269,7 @@ class AppCore:
 
     def reconnect_video(self, video_id: int, path: Path) -> None:
         self._library.reconnect_video(video_id, path)
+        self._series.regroup(self.videos() + self.excluded_videos())
 
     def rename_video(self, video_id: int, title: str) -> None:
         self._library.rename_video(video_id, title)
@@ -289,22 +291,35 @@ class AppCore:
         self._library.set_minimum_duration(seconds)
 
     def series(self) -> tuple[Series, ...]:
-        """시리즈와 각 시리즈의 영상 ID를 사용자 지정 순서로 조회한다."""
-        return self._series.list()
+        """제외 영상은 감추고 파일 없음 영상은 포함한 표시·편집용 구성이다."""
+        visible = {video.id for video in self.videos()}
+        return tuple(replace(series, video_ids=tuple(vid for vid in series.video_ids if vid in visible))
+                     for series in self._series.list())
 
     def series_for_video(self, video_id: int) -> Series | None:
-        return self._series.for_video(video_id)
+        return next((series for series in self.series() if video_id in series.video_ids), None)
 
     def create_series(self, name: str, video_ids: tuple[int, ...] = ()) -> Series:
-        return self._series.edit(None, name, video_ids)
+        return self._edit_series(None, name, video_ids)
 
     def update_series(self, series_id: int, *, name: str, video_ids: tuple[int, ...]) -> Series:
-        return self._series.edit(series_id, name, video_ids)
+        return self._edit_series(series_id, name, video_ids)
+
+    def _edit_series(self, series_id, name, video_ids):
+        excluded = {video.id for video in self.excluded_videos()}
+        if excluded.intersection(video_ids):
+            raise ValueError("제외된 영상은 되돌린 뒤 시리즈를 편집하세요.")
+        edited = self._series.edit(series_id, name, video_ids, preserved_video_ids=excluded)
+        return next(series for series in self.series() if series.id == edited.id)
 
     def adjacent_video(self, video_id: int, visible_video_ids: tuple[int, ...], *, forward: bool) -> int | None:
         """시리즈 순서를 우선하고, 시리즈 밖에서는 재생을 시작한 목록 순서를 쓴다."""
-        series = self.series_for_video(video_id)
-        return adjacent_video(video_id, series.video_ids if series else tuple(visible_video_ids), forward=forward)
+        # 현재 재생 영상이 뒤늦게 제외돼도 원래 시리즈의 경계를 벗어나지 않는다.
+        series = self._series.for_video(video_id)
+        order = series.video_ids if series else tuple(visible_video_ids)
+        playable = {video.id for video in self.videos() if not video.missing}
+        order = tuple(vid for vid in order if vid == video_id or vid in playable)
+        return adjacent_video(video_id, order, forward=forward)
 
     def scan(self) -> ScanResult:
         result = self._library.scan()

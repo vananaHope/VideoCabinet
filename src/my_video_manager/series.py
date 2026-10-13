@@ -131,7 +131,8 @@ class SeriesStore:
         db.executemany("INSERT INTO series_videos VALUES (?, ?, ?)",
                        ((series_id, video_id, position) for position, video_id in enumerate(video_ids)))
 
-    def edit(self, series_id: int | None, name: str, video_ids: tuple[int, ...]) -> Series:
+    def edit(self, series_id: int | None, name: str, video_ids: tuple[int, ...], *,
+             preserved_video_ids: set[int] | frozenset[int] = frozenset()) -> Series:
         video_ids = tuple(video_ids)
         name = name.strip()
         if not name:
@@ -151,6 +152,12 @@ class SeriesStore:
             if series_id is None:
                 series_id = db.execute("INSERT INTO series (name, edited) VALUES (?, 1)", (name,)).lastrowid
             old = [row[0] for row in db.execute("SELECT video_id FROM series_videos WHERE series_id=? ORDER BY position", (series_id,))]
+            # 화면에 없는 구성원은 기존 순번에 남긴다. 보이는 구성원의 편집만 반영한다.
+            merged = list(video_ids)
+            for index, vid in enumerate(old):
+                if vid in preserved_video_ids:
+                    merged.insert(min(index, len(merged)), vid)
+            video_ids = tuple(merged)
             common = set(old) & set(video_ids)
             if [vid for vid in old if vid in common] != [vid for vid in video_ids if vid in common]:
                 # 넣기·빼기는 순서 변경이 아니다. 남아 있는 영상의 상대 순서만 비교한다.

@@ -65,7 +65,7 @@ class SeriesEditor(QDialog):
 
     @staticmethod
     def append(widget, video):
-        item = QListWidgetItem(video.title)
+        item = QListWidgetItem(video.title + (" · 파일 없음" if video.missing else ""))
         item.setData(Qt.ItemDataRole.UserRole, video.id)
         widget.addItem(item)
 
