@@ -347,3 +347,117 @@ print(json.dumps({'spoken_language': 'en', 'segments': [{'start': 0.5, 'end': 2,
     core.request_subtitle_range(vid, 10, 20)
     assert core.process_next_subtitle().state == "completed"
     assert core.transcript(vid).lines[1].start == 10.5
+
+
+def assert_search_hits(core, video_id, query, expected):
+    response = core.search(query)
+    assert not response.truncated
+    assert [(r.video_id, r.source, r.text, r.start) for r in response.results] == [
+        (video_id, source, text, start) for source, text, start in expected]
+
+
+def test_search_follows_original_line_review_immediately(setup):
+    core, vid, _, _, _, reopen = setup
+    line = core.transcript(vid).lines[1]
+    assert_search_hits(core, vid, "source10", [("transcript", line.text, 10)])
+    core.edit_transcript_line(vid, line.id, "수정한 타격 자세")
+    assert core.transcript(vid).lines[1].id == line.id
+    assert_search_hits(core, vid, "source10", [])
+    expected = [("transcript", "수정한 타격 자세", 10)]
+    assert_search_hits(core, vid, "수정한타격", expected)
+    assert_search_hits(reopen(), vid, "수정한타격", expected)
+
+
+def test_search_follows_direct_translation_review_immediately(setup):
+    core, vid, _, _, _, reopen = setup
+    finish(core)
+    line = core.transcript(vid).lines[1]
+    assert_search_hits(core, vid, "번역source10", [("translation", "번역 source 10", 10)])
+    core.edit_translation_line(vid, line.id, "검수한 한국어 설명")
+    assert_search_hits(core, vid, "번역source10", [])
+    expected = [("translation", "검수한 한국어 설명", 10)]
+    assert_search_hits(core, vid, "검수한한국어", expected)
+    assert_search_hits(core, vid, "source10", [("transcript", line.text, 10)])
+    assert_search_hits(reopen(), vid, "검수한한국어", expected)
+
+
+def test_search_replaces_translation_after_original_review_and_retranslation(setup):
+    core, vid, *_ = setup
+    finish(core)
+    line = core.transcript(vid).lines[1]
+    assert_search_hits(core, vid, "source10", [
+        ("transcript", "source 10", 10), ("translation", "번역 source 10", 10)])
+    core.edit_transcript_line(vid, line.id, "new batting instruction")
+    # 재번역 완료 전에는 기존 번역을 보존하는 #8 계약을 따른다.
+    assert_search_hits(core, vid, "source10", [("translation", "번역 source 10", 10)])
+    finish(core)
+    assert_search_hits(core, vid, "source10", [])
+    assert_search_hits(core, vid, "newbatting", [
+        ("transcript", "new batting instruction", 10),
+        ("translation", "번역 new batting instruction", 10)])
+
+
+@pytest.mark.parametrize("counts", [(4, 1, 0), (0, 4, 1)])
+def test_search_survives_range_replacement_and_repeated_two_phase_reordering(setup, counts):
+    core, vid, transcriber, _, _, reopen = setup
+    finish(core)
+    before = core.transcript(vid)
+    # 조회를 먼저 해서 기존 FTS 결과가 생긴 뒤 삭제·UPDATE 트리거를 거치게 한다.
+    assert len(core.search("source").results) == 8
+    retained = tuple(result for result in core.search("source").results if result.start != 10)
+    old_query = "source10"
+    for generation, count in enumerate(counts):
+        old_ids = {line.id for line in core.transcript(vid).lines}
+        word = f"구간세대{generation}"
+        transcriber.result = TranscriberResult("en", tuple(
+            TranscriptSegment(i * 2 + .5, i * 2 + 1.5, f"{word} 문장{i}") for i in range(count)))
+        core.request_subtitle_range(vid, 10, 20)
+        assert core.process_next_subtitle().state == "completed"
+        current = core.transcript(vid)
+        new_lines = current.lines[1:-2]
+        assert len(new_lines) == count
+        assert old_ids.isdisjoint(line.id for line in new_lines)
+        assert current.lines[0] == before.lines[0]
+        assert current.lines[-2:] == before.lines[-2:]
+        assert_search_hits(core, vid, old_query, [])
+        assert_search_hits(core, vid, word, [
+            ("transcript", line.text, 10 + i * 2 + .5) for i, line in enumerate(new_lines)])
+        finish(core)
+        expected = [item for i, line in enumerate(new_lines) for item in (
+            ("transcript", line.text, 10 + i * 2 + .5),
+            ("translation", f"번역 {line.text}", 10 + i * 2 + .5))]
+        assert_search_hits(core, vid, word, expected)
+        # 임시 음수→최종 ordinal 갱신을 두 번 거친 바깥 줄도 중복·누락 없이 검색된다.
+        assert core.search("source").results == retained
+        assert_search_hits(core, vid, old_query, [])
+        core = reopen()
+        assert_search_hits(core, vid, word, expected)
+        assert core.search("source").results == retained
+        old_query = word
+
+
+def test_search_removes_all_reviewed_lines_on_whole_regeneration(setup):
+    core, vid, transcriber, _, _, reopen = setup
+    finish(core)
+    old_lines = core.transcript(vid).lines
+    core.edit_transcript_line(vid, old_lines[1].id, "이전 검수 원어")
+    finish(core)
+    core.edit_translation_line(vid, old_lines[1].id, "이전 직접 번역")
+    assert_search_hits(core, vid, "이전검수", [("transcript", "이전 검수 원어", 10)])
+    assert_search_hits(core, vid, "이전직접", [("translation", "이전 직접 번역", 10)])
+    assert len(core.search("source").results) == 6
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(7.125, 9, "전체 재생성 문장"),))
+    core.request_subtitles(vid)
+    assert core.process_next_subtitle().state == "completed"
+    assert {line.id for line in old_lines}.isdisjoint(line.id for line in core.transcript(vid).lines)
+    for query in ("이전검수", "이전직접", "source"):
+        assert_search_hits(core, vid, query, [])
+    assert_search_hits(core, vid, "전체재생성", [("transcript", "전체 재생성 문장", 7.125)])
+    finish(core)
+    expected = [("transcript", "전체 재생성 문장", 7.125),
+                ("translation", "번역 전체 재생성 문장", 7.125)]
+    assert_search_hits(core, vid, "전체재생성", expected)
+    core = reopen()
+    assert_search_hits(core, vid, "전체재생성", expected)
+    for query in ("이전검수", "이전직접", "source"):
+        assert_search_hits(core, vid, query, [])
