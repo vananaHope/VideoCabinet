@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 import hashlib
+import os
 from pathlib import Path
 import sqlite3
+import stat
 from typing import Callable, Mapping, Protocol
 
 
@@ -66,6 +68,13 @@ DEFAULT_KEY_BINDINGS = {
     "Down": Command(CommandType.CHANGE_SPEED, -0.25),
 }
 
+MIN_PLAYBACK_SPEED = 0.25
+MAX_PLAYBACK_SPEED = 100
+
+
+def playback_speed(current: float, change: float) -> float:
+    return max(MIN_PLAYBACK_SPEED, min(MAX_PLAYBACK_SPEED, current + change))
+
 
 @dataclass(frozen=True)
 class ScanIssue:
@@ -105,7 +114,7 @@ class AppCore:
         database: Path | None = None,
         key_bindings: Mapping[str, Command] | None = None,
     ):
-        self.database = Path(database) if database is not None else default_data_directory() / "library.sqlite3"
+        self.database = (Path(database) if database is not None else default_data_directory() / "library.sqlite3").resolve()
         self.database.parent.mkdir(parents=True, exist_ok=True)
         self._thumbnails = self.database.parent / "thumbnails"
         self._thumbnails.mkdir(exist_ok=True)
@@ -160,18 +169,32 @@ class AppCore:
     def scan(self) -> ScanResult:
         added = 0
         issues = []
-        for folder in self.watched_folders():
-            if not folder.path.is_dir():
-                issues.append(ScanIssue(folder.path, "감시 폴더를 읽을 수 없습니다."))
-                continue
-            # 확장자 대신 어댑터가 영상 스트림 여부를 판별한다.
-            for path in sorted(folder.path.rglob("*")):
-                if not path.is_file() or path.is_symlink():
+        pending = [folder.path for folder in reversed(self.watched_folders())]
+        visited: set[Path] = set()
+        while pending:
+            directory = pending.pop()
+            try:
+                real_path = directory.resolve()
+                if real_path in visited:
                     continue
-                try:
-                    added += self._register(path.resolve())
-                except (OSError, ValueError, RuntimeError) as error:
-                    issues.append(ScanIssue(path, str(error)))
+                visited.add(real_path)
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        path = Path(entry.path)
+                        try:
+                            info = entry.stat(follow_symlinks=False)
+                            if (stat.S_ISLNK(info.st_mode)
+                                    or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                                continue  # 정션·심볼릭 링크 등은 따라가지 않는다.
+                            if stat.S_ISDIR(info.st_mode):
+                                pending.append(path)
+                            elif stat.S_ISREG(info.st_mode):
+                                added += self._register(path.resolve())
+                        except (OSError, ValueError, RuntimeError) as error:
+                            issues.append(ScanIssue(path, str(error)))
+            except (OSError, RuntimeError) as error:
+                # 한 디렉터리의 열거 실패로 나머지 감시 폴더/하위 폴더를 막지 않는다.
+                issues.append(ScanIssue(directory, str(error)))
         return ScanResult(added, tuple(issues))
 
     def _register(self, path: Path) -> int:
@@ -193,7 +216,8 @@ class AppCore:
         with self._connect() as db:
             cursor = db.execute(
                 "INSERT INTO videos (fingerprint, title, duration, format, thumbnail, registered_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (fingerprint, path.stem, info.duration, info.format, str(thumbnail), self._clock().isoformat()),
+                (fingerprint, path.stem, info.duration, info.format,
+                 str(Path("thumbnails") / thumbnail.name), self._clock().isoformat()),
             )
             db.execute("INSERT INTO locations VALUES (?, ?)", (str(path), cursor.lastrowid))
         return 1
@@ -205,7 +229,8 @@ class AppCore:
                 locations.setdefault(row["video_id"], []).append(Location(Path(row["path"])))
             return tuple(
                 Video(row["id"], row["title"], row["fingerprint"], row["duration"], row["format"],
-                      Path(row["thumbnail"]), datetime.fromisoformat(row["registered_at"]),
+                      # 최초 골격의 절대 경로 레코드도 파일 이름으로 읽어 호환한다.
+                      self._thumbnails / Path(row["thumbnail"]).name, datetime.fromisoformat(row["registered_at"]),
                       tuple(locations.get(row["id"], [])))
                 for row in db.execute("SELECT * FROM videos ORDER BY title, id")
             )
