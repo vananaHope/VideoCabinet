@@ -12,6 +12,7 @@ from typing import Callable, Mapping, Protocol
 
 from .highlights import Highlight, Highlights
 from .playback import PlaybackHub
+from .series import Series, SeriesStore, adjacent_video
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 
@@ -61,6 +62,8 @@ class CommandType(str, Enum):
     PREVIOUS_HIGHLIGHT = "previous_highlight"
     NEXT_HIGHLIGHT = "next_highlight"
     TOGGLE_SUBTITLES = "toggle_subtitles"
+    PREVIOUS_VIDEO = "previous_video"
+    NEXT_VIDEO = "next_video"
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,8 @@ DEFAULT_KEY_BINDINGS = {
     "Home": Command(CommandType.PREVIOUS_HIGHLIGHT),
     "End": Command(CommandType.NEXT_HIGHLIGHT),
     "/": Command(CommandType.TOGGLE_SUBTITLES),
+    "PgUp": Command(CommandType.PREVIOUS_VIDEO),
+    "PgDn": Command(CommandType.NEXT_VIDEO),
 }
 
 MIN_PLAYBACK_SPEED = 0.25
@@ -158,6 +163,7 @@ class AppCore:
                 PRAGMA user_version = 1;
             """)
         self.playback = PlaybackHub()
+        self._series = SeriesStore(self._connect)
         self._highlights = Highlights(self._connect)
         self.playback.subscribe(self._highlights)
         self._highlight_commands = {
@@ -245,6 +251,24 @@ class AppCore:
         with self._connect() as db:
             return tuple(WatchedFolder(Path(row[0])) for row in db.execute("SELECT path FROM watched_folders ORDER BY path"))
 
+    def series(self) -> tuple[Series, ...]:
+        """시리즈와 각 시리즈의 영상 ID를 사용자 지정 순서로 조회한다."""
+        return self._series.list()
+
+    def series_for_video(self, video_id: int) -> Series | None:
+        return self._series.for_video(video_id)
+
+    def create_series(self, name: str, video_ids: tuple[int, ...] = ()) -> Series:
+        return self._series.edit(None, name, video_ids)
+
+    def update_series(self, series_id: int, *, name: str, video_ids: tuple[int, ...]) -> Series:
+        return self._series.edit(series_id, name, video_ids)
+
+    def adjacent_video(self, video_id: int, visible_video_ids: tuple[int, ...], *, forward: bool) -> int | None:
+        """시리즈 순서를 우선하고, 시리즈 밖에서는 재생을 시작한 목록 순서를 쓴다."""
+        series = self.series_for_video(video_id)
+        return adjacent_video(video_id, series.video_ids if series else tuple(visible_video_ids), forward=forward)
+
     def scan(self) -> ScanResult:
         added = 0
         issues = []
@@ -274,6 +298,7 @@ class AppCore:
             except (OSError, RuntimeError) as error:
                 # 한 디렉터리의 열거 실패로 나머지 감시 폴더/하위 폴더를 막지 않는다.
                 issues.append(ScanIssue(directory, str(error)))
+        self._series.regroup(self.videos())
         return ScanResult(added, tuple(issues))
 
     def _register(self, path: Path) -> int:
@@ -340,6 +365,14 @@ class AppCore:
     def resume_start(self, video_id: int) -> float:
         point = self.viewing_status(video_id).resume_point
         return max(0, point - self._viewings.settings.resume_rewind) if point is not None else 0
+
+    def switch_to(self, video_id: int) -> float:
+        """현재 시청·열린 구간을 닫고 대상 영상의 이어볼 위치에서 새 시청을 시작한다."""
+        self.playback_location(video_id)
+        self.playback.end()
+        start = self.resume_start(video_id)
+        self.playback.start(video_id, start)
+        return start
 
 
 class _Connection:
