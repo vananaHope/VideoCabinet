@@ -61,6 +61,37 @@ def current_id(core):
     return core.reel_playback.entry.highlight.id if core.reel_playback else None
 
 
+@pytest.mark.parametrize("remapped", [False, True])
+def test_shared_navigation_bindings_are_valid_in_normal_playback_and_reel(library, remapped):
+    core, _ = library
+    a, b, _ = core.videos()
+    first, second, other = mark(core, a, 10, 15), mark(core, a, 30, 35), mark(core, b, 20, 25)
+    previous, following, previous_video, next_video = ("F7", "F8", "F9", "F10") if remapped else ("Home", "End", "PgUp", "PgDn")
+    bindings = {row.command: row.keys for row in core.key_bindings()}
+    for kind, key in ((CommandType.PREVIOUS_HIGHLIGHT, previous), (CommandType.NEXT_HIGHLIGHT, following),
+                      (CommandType.PREVIOUS_VIDEO, previous_video), (CommandType.NEXT_VIDEO, next_video)):
+        bindings[Command(kind)] = (key,)
+    core.switch_to(a.id)
+    core.playback.report(25)
+    core.save_key_bindings(bindings)
+    assert press(core, previous) == 10
+    assert press(core, following) == 30
+    assert core.execute_video_command(core.command_for_key(next_video), (a.id, b.id)) == b.id
+    core.switch_to(b.id)
+    assert core.execute_video_command(core.command_for_key(previous_video), (a.id, b.id)) == a.id
+    core.start_reel(highlight_id=first.id)
+    # 같은 명령을 모아보기에서 해석하므로 동일 배치를 다시 저장해도 충돌하지 않는다.
+    core.save_key_bindings(bindings)
+    press(core, following)
+    assert current_id(core) == second.id
+    press(core, previous)
+    assert current_id(core) == first.id
+    core.execute_video_command(core.command_for_key(next_video), ())
+    assert current_id(core) == other.id
+    core.execute_video_command(core.command_for_key(previous_video), ())
+    assert current_id(core) == first.id
+
+
 def test_list_order_tag_filter_and_missing(library):
     core, _ = library
     a, b, c = core.videos()

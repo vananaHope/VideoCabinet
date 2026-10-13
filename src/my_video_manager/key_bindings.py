@@ -59,6 +59,7 @@ def command_label(command: Command) -> str:
         "next_highlight": "다음 하이라이트", "toggle_subtitles": "자막 켜기 / 끄기",
         "previous_video": "이전 영상 / 시리즈 이전 화", "next_video": "다음 영상 / 시리즈 다음 화",
         "toggle_subtitle_language": "원어 / 번역 자막 전환",
+        "toggle_reel_repeat": "구간 반복 켜기 / 끄기",
     }.get(kind, kind)
 
 

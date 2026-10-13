@@ -45,6 +45,35 @@ def test_translation_toggle_has_korean_label_and_period_default(tmp_path):
     assert core.command_for_key(".") == command
 
 
+def test_reel_repeat_has_korean_label_and_rebinding_survives_restart(tmp_path):
+    core = open_core(tmp_path)
+    command = Command(CommandType.TOGGLE_REEL_REPEAT)
+    row = next(row for row in core.key_bindings() if row.command == command)
+    assert row.label == "구간 반복 켜기 / 끄기"
+    assert row.keys == row.default_keys == ("\\",)
+    bindings = draft(core)
+    bindings[command] = ("R",)
+    core.save_key_bindings(bindings)
+    for app in (core, open_core(tmp_path)):
+        assert app.command_for_key("R") == command
+        assert app.command_for_key("\\") is None
+    core.reset_key_bindings(command)
+    assert open_core(tmp_path).command_for_key("\\") == command
+
+
+@pytest.mark.parametrize(("kind", "key"), [
+    (CommandType.TOGGLE_PAUSE, "\\"), (CommandType.TOGGLE_REEL_REPEAT, "Enter"),
+])
+def test_reel_repeat_conflicts_only_with_a_different_command(tmp_path, kind, key):
+    core = open_core(tmp_path)
+    bindings = draft(core)
+    bindings[Command(kind)] = (key,)
+    with pytest.raises(ValueError, match="구간 반복"):
+        core.save_key_bindings(bindings)
+    assert core.command_for_key("\\") == Command(CommandType.TOGGLE_REEL_REPEAT)
+    assert core.command_for_key("Enter") == Command(CommandType.TOGGLE_PAUSE)
+
+
 @pytest.mark.parametrize(("kind", "key"), [
     (CommandType.TOGGLE_PAUSE, "."),
     (CommandType.TOGGLE_SUBTITLE_LANGUAGE, "Enter"),

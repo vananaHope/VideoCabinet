@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
 )
 
 from .highlight_ui import timestamp
+from .core import CommandType
+from .key_display import display_keys
 
 
 class ReelControls:
@@ -166,6 +168,9 @@ class ReelControls:
         self.window.back_button.setText("모아보기 목록으로 (Esc)" if current else "목록으로 (Esc)")
         if current:
             repeat = "켜짐" if self.core.reel_repeat else "꺼짐"
+            keys = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
             self.window.reel_label.setText(
                 f"모아보기 · {current.entry.video_title} · {timestamp(current.start)} — {timestamp(current.end)}\n"
-                f"반복 {repeat} (\\) · Home/End 이전/다음 하이라이트 · PgUp/PgDn 영상 단위 이동")
+                f"반복 {repeat} ({keys[CommandType.TOGGLE_REEL_REPEAT]}) · "
+                f"이전/다음 하이라이트: {keys[CommandType.PREVIOUS_HIGHLIGHT]} / {keys[CommandType.NEXT_HIGHLIGHT]} · "
+                f"영상 단위 이동: {keys[CommandType.PREVIOUS_VIDEO]} / {keys[CommandType.NEXT_VIDEO]}")

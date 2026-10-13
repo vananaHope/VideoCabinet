@@ -123,6 +123,7 @@ class MainWindow(QMainWindow):
         self.highlights_button.clicked.connect(self.show_highlights)
         playback_layout.addWidget(self.highlights_button)
         self.video_navigation_label = QLabel()
+        self.video_navigation_label.setWordWrap(True)
         playback_layout.addWidget(self.video_navigation_label)
         self.key_help = QLabel()
         self.key_help.setWordWrap(True)
@@ -331,12 +332,18 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def refresh_key_help(self):
+        navigation = (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO)
+        rows = self.core.key_bindings()
+        self.video_navigation_label.setText(" · ".join(f"{display_keys(row.keys)} {row.label}"
+                                                      for row in rows if row.command.kind in navigation))
         self.key_help.setText(" · ".join(f"{display_keys(row.keys)} {row.label}"
-                                        for row in self.core.key_bindings() if row.keys))
+                                        for row in rows if row.keys and row.command.kind not in
+                                        (*navigation, CommandType.TOGGLE_REEL_REPEAT)))
 
     def show_settings(self):
         SettingsDialog(self.core, self).exec()
         self.refresh_key_help()
+        self.reel.update_label()
         if self.pages.currentIndex() == 1:
             self.surface.setFocus()
 
