@@ -136,7 +136,9 @@ class AutoSubtitleRulesDialog(QDialog):
             return
         rule = item.data(Qt.ItemDataRole.UserRole)
         target = {"folder": rule.folder} if rule.folder else {"tag_id": rule.tag_id}
-        self.target.setCurrentIndex(self.target.findData(target))
+        # Path가 들어 있는 Python 객체는 QVariant의 findData 동등 비교 대상이 아니다.
+        index = next((i for i in range(self.target.count()) if self.target.itemData(i) == target), -1)
+        self.target.setCurrentIndex(index)
         self.language.setCurrentText(rule.spoken_language or "자동 감지")
 
     def save(self):
