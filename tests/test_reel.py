@@ -22,19 +22,18 @@ class Media:
         destination.write_bytes(b"thumbnail")
 
 
-class Library(AppCore):
-    """#3의 위치 소실 API가 들어오기 전, 공개 영상 목록 경계에서 파일 없음을 공급한다."""
-    missing = ()
-
-    def videos(self):
-        return tuple(replace(v, locations=()) if v.id in self.missing else v
-                     for v in super().videos())
+def remove_files(core, *videos):
+    for video in videos:
+        for location in video.locations:
+            location.path.unlink()
+    core.scan()
+    assert all(v.missing for v in core.videos() if v.id in {video.id for video in videos})
 
 
 @pytest.fixture
 def library(tmp_path):
     clock = Clock()
-    core = Library(media=Media(), clock=clock, database=tmp_path / "data/library.sqlite3")
+    core = AppCore(media=Media(), clock=clock, database=tmp_path / "data/library.sqlite3")
     folder = tmp_path / "videos"
     folder.mkdir()
     for title in ("B 영상", "A 영상", "C 영상"):
@@ -71,7 +70,7 @@ def test_list_order_tag_filter_and_missing(library):
     tag = core.add_highlight_tag(last.id, "복습")
     core.add_highlight_tag(first.id, "복습")
     core.add_video_tag(c.id, "복습")
-    core.missing = (a.id,)
+    remove_files(core, a)
     assert [e.highlight for e in core.reel_entries()] == [first, second, last]
     assert [e.playable for e in core.reel_entries()] == [False, False, True]
     assert [e.highlight for e in core.reel_entries(tag.id)] == [first, last]
@@ -84,6 +83,84 @@ def test_sort_ties_are_stable(library):
     ha, hb = mark(core, a, 30), mark(core, b, 10)
     entries = ordered_reel_entries([replace(b, title=a.title), a], [hb, ha], {})
     assert [e.highlight.video_id for e in entries] == sorted([a.id, b.id])
+
+
+def test_excluded_highlights_hidden_including_tag_filter_and_restored_with_records(library):
+    core, clock = library
+    a, b, _ = core.videos()
+    first, hidden = mark(core, a, 10), mark(core, b, 20)
+    tag = core.add_highlight_tag(hidden.id, "복습")
+    core.start_reel(highlight_id=hidden.id)
+    core.playback.report(23)
+    core.playback.end()
+    core.exclude_video(b.id)
+    assert [e.highlight for e in core.reel_entries()] == [first]
+    assert core.reel_entries(tag.id) == ()
+    with pytest.raises(ValueError, match="목록에 없는"):
+        core.start_reel(highlight_id=hidden.id)
+    reopened = AppCore(media=Media(), clock=clock, database=core.database)
+    assert [e.highlight for e in reopened.reel_entries()] == [first]
+    reopened.restore_video(b.id)
+    entry, = reopened.reel_entries(tag.id)
+    assert entry.highlight == hidden and entry.playable
+    assert entry.last_revisited_at == clock.now
+    reopened.start_reel(tag.id)
+    assert current_id(reopened) == hidden.id
+
+
+@pytest.mark.parametrize("change_after_start", [False, True])
+def test_pgup_pgdn_skip_both_missing_and_excluded_videos(library, change_after_start):
+    core, _ = library
+    a, b, c = core.videos()
+    path = a.locations[0].path.parent / "D 영상.mkv"
+    path.write_bytes(b"fourth video")
+    core.add_file(path)
+    d = core.videos()[-1]
+    first, _, _, last = [mark(core, video, 10) for video in (a, b, c, d)]
+    if change_after_start:
+        core.start_reel()
+    remove_files(core, b)
+    core.exclude_video(c.id)
+    if not change_after_start:
+        core.start_reel()
+    core.execute_video_command(core.command_for_key("PgDn"), ())
+    assert current_id(core) == last.id
+    core.execute_video_command(core.command_for_key("PgUp"), ())
+    assert current_id(core) == first.id
+    assert not core.playback.session.record_viewing
+
+
+@pytest.mark.parametrize("state", ["missing", "excluded"])
+def test_auto_advance_skips_newly_unavailable_video(library, state):
+    core, _ = library
+    a, b, c = core.videos()
+    first, _, last = [mark(core, video, 10) for video in (a, b, c)]
+    core.start_reel()
+    if state == "missing":
+        remove_files(core, b)
+    else:
+        core.exclude_video(b.id)
+    core.playback.report(20)
+    core.advance_reel_if_due()
+    assert current_id(core) == last.id
+    press(core, "Home")
+    assert current_id(core) == first.id
+
+
+@pytest.mark.parametrize("state", ["missing", "excluded"])
+@pytest.mark.parametrize("key", ["PgUp", "PgDn"])
+def test_video_navigation_keeps_anchor_when_current_video_becomes_unavailable(library, state, key):
+    core, _ = library
+    a, b, c = core.videos()
+    first, _, second, last = (mark(core, a, 10), mark(core, b, 10),
+                              mark(core, b, 30), mark(core, c, 10))
+    core.start_reel(highlight_id=second.id)
+    if state == "missing":
+        remove_files(core, b)
+    else:
+        core.exclude_video(b.id)
+    core.execute_video_command(core.command_for_key(key), ())
+    assert current_id(core) == (first.id if key == "PgUp" else last.id)
 
 
 def test_point_range_cross_video_auto_advance_and_end(library):
@@ -244,7 +321,7 @@ def test_missing_skipped_both_directions_and_selected_missing_refused(library):
     core, _ = library
     a, b, c = core.videos()
     first, missing, last = mark(core, a, 10), mark(core, b, 20), mark(core, c, 30)
-    core.missing = (b.id,)
+    remove_files(core, b)
     core.start_reel()
     press(core, "End")
     assert current_id(core) == last.id
@@ -253,7 +330,7 @@ def test_missing_skipped_both_directions_and_selected_missing_refused(library):
     with pytest.raises(ValueError, match="파일 없음"):
         core.start_reel(highlight_id=missing.id)
     assert current_id(core) == first.id
-    core.missing = (a.id, b.id, c.id)
+    remove_files(core, a, c)
     assert core.start_reel() is None
     assert core.playback.session is None
 
@@ -388,7 +465,7 @@ def test_pgup_pgdn_stay_in_revisit_and_use_video_groups(library):
     assert current_id(core) == b1.id
     video_key("PgUp")
     assert current_id(core) == a1.id
-    core.missing = (b.id,)
+    remove_files(core, b)
     video_key("PgDn")
     assert current_id(core) == c1.id
     video_key("PgDn")

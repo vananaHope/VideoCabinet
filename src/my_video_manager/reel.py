@@ -37,9 +37,9 @@ def natural_title_key(title: str):
 
 def ordered_reel_entries(videos, highlights, last_revisited) -> tuple[ReelEntry, ...]:
     """영상 제목 자연 정렬 → 영상 ID → 영상 안 시각 → 하이라이트 ID."""
-    by_id = {video.id: video for video in videos}
+    by_id = {video.id: video for video in videos if not video.excluded}
     entries = [ReelEntry(h, by_id[h.video_id].title, by_id[h.video_id].duration,
-                         bool(by_id[h.video_id].locations), last_revisited.get(h.id))
+                         not by_id[h.video_id].missing, last_revisited.get(h.id))
                for h in highlights if h.video_id in by_id]
     return tuple(sorted(entries, key=lambda e: (natural_title_key(e.video_title),
                                                 e.highlight.video_id, e.highlight.start, e.highlight.id)))
@@ -98,7 +98,7 @@ class HighlightReel:
 
     def _available_ids(self):
         # 한 명령에서 각각 한 번 읽는다. 항목별 전체 조회를 하지 않는다.
-        videos = {v.id for v in self._videos() if v.locations}
+        videos = {v.id for v in self._videos() if not v.missing and not v.excluded}
         return {h.id for h in self._highlights() if h.video_id in videos}
 
     def _end(self, entry):
@@ -146,14 +146,18 @@ class HighlightReel:
         available = self._available_ids()
         groups = []
         for index, entry in enumerate(self._entries):
-            if entry.highlight.id in available and self._end(entry) > entry.highlight.start:
+            # 현재 영상이 뒤늦게 파일 없음·제외가 되어도 이동의 기준점은 남긴다.
+            if (entry.highlight.video_id == self.current.video_id or
+                    entry.highlight.id in available and self._end(entry) > entry.highlight.start):
                 if not groups or groups[-1][0] != entry.highlight.video_id:
                     groups.append((entry.highlight.video_id, index))
         group = next((i for i, (video_id, _) in enumerate(groups)
                       if video_id == self.current.video_id), None)
         if group is None:
             return
-        target = group + 1 if forward else group if self._index > groups[group][1] else group - 1
+        first = groups[group][1]
+        restart = self._index > first and self._entries[first].highlight.id in available
+        target = group + 1 if forward else group if restart else group - 1
         if 0 <= target < len(groups):
             self._move(groups[target][1], 1, available)
 
