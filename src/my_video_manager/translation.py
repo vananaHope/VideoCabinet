@@ -18,6 +18,7 @@ class TranslationError(RuntimeError):
         self.kind, self.detail = kind, detail
         super().__init__({
             "usage_limit": "구독 사용량 한도로 보류했습니다. 잠시 뒤 자동으로 재시도합니다.",
+            "usage_limit_repeated": "사용량 한도가 3회 반복되어 자동 재시도를 멈췄습니다. 한도 확인 후 직접 재시도하세요.",
             "authentication": "번역 CLI 로그인이 필요합니다.",
             "missing_cli": "번역 CLI가 없습니다. 선택한 CLI를 설치하거나 설정을 바꾸세요.",
             "format": "번역 응답의 줄 ID 또는 형식이 올바르지 않습니다.",
@@ -105,6 +106,12 @@ class Translations:
                     cli TEXT PRIMARY KEY,
                     retry_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS translation_limit_attempts (
+                    queue_id TEXT NOT NULL REFERENCES translation_queue(id) ON DELETE CASCADE,
+                    cli TEXT NOT NULL,
+                    attempts INTEGER NOT NULL,
+                    PRIMARY KEY(queue_id, cli)
+                );
             """)
         self.enqueue_eligible()  # 원어 저장 직후 강제 종료된 경우도 복구한다.
 
@@ -148,6 +155,7 @@ class Translations:
                     return None
             # 명시적인 전체 재시도는 저장한 묶음을 재사용한다.
             if old and line_ids is None:
+                db.execute("DELETE FROM translation_limit_attempts WHERE queue_id = ?", (old["id"],))
                 db.execute("UPDATE translation_queue SET state = 'queued', retry_at = NULL, "
                            "error_kind = NULL, error_detail = NULL WHERE id = ?", (old["id"],))
                 queue_id = old["id"]
@@ -206,7 +214,9 @@ class Translations:
         if backoff and datetime.fromisoformat(backoff[0]) > self._clock():
             return None
         blocked = {e.video_id for e in self._subtitles.queue() if e.state == "queued"}
-        return next((e for e in self.queue() if e.video_id not in blocked and
+        # 새로 진행할 영상이 반복 보류되는 영상 뒤에서 계속 기다리지 않게 한다.
+        entries = sorted(self.queue(), key=lambda e: e.state == "held")
+        return next((e for e in entries if e.video_id not in blocked and
                      e.state in ("queued", "held")), None)
 
     def process_next(self):
@@ -253,6 +263,8 @@ class Translations:
                         return None
                     if self._cancellation.is_set():
                         raise TranslationCancelled
+                    db.execute("DELETE FROM translation_limit_attempts WHERE queue_id = ? AND cli = ?",
+                               (pending.id, cli))
                     db.executemany("UPDATE translation_targets SET text = ? WHERE queue_id = ? AND line_id = ?",
                                    [(line.text, pending.id, line.id) for line in result])
                     done = not db.execute("SELECT 1 FROM translation_targets WHERE queue_id = ? AND text IS NULL",
@@ -281,6 +293,15 @@ class Translations:
                         db.execute("INSERT INTO translation_cli_backoff VALUES (?, ?) "
                                    "ON CONFLICT(cli) DO UPDATE SET retry_at = excluded.retry_at",
                                    (cli, retry_at.isoformat()))
+                        if db.execute("SELECT 1 FROM translation_queue WHERE id = ?", (pending.id,)).fetchone():
+                            db.execute("INSERT INTO translation_limit_attempts VALUES (?, ?, 1) "
+                                       "ON CONFLICT(queue_id, cli) DO UPDATE SET attempts = attempts + 1",
+                                       (pending.id, cli))
+                            attempts = db.execute("SELECT attempts FROM translation_limit_attempts "
+                                                  "WHERE queue_id = ? AND cli = ?", (pending.id, cli)).fetchone()[0]
+                            if attempts >= 3:
+                                failure = TranslationError("usage_limit_repeated", failure.detail)
+                                held, retry_at = False, None
                     db.execute("UPDATE translation_queue SET state = ?, retry_at = ?, error_kind = ?, error_detail = ? "
                                "WHERE id = ?", ("held" if held else "failed", retry_at.isoformat() if retry_at else None,
                                                 failure.kind, failure.detail, pending.id))

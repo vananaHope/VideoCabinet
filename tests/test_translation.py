@@ -7,6 +7,7 @@ import pytest
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.translation import TranslatedLine, TranslationCancelled, TranslationError
+from my_video_manager.translation_cli import classify_cli_failure
 
 
 class Media:
@@ -439,6 +440,122 @@ def test_one_failed_video_does_not_block_other_videos(setup, kind):
     adapter.error = None
     assert all(result.video_id == b.id for result in finish(core))
     assert core.translation(b.id) and core.translation(a.id) is None
+
+
+def test_n1_output_limit_does_not_repeatedly_hold_all_videos(setup):
+    core, _, adapter, time, _ = setup
+    a, b = core.videos()
+    transcript = source(core, a.id)
+    source(core, b.id)
+    a_ids = {line.id for line in transcript.lines}
+
+    def translate(lines):
+        if lines[0].id in a_ids:
+            message = "Partial reply. The last attempt reached the limit while still thinking…"
+            raise TranslationError(classify_cli_failure(message), message)
+        return tuple(TranslatedLine(line.id, "번역") for line in lines)
+
+    adapter.response = translate
+    for _ in range(4):
+        finish(core)
+        time[0] += timedelta(minutes=15)
+    assert core.translation(b.id) is not None
+    assert core.translation_queue()[0].state == "failed"
+    assert sum(call[0][0].id in a_ids for call in adapter.calls) == 1
+
+
+def test_queued_video_precedes_repeatedly_held_video_after_cli_cooldown(setup):
+    core, _, adapter, time, reopen = setup
+    a, b = core.videos()
+    transcript = source(core, a.id)
+    source(core, b.id)
+    a_ids = {line.id for line in transcript.lines}
+
+    def translate(lines):
+        if lines[0].id in a_ids:
+            raise TranslationError("usage_limit", "possibly misclassified diagnostic")
+        return tuple(TranslatedLine(line.id, "번역") for line in lines)
+
+    adapter.response = translate
+    assert core.process_next_translation().state == "held"
+    assert not core.translation_ready()
+    time[0] += timedelta(minutes=15)
+    core = reopen()
+    for _ in range(3):
+        assert core.process_next_translation().video_id == b.id
+    assert core.translation(b.id) is not None
+    assert core.process_next_translation().state == "held"
+
+
+def test_repeated_usage_limit_stops_after_three_attempts_across_restarts(setup):
+    core, _, adapter, time, reopen = setup
+    video = core.videos()[0]
+    source(core, video.id)
+    core.process_next_translation()
+    adapter.error = TranslationError("usage_limit", "You've hit your usage limit")
+    for expected in ("held", "held", "failed"):
+        core = reopen()
+        result = core.process_next_translation()
+        assert result.state == expected
+        assert result.completed_lines == 2
+        assert not core.translation_ready()
+        time[0] += timedelta(minutes=15)
+    assert "반복" in result.error and "재시도" in result.error
+    assert result.retry_at is None
+    assert result.error_detail == adapter.error.detail
+    assert reopen().process_next_translation() is None
+    assert len(adapter.calls) == 4  # 성공한 첫 묶음 + 한도 오류 3회
+    core.request_translation(video.id)
+    assert core.process_next_translation().state == "held"  # 명시적 재시도는 횟수를 초기화한다.
+    time[0] += timedelta(minutes=15)
+    adapter.error = None
+    finish(core)
+    assert core.translation(video.id) is not None
+
+
+def test_successful_batch_resets_consecutive_usage_limit_count(setup):
+    core, _, adapter, time, _ = setup
+    source(core, core.videos()[0].id)
+    for _ in range(2):
+        adapter.error = TranslationError("usage_limit", "usage_limit")
+        assert core.process_next_translation().state == "held"
+        time[0] += timedelta(minutes=15)
+    adapter.error = None
+    assert core.process_next_translation().completed_lines == 2
+    adapter.error = TranslationError("usage_limit", "usage_limit")
+    assert core.process_next_translation().state == "held"
+
+
+def test_repeated_usage_limit_count_is_separate_for_each_cli(setup):
+    core, _, adapter, time, reopen = setup
+    source(core, core.videos()[0].id)
+    adapter.error = TranslationError("usage_limit", "usage_limit")
+    for cli in ("codex", "claude"):
+        core.set_translation_cli(cli)
+        for _ in range(2):
+            assert core.process_next_translation().state == "held"
+            time[0] += timedelta(minutes=15)
+    core = reopen()
+    core.set_translation_cli("codex")
+    assert core.process_next_translation().state == "failed"
+
+
+def test_usage_limit_from_replaced_request_still_holds_cli_without_stale_attempts(setup):
+    core, _, adapter, time, _ = setup
+    video = core.videos()[0]
+    source(core, video.id)
+
+    def replace_then_fail(lines):
+        source(core, video.id)
+        raise TranslationError("usage_limit", "usage_limit")
+
+    adapter.response = replace_then_fail
+    assert core.process_next_translation() is None
+    assert not core.translation_ready()
+    time[0] += timedelta(minutes=15)
+    adapter.response = None
+    finish(core)
+    assert core.translation(video.id) is not None
 
 
 def test_series_switch_to_resets_language_and_keeps_translations_with_their_video(setup):

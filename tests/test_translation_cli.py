@@ -36,6 +36,10 @@ LINES = (TranscriptLine("one", 0, 1, "Hello"), TranscriptLine("two", 1, 2, "Worl
     ('{"error":{"type":"rate_limit_error"}}', "usage_limit"),
     ("HTTP 429 Too Many Requests", "usage_limit"),
     ("quota_exceeded", "usage_limit"),
+    ("You've reached your workspace credit limit", "usage_limit"),
+    ("Your workspace is out of credits", "usage_limit"),
+    ("HTTP 429", "usage_limit"),
+    ("Unexpected status code: 429", "usage_limit"),
     ("구독 사용량 한도에 도달했습니다", "usage_limit"),
     ("Not logged in. Please run claude auth login", "authentication"),
     ("Authentication failed: token expired", "authentication"),
@@ -49,6 +53,12 @@ LINES = (TranscriptLine("one", 0, 1, "Hello"), TranscriptLine("two", 1, 2, "Worl
     ("Context window limit reached", "other"),
     ("Maximum output token limit reached", "other"),
     ("Login required before checking your session limit", "authentication"),
+    ("Partial reply. The last attempt reached the limit while still thinking…", "other"),
+    ("code-mode host exceeded the limit of 10", "other"),
+    ("locally-reset streams reached limit (100)", "other"),
+    ("Request exceeded the limit of 1048576 bytes", "other"),
+    ("Error: stream disconnected: line 429 of file", "other"),
+    ("Request exceeded your limit of 1048576 bytes", "other"),
 ])
 def test_failure_classifier(output, expected):
     assert classify_cli_failure(output) == expected

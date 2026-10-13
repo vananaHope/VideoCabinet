@@ -54,12 +54,16 @@ def parse_translation_response(output, lines):
 def classify_cli_failure(output: str) -> str:
     """실패 진단만 전달한다. 성공한 번역 텍스트는 한도 판정에 넣지 않는다."""
     lowered = output.lower()
-    subscription_limit = r"(?:usage|session|weekly|daily|monthly(?: spend)?|\d+[ -]hour|opus|sonnet)"
+    subscription_limit = r"(?:usage|session|weekly|daily|monthly(?: spend)?|\d+[ -]hour|opus|sonnet|workspace credit)"
     if re.search(r"usage[_ -]limit|rate[_ -]limit|quota[_ -](?:exceeded|exhausted)|"
-                 rf"(?:hit|reached|exceeded) (?:your |the )?(?:{subscription_limit} )?limit\b|"
+                 rf"(?:hit|reached|exceeded) (?:your |the )?{subscription_limit} limit\b|"
                  rf"\b{subscription_limit} limit (?:reached|exceeded)\b|"
+                 # Claude의 알려진 짧은 계정 안내만 유지하고 일반적인 'the limit'는 받지 않는다.
+                 r"\byou've hit your limit(?:[.!·\r\n]|$)|"
                  r"\bout of (?:extra )?usage\b|exceeded (?:your |the )?(?:current )?quota\b|"
-                 r"too many requests|\b429\b|사용량.{0,12}한도|구독.{0,12}한도", lowered):
+                 r"\byour workspace is out of credits\b|too many requests|"
+                 r"\b(?:http(?:/\d(?:\.\d)?)?|status(?: code)?|error(?: code)?)[\s:\"'=]*429\b|"
+                 r"사용량.{0,12}한도|구독.{0,12}한도", lowered):
         return "usage_limit"
     if re.search(r"not (?:logged|signed) in|(?:login|log in|sign in|authenticate).{0,20}(?:required|first)|"
                  r"authentication|unauthorized|invalid.{0,10}(?:api.?key|token)|\b401\b|로그인", lowered):
