@@ -164,7 +164,16 @@ class AppCore:
 
     def advance_reel_if_due(self, *, eof: bool = False) -> None:
         """위치 보고가 모든 리스너에 전달된 뒤 모아보기의 다음 재생 지시를 확정한다."""
-        self._reel.advance_if_due(eof=eof)
+        self._execute_reel_transition(lambda: self._reel.advance_if_due(eof=eof))
+
+    def _execute_reel_transition(self, transition) -> None:
+        previous = self.reel_playback
+        translated = self._subtitle_selection.translated
+        transition()
+        current = self.reel_playback
+        if previous and current and current.action == "seek" and previous.video_id == current.video_id:
+            # 항목별 재생 수명주기는 닫되, 같은 영상의 자막 선택은 엔진과 함께 유지한다.
+            self._subtitle_selection.translated = translated
 
     def last_highlight_revisited_at(self, highlight_id: int) -> datetime | None:
         return self._revisits.last_for_highlight(highlight_id)
@@ -290,7 +299,8 @@ class AppCore:
             return None
         if self.reel_playback is not None and command.kind in (
                 CommandType.PREVIOUS_HIGHLIGHT, CommandType.NEXT_HIGHLIGHT):
-            self._reel.adjacent(forward=command.kind == CommandType.NEXT_HIGHLIGHT)
+            self._execute_reel_transition(
+                lambda: self._reel.adjacent(forward=command.kind == CommandType.NEXT_HIGHLIGHT))
             return None
         handler = self._highlight_commands.get(command.kind)
         if handler is None:
@@ -373,7 +383,7 @@ class AppCore:
             raise ValueError("영상 이동 명령이 아닙니다.")
         forward = command.kind == CommandType.NEXT_VIDEO
         if self.reel_playback is not None:
-            self._reel.adjacent_video(forward=forward)
+            self._execute_reel_transition(lambda: self._reel.adjacent_video(forward=forward))
             return None
         if self.playback.session is None:
             return None

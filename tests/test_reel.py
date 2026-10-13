@@ -565,3 +565,51 @@ def test_list_and_pgdn_read_each_public_snapshot_once(library):
     core.video_reads = core.highlight_reads = 0
     core.execute_video_command(core.command_for_key("PgDn"), ())
     assert (core.video_reads, core.highlight_reads) == (1, 1)
+
+
+def test_subtitle_language_survives_same_video_reel_moves_but_resets_on_new_video(library):
+    from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
+    from my_video_manager.translation import TranslatedLine
+
+    class Transcriber:
+        def transcribe(self, *args, **kwargs):
+            return TranscriberResult("en", (TranscriptSegment(0, 100, "source"),))
+
+    class Translator:
+        def translate(self, lines, language, **kwargs):
+            return tuple(TranslatedLine(line.id, "번역") for line in lines)
+
+    original, clock = library
+    a, b, _ = original.videos()
+    first = mark(original, a, 10)
+    mark(original, a, 30)
+    mark(original, b, 10)
+    core = AppCore(media=Media(), clock=clock, database=original.database,
+                   transcriber=Transcriber(), translator=Translator())
+    for video in (a, b):
+        core.request_subtitles(video.id)
+        core.process_next_subtitle()
+        core.process_next_translation()
+    core.start_reel()
+    assert "source" in core.playback_subtitle(a.id).read_text(encoding="utf-8")
+    assert core.toggle_subtitle_language() == (True, "번역 자막")
+    translated = core.playback_subtitle(a.id)
+    assert "번역" in translated.read_text(encoding="utf-8")
+    press(core, "End")
+    assert core.reel_playback.action == "seek" and core.playback_subtitle(a.id) == translated
+    press(core, "\\")
+    core.playback.report(core.reel_playback.end)
+    core.advance_reel_if_due()
+    assert core.playback_subtitle(a.id) == translated
+    core.execute_video_command(core.command_for_key("PgUp"), ())
+    assert current_id(core) == first.id and core.playback_subtitle(a.id) == translated
+    core.execute_video_command(core.command_for_key("PgDn"), ())
+    assert core.reel_playback.video_id == b.id
+    assert "source" in core.playback_subtitle(b.id).read_text(encoding="utf-8")
+    core.toggle_subtitle_language()
+    core.switch_to(b.id)  # 일반 재생의 재시작은 #8 정책대로 원어다.
+    assert "source" in core.playback_subtitle(b.id).read_text(encoding="utf-8")
+    core.start_reel()
+    core.toggle_subtitle_language()
+    core.start_reel()  # 새 모아보기 역시 원어로 시작한다.
+    assert "source" in core.playback_subtitle(a.id).read_text(encoding="utf-8")
