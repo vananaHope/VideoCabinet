@@ -236,8 +236,7 @@ class MainWindow(QMainWindow):
         command = self.core.command_for_key(key)
         if command and self.player:
             try:
-                if command.kind in (CommandType.POINT_HIGHLIGHT, CommandType.RANGE_HIGHLIGHT,
-                                    CommandType.PREVIOUS_HIGHLIGHT, CommandType.NEXT_HIGHLIGHT):
+                if self.core.is_highlight_command(command):
                     if event.isAutoRepeat() or self.sync_position() is None:
                         return True
                     target = self.core.execute_highlight_command(command)

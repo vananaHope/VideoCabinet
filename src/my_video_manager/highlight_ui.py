@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from .highlight_editing import resolve_time_input, time_input_maximum
+
 
 def timestamp(seconds: float) -> str:
     milliseconds = round(seconds * 1000)
@@ -64,10 +66,12 @@ class HighlightEditor(QDialog):
         self.end = QDoubleSpinBox()
         for field in (self.start, self.end):
             field.setDecimals(3)
-            field.setRange(0, duration)
+            field.setRange(0, time_input_maximum(duration))
             field.setSuffix(" 초")
         self.start.setValue(highlight.start)
         self.end.setValue(highlight.end if highlight.end is not None else highlight.start)
+        self.initial_start = self.start.value()
+        self.initial_end = self.end.value()
         self.range = QCheckBox("구간 하이라이트")
         self.range.setChecked(highlight.end is not None)
         self.end.setEnabled(self.range.isChecked())
@@ -88,8 +92,10 @@ class HighlightEditor(QDialog):
 
     def save(self):
         try:
-            self.core.update_highlight(self.highlight.id, start=self.start.value(),
-                                       end=self.end.value() if self.range.isChecked() else None,
+            start = resolve_time_input(self.highlight.start, self.initial_start, self.start.value())
+            end = (resolve_time_input(self.highlight.end, self.initial_end, self.end.value())
+                   if self.range.isChecked() else None)
+            self.core.update_highlight(self.highlight.id, start=start, end=end,
                                        note=self.note.toPlainText())
         except (ValueError, OSError, sqlite3.Error) as error:
             QMessageBox.warning(self, "하이라이트 저장 실패", str(error))
