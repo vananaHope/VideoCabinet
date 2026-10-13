@@ -12,6 +12,7 @@ from typing import Callable, Mapping, Protocol
 
 from .highlights import Highlight, Highlights
 from .playback import PlaybackHub
+from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,7 @@ class AppCore:
         clock: Callable[[], datetime],
         database: Path | None = None,
         key_bindings: Mapping[str, Command] | None = None,
+        viewing_settings: ViewingSettings | None = None,
     ):
         self.database = (Path(database) if database is not None else default_data_directory() / "library.sqlite3").resolve()
         self.database.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +162,8 @@ class AppCore:
             CommandType.PREVIOUS_HIGHLIGHT: lambda: self._highlights.adjacent(forward=False),
             CommandType.NEXT_HIGHLIGHT: lambda: self._highlights.adjacent(forward=True),
         }
+        self._viewings = ViewingStore(self._connect, clock, viewing_settings or ViewingSettings())
+        self.playback.subscribe(ViewingRecorder(self.start_viewing, self.report_playback_position, self.end_viewing))
 
     def _connect(self):
         connection = sqlite3.connect(self.database, timeout=30)
@@ -286,6 +290,32 @@ class AppCore:
         if row is None:
             raise ValueError("재생할 영상의 위치가 없습니다.")
         return Location(Path(row[0]))
+
+    def start_viewing(self, video_id: int) -> Viewing:
+        with self._connect() as db:
+            row = db.execute("SELECT duration FROM videos WHERE id=?", (video_id,)).fetchone()
+        if row is None:
+            raise ValueError("영상이 없습니다.")
+        return self._viewings.start(video_id, row[0])
+
+    def report_playback_position(self, viewing_id: int, position: float, *, discontinuity: bool = False) -> None:
+        self._viewings.report(viewing_id, position, discontinuity=discontinuity)
+
+    def save_viewings(self) -> None:
+        self._viewings.save_due()
+
+    def end_viewing(self, viewing_id: int) -> Viewing:
+        return self._viewings.end(viewing_id)
+
+    def viewings(self, video_id: int) -> tuple[Viewing, ...]:
+        return self._viewings.list(video_id)
+
+    def viewing_status(self, video_id: int) -> ViewingStatus:
+        return viewing_status(self.viewings(video_id), self._viewings.settings)
+
+    def resume_start(self, video_id: int) -> float:
+        point = self.viewing_status(video_id).resume_point
+        return max(0, point - self._viewings.settings.resume_rewind) if point is not None else 0
 
 
 class _Connection:

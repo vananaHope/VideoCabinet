@@ -3,6 +3,7 @@
 from functools import lru_cache
 import os
 from pathlib import Path
+from queue import Empty, SimpleQueue
 import shutil
 import subprocess
 import sys
@@ -68,10 +69,39 @@ class MpvPlayer:
 
         self._player = mpv.MPV(wid=str(window_id), input_default_bindings=False,
                                input_vo_keyboard=False, osc=False, config=False, keep_open=True)
+        self._positions = SimpleQueue()
+        self._seeking = True
 
-    def play(self, path: Path) -> None:
+        @self._player.event_callback("seek", "start-file")
+        def discontinuity(event):
+            self._seeking = True
+
+        @self._player.event_callback("playback-restart")
+        def restarted(event):
+            # 탐색 도중의 임시 위치는 버리고 실제 재생 재개 위치를 새 기준점으로 보낸다.
+            position = self._player.time_pos
+            if position is not None:
+                self._positions.put((position, True))
+            self._seeking = False
+
+        @self._player.property_observer("time-pos")
+        def position_changed(name, position):
+            if position is not None and not self._seeking:
+                self._positions.put((position, False))
+
+    def play(self, path: Path, start: float = 0) -> None:
+        self._player.start = start
         self._player.play(str(path))
         self._player.pause = False
+
+    def take_positions(self) -> tuple[tuple[float, bool], ...]:
+        """mpv 스레드의 (위치, 탐색 여부) 보고를 순서대로 UI 스레드에 넘긴다."""
+        positions = []
+        while True:
+            try:
+                positions.append(self._positions.get_nowait())
+            except Empty:
+                return tuple(positions)
 
     def execute(self, command: Command) -> None:
         if command.kind == CommandType.TOGGLE_PAUSE:

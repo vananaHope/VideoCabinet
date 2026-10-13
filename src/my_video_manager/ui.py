@@ -33,7 +33,6 @@ class MainWindow(QMainWindow):
         self.core = core
         self.player = None
         self.player_factory = player_factory
-        self._seek_pending = False
         self.position_timer = QTimer(self)
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
@@ -97,7 +96,11 @@ class MainWindow(QMainWindow):
         self.folders.setText("감시 폴더: " + (", ".join(str(f.path) for f in self.core.watched_folders()) or "없음"))
         self.list.clear()
         for video in self.core.videos():
-            item = QListWidgetItem(QIcon(str(video.thumbnail)), video.title)
+            status = self.core.viewing_status(video.id)
+            label = "다 봄" if status.finished else f"보다 만 ({status.stopped_percent:.0f}%)" if status.abandoned else ""
+            if status.favorite:
+                label += " · 즐겨 보는 영상"
+            item = QListWidgetItem(QIcon(str(video.thumbnail)), video.title + (f"\n{label}" if label else ""))
             item.setData(Qt.ItemDataRole.UserRole, video.id)
             item.setSizeHint(QSize(300, 120))
             self.list.addItem(item)
@@ -143,15 +146,15 @@ class MainWindow(QMainWindow):
 
     def play(self, item):
         try:
+            self.end_playback()
             video_id = item.data(Qt.ItemDataRole.UserRole)
             location = self.core.playback_location(video_id)
-            self.end_playback()
+            start = self.core.resume_start(video_id)
             self.pages.setCurrentIndex(1)
             if self.player is None:
                 self.player = self.player_factory(int(self.surface.winId()))
-            self.player.play(location.path)
-            self.core.playback.start(video_id, 0)
-            self._seek_pending = False
+            self.core.playback.start(video_id, start)
+            self.player.play(location.path, start)
             self.progress.duration = next(v.duration for v in self.core.videos() if v.id == video_id)
             self.refresh_highlights()
             self.position_timer.start()
@@ -163,28 +166,25 @@ class MainWindow(QMainWindow):
 
     def end_playback(self):
         self.position_timer.stop()
-        if self.player and self.core.playback.session is not None:
-            self.sync_position()
-        self.core.playback.end()
         if self.player:
             self.player.close()
+            self.sync_position()
             self.player = None
+        self.core.playback.end()
 
     def sync_position(self):
         if self.player and self.core.playback.session is not None:
-            position = self.player.position()
-            if position is not None:
-                # mpv의 비동기 seek가 아직 이전 위치를 반환하면 표시만 유지한다.
-                # 처음 바뀐 위치까지의 간격은 재생된 구간으로 세지 않는다.
-                if not self._seek_pending or position != self.core.playback.position:
-                    self.core.playback.report(position, seeked=self._seek_pending)
-                    self._seek_pending = False
-                self.progress.position = position
-                self.progress.open_start = self.core.open_highlight_start
-                self.progress.update()
-                opened = self.core.open_highlight_start
-                suffix = f" · 구간 시작 {timestamp(opened)} — Delete로 끝내기" if opened is not None else ""
-                self.position_label.setText(f"{timestamp(position)} / {timestamp(self.progress.duration)}{suffix}")
+            # 상대 탐색과 Home/End 절대 탐색 모두 mpv 이벤트의 seeked 표시를 쓴다.
+            for position, seeked in self.player.take_positions():
+                self.core.playback.report(position, seeked=seeked)
+            self.core.save_viewings()
+            position = self.core.playback.position
+            self.progress.position = position
+            self.progress.open_start = self.core.open_highlight_start
+            self.progress.update()
+            opened = self.core.open_highlight_start
+            suffix = f" · 구간 시작 {timestamp(opened)} — Delete로 끝내기" if opened is not None else ""
+            self.position_label.setText(f"{timestamp(position)} / {timestamp(self.progress.duration)}{suffix}")
             return position
         return None
 
@@ -210,7 +210,7 @@ class MainWindow(QMainWindow):
     def show_library(self):
         self.end_playback()
         self.pages.setCurrentIndex(0)
-        self.list.setFocus()
+        self.refresh()
 
     def eventFilter(self, watched, event):
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()
@@ -242,15 +242,12 @@ class MainWindow(QMainWindow):
                     target = self.core.execute_highlight_command(command)
                     if target is not None:
                         self.player.seek_to(target)
-                        self._seek_pending = True
                     self.refresh_highlights()
                     self.sync_position()
                 else:
                     if command.kind == CommandType.SEEK:
                         self.sync_position()
                     self.player.execute(command)
-                    if command.kind == CommandType.SEEK:
-                        self._seek_pending = True
             except Exception as error:
                 QMessageBox.warning(self, "재생 조작 실패", str(error))
             return True
