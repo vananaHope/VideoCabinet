@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
         self.player_factory = player_factory
         self.playback_list = ()
         self._return_to_gems = False
-        self.thumbnail_icons = ThumbnailIcons()
+        self.thumbnail_icons = ThumbnailIcons(QSize(192, 108))
         self.position_timer = QTimer(self)
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
