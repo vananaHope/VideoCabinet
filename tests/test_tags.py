@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
+from my_video_manager.tag_editing import resolve_tag_input
 
 
 class FakeMedia:
@@ -33,7 +34,7 @@ def core(tmp_path):
 @pytest.mark.parametrize("first, equivalent, display", [
     (" Python ", "pYTHON", "Python"),
     ("  영상\t 공부\n", "영상  공부", "영상 공부"),
-    ("Ｐｙｔｈｏｎ", "python", "Python"),
+    ("Ｐｙｔｈｏｎ", "python", "Ｐｙｔｈｏｎ"),
     ("Straße", "STRASSE", "Straße"),
     ("한글", "한글", "한글"),
     ("CAFÉ", "cafe\u0301", "CAFÉ"),
@@ -213,3 +214,91 @@ def test_tag_names_are_flat_and_punctuation_is_literal(core):
     assert core.videos_for_tag(child_like.id) == core.videos_for_tag(punctuation.id) == (video,)
     core.delete_tag(root.id)
     assert set(core.tags()) == {child_like, punctuation}
+
+
+@pytest.mark.parametrize("entered, selected, expected", [
+    ("강의", None, "강의"), ("Py", None, "Py"), ("Rust", None, "Rust"),
+    ("Go", None, "Go"), ("강의", "강의 노트", "강의 노트"),
+    ("Py", "Python", "Python"), (" Ｐｙ ", None, " Ｐｙ "),
+])
+def test_enter_uses_typed_name_unless_candidate_was_explicitly_selected(entered, selected, expected):
+    assert resolve_tag_input(entered, selected) == expected
+
+
+@pytest.mark.parametrize("name, equivalent", [
+    ("①강", "1강"), ("Brand™", "BrandTM"), ("㈜회사", "(주)회사"),
+    ("½", "1⁄2"), ("x²", "x2"), ("ｶﾀｶﾅ", "カタカナ"),
+])
+def test_display_preserves_compatibility_characters_but_identity_normalizes_them(core, name, equivalent):
+    tag = core.create_tag(name)
+    assert tag.name == name
+    assert core.create_tag(equivalent) == tag
+    assert core.tags(equivalent) == (tag,)
+    renamed = core.rename_tag(tag.id, f" {name} ")
+    assert renamed.name == name and renamed.id == tag.id
+
+
+@pytest.mark.parametrize("name", ["가" * 51, "a" * 100000], ids=["51-characters", "100000-characters"])
+def test_overlong_names_are_rejected_by_all_writes_without_side_effects(core, name):
+    video = core.videos()[0]
+    highlight = core.highlights(video.id)[0]
+    original = core.add_video_tag(video.id, "기존")
+    core.add_highlight_tag(highlight.id, original.name)
+    for action in (lambda: core.create_tag(name), lambda: core.rename_tag(original.id, name),
+                   lambda: core.add_video_tag(video.id, name),
+                   lambda: core.add_highlight_tag(highlight.id, name)):
+        with pytest.raises(ValueError, match="50자"):
+            action()
+    assert core.tags() == core.video_tags(video.id) == core.highlight_tags(highlight.id) == (original,)
+
+
+def test_name_length_counts_cleaned_nfc_display_name(core):
+    # 150자 조합형 입력을 완성형 50자로 세며, 비교 키가 늘어나도 표시 길이를 센다.
+    tag = core.create_tag("  " + "한" * 50 + " \u200b ")
+    assert tag.name == "한" * 50
+    assert core.create_tag("™" * 50).name == "™" * 50
+    with pytest.raises(ValueError, match="50자"):
+        core.create_tag("™" * 51)
+
+
+@pytest.mark.parametrize("dirty, clean", [
+    ("Py\u200bthon", "Python"), ("Python\ufeff", "Python"),
+    ("a\x00b", "ab"), ("a\x1fb", "ab"), ("\u202eabc\u202c", "abc"),
+    ("a\tb\nc", "abc"), ("가\u200d나", "가나"),
+])
+def test_control_and_format_characters_are_removed_from_names_and_completion(core, dirty, clean):
+    tag = core.create_tag(dirty)
+    assert tag.name == clean
+    assert core.create_tag(clean) == tag
+    assert core.tags(dirty) == (tag,)
+    assert core.rename_tag(tag.id, dirty).name == clean
+
+
+@pytest.mark.parametrize("name", ["\u200b\ufeff", "\x00\x1f", " \u200d\u202e "])
+def test_invisible_only_names_are_rejected(core, name):
+    with pytest.raises(ValueError, match="이름을 입력"):
+        core.create_tag(name)
+    assert core.tags() == ()
+
+
+@pytest.mark.parametrize("target, message", [
+    ("video", "영상을 찾을 수 없습니다."), ("highlight", "하이라이트를 찾을 수 없습니다."),
+])
+def test_missing_target_error_uses_correct_sentence(core, target, message):
+    with pytest.raises(ValueError) as error:
+        getattr(core, f"add_{target}_tag")(9999, "태그")
+    assert str(error.value) == message
+
+
+def test_tagged_highlights_keep_order_note_and_updated_times(core):
+    first, second, _ = core.videos()
+    core.playback.start(first.id, 5)
+    core.execute_highlight_command(core.command_for_key("Insert"))
+    core.playback.end()
+    earlier, later = core.highlights(first.id)
+    other = core.highlights(second.id)[0]
+    for highlight in (other, later, earlier):
+        core.add_highlight_tag(highlight.id, "조회")
+    tag, = core.tags()
+    changed = core.update_highlight(later.id, start=1, end=3, note="수정한 메모")
+    assert core.highlights_for_tag(tag.id) == (changed, earlier, other)

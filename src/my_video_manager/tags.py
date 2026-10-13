@@ -4,8 +4,6 @@ from dataclasses import dataclass
 import sqlite3
 import unicodedata
 
-from .highlights import Highlight, Note
-
 
 @dataclass(frozen=True)
 class Tag:
@@ -14,8 +12,13 @@ class Tag:
 
 
 def normalize_tag_name(name: str) -> str:
-    """표시 이름: Unicode 호환 정규화 후 연속 공백을 한 칸으로 정리한다."""
-    return " ".join(unicodedata.normalize("NFKC", name).split())
+    """표시 이름은 NFC로 보존하고 제어·서식 문자를 제거한 뒤 공백을 정리한다."""
+    name = "".join(char for char in name if unicodedata.category(char) not in {"Cc", "Cf"})
+    return " ".join(unicodedata.normalize("NFC", name).split())
+
+
+def tag_name_key(name: str) -> str:
+    return unicodedata.normalize("NFKC", normalize_tag_name(name)).casefold()
 
 
 class Tags:
@@ -47,17 +50,20 @@ class Tags:
         name = normalize_tag_name(name)
         if not name:
             raise ValueError("태그 이름을 입력하세요.")
-        return name, name.casefold()
+        if len(name) > 50:
+            raise ValueError("태그 이름은 공백 정리 후 50자 이하여야 합니다.")
+        return name, tag_name_key(name)
 
     @staticmethod
     def _require(db, table, identifier):
         # table은 이 모듈 안에서 정한 상수만 전달한다.
         if db.execute(f"SELECT 1 FROM {table} WHERE id = ?", (identifier,)).fetchone() is None:
-            label = {"tags": "태그", "videos": "영상", "highlights": "하이라이트"}[table]
-            raise ValueError(f"{label}를 찾을 수 없습니다.")
+            message = {"tags": "태그를 찾을 수 없습니다.", "videos": "영상을 찾을 수 없습니다.",
+                       "highlights": "하이라이트를 찾을 수 없습니다."}[table]
+            raise ValueError(message)
 
     def list(self, prefix: str = "") -> tuple[Tag, ...]:
-        key = normalize_tag_name(prefix).casefold()
+        key = tag_name_key(prefix)
         with self._connect() as db:
             # LIKE의 %, _를 검색 문법으로 해석하지 않고 Unicode casefold를 일관되게 쓴다.
             return tuple(Tag(row["id"], row["name"]) for row in db.execute(
@@ -115,11 +121,8 @@ class Tags:
             self._require(db, "tags", tag_id)
             return {row[0] for row in db.execute("SELECT video_id FROM video_tags WHERE tag_id = ?", (tag_id,))}
 
-    def highlights(self, tag_id: int) -> tuple[Highlight, ...]:
+    def highlight_ids(self, tag_id: int) -> set[int]:
         with self._connect() as db:
             self._require(db, "tags", tag_id)
-            return tuple(Highlight(row["id"], row["video_id"], row["start"], row["end"],
-                                   Note(row["note"]) if row["note"] else None)
-                         for row in db.execute(
-                             "SELECT h.* FROM highlights h JOIN highlight_tags a ON a.highlight_id = h.id "
-                             "WHERE a.tag_id = ? ORDER BY h.video_id, h.start, h.id", (tag_id,)))
+            return {row[0] for row in db.execute(
+                "SELECT highlight_id FROM highlight_tags WHERE tag_id = ?", (tag_id,))}

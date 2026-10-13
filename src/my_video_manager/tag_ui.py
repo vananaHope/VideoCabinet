@@ -2,11 +2,13 @@
 
 import sqlite3
 
-from PySide6.QtCore import QStringListModel, Qt
+from PySide6.QtCore import QEvent, QStringListModel, Qt
 from PySide6.QtWidgets import (
     QCompleter, QDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout,
 )
+
+from .tag_editing import resolve_tag_input
 
 
 def _button(text, callback):
@@ -87,7 +89,7 @@ class TagEditor(QDialog):
             self.setWindowTitle("하이라이트 태그")
         self.resize(500, 400)
         layout = QVBoxLayout(self)
-        help_text = QLabel("이름 입력 후 Enter로 추가합니다. 자동 완성은 ↓/↑와 Enter로 고르세요.\n"
+        help_text = QLabel("Enter로 입력한 이름을 추가합니다. 후보를 쓰려면 ↓/↑로 고른 뒤 Enter를 누르세요.\n"
                            "Tab으로 이동해 버튼을 Space로 누를 수 있습니다. 변경은 즉시 저장됩니다.")
         help_text.setWordWrap(True)
         layout.addWidget(help_text)
@@ -100,8 +102,12 @@ class TagEditor(QDialog):
         # 후보는 코어가 정규화된 접두어로 고른다. Qt에서 다시 필터링하지 않는다.
         self.completer.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
         self.name.setCompleter(self.completer)
+        self.selected_candidate = None
         self.name.textEdited.connect(self.complete)
-        self.name.returnPressed.connect(self.add_from_keyboard)
+        self.completer.activated[str].connect(self.add_candidate)
+        # Qt의 자동 선정을 명시적인 사용자 선택과 구분하고 Enter를 한 번만 처리한다.
+        self.name.installEventFilter(self)
+        self.completer.popup().installEventFilter(self)
         entry.addWidget(self.name)
         entry.addWidget(_button("추가", self.add))
         layout.addLayout(entry)
@@ -117,6 +123,7 @@ class TagEditor(QDialog):
         self.name.setFocus()
 
     def complete(self, text):
+        self.selected_candidate = None
         self.suggestions.setStringList([tag.name for tag in self.core.tags(text)])
 
     def refresh(self):
@@ -140,11 +147,35 @@ class TagEditor(QDialog):
         self.refresh()
         self.name.setFocus()
 
-    def add_from_keyboard(self):
-        # QCompleter가 후보를 확정하기 전에도 QLineEdit.returnPressed가 발생한다.
-        # 팝업의 Enter는 후보 선택에만 쓰고 다음 Enter에서 연결을 저장한다.
-        if not self.completer.popup().isVisible():
-            self.add()
+    def add_candidate(self, candidate):
+        self.name.setText(candidate)
+        self.add()
+
+    def eventFilter(self, watched, event):
+        popup = self.completer.popup()
+        if watched in (self.name, popup) and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                name = resolve_tag_input(self.name.text(), self.selected_candidate if popup.isVisible() else None)
+                popup.hide()
+                self.name.setText(name)
+                self.add()
+                return True
+            if popup.isVisible() and key in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+                count = popup.model().rowCount()
+                if count:
+                    step = 1 if key == Qt.Key.Key_Down else -1
+                    if self.selected_candidate is None:
+                        row = 0 if step == 1 else count - 1
+                    else:
+                        row = (popup.currentIndex().row() + step) % count
+                    index = popup.model().index(row, 0)
+                    popup.setCurrentIndex(index)
+                    self.selected_candidate = index.data()
+                return True
+            if key == Qt.Key.Key_Escape:
+                self.selected_candidate = None
+        return super().eventFilter(watched, event)
 
     def remove(self):
         if item := self.list.currentItem():

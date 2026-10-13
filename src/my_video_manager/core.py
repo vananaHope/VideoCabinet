@@ -256,7 +256,7 @@ class AppCore:
         return tuple(video for video in self.videos() if video.id in ids)
 
     def highlights_for_tag(self, tag_id: int) -> tuple[Highlight, ...]:
-        return self._tags.highlights(tag_id)
+        return self._highlights.list_by_ids(self._tags.highlight_ids(tag_id))
 
     def update_highlight(self, highlight_id: int, *, start: float, end: float | None,
                          note: str) -> Highlight:
