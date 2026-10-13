@@ -13,6 +13,7 @@ from typing import Callable, Mapping, Protocol
 from .highlights import Highlight, Highlights
 from .playback import PlaybackHub
 from .series import Series, SeriesStore, adjacent_video
+from .tags import Tag, Tags
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 
@@ -165,6 +166,7 @@ class AppCore:
         self.playback = PlaybackHub()
         self._series = SeriesStore(self._connect)
         self._highlights = Highlights(self._connect)
+        self._tags = Tags(self._connect)
         self.playback.subscribe(self._highlights)
         self._highlight_commands = {
             CommandType.POINT_HIGHLIGHT: self._highlights.add_point,
@@ -216,6 +218,45 @@ class AppCore:
 
     def highlights(self, video_id: int) -> tuple[Highlight, ...]:
         return self._highlights.list(video_id)
+
+    def tags(self, prefix: str = "") -> tuple[Tag, ...]:
+        """정규화된 이름의 접두어로 자동 완성한다. 빈 접두어는 모든 태그다."""
+        return self._tags.list(prefix)
+
+    def create_tag(self, name: str) -> Tag:
+        return self._tags.create(name)
+
+    def rename_tag(self, tag_id: int, name: str) -> Tag:
+        return self._tags.rename(tag_id, name)
+
+    def delete_tag(self, tag_id: int) -> None:
+        self._tags.delete(tag_id)
+
+    def video_tags(self, video_id: int) -> tuple[Tag, ...]:
+        return self._tags.attached("video", video_id)
+
+    def highlight_tags(self, highlight_id: int) -> tuple[Tag, ...]:
+        return self._tags.attached("highlight", highlight_id)
+
+    def add_video_tag(self, video_id: int, name: str) -> Tag:
+        return self._tags.attach("video", video_id, name)
+
+    def add_highlight_tag(self, highlight_id: int, name: str) -> Tag:
+        return self._tags.attach("highlight", highlight_id, name)
+
+    def remove_video_tag(self, video_id: int, tag_id: int) -> None:
+        self._tags.detach("video", video_id, tag_id)
+
+    def remove_highlight_tag(self, highlight_id: int, tag_id: int) -> None:
+        self._tags.detach("highlight", highlight_id, tag_id)
+
+    def videos_for_tag(self, tag_id: int) -> tuple[Video, ...]:
+        """영상 자체에 붙인 태그로 조회한다. 하이라이트 태그는 포함하지 않는다."""
+        ids = self._tags.video_ids(tag_id)
+        return tuple(video for video in self.videos() if video.id in ids)
+
+    def highlights_for_tag(self, tag_id: int) -> tuple[Highlight, ...]:
+        return self._tags.highlights(tag_id)
 
     def update_highlight(self, highlight_id: int, *, start: float, end: float | None,
                          note: str) -> Highlight:
