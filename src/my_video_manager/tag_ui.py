@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout,
 )
 
-from .tag_editing import resolve_tag_input
+from .tag_editing import move_tag_candidate, resolve_tag_input
 
 
 def _button(text, callback):
@@ -156,21 +156,30 @@ class TagEditor(QDialog):
         if watched in (self.name, popup) and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if not self.name.text().strip():
+                    return True
                 name = resolve_tag_input(self.name.text(), self.selected_candidate if popup.isVisible() else None)
                 popup.hide()
                 self.name.setText(name)
                 self.add()
                 return True
-            if popup.isVisible() and key in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+            if not popup.isVisible() and key == Qt.Key.Key_Down:
+                self.complete(self.name.text())
+                self.completer.complete()
+            navigation = {
+                Qt.Key.Key_Down: "Down", Qt.Key.Key_Up: "Up",
+                Qt.Key.Key_PageDown: "PageDown", Qt.Key.Key_PageUp: "PageUp",
+                Qt.Key.Key_Home: "Home", Qt.Key.Key_End: "End",
+            }
+            if popup.isVisible() and key in navigation:
                 count = popup.model().rowCount()
-                if count:
-                    step = 1 if key == Qt.Key.Key_Down else -1
-                    if self.selected_candidate is None:
-                        row = 0 if step == 1 else count - 1
-                    else:
-                        row = (popup.currentIndex().row() + step) % count
+                current = popup.currentIndex().row() if self.selected_candidate is not None else None
+                page_size = popup.viewport().height() // max(1, popup.sizeHintForRow(0))
+                row = move_tag_candidate(current, count, navigation[key], page_size)
+                if row is not None:
                     index = popup.model().index(row, 0)
                     popup.setCurrentIndex(index)
+                    popup.scrollTo(index)
                     self.selected_candidate = index.data()
                 return True
             if key == Qt.Key.Key_Escape:

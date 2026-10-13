@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
-from my_video_manager.tag_editing import resolve_tag_input
+from my_video_manager.tag_editing import move_tag_candidate, resolve_tag_input
 
 
 class FakeMedia:
@@ -223,6 +223,19 @@ def test_tag_names_are_flat_and_punctuation_is_literal(core):
 ])
 def test_enter_uses_typed_name_unless_candidate_was_explicitly_selected(entered, selected, expected):
     assert resolve_tag_input(entered, selected) == expected
+
+
+@pytest.mark.parametrize("current, count, key, page_size, expected", [
+    (None, 0, "Down", 5, None), (None, 20, "Down", 5, 0),
+    (None, 20, "Up", 5, 19), (19, 20, "Down", 5, 0), (0, 20, "Up", 5, 19),
+    (0, 2, "PageDown", 5, 1), (1, 2, "PageUp", 5, 0),
+    (2, 20, "PageDown", 5, 7), (7, 20, "PageUp", 5, 2),
+    (18, 20, "PageDown", 5, 19), (1, 20, "PageUp", 5, 0),
+    (None, 20, "PageDown", 5, 5), (None, 20, "PageUp", 5, 0),
+    (8, 20, "Home", 5, 0), (8, 20, "End", 5, 19),
+])
+def test_candidate_navigation_selects_visible_row(current, count, key, page_size, expected):
+    assert move_tag_candidate(current, count, key, page_size) == expected
 
 
 @pytest.mark.parametrize("name, equivalent", [
