@@ -56,6 +56,8 @@ def record(core, video_id):
     core.execute_highlight_command(core.command_for_key("Insert"))
     highlight, = core.highlights(video_id)
     core.update_highlight(highlight.id, start=20, end=None, note="기억할 장면")
+    core.add_video_tag(video_id, "영상 기록")
+    core.add_highlight_tag(highlight.id, "하이라이트 기록")
     core.playback.end()
     core.request_subtitles(video_id)
     core.process_next_subtitle()
@@ -63,7 +65,9 @@ def record(core, video_id):
 
 
 def records(core, video_id):
-    return core.viewings(video_id), core.highlights(video_id), core.transcript(video_id), core.series_for_video(video_id)
+    return (core.viewings(video_id), core.highlights(video_id), core.transcript(video_id),
+            core.series_for_video(video_id), core.video_tags(video_id),
+            tuple(core.highlight_tags(h.id) for h in core.highlights(video_id)))
 
 
 def test_move_rename_missing_return_keeps_identity_and_all_records(core, tmp_path):
@@ -390,10 +394,18 @@ def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, versi
                 video_id INTEGER NOT NULL UNIQUE REFERENCES videos(id), position INTEGER NOT NULL,
                 PRIMARY KEY(series_id, position));
             CREATE TABLE series_overrides(video_id INTEGER PRIMARY KEY REFERENCES videos(id));
+            CREATE TABLE tags(id INTEGER PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE);
+            CREATE TABLE video_tags(video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY(video_id, tag_id));
+            CREATE TABLE highlight_tags(highlight_id INTEGER NOT NULL REFERENCES highlights(id) ON DELETE CASCADE,
+                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY(highlight_id, tag_id));
             INSERT INTO highlights VALUES (7, 42, 10, NULL, '옛 메모');
             INSERT INTO series VALUES (3, '내 시리즈', NULL, NULL, 1);
             INSERT INTO series_videos VALUES (3, 42, 0);
             INSERT INTO series_overrides VALUES (42);
+            INSERT INTO tags VALUES (1, '옛 태그', '옛 태그');
+            INSERT INTO video_tags VALUES (42, 1);
+            INSERT INTO highlight_tags VALUES (7, 1);
         ''')
         db.execute("INSERT INTO videos VALUES (42, ?, '옛 제목', 20, 'matroska', 'old.jpg', ?)",
                    (f"v1:3:{digest}", NOW.isoformat()))
@@ -410,6 +422,8 @@ def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, versi
     assert core.viewing_status(42).finished
     assert core.transcript(42).lines[0].id == "old-line"
     assert core.series_for_video(42).name == "내 시리즈"
+    assert core.video_tags(42)[0].name == "옛 태그"
+    assert core.highlight_tags(7) == core.video_tags(42)
     expected = records(core, 42)
     assert core.scan().added == 0  # 기존 1분 미만 영상도 기록을 보존한다.
     core = open_core(database)
