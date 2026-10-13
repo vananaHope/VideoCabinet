@@ -101,6 +101,18 @@ class Tags:
                 f"SELECT t.id, t.name FROM tags t JOIN {target}_tags a ON a.tag_id = t.id "
                 f"WHERE a.{target}_id = ? ORDER BY t.name_key, t.id", (identifier,)))
 
+    def video_tags_map(self) -> dict[int, tuple[Tag, ...]]:
+        """태그 없는 영상도 빈 튜플로 포함하는 일괄 조회."""
+        grouped = {}
+        with self._connect() as db:
+            for row in db.execute("""SELECT v.id AS video_id, t.id, t.name FROM videos v
+                    LEFT JOIN video_tags a ON a.video_id = v.id
+                    LEFT JOIN tags t ON t.id = a.tag_id ORDER BY t.name_key, t.id"""):
+                tags = grouped.setdefault(row["video_id"], [])
+                if row["id"] is not None:
+                    tags.append(Tag(row["id"], row["name"]))
+        return {vid: tuple(tags) for vid, tags in grouped.items()}
+
     def attach(self, target: str, identifier: int, name: str) -> Tag:
         with self._connect() as db:
             self._require(db, f"{target}s", identifier)

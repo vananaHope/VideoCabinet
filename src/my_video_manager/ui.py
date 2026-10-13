@@ -1,7 +1,6 @@
 """화면은 입력을 코어에 전달하고 결과를 표시한다."""
 
 from PySide6.QtCore import QEvent, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMainWindow, QMessageBox, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
@@ -20,6 +19,8 @@ from .reel_ui import ReelControls
 from .key_settings_ui import SettingsDialog, key_name
 from .key_display import display_keys
 from .tray import TrayControls
+from .hidden_gems_ui import HiddenGemControls
+from .thumbnail_ui import ThumbnailIcons
 
 from .review_ui import ReviewDialog, review_button
 
@@ -47,6 +48,8 @@ class MainWindow(QMainWindow):
         self.player = None
         self.player_factory = player_factory
         self.playback_list = ()
+        self._return_to_gems = False
+        self.thumbnail_icons = ThumbnailIcons()
         self.position_timer = QTimer(self)
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
@@ -65,6 +68,8 @@ class MainWindow(QMainWindow):
 
         library = QWidget()
         layout = QVBoxLayout(library)
+        self.hidden_gems = HiddenGemControls(self)
+        layout.addWidget(self.hidden_gems)
         buttons = QHBoxLayout()
         self.add_button = QPushButton("감시 폴더 추가")
         self.scan_button = QPushButton("다시 검사")
@@ -153,7 +158,12 @@ class MainWindow(QMainWindow):
         self.refresh()
         self.search_preparation = SearchPreparation(self.core, self)
 
-    def refresh(self):
+    def refresh(self, *, focus_gems=None):
+        if focus_gems is None:
+            focus_gems = self.hidden_gems.list.hasFocus()
+        snapshot = self.core.library_snapshot()
+        self.thumbnail_icons.retain(video.thumbnail for video in snapshot.videos)
+        self.hidden_gems.refresh(snapshot=snapshot)
         tag_id = self.tag_filter.currentData()
         self.tag_filter.blockSignals(True)
         self.tag_filter.clear()
@@ -168,11 +178,14 @@ class MainWindow(QMainWindow):
         self.folders.setText("감시 폴더: " + (", ".join(str(f.path) for f in self.core.watched_folders()) or "없음"))
         self.list.clear()
         series_labels = {vid: f"{s.name} · {index + 1}/{len(s.video_ids)}"
-                         for s in self.core.series() for index, vid in enumerate(s.video_ids)}
+                         for s in snapshot.series for index, vid in enumerate(s.video_ids)}
         tag_id = self.tag_filter.currentData()
-        videos = self.core.videos() if tag_id is None else self.core.videos_for_tag(tag_id)
+        videos = snapshot.videos
+        statuses, tags_by_video = snapshot.statuses, snapshot.tags
+        if tag_id is not None:
+            videos = tuple(v for v in videos if any(t.id == tag_id for t in tags_by_video.get(v.id, ())))
         for row, video in enumerate(videos):
-            status = self.core.viewing_status(video.id)
+            status = statuses[video.id]
             label = "다 봄" if status.finished else f"보다 만 ({status.stopped_percent:.0f}%)" if status.abandoned else ""
             if status.favorite:
                 label += " · 즐겨 보는 영상"
@@ -182,8 +195,8 @@ class MainWindow(QMainWindow):
                 label += (" · " if label else "") + f"위치 {len(video.locations)}개"
             if video.id in series_labels:
                 label += ("\n" if label else "") + "시리즈: " + series_labels[video.id]
-            item = QListWidgetItem(QIcon(str(video.thumbnail)), video.title + (f"\n{label}" if label else ""))
-            tags = self.core.video_tags(video.id)
+            item = QListWidgetItem(self.thumbnail_icons.get(video.thumbnail), video.title + (f"\n{label}" if label else ""))
+            tags = tags_by_video.get(video.id, ())
             if tags:
                 item.setText(item.text() + "\n태그: " + ", ".join(tag.name for tag in tags))
             item.setData(Qt.ItemDataRole.UserRole, video.id)
@@ -193,7 +206,8 @@ class MainWindow(QMainWindow):
                 selected_row = row
         if self.list.count():
             self.list.setCurrentRow(selected_row)
-        self.list.setFocus()
+        target = self.hidden_gems.list if focus_gems and self.hidden_gems.list.count() else self.list
+        target.setFocus()
         self.tags_button.setEnabled(self.list.count() > 0)
 
     def filter_changed(self):
@@ -258,7 +272,9 @@ class MainWindow(QMainWindow):
             result = dialog.selected_result
             self.play_video(result.video_id, start=result.start)
 
-    def play_video(self, video_id, *, start=None):
+    def play_video(self, video_id, *, start=None, from_gems=False):
+        if self.pages.currentIndex() == 0:
+            self._return_to_gems = from_gems
         try:
             self.stop_player()
             self.load_player(video_id, self.core.switch_to(video_id, start=start))
@@ -341,7 +357,8 @@ class MainWindow(QMainWindow):
     def show_library(self):
         self.end_playback()
         self.pages.setCurrentIndex(0)
-        self.refresh()
+        self.refresh(focus_gems=self._return_to_gems)
+        self._return_to_gems = False
 
     def back_to_list(self):
         if self.reel.shown is not None or self.core.reel_playback is not None:

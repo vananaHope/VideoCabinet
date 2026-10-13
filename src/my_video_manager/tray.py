@@ -33,7 +33,11 @@ class TrayControls(QObject):
         return button
 
     def open(self):
+        was_hidden = not self.window.isVisible()
         self.window.showNormal()
+        if was_hidden:
+            # 닫을 때 저장한 시청 상태를 복귀 시점에만 목록과 추천에 반영한다.
+            self.window.show_library()
         self.window.raise_()
         self.window.activateWindow()
 
