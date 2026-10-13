@@ -3,6 +3,7 @@
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
+import math
 from pathlib import Path
 import sqlite3
 from typing import Callable, Mapping
@@ -15,6 +16,7 @@ from .playback import PlaybackHub
 from .reel import HighlightReel, ReelEntry, ReelPlayback, ReelSettings
 from .revisit import Revisits
 from .series import Series, SeriesStore, adjacent_video
+from .search import Search, SearchResult, configure_search_connection
 from .tags import Tag, Tags
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
@@ -120,6 +122,7 @@ class AppCore:
         self._reel = HighlightReel(self.playback, self.videos, self.all_highlights,
                                    self._revisits, reel_settings or ReelSettings())
         self.playback.subscribe(self._reel)
+        self._search = Search(self._connect)
 
     @property
     def translation_cli(self) -> str:
@@ -185,6 +188,9 @@ class AppCore:
         """해당 영상의 남아 있는 하이라이트 중 가장 최근 복습 시각. 미복습은 None."""
         return self._revisits.last_for_video(video_id)
 
+    def search(self, query: str) -> tuple[SearchResult, ...]:
+        return self._search.find(query, self.videos())
+
     def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:
         self.playback_location(video_id)
         return self._subtitles.request(video_id, spoken_language)
@@ -225,6 +231,7 @@ class AppCore:
     def _connect(self):
         connection = sqlite3.connect(self.database, timeout=30)
         connection.row_factory = sqlite3.Row
+        configure_search_connection(connection)
         connection.execute("PRAGMA foreign_keys = ON")
         # sqlite3의 context manager는 commit/rollback만 하므로 명시적으로 닫는다.
         return _Connection(connection)
@@ -432,11 +439,15 @@ class AppCore:
         point = self.viewing_status(video_id).resume_point
         return max(0, point - self._viewings.settings.resume_rewind) if point is not None else 0
 
-    def switch_to(self, video_id: int) -> float:
-        """현재 시청·열린 구간을 닫고 대상 영상의 이어볼 위치에서 새 시청을 시작한다."""
+    def switch_to(self, video_id: int, *, start: float | None = None) -> float:
+        """시청·열린 구간을 닫고 지정 장면 또는 이어볼 위치에서 시작한다."""
         self.playback_location(video_id)
+        if start is not None:
+            video = next(v for v in self.videos() if v.id == video_id)
+            if not math.isfinite(start) or not 0 <= start <= video.duration:
+                raise ValueError("시각은 0초 이상 영상 길이 이하여야 합니다.")
         self.playback.end()
-        start = self.resume_start(video_id)
+        start = self.resume_start(video_id) if start is None else start
         self.playback.start(video_id, start)
         return start
 

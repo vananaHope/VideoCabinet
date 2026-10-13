@@ -13,6 +13,7 @@ from .subtitle_ui import SubtitleControls
 from .translation_ui import TranslationControls
 from .highlight_ui import HighlightList, HighlightProgress, timestamp
 from .series_ui import SeriesEditor
+from .search_ui import SearchDialog
 from .tag_ui import TagEditor, TagManager
 from .library_ui import LibraryControls
 from .reel_ui import ReelControls
@@ -68,6 +69,9 @@ class MainWindow(QMainWindow):
         self.series_button.clicked.connect(self.show_series)
         buttons.addWidget(self.series_button)
         buttons.addWidget(self.translations.button())
+        self.search_button = QPushButton("검색")
+        self.search_button.clicked.connect(self.show_search)
+        buttons.addWidget(self.search_button)
         buttons.addStretch()
         layout.addLayout(buttons)
         self.library_controls = LibraryControls(self)
@@ -238,14 +242,21 @@ class MainWindow(QMainWindow):
         self.playback_list = tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
         self.play_video(item.data(Qt.ItemDataRole.UserRole))
 
-    def play_video(self, video_id):
+    def show_search(self):
+        dialog = SearchDialog(self.core, self)
+        if dialog.exec() and dialog.selected_result is not None:
+            self.playback_list = dialog.video_ids
+            result = dialog.selected_result
+            self.play_video(result.video_id, start=result.start)
+
+    def play_video(self, video_id, *, start=None):
         try:
             self.stop_player()
             location = self.core.playback_location(video_id)
             self.pages.setCurrentIndex(1)
             if self.player is None:
                 self.player = self.player_factory(int(self.surface.winId()))
-            start = self.core.switch_to(video_id)
+            start = self.core.switch_to(video_id, start=start)
             self.player.play(location.path, start, subtitle=self.core.playback_subtitle(video_id))
             self.progress.duration = next(v.duration for v in self.core.videos() if v.id == video_id)
             self.refresh_highlights()
