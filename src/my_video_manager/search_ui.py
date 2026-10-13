@@ -52,19 +52,23 @@ class SearchDialog(QDialog):
         labels = {"title": "제목", "filename": "파일 이름", "tag": "태그", "note": "메모",
                   "transcript": "원어 자막", "translation": "번역 자막"}
         try:
-            results = self.core.search(self.query.text())
+            response = self.core.search(self.query.text())
+            results = response.results
         except Exception as error:
             self.status.setText(f"검색 실패: {error}")
             return
         self.video_ids = tuple(dict.fromkeys(result.video_id for result in results))
         for result in results:
             time = f" · {timestamp(result.start)}" if result.start is not None else ""
-            item = QListWidgetItem(f"{result.title} · {labels[result.source]}{time}\n{result.text}")
+            missing = " · 파일 없음" if result.missing else ""
+            item = QListWidgetItem(f"{result.title}{missing} · {labels[result.source]}{time}\n{result.text}")
             item.setData(Qt.ItemDataRole.UserRole, result)
             self.results.addItem(item)
         if results:
             self.results.setCurrentRow(0)
         self.status.setText(f"검색 결과 {len(results)}개" if self.query.text().strip() else "검색어를 입력하세요.")
+        if response.truncated:
+            self.status.setText(f"검색 결과 {len(results)}개 · 결과가 많습니다. 더 길게 입력하세요.")
 
     def focus_results(self):
         self.refresh()
@@ -72,7 +76,11 @@ class SearchDialog(QDialog):
             self.results.setFocus()
 
     def choose(self, item):
-        self.selected_result = item.data(Qt.ItemDataRole.UserRole)
+        result = item.data(Qt.ItemDataRole.UserRole)
+        if result.missing:
+            self.status.setText("파일 없음: 영상의 위치를 다시 연결한 뒤 재생하세요.")
+            return
+        self.selected_result = result
         self.accept()
 
     def eventFilter(self, watched, event):

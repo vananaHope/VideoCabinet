@@ -16,7 +16,7 @@ from .playback import PlaybackHub
 from .reel import HighlightReel, ReelEntry, ReelPlayback, ReelSettings
 from .revisit import Revisits
 from .series import Series, SeriesStore, adjacent_video
-from .search import Search, SearchResult, configure_search_connection
+from .search import Search, SearchResponse
 from .tags import Tag, Tags
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
@@ -188,7 +188,7 @@ class AppCore:
         """해당 영상의 남아 있는 하이라이트 중 가장 최근 복습 시각. 미복습은 None."""
         return self._revisits.last_for_video(video_id)
 
-    def search(self, query: str) -> tuple[SearchResult, ...]:
+    def search(self, query: str) -> SearchResponse:
         return self._search.find(query, self.videos())
 
     def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:
@@ -231,7 +231,6 @@ class AppCore:
     def _connect(self):
         connection = sqlite3.connect(self.database, timeout=30)
         connection.row_factory = sqlite3.Row
-        configure_search_connection(connection)
         connection.execute("PRAGMA foreign_keys = ON")
         # sqlite3의 context manager는 commit/rollback만 하므로 명시적으로 닫는다.
         return _Connection(connection)
