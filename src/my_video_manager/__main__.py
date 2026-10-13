@@ -10,12 +10,15 @@ def main():
     args = parser.parse_args()
     from PySide6.QtWidgets import QApplication, QMessageBox
     from .adapters import FFmpegMediaReader
-    from .core import AppCore
+    from .core import AppCore, default_data_directory
+    from .transcription import FasterWhisperTranscriber
     from .ui import MainWindow
 
     app = QApplication(sys.argv[:1])
     try:
+        data_directory = args.data_dir or default_data_directory()
         core = AppCore(media=FFmpegMediaReader(), clock=lambda: datetime.now(timezone.utc),
+                       transcriber=FasterWhisperTranscriber(data_directory / "models"),
                        database=args.data_dir / "library.sqlite3" if args.data_dir else None)
         window = MainWindow(core)
     except Exception as error:

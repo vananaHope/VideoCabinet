@@ -14,7 +14,7 @@ if (-not (Test-Path '.venv/Scripts/python.exe')) {
 }
 & .venv/Scripts/python.exe -m pip install --upgrade pip
 Confirm-Exit 'pip upgrade'
-& .venv/Scripts/python.exe -m pip install -e '.[dev]'
+& .venv/Scripts/python.exe -m pip install -e '.[dev,cuda]'
 Confirm-Exit 'Python dependencies'
 
 if (-not $SkipFFmpeg -and -not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
@@ -30,6 +30,8 @@ if (-not (Get-Command 7z -ErrorAction SilentlyContinue) -and -not (Test-Path "$e
 Confirm-Exit 'libmpv'
 & .venv/Scripts/python.exe -c "from my_video_manager.adapters import FFmpegMediaReader; m = FFmpegMediaReader(); print(m.ffmpeg); print(m.ffprobe)"
 Confirm-Exit 'FFmpeg check'
+& .venv/Scripts/python.exe -c "from my_video_manager.transcription import prepare_cuda_runtime; prepare_cuda_runtime(); import ctranslate2; print('CUDA GPUs:', ctranslate2.get_cuda_device_count()); print('CUDA compute types:', ctranslate2.get_supported_compute_types('cuda'))"
+Confirm-Exit 'CUDA runtime check (NVIDIA GPU and current driver required; see README)'
 & .venv/Scripts/python.exe -m pytest
 Confirm-Exit 'pytest'
 Write-Host 'Ready: .venv/Scripts/python.exe -m my_video_manager'

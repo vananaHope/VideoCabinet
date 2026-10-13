@@ -13,6 +13,7 @@ from typing import Callable, Mapping, Protocol
 from .highlights import Highlight, Highlights
 from .playback import PlaybackHub
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
+from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class CommandType(str, Enum):
     RANGE_HIGHLIGHT = "range_highlight"
     PREVIOUS_HIGHLIGHT = "previous_highlight"
     NEXT_HIGHLIGHT = "next_highlight"
+    TOGGLE_SUBTITLES = "toggle_subtitles"
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,7 @@ DEFAULT_KEY_BINDINGS = {
     "Delete": Command(CommandType.RANGE_HIGHLIGHT),
     "Home": Command(CommandType.PREVIOUS_HIGHLIGHT),
     "End": Command(CommandType.NEXT_HIGHLIGHT),
+    "/": Command(CommandType.TOGGLE_SUBTITLES),
 }
 
 MIN_PLAYBACK_SPEED = 0.25
@@ -126,6 +129,7 @@ class AppCore:
         database: Path | None = None,
         key_bindings: Mapping[str, Command] | None = None,
         viewing_settings: ViewingSettings | None = None,
+        transcriber: Transcriber | None = None,
     ):
         self.database = (Path(database) if database is not None else default_data_directory() / "library.sqlite3").resolve()
         self.database.parent.mkdir(parents=True, exist_ok=True)
@@ -164,6 +168,29 @@ class AppCore:
         }
         self._viewings = ViewingStore(self._connect, clock, viewing_settings or ViewingSettings())
         self.playback.subscribe(ViewingRecorder(self._start_viewing, self._viewings.report, self._viewings.end))
+        self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location)
+
+    def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:
+        return self._subtitles.request(video_id, spoken_language)
+
+    def subtitle_queue(self) -> tuple[SubtitleQueueEntry, ...]:
+        return self._subtitles.queue()
+
+    def process_next_subtitle(self) -> SubtitleQueueEntry | None:
+        return self._subtitles.process_next()
+
+    def transcript(self, video_id: int) -> Transcript | None:
+        return self._subtitles.transcript(video_id)
+
+    def playback_subtitle(self, video_id: int) -> Path | None:
+        transcript = self.transcript(video_id)
+        if transcript is None or not transcript.lines:
+            return None
+        directory = self.database.parent / "playback-subtitles"
+        directory.mkdir(exist_ok=True)
+        path = directory / f"{video_id}.srt"
+        path.write_text(transcript_srt(transcript), encoding="utf-8")
+        return path
 
     def _connect(self):
         connection = sqlite3.connect(self.database, timeout=30)

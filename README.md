@@ -7,6 +7,7 @@ Python + PySide6 + libmpv로 만든 Windows 개인 영상 라이브러리입니�
 
 Windows x64, **64비트 Python 3.10 이상**, `winget`, 인터넷 연결이 필요합니다.
 저장소 루트의 PowerShell에서 실행합니다. Python 3.10.6으로 검증했습니다.
+이미 실행 중인 앱은 종료한 뒤 설치 스크립트를 실행하세요(DLL을 교체합니다).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
@@ -30,7 +31,7 @@ DLL은 `.runtime/mpv/libmpv-2.dll`에만 둡니다. 아카이브의 BCJ2 필터 
 ```powershell
 python -m venv .venv
 .venv/Scripts/python -m pip install --upgrade pip
-.venv/Scripts/python -m pip install -e '.[dev]'
+.venv/Scripts/python -m pip install -e '.[dev,cuda]'
 winget install --id Gyan.FFmpeg --version 9.0.2 --exact --source winget --accept-package-agreements --accept-source-agreements
 winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-package-agreements --accept-source-agreements
 .venv/Scripts/python scripts/install_libmpv.py
@@ -69,6 +70,7 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 | Insert | 현재 순간에 지점 하이라이트 |
 | Delete | 구간 하이라이트 시작 / 끝 |
 | Home / End | 이전 / 다음 하이라이트의 시작으로 이동 |
+| / | 자막 켜기 / 끄기 |
 
 열린 구간은 재생 종료·영상 전환 시 그 위치에서 닫으며, 끝이 시작 이하이면 시작 위치의 지점 하이라이트로 저장합니다.
 Delete로 직접 끝낼 때도 같은 규칙을 적용합니다. Home은 현재 위치에서 1초를 뺀 시각보다 앞의 시작점을,
@@ -83,6 +85,43 @@ End는 현재 위치 뒤의 시작점을 찾으며, 해당 항목이 없으면 �
 목록에서는 방향키와 Enter가 선택·열기로 동작합니다. 단축키는 앱 창이 활성화된 동안만 처리하며,
 mpv 자체 키 바인딩은 끕니다. 키 대응표는 `AppCore`의 주입 인자와 `set_key_bindings()`로 교체할 수 있습니다.
 설정 화면은 후속 범위입니다. 검사 중에는 창을 닫지 못하도록 안내하며 완료 후 종료할 수 있습니다.
+
+### 원어 자막
+
+목록에서 영상을 고르거나 재생 중 **자막 만들기 / 원어 지정**을 누릅니다.
+**자동 감지** 또는 언어 코드(`ko`, `en`, `ja`, `zh` 등)를 고르면 자막 대기열에 들어갑니다.
+같은 요청을 반복해도 중복 등록하지 않으며, 먼저 들어온 순서대로 한 영상씩 처리합니다.
+원어를 바꿔 다시 요청하면 새 요청으로 교체합니다. 완료된 자막을 다시 만들 때는 기존 줄이
+교체된다는 확인을 받습니다. 실패하면 기존 자막을 유지하며, 같은 버튼으로 재시도합니다.
+
+받아쓰기는 별도 작업자와 낮은 우선순위의 별도 프로세스에서 실행되어 화면·재생 중에도 진행됩니다.
+완료 즉시 재생 중인 영상에 원어 자막이 붙고 `/`로 표시를 바꿀 수 있습니다.
+원어와 줄 수, 실패 이유는 창 아래 상태 표시줄에 표시됩니다.
+받아쓰기 중 창을 닫으면 현재 영상 처리 후 종료하고 남은 대기열은 다음 실행에 이어집니다.
+강제 종료된 처리도 다음 실행에 처음부터 재시도합니다. 트레이·대기열 화면은 후속 범위입니다.
+
+Windows GPU 검증 조합은 **faster-whisper 1.2.1, CTranslate2 4.8.3,
+CUDA 12.8 cuBLAS 12.8.4.1, cuDNN 9.8.0.87**입니다.
+`setup.ps1`은 NVIDIA 공식 Windows wheel을 **이 저장소의 `.venv`에만** 설치하며,
+시스템 CUDA Toolkit이나 PyTorch 설치는 필요하지 않습니다. 앱이 해당 DLL 경로를 프로세스 안에 등록합니다.
+RTX 5070(Blackwell)에서 NVIDIA 드라이버 **610.47**, Python **3.10.6**으로
+`large-v3` FP16 실제 음성 받아쓰기를 확인했습니다. 드라이버는 스크립트가 변경하지 않습니다.
+Blackwell에는 CUDA 12.8 이상이 필요하므로 오래된 cuBLAS/cuDNN을 섞지 마세요.
+근거: [faster-whisper GPU 요구사항](https://github.com/SYSTRAN/faster-whisper#gpu),
+[CTranslate2 Windows 빌드](https://github.com/OpenNMT/CTranslate2/blob/v4.8.3/python/tools/prepare_build_environment_windows.sh),
+[NVIDIA cuDNN 지원표](https://docs.nvidia.com/deeplearning/cudnn/backend/v9.8.0/reference/support-matrix.html).
+
+GPU가 없거나 드라이버·DLL 초기화에 실패하면 **명확한 오류와 함께 해당 요청을 실패 처리**하며
+CPU로 자동 전환하지 않습니다. 다른 요청의 처리는 계속하며 라이브러리와 재생은 사용할 수 있습니다.
+설치 스크립트의 CUDA 확인이 실패해도 설치된 앱의 라이브러리·재생 기능은 실행할 수 있습니다.
+첫 자막 요청은 Hugging Face에서 `large-v3` 모델(약 3 GB)을 데이터 폴더의 `models/`에 내려받습니다.
+모델은 Git에 넣지 않으며, 기본 데이터 폴더는 저장소 밖 사용자 프로필 아래에 있습니다.
+첫 실행에는 인터넷과 모델 저장 공간이 필요합니다. 이후에는 캐시를 재사용합니다.
+
+원어 자막은 DB에 시작·끝 시각과 텍스트, 줄별 UUID로 저장합니다.
+줄 ID는 다시 읽기·앱 재시작에도 유지되며, 전체 재생성에서는 새 세대와 새 줄 ID로 교체합니다.
+향후 번역·검수는 이 ID를 참조할 수 있습니다. mpv 전달용 `.srt` 캐시는 데이터 폴더의
+`playback-subtitles/`에만 만들고 영상 옆에는 쓰지 않습니다. 이 캐시는 삭제해도 다시 만들어집니다.
 
 기본 저장 위치는 `%USERPROFILE%/.my-video-manager/library.sqlite3`이며,
 썸네일은 같은 폴더의 `thumbnails/`에 저장합니다. 원본 영상에는 쓰지 않습니다.
@@ -115,6 +154,10 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 `core.playback.report(position, seeked=...)`로 전달합니다.
 `core.playback.start(video_id, position, record_viewing=False)`로 시작하면 시청 기록이 생기지 않아
 후속 하이라이트 모아보기에서도 같은 재생 연결을 사용할 수 있습니다.
+- `subtitles.py`: 영속 자막 대기열, 원어·원어 자막 저장, 받아쓰기 Protocol과 SRT 변환.
+- `transcription.py`: 별도 프로세스의 faster-whisper large-v3 GPU 어댑터.
+- `subtitle_ui.py`: 자막 요청 입력, 백그라운드 처리, 완료된 자막의 플레이어 연결.
+- `tests/test_subtitles.py`: 가짜 받아쓰기와 실제 임시 DB로 요청·FIFO·언어·재생성·재시작·실패 복구를 검증.
 
 ```powershell
 .venv/Scripts/python -m pytest -q
@@ -132,7 +175,7 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 정션·심볼릭 링크 등 재분석 지점은 건너뛰고 이미 검사한 실제 디렉터리는 다시 들어가지 않습니다.
 
 이 골격은 수동 재검사만 제공하며 실시간 파일 감시, 이름 변경·이동 추적, 파일 없음,
-제외, 자막·태그·시리즈는 구현하지 않습니다.
+제외, 번역·검수·태그·시리즈는 구현하지 않습니다.
 
 ## 직접 확인할 항목
 
@@ -149,6 +192,8 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 - 실제로 5% 이상 본 뒤 목록의 보다 만 표시와 3초 전 이어보기, 다 본 뒤 처음부터 재생되는지.
 - 앞으로 건너뛰기·되감기·배속·일시정지를 섞어도 시청 비율과 마지막 정지 위치가 구별되는지.
 - 테스트용 데이터로 재생 중 강제 종료한 뒤 마지막 저장분과 이어볼 위치가 복구되는지.
+- 영상에서 자막 요청 → 재생 중 처리 완료 → `/` 표시 전환 → 원어 지정 후 다시 생성되는지.
+- 긴 실제 영상과 평소 배속에서도 GPU 받아쓰기를 함께 켰을 때 재생이 매끄러운지.
 
 ffmpeg/ffprobe를 찾지 못하면 설치 후 새 터미널을 열거나 PATH를 확인하세요.
 앱은 winget 기본 설치 경로도 탐색하므로 설치 직후 기존 터미널에서도 실행할 수 있습니다.

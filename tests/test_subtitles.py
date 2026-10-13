@@ -1,0 +1,216 @@
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from threading import Event
+
+import pytest
+
+from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
+from my_video_manager.subtitles import Transcription, TranscriptSegment
+
+
+NOW = datetime(2026, 10, 14, tzinfo=timezone.utc)
+
+
+class FakeMedia:
+    def read(self, path):
+        return MediaInfo(100, "matroska")
+
+    def capture(self, path, destination, seconds):
+        destination.write_bytes(b"thumbnail")
+
+
+class FakeTranscriber:
+    def __init__(self):
+        self.calls = []
+        self.result = Transcription("en", (TranscriptSegment(1.25, 3.5, "Hello"),
+                                           TranscriptSegment(5, 7, "World")))
+        self.error = None
+
+    def transcribe(self, path, spoken_language):
+        self.calls.append((path, spoken_language))
+        if self.error:
+            raise self.error
+        return self.result
+
+
+@pytest.fixture
+def setup(tmp_path):
+    folder = tmp_path / "영상"
+    folder.mkdir()
+    for name in ("a", "b"):
+        (folder / f"{name}.mkv").write_bytes(name.encode())
+    adapter = FakeTranscriber()
+    core = AppCore(media=FakeMedia(), clock=lambda: NOW, transcriber=adapter,
+                   database=tmp_path / "data/library.sqlite3")
+    core.add_watched_folder(folder)
+    core.scan()
+    return core, adapter, core.videos()
+
+
+def reopen(core, adapter):
+    return AppCore(media=FakeMedia(), clock=lambda: NOW, transcriber=adapter, database=core.database)
+
+
+def test_queue_persists_fifo_and_duplicate_request_preserves_order(setup):
+    core, adapter, (a, b) = setup
+    first = core.request_subtitles(b.id)
+    core.request_subtitles(a.id)
+    assert core.request_subtitles(b.id) == first
+    core = reopen(core, adapter)
+    assert [entry.video_id for entry in core.subtitle_queue()] == [b.id, a.id]
+    assert core.process_next_subtitle().video_id == b.id
+    assert core.process_next_subtitle().video_id == a.id
+    assert core.process_next_subtitle() is None
+    assert core.subtitle_queue() == ()
+    assert [path.name for path, _ in adapter.calls] == ["b.mkv", "a.mkv"]
+
+
+def test_detected_language_and_stable_lines_survive_reopen_without_sidecar(setup):
+    core, adapter, (a, _) = setup
+    core.request_subtitles(a.id)
+    assert core.process_next_subtitle().state == "completed"
+    transcript = core.transcript(a.id)
+    assert transcript.spoken_language == "en"
+    assert not transcript.language_specified
+    assert transcript.created_at == NOW
+    assert [(line.start, line.end, line.text) for line in transcript.lines] == [(1.25, 3.5, "Hello"), (5, 7, "World")]
+    assert len({line.id for line in transcript.lines}) == 2
+    assert reopen(core, adapter).transcript(a.id) == transcript
+    subtitle = core.playback_subtitle(a.id)
+    assert subtitle.is_relative_to(core.database.parent)
+    assert "00:00:01,250 --> 00:00:03,500\nHello" in subtitle.read_text(encoding="utf-8")
+    assert sorted(path.suffix for path in a.locations[0].path.parent.iterdir()) == [".mkv", ".mkv"]
+
+
+def test_specifying_language_regenerates_atomically_with_new_line_ids(setup):
+    core, adapter, (a, _) = setup
+    core.request_subtitles(a.id)
+    core.process_next_subtitle()
+    old = core.transcript(a.id)
+    request = core.request_subtitles(a.id, " KO ")
+    assert request.spoken_language == "ko"
+    assert core.transcript(a.id) == old  # 요청만으로 기존 자막을 지우지 않는다.
+    core = reopen(core, adapter)
+    core.process_next_subtitle()
+    new = core.transcript(a.id)
+    assert adapter.calls[-1][1] == "ko"
+    assert new.spoken_language == "ko" and new.language_specified
+    assert {line.id for line in old.lines}.isdisjoint(line.id for line in new.lines)
+    core.request_subtitles(a.id)  # 자동 감지로 되돌릴 수 있다.
+    core.process_next_subtitle()
+    assert not core.transcript(a.id).language_specified
+    assert core.transcript(a.id).spoken_language == "en"
+
+
+def test_failure_keeps_previous_transcript_and_next_request_runs_then_retry(setup):
+    core, adapter, (a, b) = setup
+    core.request_subtitles(a.id)
+    core.process_next_subtitle()
+    old = core.transcript(a.id)
+    adapter.error = RuntimeError("GPU unavailable")
+    core.request_subtitles(a.id, "ko")
+    failed = core.process_next_subtitle()
+    assert failed.state == "failed" and "GPU unavailable" in failed.error
+    assert reopen(core, adapter).subtitle_queue() == (failed,)
+    assert core.transcript(a.id) == old
+    adapter.error = None
+    core.request_subtitles(b.id)
+    assert core.process_next_subtitle().video_id == b.id
+    assert core.process_next_subtitle() is None
+    core.request_subtitles(a.id, "ko")
+    assert core.process_next_subtitle().state == "completed"
+    assert core.subtitle_queue() == ()
+
+
+def test_empty_speech_is_success_and_replaces_old_lines(setup):
+    core, adapter, (a, _) = setup
+    core.request_subtitles(a.id)
+    core.process_next_subtitle()
+    adapter.result = Transcription("en", ())
+    core.request_subtitles(a.id)
+    assert core.process_next_subtitle().state == "completed"
+    assert core.transcript(a.id).lines == ()
+    assert core.playback_subtitle(a.id) is None
+
+
+@pytest.mark.parametrize("language", ["", "english", "../en", "e1"])
+def test_invalid_language_does_not_enqueue(setup, language):
+    core, _, (a, _) = setup
+    with pytest.raises(ValueError):
+        core.request_subtitles(a.id, language)
+    assert core.subtitle_queue() == ()
+
+
+def test_unknown_video_rejected(setup):
+    core, _, _ = setup
+    with pytest.raises(ValueError, match="영상"):
+        core.request_subtitles(999)
+    assert core.subtitle_queue() == ()
+    assert core.transcript(999) is None
+
+
+@pytest.mark.parametrize("segment", [TranscriptSegment(-1, 2, "a"), TranscriptSegment(2, 1, "a"),
+                                    TranscriptSegment(1, float("nan"), "a"), TranscriptSegment(1, 2, " ")])
+def test_invalid_adapter_result_does_not_replace_saved_transcript(setup, segment):
+    core, adapter, (a, _) = setup
+    core.request_subtitles(a.id)
+    core.process_next_subtitle()
+    old = core.transcript(a.id)
+    adapter.result = Transcription("en", (segment,))
+    core.request_subtitles(a.id)
+    assert core.process_next_subtitle().state == "failed"
+    assert core.transcript(a.id) == old
+
+
+def test_busy_transcriber_does_not_block_core_and_new_language_supersedes_result(setup):
+    core, adapter, (a, b) = setup
+    started, release = Event(), Event()
+
+    class BlockingTranscriber(FakeTranscriber):
+        def transcribe(self, path, spoken_language):
+            started.set()
+            assert release.wait(5)
+            return super().transcribe(path, spoken_language)
+
+    core = reopen(core, BlockingTranscriber())
+    core.request_subtitles(a.id)
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(core.process_next_subtitle)
+        try:
+            assert started.wait(5)
+            assert core.process_next_subtitle() is None
+            assert core.playback_location(a.id) == a.locations[0]
+            assert core.command_for_key("/") == Command(CommandType.TOGGLE_SUBTITLES)
+            core.request_subtitles(b.id)
+            core.request_subtitles(a.id, "ja")
+        finally:
+            release.set()
+        future.result(timeout=5)
+    assert core.transcript(a.id) is None
+    assert [entry.video_id for entry in core.subtitle_queue()] == [b.id, a.id]
+    core.process_next_subtitle()
+    core.process_next_subtitle()
+    assert core.transcript(a.id).spoken_language == "ja"
+
+
+def test_interrupted_processing_remains_queued_on_restart(setup):
+    core, adapter, (a, _) = setup
+
+    class Interrupted(FakeTranscriber):
+        def transcribe(self, path, spoken_language):
+            raise KeyboardInterrupt
+
+    core = reopen(core, Interrupted())
+    core.request_subtitles(a.id, "ja")
+    with pytest.raises(KeyboardInterrupt):
+        core.process_next_subtitle()
+    core = reopen(core, adapter)
+    assert core.subtitle_queue()[0].state == "queued"
+    assert core.process_next_subtitle().state == "completed"
+
+
+def test_subtitle_key_can_be_remapped(setup):
+    core, _, _ = setup
+    core.set_key_bindings({"S": Command(CommandType.TOGGLE_SUBTITLES)})
+    assert core.command_for_key("/") is None
+    assert core.command_for_key("S").kind == CommandType.TOGGLE_SUBTITLES
