@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import os
 import shutil
@@ -8,6 +8,7 @@ import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
+from my_video_manager.translation import TranslatedLine
 
 
 NOW = datetime(2026, 10, 14, tzinfo=timezone.utc)
@@ -472,6 +473,101 @@ def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, versi
     assert core.watched_folders()[0].path == path.parent
     core.exclude_video(42)
     assert core.excluded_videos()[0].id == 42
+
+
+@pytest.mark.parametrize("state", ["completed", "queued", "held"])
+def test_v1_translation_records_survive_migration_identity_changes_and_resume(tmp_path, state):
+    database, path = legacy_database(tmp_path, 1)
+    retry_at = NOW + timedelta(minutes=15)
+    # 번역 기능이 추가된 v1 저장 형식: 완성본과 재번역 진행 중인 묶음을 함께 보존한다.
+    with sqlite3.connect(database) as db:
+        db.executescript('''
+            CREATE TABLE translation_lines (
+                line_id TEXT PRIMARY KEY REFERENCES transcript_lines(id) ON DELETE CASCADE,
+                text TEXT NOT NULL);
+            CREATE TABLE translation_queue (
+                id TEXT PRIMARY KEY, video_id INTEGER NOT NULL UNIQUE REFERENCES videos(id),
+                transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+                requested_at TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued',
+                retry_at TEXT, error_kind TEXT, error_detail TEXT);
+            CREATE TABLE translation_targets (
+                queue_id TEXT NOT NULL REFERENCES translation_queue(id) ON DELETE CASCADE,
+                line_id TEXT NOT NULL REFERENCES transcript_lines(id) ON DELETE CASCADE,
+                text TEXT, PRIMARY KEY(queue_id, line_id));
+            CREATE TABLE translation_cli_backoff (cli TEXT PRIMARY KEY, retry_at TEXT NOT NULL);
+            CREATE TABLE translation_limit_attempts (
+                queue_id TEXT NOT NULL REFERENCES translation_queue(id) ON DELETE CASCADE,
+                cli TEXT NOT NULL, attempts INTEGER NOT NULL, PRIMARY KEY(queue_id, cli));
+            INSERT INTO transcript_lines VALUES ('old-line-2', 'old-transcript', 1, 4, 6, 'more words');
+            INSERT INTO translation_lines VALUES ('old-line', '옛 번역 첫 줄'), ('old-line-2', '옛 번역 둘째 줄');
+        ''')
+        if state != "completed":
+            db.execute("INSERT INTO translation_queue VALUES ('old-queue', 42, 'old-transcript', ?, ?, ?, ?, ?)",
+                       (NOW.isoformat(), state, retry_at.isoformat() if state == "held" else None,
+                        "usage_limit" if state == "held" else None, "이전 한도 응답" if state == "held" else None))
+            db.execute("INSERT INTO translation_targets VALUES ('old-queue', 'old-line', '저장된 새 번역'), "
+                       "('old-queue', 'old-line-2', NULL)")
+        if state == "held":
+            db.execute("INSERT INTO translation_cli_backoff VALUES ('codex', ?)", (retry_at.isoformat(),))
+            db.execute("INSERT INTO translation_limit_attempts VALUES ('old-queue', 'codex', 1)")
+
+    class Translator:
+        def __init__(self):
+            self.calls = []
+
+        def translate(self, lines, spoken_language, *, cli, cancellation):
+            self.calls.append(tuple(line.id for line in lines))
+            return tuple(TranslatedLine(line.id, "이어서 번역") for line in lines)
+
+    translator, time = Translator(), [NOW]
+
+    def reopen():
+        return AppCore(media=Media(), clock=lambda: time[0], database=database, translator=translator)
+
+    core = reopen()
+    translated = core.translation(42)
+    assert translated.transcript_id == "old-transcript"
+    assert [(line.id, line.start, line.end, line.text) for line in translated.lines] == [
+        ("old-line", 1, 3, "옛 번역 첫 줄"), ("old-line-2", 4, 6, "옛 번역 둘째 줄")]
+    queue = core.translation_queue()
+    if state == "completed":
+        assert queue == ()
+    else:
+        entry, = queue
+        assert (entry.id, entry.video_id, entry.state, entry.completed_lines, entry.total_lines) == (
+            "old-queue", 42, state, 1, 2)
+        assert entry.retry_at == (retry_at if state == "held" else None)
+        assert entry.error_detail == ("이전 한도 응답" if state == "held" else None)
+
+    moved = path.with_name("renamed.mkv")
+    path.rename(moved)
+    assert core.scan().added == 0
+    assert core.videos()[0].id == 42
+    assert core.playback_location(42).path == moved
+    assert core.translation(42) == translated and core.translation_queue() == queue
+    outside = tmp_path / "reconnected.mkv"
+    moved.rename(outside)
+    core.scan()
+    assert core.videos()[0].missing
+    core.exclude_video(42)
+    assert core.translation(42) == translated and core.translation_queue() == queue
+    core.restore_video(42)
+    core.reconnect_video(42, outside)
+    core = reopen()
+    assert core.playback_location(42).path == outside
+    assert core.translation(42) == translated and core.translation_queue() == queue
+    assert translator.calls == []
+
+    if state == "held":
+        assert not core.translation_ready()
+        assert core.process_next_translation() is None
+        time[0] = retry_at
+    if state != "completed":
+        assert core.translation_ready()
+        assert core.process_next_translation().state == "completed"
+        assert translator.calls == [("old-line-2",)]
+        assert [line.text for line in reopen().translation(42).lines] == ["저장된 새 번역", "이어서 번역"]
+    assert reopen().translation_queue() == ()
 
 
 @pytest.mark.parametrize("version", [0, 1])
