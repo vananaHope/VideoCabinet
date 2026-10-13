@@ -7,6 +7,7 @@ from queue import Empty, SimpleQueue
 import shutil
 import subprocess
 import sys
+from threading import Lock
 
 from .core import Command, CommandType, MediaInfo, playback_speed
 from .media import parse_ffprobe_result
@@ -70,11 +71,15 @@ class MpvPlayer:
         self._player = mpv.MPV(wid=str(window_id), input_default_bindings=False,
                                input_vo_keyboard=False, osc=False, config=False, keep_open=True)
         self._subtitle_path = None
+        self._closing = False
+        self._callback_lock = Lock()
 
         @self._player.event_callback("file-loaded")
         def select_app_subtitle(_event):
-            for track in self._app_subtitle_tracks():
-                self._player.sid = track["id"]
+            with self._callback_lock:
+                if not self._closing:
+                    for track in self._app_subtitle_tracks():
+                        self._player.sid = track["id"]
 
         self._positions = SimpleQueue()
         self._seeking = True
@@ -86,10 +91,13 @@ class MpvPlayer:
         @self._player.event_callback("playback-restart")
         def restarted(event):
             # 탐색 도중의 임시 위치는 버리고 실제 재생 재개 위치를 새 기준점으로 보낸다.
-            position = self._player.time_pos
-            if position is not None:
-                self._positions.put((position, True))
-            self._seeking = False
+            with self._callback_lock:
+                if self._closing:
+                    return
+                position = self._player.time_pos
+                if position is not None:
+                    self._positions.put((position, True))
+                self._seeking = False
 
         @self._player.property_observer("time-pos")
         def position_changed(name, position):
@@ -139,32 +147,6 @@ class MpvPlayer:
         elif command.kind == CommandType.TOGGLE_SUBTITLES:
             self._player.cycle("sub-visibility")
 
-    def position_changed(name, position):
-            if position is not None and not self._seeking:
-                self._positions.put((position, False))
-
-    def play(self, path: Path, start: float = 0) -> None:
-        self._player.start = start
-        self._player.play(str(path))
-        self._player.pause = False
-
-    def take_positions(self) -> tuple[tuple[float, bool], ...]:
-        """mpv 스레드의 (위치, 탐색 여부) 보고를 순서대로 UI 스레드에 넘긴다."""
-        positions = []
-        while True:
-            try:
-                positions.append(self._positions.get_nowait())
-            except Empty:
-                return tuple(positions)
-
-    def execute(self, command: Command) -> None:
-        if command.kind == CommandType.TOGGLE_PAUSE:
-            self._player.cycle("pause")
-        elif command.kind == CommandType.SEEK:
-            self._player.command("seek", command.amount, "relative+exact")
-        elif command.kind == CommandType.CHANGE_SPEED:
-            self._player.speed = playback_speed(self._player.speed, command.amount)
-
     def position(self) -> float | None:
         return self._player.time_pos
 
@@ -172,4 +154,8 @@ class MpvPlayer:
         self._player.command("seek", position, "absolute+exact")
 
     def close(self) -> None:
+        # 콜백의 native handle 접근을 끝낸 뒤 핸들을 해제한다.
+        # terminate는 이벤트 스레드를 기다리므로 lock 밖에서 실행한다.
+        with self._callback_lock:
+            self._closing = True
         self._player.terminate()

@@ -163,6 +163,9 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 - `viewing.py`: 시청 구간 합집합·분류·이어볼 위치, 시청 전용 SQLite 테이블과 주기 저장·복구.
 - `tests/test_viewing.py`: 순수 구간 계산과 코어 공개 동작으로 분류·탐색·배속·이어보기·복구를 검증.
 
+- `tests/test_subtitles.py`: 가짜 받아쓰기와 실제 임시 DB로 요청·FIFO·언어·재생성·재시작·실패 복구를 검증.
+- `tests/test_transcription.py`: GPU 없이 가짜 스크립트로 JSON·오류·취소·부모 강제 종료 시 자식 정리를 검증.
+
 시청 기본값은 `AppCore(viewing_settings=ViewingSettings(...))`로 주입합니다.
 `finished_ratio`, `abandoned_ratio`, `favorite_count`, `resume_rewind`, `save_interval`을 바꿀 수 있으며
 설정 화면은 후속 범위입니다. 재생 어댑터는 mpv의 `time-pos`를 보고하고 `seek`부터
@@ -170,8 +173,6 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 `core.playback.report(position, seeked=...)`로 전달합니다.
 `core.playback.start(video_id, position, record_viewing=False)`로 시작하면 시청 기록이 생기지 않아
 후속 하이라이트 모아보기에서도 같은 재생 연결을 사용할 수 있습니다.
-- `tests/test_subtitles.py`: 가짜 받아쓰기와 실제 임시 DB로 요청·FIFO·언어·재생성·재시작·실패 복구를 검증.
-- `tests/test_transcription.py`: GPU 없이 가짜 스크립트로 JSON·오류·취소·부모 강제 종료 시 자식 정리를 검증.
 
 ```powershell
 .venv/Scripts/python -m pytest -q

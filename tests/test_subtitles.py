@@ -287,3 +287,25 @@ def test_srt_rounding_carries_to_minutes_and_hours(seconds, timestamp):
     transcript = Transcript(1, "transcript", "en", False, NOW,
                             (TranscriptLine("line", seconds, seconds + 1, "Hello"),))
     assert transcript_srt(transcript).startswith(f"1\n{timestamp} --> ")
+
+
+def test_subtitles_share_playback_with_viewing_and_highlight_keys(setup):
+    core, adapter, (a, _) = setup
+    core.request_subtitles(a.id)
+    core.playback.start(a.id, 0)
+    core.playback.report(10)
+    core.execute_highlight_command(core.command_for_key("Insert"))
+    core.playback.report(20)
+    core.execute_highlight_command(core.command_for_key("Delete"))
+    assert core.process_next_subtitle().state == "completed"
+    core.playback.report(30)
+    core.execute_highlight_command(core.command_for_key("Delete"))
+    assert [(h.start, h.end) for h in core.highlights(a.id)] == [(10, None), (20, 30)]
+    assert core.execute_highlight_command(core.command_for_key("Home")) == 20
+    core.playback.report(15, seeked=True)
+    assert core.execute_highlight_command(core.command_for_key("End")) == 20
+    assert not core.is_highlight_command(core.command_for_key("/"))
+    core.playback.end()
+    assert core.viewings(a.id)[0].played_seconds == 30
+    assert core.resume_start(a.id) == 12
+    assert core.transcript(a.id).lines

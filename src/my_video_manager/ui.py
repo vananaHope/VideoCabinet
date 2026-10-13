@@ -240,7 +240,7 @@ class MainWindow(QMainWindow):
             return True
         key = {Qt.Key.Key_Return: "Enter", Qt.Key.Key_Enter: "Enter", Qt.Key.Key_Left: "Left",
                Qt.Key.Key_Right: "Right", Qt.Key.Key_Up: "Up", Qt.Key.Key_Down: "Down",
-               Qt.Key.Key_Comma: ",", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
+               Qt.Key.Key_Comma: ",", Qt.Key.Key_Slash: "/", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
                Qt.Key.Key_Home: "Home", Qt.Key.Key_End: "End"}.get(event.key(), event.text())
         command = self.core.command_for_key(key)
         if command and self.player:
