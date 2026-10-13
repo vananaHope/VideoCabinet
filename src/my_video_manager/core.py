@@ -77,6 +77,15 @@ def default_data_directory() -> Path:
     return Path.home() / ".my-video-manager"
 
 
+@dataclass(frozen=True)
+class LibrarySnapshot:
+    """한 번의 목록 갱신에서 공유하는 영상·시청·태그·시리즈 조회 결과."""
+    videos: tuple[Video, ...]
+    statuses: dict[int, ViewingStatus]
+    tags: dict[int, tuple[Tag, ...]]
+    series: tuple[Series, ...]
+
+
 class AppCore:
     def __init__(
         self,
@@ -258,9 +267,17 @@ class AppCore:
     def search_index_ready(self) -> bool:
         return self._search.ready
 
-    def hidden_gems(self) -> tuple[HiddenGem, ...]:
+    def library_snapshot(self) -> LibrarySnapshot:
+        videos = self.videos()
+        visible = {v.id for v in videos}
+        series = tuple(replace(s, video_ids=tuple(vid for vid in s.video_ids if vid in visible))
+                       for s in self._series.list())
+        return LibrarySnapshot(videos, self.viewing_status_map(), self.video_tags_map(), series)
+
+    def hidden_gems(self, *, snapshot: LibrarySnapshot | None = None) -> tuple[HiddenGem, ...]:
+        snapshot = self.library_snapshot() if snapshot is None else snapshot
         return select_hidden_gems(
-            self.videos(), self.viewing_status_map(), self.video_tags_map(), self._series.list(),
+            snapshot.videos, snapshot.statuses, snapshot.tags, snapshot.series,
             self._hidden_gems.dismissed_ids(), self._hidden_gems.revisit_times(), now=self._clock(),
             unwatched_days=self._hidden_gems.days("unwatched"), revisit_days=self._hidden_gems.days("revisit"))
 

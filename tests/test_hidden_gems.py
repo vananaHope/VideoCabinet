@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import sqlite3
 
 import pytest
 
@@ -294,3 +295,187 @@ def test_bulk_status_and_tags_match_single_reads_and_include_empty_and_excluded(
     core = AppCore(media=Media(), clock=clock, database=core.database,
                    viewing_settings=ViewingSettings(abandoned_ratio=0.5))
     assert not core.viewing_status_map()[a.id].abandoned
+
+
+def test_finished_series_recommends_only_oldest_overdue_revisit(library):
+    core, clock, add = library
+    a, b, c = add("첫 강의"), add("둘째 강의"), add("셋째 강의")
+    core.create_series("전부 다 본 강의", (a.id, b.id, c.id))
+    for video in (a, b, c):
+        watch(core, video)
+    mark(core, b)
+    clock.days(1)
+    mark(core, a)
+    mark(core, c)
+    clock.days(30)
+    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == [(b.id, "revisit")]
+    core.start_reel(highlight_id=core.highlights(b.id)[0].id)
+    core.playback.report(13)
+    core.playback.end()
+    # 같은 기준 시각이면 영상 ID 순으로 한 편만 남는다.
+    assert ids(core) == [a.id]
+
+
+@pytest.mark.parametrize("normal", ["abandoned", "similar_tags", "unwatched"])
+def test_series_allows_first_unfinished_plus_one_finished_revisit(library, normal):
+    core, clock, add = library
+    finished, first, later = add("다 본 강의"), add("첫 미완료"), add("뒤 미완료")
+    core.create_series("강의", (finished.id, first.id, later.id))
+    watch(core, finished)
+    watch(core, finished)  # 태그 기준의 즐겨 보는 영상
+    mark(core, finished)
+    watch(core, later, 40)  # 뒤 미완료 화의 일반 기준은 적용하지 않는다.
+    if normal == "abandoned":
+        watch(core, first, 20)
+    elif normal == "similar_tags":
+        core.add_video_tag(finished.id, "주제")
+        core.add_video_tag(first.id, "주제")
+    clock.days(30)
+    expected = [(finished.id, "revisit"), (first.id, normal)]
+    if normal == "abandoned":
+        expected.reverse()
+    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == expected
+
+
+def test_series_same_first_unfinished_and_oldest_revisit_is_not_duplicated(library):
+    core, clock, add = library
+    first, later = add("첫 미완료"), add("뒤 강의")
+    core.create_series("강의", (first.id, later.id))
+    watch(core, first, 40)
+    mark(core, first)
+    clock.days(1)
+    watch(core, later)
+    mark(core, later)
+    clock.days(30)
+    # 가장 오래 밀린 복습이 보다 만 기준으로 나와도 뒤 화로 복습 자리를 채우지 않는다.
+    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == [(first.id, "abandoned")]
+
+
+def test_series_later_abandoned_can_only_appear_for_revisit(library):
+    core, clock, add = library
+    first, later = add("첫 미완료"), add("뒤 미완료")
+    core.create_series("강의", (first.id, later.id))
+    watch(core, later, 40)
+    mark(core, later)
+    core.settings.set("recommend.unwatched_days", 100)
+    clock.days(30)
+    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == [(later.id, "revisit")]
+    core.dismiss_video(first.id)  # 일반 후보 관심 없음도 복습 예외를 막지 않는다.
+    assert ids(core) == [later.id]
+
+
+@pytest.mark.parametrize("state", ["missing", "excluded", "dismissed"])
+def test_series_revisit_skips_ineligible_overdue_video(library, state):
+    core, clock, add = library
+    a, b = add("오래 밀린 강의"), add("다음 밀린 강의")
+    core.create_series("강의", (a.id, b.id))
+    watch(core, a)
+    watch(core, b)
+    mark(core, a)
+    clock.days(1)
+    mark(core, b)
+    if state == "missing":
+        a.locations[0].path.unlink()
+        core.scan()
+    elif state == "excluded":
+        core.exclude_video(a.id)
+    else:
+        core.dismiss_video(a.id)
+    clock.days(30)
+    assert ids(core) == [b.id]
+
+
+def test_series_revisit_exceptions_still_share_ten_item_limit(library):
+    core, clock, add = library
+    for letter in "ABCDEF":
+        finished, first = add(letter + "다 본 강의"), add(letter + "미완료")
+        core.create_series(letter, (finished.id, first.id))
+        watch(core, finished)
+        mark(core, finished)
+        watch(core, first, 40)
+    clock.days(30)
+    gems = core.hidden_gems()
+    assert len(gems) == len({g.video.id for g in gems}) == 10
+    assert [g.criterion for g in gems] == ["abandoned"] * 6 + ["revisit"] * 4
+
+
+@pytest.mark.parametrize("state, expected", [("excluded", False), ("missing", True), ("dismissed", True)])
+def test_favorite_tag_evidence_excludes_only_excluded_videos(library, state, expected):
+    core, _, add = library
+    favorite, target = add("즐겨 보는 영상"), add("대상")
+    watch(core, favorite)
+    watch(core, favorite)
+    core.add_video_tag(favorite.id, "주제")
+    core.add_video_tag(target.id, "주제")
+    if state == "excluded":
+        core.exclude_video(favorite.id)
+    elif state == "missing":
+        favorite.locations[0].path.unlink()
+        core.scan()
+    else:
+        core.dismiss_video(favorite.id)
+    assert ids(core) == ([target.id] if expected else [])
+    if state == "excluded":
+        core.restore_video(favorite.id)
+        assert ids(core) == [target.id]
+
+
+def test_library_snapshot_reuses_public_state_and_preserves_tag_filter_scope(library):
+    core, clock, add = library
+    a, b, excluded = add("태그 영상"), add("다른 영상"), add("제외 영상")
+    core.create_series("시리즈", (excluded.id, a.id))
+    core.exclude_video(excluded.id)
+    core.add_video_tag(a.id, "주제")
+    clock.days(30)
+    snapshot = core.library_snapshot()
+    assert snapshot.videos == core.videos()
+    assert snapshot.statuses == core.viewing_status_map()
+    assert snapshot.tags == core.video_tags_map()
+    assert snapshot.series == core.series()
+    assert core.hidden_gems(snapshot=snapshot) == core.hidden_gems()
+    # 이후 시청은 기존 스냅숏에 섞이지 않고 새 갱신에서 반영된다.
+    watch(core, b)
+    assert b.id in [g.video.id for g in core.hidden_gems(snapshot=snapshot)]
+    assert b.id not in ids(core)
+
+
+def test_legacy_highlight_upgrade_baseline_is_preserved_on_reopen(tmp_path):
+    # #14 이전 main의 저장 형식 fixture. 생성 시각 테이블이 없는 DB를 독립적으로 만든다.
+    # 검증은 테이블 값이나 private 메서드 대신 AppCore의 추천 결과로만 한다.
+    database = tmp_path / "legacy.sqlite3"
+    path = tmp_path / "legacy.mkv"
+    path.write_bytes(b"legacy")
+    old = "2020-01-01T00:00:00+00:00"
+    with sqlite3.connect(database) as db:
+        db.executescript("""
+            PRAGMA user_version = 2;
+            CREATE TABLE watched_folders(path TEXT PRIMARY KEY);
+            CREATE TABLE videos(id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL, duration REAL NOT NULL, format TEXT NOT NULL,
+                thumbnail TEXT NOT NULL, registered_at TEXT NOT NULL, excluded INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE locations(path TEXT PRIMARY KEY, video_id INTEGER NOT NULL REFERENCES videos(id),
+                size INTEGER, mtime_ns INTEGER);
+            CREATE TABLE library_file_checks(path TEXT PRIMARY KEY, size INTEGER NOT NULL,
+                mtime_ns INTEGER NOT NULL, duration REAL, fingerprint TEXT);
+            CREATE TABLE highlights(id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL REFERENCES videos(id),
+                start REAL NOT NULL CHECK(start >= 0), end REAL CHECK(end > start), note TEXT);
+            CREATE TABLE viewings(id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL REFERENCES videos(id),
+                duration REAL NOT NULL, started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                ended_at TEXT, intervals TEXT NOT NULL, last_position REAL);
+            INSERT INTO highlights VALUES (7, 1, 10, NULL, '기존 하이라이트');
+        """)
+        db.execute("INSERT INTO videos VALUES (1, 'legacy', '기존 영상', 100, 'matroska', 'old.png', ?, 0)", (old,))
+        db.execute("INSERT INTO locations VALUES (?, 1, NULL, NULL)", (str(path),))
+        db.execute("INSERT INTO viewings VALUES (1, 1, 100, ?, ?, ?, '[[0, 90]]', 90)", (old, old, old))
+    clock = Clock()
+    core = AppCore(media=Media(), clock=clock, database=database)
+    assert core.highlights(1)[0].note.text == "기존 하이라이트"
+    assert ids(core) == []
+    clock.days(29)
+    core = AppCore(media=Media(), clock=clock, database=database)
+    assert ids(core) == []
+    clock.days(1)
+    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == [(1, "revisit")]
+    clock.days(1)
+    core = AppCore(media=Media(), clock=clock, database=database)
+    assert ids(core) == [1]

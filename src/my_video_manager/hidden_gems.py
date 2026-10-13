@@ -21,32 +21,40 @@ def select_hidden_gems(videos, statuses, tags, series, dismissed, revisit_times,
     """기준 순서와 기준별 정렬을 적용한다. 틀어보기만 있으면 시청 없음이다."""
     playable = {v.id: v for v in videos if not v.missing and not v.excluded}
     allowed = set(playable)
+    revisit_allowed = {vid for vid in playable if vid not in dismissed and vid in revisit_times
+                       and now - revisit_times[vid] >= timedelta(days=revisit_days)}
     for group in series:
         allowed.difference_update(group.video_ids)
         first = next((vid for vid in group.video_ids
                       if vid in playable and not statuses[vid].finished), None)
         if first is not None:
             allowed.add(first)
+        overdue = revisit_allowed.intersection(group.video_ids)
+        if overdue:
+            # 복습은 미완료 화 규칙의 예외지만 시리즈마다 가장 오래 밀린 한 편만 남긴다.
+            revisit_allowed.difference_update(overdue)
+            revisit_allowed.add(min(overdue, key=lambda vid: (revisit_times[vid], vid)))
     # 관심 없음은 첫 미완료 화를 고른 뒤 적용한다. 뒤 화로 넘어가지 않는다.
     allowed.difference_update(dismissed)
-    favorite_tags = {tag.id for vid, status in statuses.items() if status.favorite
+    visible = {v.id for v in videos if not v.excluded}
+    favorite_tags = {tag.id for vid, status in statuses.items() if vid in visible and status.favorite
                      for tag in tags.get(vid, ())}
     ranked = []
-    for vid in allowed:
+    for vid in allowed | revisit_allowed:
         video, status = playable[vid], statuses[vid]
         unwatched = not status.finished and not status.abandoned
         shared = tuple(tag for tag in tags.get(vid, ()) if tag.id in favorite_tags)
         revisit = revisit_times.get(vid)
-        if status.abandoned:
+        if vid in allowed and status.abandoned:
             gem = HiddenGem(video, "abandoned", f"보다 만 · {status.stopped_percent:.0f}%에서 멈췄어요")
             order = (0, -(status.last_viewed_at or video.registered_at).timestamp(), vid)
-        elif revisit is not None and now - revisit >= timedelta(days=revisit_days):
+        elif vid in revisit_allowed:
             gem = HiddenGem(video, "revisit", "복습할 때가 됨 · 하이라이트를 다시 볼 시간이에요")
             order = (1, revisit.timestamp(), vid)
-        elif unwatched and shared:
+        elif vid in allowed and unwatched and shared:
             gem = HiddenGem(video, "similar_tags", "태그가 비슷함 · " + ", ".join(t.name for t in shared), shared)
             order = (2, -len(shared), video.registered_at.timestamp(), vid)
-        elif unwatched and now - video.registered_at >= timedelta(days=unwatched_days):
+        elif vid in allowed and unwatched and now - video.registered_at >= timedelta(days=unwatched_days):
             gem = HiddenGem(video, "unwatched", "오래 시청 없음 · 등록한 뒤 아직 시청하지 않았어요")
             order = (3, video.registered_at.timestamp(), vid)
         else:

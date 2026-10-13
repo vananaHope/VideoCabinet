@@ -1,9 +1,8 @@
 """숨겨진 보석 카드와 관심 없음 되돌리기. 도메인 판단은 AppCore에 맡긴다."""
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem,
+    QDialog, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QMenu,
     QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -11,6 +10,12 @@ from PySide6.QtWidgets import (
 class GemList(QListWidget):
     dismiss_requested = Signal()
     play_requested = Signal(object)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event):
         if event.modifiers() == Qt.KeyboardModifier.NoModifier:
@@ -35,6 +40,7 @@ class HiddenGemControls(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         bar = QHBoxLayout()
         self.label = QLabel("숨겨진 보석")
+        self.label.setWordWrap(True)
         bar.addWidget(self.label)
         bar.addStretch()
         self.dismiss = QPushButton("선택 영상 관심 없음")
@@ -44,7 +50,7 @@ class HiddenGemControls(QWidget):
         restore.clicked.connect(self.show_dismissed)
         bar.addWidget(restore)
         layout.addLayout(bar)
-        layout.addWidget(QLabel("←/→로 선택 · Enter 또는 클릭으로 재생 · 카드에서 Backspace로 관심 없음"))
+        layout.addWidget(QLabel("←/→로 선택 · Enter 또는 클릭으로 재생 · 카드에서 Backspace 또는 우클릭으로 관심 없음"))
         self.list = GemList()
         self.list.setAccessibleName("숨겨진 보석 추천 카드")
         self.list.setFlow(QListView.Flow.LeftToRight)
@@ -56,16 +62,24 @@ class HiddenGemControls(QWidget):
         self.list.itemClicked.connect(self.play)
         self.list.play_requested.connect(self.play)
         self.list.dismiss_requested.connect(self.dismiss_selected)
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self.context_menu)
         layout.addWidget(self.list)
 
-    def refresh(self):
+    def refresh(self, *, snapshot=None):
         selected = self.list.currentItem()
         selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None
         row = max(0, self.list.currentRow())
         self.list.clear()
-        gems = self.core.hidden_gems()
+        try:
+            gems = self.core.hidden_gems(snapshot=snapshot)
+        except Exception as error:
+            self.dismiss.setEnabled(False)
+            self.label.setText(f"숨겨진 보석을 불러오지 못했어요: {error}")
+            return
         for index, gem in enumerate(gems):
-            item = QListWidgetItem(QIcon(str(gem.video.thumbnail)), f"{gem.video.title}\n{gem.reason}")
+            item = QListWidgetItem(self.window.thumbnail_icons.get(gem.video.thumbnail),
+                                   f"{gem.video.title}\n{gem.reason}")
             item.setData(Qt.ItemDataRole.UserRole, gem.video.id)
             item.setToolTip(item.text())
             item.setSizeHint(QSize(280, 112))
@@ -79,13 +93,27 @@ class HiddenGemControls(QWidget):
     def play(self, item):
         self.window.playback_list = tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole)
                                           for i in range(self.list.count()))
-        self.window.play_video(item.data(Qt.ItemDataRole.UserRole))
+        self.window.play_video(item.data(Qt.ItemDataRole.UserRole), from_gems=True)
+
+    def context_menu(self, position):
+        item = self.list.itemAt(position)
+        if item is None:
+            return
+        # 현재 선택과 무관하게 우클릭한 카드만 대상으로 삼고 재생 신호를 내지 않는다.
+        video_id = item.data(Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+        dismiss = menu.addAction("관심 없음")
+        if menu.exec(self.list.viewport().mapToGlobal(position)) == dismiss:
+            self.dismiss_video(video_id)
+
+    def dismiss_video(self, video_id):
+        self.core.dismiss_video(video_id)
+        self.refresh()
+        self.list.setFocus()
 
     def dismiss_selected(self):
         if item := self.list.currentItem():
-            self.core.dismiss_video(item.data(Qt.ItemDataRole.UserRole))
-            self.refresh()
-            self.list.setFocus()
+            self.dismiss_video(item.data(Qt.ItemDataRole.UserRole))
 
     def show_dismissed(self):
         dialog = QDialog(self)
