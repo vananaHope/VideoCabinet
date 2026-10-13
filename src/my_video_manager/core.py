@@ -10,6 +10,7 @@ from typing import Callable, Mapping
 from .library import Library, Location, MediaInfo, MediaReader, ScanIssue, ScanResult, Video, WatchedFolder
 from .settings import Settings
 from .highlights import Highlight, Highlights
+from .key_bindings import KeyBinding, KeyBindings
 from .playback import PlaybackHub
 from .reel import HighlightReel, ReelEntry, ReelPlayback, ReelSettings
 from .revisit import Revisits
@@ -91,9 +92,11 @@ class AppCore:
         self._thumbnails.mkdir(exist_ok=True)
         self._media = media
         self._clock = clock
-        self.set_key_bindings(DEFAULT_KEY_BINDINGS if key_bindings is None else key_bindings)
-        # 접속은 호출 단위로 열어 UI 작업자 스레드에서도 코어를 사용할 수 있다.
         self.settings = Settings(self._connect)
+        self._keys = KeyBindings(self.settings, DEFAULT_KEY_BINDINGS, tuple(Command(kind) for kind in CommandType))
+        if key_bindings is not None:
+            self._keys.replace(key_bindings, persist=False)
+        # 접속은 호출 단위로 열어 UI 작업자 스레드에서도 코어를 사용할 수 있다.
         self._library = Library(self._connect, media, clock, self._thumbnails, self.settings)
         self.playback = PlaybackHub()
         self._series = SeriesStore(self._connect)
@@ -227,10 +230,19 @@ class AppCore:
         return _Connection(connection)
 
     def set_key_bindings(self, bindings: Mapping[str, Command]) -> None:
-        self._key_bindings = dict(bindings)
+        self._keys.replace(bindings)
+
+    def key_bindings(self) -> tuple[KeyBinding, ...]:
+        return self._keys.rows()
+
+    def save_key_bindings(self, bindings: Mapping[Command, tuple[str, ...]]) -> None:
+        self._keys.save(bindings)
+
+    def reset_key_bindings(self, command: Command | None = None) -> None:
+        self._keys.reset(command)
 
     def command_for_key(self, key: str) -> Command | None:
-        return self._key_bindings.get(key)
+        return self._keys.command_for_key(key)
 
     def highlights(self, video_id: int) -> tuple[Highlight, ...]:
         return self._highlights.list(video_id)
