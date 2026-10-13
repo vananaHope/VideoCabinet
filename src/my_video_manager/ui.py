@@ -15,6 +15,7 @@ from .highlight_ui import HighlightList, HighlightProgress, timestamp
 from .series_ui import SeriesEditor
 from .tag_ui import TagEditor, TagManager
 from .library_ui import LibraryControls
+from .reel_ui import ReelControls
 
 
 class ScanWorker(QThread):
@@ -96,8 +97,12 @@ class MainWindow(QMainWindow):
         playback = QWidget()
         playback_layout = QVBoxLayout(playback)
         self.back_button = QPushButton("목록으로 (Esc)")
-        self.back_button.clicked.connect(self.show_library)
+        self.back_button.clicked.connect(self.back_to_list)
         playback_layout.addWidget(self.back_button)
+        self.reel_label = QLabel()
+        self.reel_label.setWordWrap(True)
+        self.reel_label.hide()
+        playback_layout.addWidget(self.reel_label)
         playback_layout.addWidget(self.subtitles.button())
         playback_layout.addWidget(self.translations.button())
         self.surface = QWidget()
@@ -114,9 +119,12 @@ class MainWindow(QMainWindow):
         self.highlights_button.clicked.connect(self.show_highlights)
         playback_layout.addWidget(self.highlights_button)
         playback_layout.addWidget(QLabel("Enter 재생/일시정지 · ←/→ 5초 · , 3초 뒤로 · ↑/↓ 속도 ±0.25 · / 자막 켜기/끄기 · . 원어/번역"))
-        playback_layout.addWidget(QLabel("PgUp/PgDn 이전/다음 영상 · 시리즈 안에서는 이전/다음 화"))
+        self.video_navigation_label = QLabel("PgUp/PgDn 이전/다음 영상 · 시리즈 안에서는 이전/다음 화")
+        playback_layout.addWidget(self.video_navigation_label)
         playback_layout.addWidget(QLabel("Insert 지점 · Delete 구간 시작/끝 · Home/End 이전/다음 · 노랑 지점 / 초록 구간 / 주황 열린 구간"))
         self.pages.addWidget(playback)
+        self.reel = ReelControls(self)
+        buttons.addWidget(self.reel.button())
 
         self.add_button.clicked.connect(self.add_folder)
         self.scan_button.clicked.connect(self.scan)
@@ -243,6 +251,8 @@ class MainWindow(QMainWindow):
     def end_playback(self):
         self.stop_player()
         self.core.playback.end()
+        self.reel.shown = None
+        self.reel_label.hide()
 
     def stop_player(self):
         self.position_timer.stop()
@@ -254,8 +264,15 @@ class MainWindow(QMainWindow):
     def sync_position(self):
         if self.player and self.core.playback.session is not None:
             # 상대 탐색과 Home/End 절대 탐색 모두 mpv 이벤트의 seeked 표시를 쓴다.
+            session = self.core.playback.session
             for position, seeked in self.player.take_positions():
                 self.core.playback.report(position, seeked=seeked)
+                self.core.advance_reel_if_due()
+                if self.core.playback.session is not session:
+                    break  # 자동 전환 뒤 이전 엔진의 나머지 보고는 버린다.
+            eof = self.player.take_eof()
+            if self.core.playback.session is session and eof:
+                self.core.advance_reel_if_due(eof=True)
             self.core.save_viewings()
             position = self.core.playback.position
             self.progress.position = position
@@ -270,11 +287,14 @@ class MainWindow(QMainWindow):
     def poll_position(self):
         try:
             self.sync_position()
+            self.reel.sync()
         except Exception as error:
             self.position_timer.stop()
             self.position_label.setText(f"재생 위치 확인 실패: {error}")
 
     def refresh_highlights(self):
+        if self.core.playback.session is None:
+            return
         self.progress.highlights = self.core.highlights(self.core.playback.session.video_id)
         self.progress.open_start = self.core.open_highlight_start
         self.progress.position = self.core.playback.position
@@ -290,6 +310,12 @@ class MainWindow(QMainWindow):
         self.end_playback()
         self.pages.setCurrentIndex(0)
         self.refresh()
+
+    def back_to_list(self):
+        if self.reel.shown is not None or self.core.reel_playback is not None:
+            self.reel.open()
+        else:
+            self.show_library()
 
     def show_series(self):
         SeriesEditor(self.core, self).exec()
@@ -309,29 +335,44 @@ class MainWindow(QMainWindow):
                 # 화면을 연 Enter가 부모로 전파되어 곧바로 pause를 실행하지 않게 소비한다.
                 return True
             return False
+        if self.pages.currentWidget() is self.reel.page:
+            if event.key() == Qt.Key.Key_Escape:
+                self.show_library()
+                return True
+            if self.reel.list.hasFocus() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self.reel.play_selected(self.reel.list.currentItem())
+                return True  # 목록을 연 Enter가 재생 화면까지 전파되어 멈추지 않게 한다.
+            return False
         if event.key() == Qt.Key.Key_Escape:
-            self.show_library()
+            self.back_to_list()
             return True
         key = {Qt.Key.Key_Return: "Enter", Qt.Key.Key_Enter: "Enter", Qt.Key.Key_Left: "Left",
                Qt.Key.Key_Right: "Right", Qt.Key.Key_Up: "Up", Qt.Key.Key_Down: "Down",
                Qt.Key.Key_Comma: ",", Qt.Key.Key_Slash: "/", Qt.Key.Key_Period: ".", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
                Qt.Key.Key_Home: "Home", Qt.Key.Key_End: "End",
+               Qt.Key.Key_Backslash: "\\",
                Qt.Key.Key_PageUp: "PgUp", Qt.Key.Key_PageDown: "PgDn"}.get(event.key(), event.text())
         command = self.core.command_for_key(key)
         if command and self.player:
             try:
                 if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):
-                    if not event.isAutoRepeat() and self.core.playback.session is not None:
-                        target = self.core.adjacent_video(self.core.playback.session.video_id, self.playback_list,
-                                                          forward=command.kind == CommandType.NEXT_VIDEO)
+                    if not event.isAutoRepeat():
+                        self.sync_position()
+                        target = self.core.execute_video_command(command, self.playback_list)
                         if target is not None:
                             self.play_video(target)
+                        else:
+                            self.reel.sync()
                 elif self.core.is_highlight_command(command):
                     if event.isAutoRepeat() or self.sync_position() is None:
+                        return True
+                    self.reel.sync()
+                    if self.core.playback.session is None:
                         return True
                     target = self.core.execute_highlight_command(command)
                     if target is not None:
                         self.player.seek_to(target)
+                    self.reel.sync()
                     self.refresh_highlights()
                     self.sync_position()
                 elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
@@ -340,7 +381,9 @@ class MainWindow(QMainWindow):
                 else:
                     if command.kind == CommandType.SEEK:
                         self.sync_position()
-                    self.player.execute(command)
+                        self.reel.sync()
+                    if self.player:
+                        self.player.execute(command)
             except Exception as error:
                 QMessageBox.warning(self, "재생 조작 실패", str(error))
             return True
