@@ -261,20 +261,22 @@ class MainWindow(QMainWindow):
     def play_video(self, video_id, *, start=None):
         try:
             self.stop_player()
-            location = self.core.playback_location(video_id)
-            self.pages.setCurrentIndex(1)
-            if self.player is None:
-                self.player = self.player_factory(int(self.surface.winId()))
-            start = self.core.switch_to(video_id, start=start)
-            self.player.play(location.path, start, subtitle=self.core.playback_subtitle(video_id))
-            self.progress.duration = next(v.duration for v in self.core.videos() if v.id == video_id)
-            self.refresh_highlights()
-            self.position_timer.start()
-            self.surface.setFocus()
+            self.load_player(video_id, self.core.switch_to(video_id, start=start))
         except Exception as error:
             self.end_playback()
             self.pages.setCurrentIndex(0)
             QMessageBox.critical(self, "재생 실패", str(error))
+
+    def load_player(self, video_id, start):
+        location = self.core.playback_location(video_id)
+        self.pages.setCurrentIndex(1)
+        if self.player is None:
+            self.player = self.player_factory(int(self.surface.winId()))
+        self.player.play(location.path, start, subtitle=self.core.playback_subtitle(video_id))
+        self.progress.duration = next(v.duration for v in self.core.videos() if v.id == video_id)
+        self.refresh_highlights()
+        self.position_timer.start()
+        self.surface.setFocus()
 
     def end_playback(self):
         self.stop_player()
@@ -374,14 +376,26 @@ class MainWindow(QMainWindow):
         if video_id is not None:
             ReviewDialog(self.core, video_id, self.review_jump, self.review_changed, self).exec()
 
-    def review_jump(self, video_id, position):
-        session = self.core.playback.session
-        if self.player and session and session.video_id == video_id:
-            self.sync_position()
-            self.player.seek_to(position, resume=True)
-        else:
-            self.playback_list = tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
-            self.play_video(video_id, position=position)
+    def review_jump(self, video_id, line_id):
+        self.sync_position()
+        target = self.core.play_review_line(video_id, line_id)
+        try:
+            if self.player and target.action == "seek":
+                self.player.seek_to(target.start, resume=True)
+            else:
+                # 코어는 이미 새 시청을 시작했다. 이전 엔진의 남은 보고를 새 시청에 보내지 않는다.
+                self.position_timer.stop()
+                if self.player:
+                    self.player.close()
+                    self.player = None
+                self.reel.shown = None
+                self.reel.update_label()
+                self.playback_list = tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
+                self.load_player(video_id, target.start)
+        except Exception:
+            self.end_playback()
+            self.pages.setCurrentIndex(0)
+            raise
 
     def review_changed(self, video_id):
         session = self.core.playback.session

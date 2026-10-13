@@ -16,6 +16,7 @@ class ReviewDialog(QDialog):
         self.core, self.video_id = core, video_id
         self.jump, self.changed = jump, changed
         self.rows = ()
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle("자막 검수 · SRT 내보내기")
         self.resize(1050, 620)
         layout = QVBoxLayout(self)
@@ -26,6 +27,7 @@ class ReviewDialog(QDialog):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setTabKeyNavigation(False)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.cellClicked.connect(lambda row, column: self.activate(row))
@@ -80,8 +82,7 @@ class ReviewDialog(QDialog):
     def activate(self, index):
         if 0 <= index < len(self.rows):
             try:
-                position = self.core.review_line_position(self.video_id, self.rows[index].original.id)
-                self.jump(self.video_id, position)
+                self.jump(self.video_id, self.rows[index].original.id)
             except Exception as error:
                 QMessageBox.warning(self, "장면 이동", str(error))
 

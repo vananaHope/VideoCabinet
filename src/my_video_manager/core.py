@@ -22,7 +22,7 @@ from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, V
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 from .translation import Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
-from .review import Review, SubtitleExport
+from .review import Review, ReviewPlayback, SubtitleExport
 
 
 class CommandType(str, Enum):
@@ -169,6 +169,14 @@ class AppCore:
             raise ValueError("자막 줄이 바뀌었습니다. 목록을 새로 확인하세요.")
         self.playback_location(video_id)
         return line.original.start
+
+    def play_review_line(self, video_id, line_id) -> ReviewPlayback:
+        start = self.review_line_position(video_id, line_id)
+        session = self.playback.session
+        if session and session.video_id == video_id and session.record_viewing and self.reel_playback is None:
+            return ReviewPlayback(video_id, start, "seek")
+        self.playback.start(video_id, start, record_viewing=True)
+        return ReviewPlayback(video_id, start, "play")
 
     def set_translation_cli(self, cli: str) -> None:
         self._translations.set_cli(cli)

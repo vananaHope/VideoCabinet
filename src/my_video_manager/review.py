@@ -29,6 +29,13 @@ class SubtitleExport:
     default_path: Path
 
 
+@dataclass(frozen=True)
+class ReviewPlayback:
+    video_id: int
+    start: float
+    action: str  # play 또는 seek. 재생 엔진이 수행할 동작.
+
+
 class Review:
     def __init__(self, connect, clock, subtitles, playback_location):
         self._connect, self._clock = connect, clock
