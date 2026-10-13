@@ -25,7 +25,6 @@ class SubtitleControls(QObject):
         self.window = window
         self.core = window.core
         self.worker = None
-        self.closing = False
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.process_queue)
         self.timer.start(500)
@@ -36,7 +35,8 @@ class SubtitleControls(QObject):
         return button
 
     def request(self):
-        video_id = self.window.playing_video_id
+        session = self.core.playback.session
+        video_id = session.video_id if session else None
         if video_id is None:
             item = self.window.list.currentItem()
             if item is None:
@@ -50,7 +50,7 @@ class SubtitleControls(QObject):
         prompt = "원어를 고르거나 언어 코드를 입력하세요 (예: en, ko, ja)."
         if existing:
             source = "직접 지정" if existing.language_specified else "자동 감지"
-            prompt += f"\n현재 원어: {existing.spoken_language} ({source})"
+            prompt += f"\n현재 원어: {existing.spoken_language or '알 수 없음'} ({source})"
         language, accepted = QInputDialog.getItem(
             self.window, "원어 자막 만들기", prompt,
             languages, languages.index(initial), True,
@@ -70,7 +70,7 @@ class SubtitleControls(QObject):
             QMessageBox.warning(self.window, "자막 요청 실패", str(error))
 
     def process_queue(self):
-        if self.worker or self.closing:
+        if self.worker:
             return
         if not any(entry.state == "queued" for entry in self.core.subtitle_queue()):
             return
@@ -86,11 +86,14 @@ class SubtitleControls(QObject):
             return
         if result.error:
             self.window.statusBar().showMessage(f"자막 실패 — 다시 요청하면 재시도합니다: {result.error}")
+            self.window.statusBar().setToolTip(result.error_detail or result.error)
         elif result.state == "completed":
             transcript = self.core.transcript(result.video_id)
+            self.window.statusBar().setToolTip("")
             self.window.statusBar().showMessage(
-                f"원어 자막 완료 · 원어 {transcript.spoken_language} · {len(transcript.lines)}줄")
-            if self.window.player and self.window.playing_video_id == result.video_id:
+                f"원어 자막 완료 · 원어 {transcript.spoken_language or '알 수 없음'} · {len(transcript.lines)}줄")
+            session = self.core.playback.session
+            if self.window.player and session and session.video_id == result.video_id:
                 try:
                     self.window.player.set_subtitle(self.core.playback_subtitle(result.video_id))
                 except Exception as error:
@@ -99,13 +102,20 @@ class SubtitleControls(QObject):
     def finished(self):
         self.worker.deleteLater()
         self.worker = None
-        if self.closing:
-            self.window.close()
 
     def shutdown(self):
-        self.closing = True
+        if self.worker and self.worker.isRunning():
+            dialog = QMessageBox(QMessageBox.Icon.Question, "받아쓰기 중 종료",
+                                 "받아쓰기 중입니다. 지금 종료하면 다음 실행 때 처음부터 다시 받아씁니다.",
+                                 parent=self.window)
+            quit_button = dialog.addButton("지금 종료", QMessageBox.ButtonRole.AcceptRole)
+            cancel_button = dialog.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+            dialog.setDefaultButton(cancel_button)
+            dialog.exec()
+            if dialog.clickedButton() != quit_button:
+                return False
         self.timer.stop()
+        self.core.stop_subtitle_processing()
         if self.worker:
-            self.window.statusBar().showMessage("현재 자막 처리가 끝나면 종료합니다. 남은 대기열은 다음 실행에 이어집니다.")
-            return False
+            self.worker.wait()  # 취소 신호가 프로세스 트리를 즉시 종료한 뒤 스레드를 회수한다.
         return True

@@ -68,9 +68,14 @@ class MpvPlayer:
         import mpv
 
         self._player = mpv.MPV(wid=str(window_id), input_default_bindings=False,
-                               input_vo_keyboard=False, osc=False, config=False, keep_open=True,
-                               sub_auto="no")
-        self._subtitle_id = None
+                               input_vo_keyboard=False, osc=False, config=False, keep_open=True)
+        self._subtitle_path = None
+
+        @self._player.event_callback("file-loaded")
+        def select_app_subtitle(_event):
+            for track in self._app_subtitle_tracks():
+                self._player.sid = track["id"]
+
         self._positions = SimpleQueue()
         self._seeking = True
 
@@ -91,11 +96,56 @@ class MpvPlayer:
             if position is not None and not self._seeking:
                 self._positions.put((position, False))
 
+    def _app_subtitle_tracks(self):
+        if self._subtitle_path is None:
+            return []
+        return [track for track in self._player.track_list
+                if track.get("type") == "sub" and track.get("external-filename")
+                and Path(track["external-filename"]).resolve() == self._subtitle_path]
+
     def play(self, path: Path, start: float = 0, *, subtitle: Path | None = None) -> None:
         self._player.start = start
-        self._subtitle_id = None
+        self._subtitle_path = subtitle.resolve() if subtitle else None
+        # loadfile 옵션으로 전달해 비동기 file-loaded 이전의 sub-add 경합을 피한다.
         options = {"sub-files": str(subtitle)} if subtitle else {}
         self._player.loadfile(str(path), "replace", **options)
+        self._player.pause = False
+
+    def set_subtitle(self, path: Path | None) -> None:
+        for track in self._app_subtitle_tracks():
+            self._player.command("sub-remove", track["id"])
+        self._subtitle_path = path.resolve() if path else None
+        if path:
+            self._player.command("sub-add", str(path), "select")
+        else:
+            self._player.sid = "auto"
+
+    def take_positions(self) -> tuple[tuple[float, bool], ...]:
+        """mpv 스레드의 (위치, 탐색 여부) 보고를 순서대로 UI 스레드에 넘긴다."""
+        positions = []
+        while True:
+            try:
+                positions.append(self._positions.get_nowait())
+            except Empty:
+                return tuple(positions)
+
+    def execute(self, command: Command) -> None:
+        if command.kind == CommandType.TOGGLE_PAUSE:
+            self._player.cycle("pause")
+        elif command.kind == CommandType.SEEK:
+            self._player.command("seek", command.amount, "relative+exact")
+        elif command.kind == CommandType.CHANGE_SPEED:
+            self._player.speed = playback_speed(self._player.speed, command.amount)
+        elif command.kind == CommandType.TOGGLE_SUBTITLES:
+            self._player.cycle("sub-visibility")
+
+    def position_changed(name, position):
+            if position is not None and not self._seeking:
+                self._positions.put((position, False))
+
+    def play(self, path: Path, start: float = 0) -> None:
+        self._player.start = start
+        self._player.play(str(path))
         self._player.pause = False
 
     def take_positions(self) -> tuple[tuple[float, bool], ...]:
@@ -107,18 +157,6 @@ class MpvPlayer:
             except Empty:
                 return tuple(positions)
 
-    def set_subtitle(self, path: Path | None) -> None:
-        if self._subtitle_id is not None:
-            self._player.command("sub-remove", self._subtitle_id)
-            self._subtitle_id = None
-        # 이전 loadfile로 읽은 외부 원어 자막도 교체한다.
-        for track in self._player.track_list:
-            if track.get("type") == "sub" and track.get("external"):
-                self._player.command("sub-remove", track["id"])
-        if path:
-            self._player.command("sub-add", str(path), "select")
-            self._subtitle_id = self._player.sid
-
     def execute(self, command: Command) -> None:
         if command.kind == CommandType.TOGGLE_PAUSE:
             self._player.cycle("pause")
@@ -126,8 +164,6 @@ class MpvPlayer:
             self._player.command("seek", command.amount, "relative+exact")
         elif command.kind == CommandType.CHANGE_SPEED:
             self._player.speed = playback_speed(self._player.speed, command.amount)
-        elif command.kind == CommandType.TOGGLE_SUBTITLES:
-            self._player.cycle("sub-visibility")
 
     def position(self) -> float | None:
         return self._player.time_pos

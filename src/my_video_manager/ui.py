@@ -38,7 +38,6 @@ class MainWindow(QMainWindow):
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
         self.worker = None
-        self.playing_video_id = None
         self.subtitles = SubtitleControls(self)
         self.setWindowTitle("영상 라이브러리")
         self.resize(1100, 720)
@@ -165,7 +164,6 @@ class MainWindow(QMainWindow):
                 self.player = self.player_factory(int(self.surface.winId()))
             self.core.playback.start(video_id, start)
             self.player.play(location.path, start, subtitle=self.core.playback_subtitle(video_id))
-            self.playing_video_id = video_id
             self.progress.duration = next(v.duration for v in self.core.videos() if v.id == video_id)
             self.refresh_highlights()
             self.position_timer.start()
@@ -182,7 +180,6 @@ class MainWindow(QMainWindow):
             self.sync_position()
             self.player = None
         self.core.playback.end()
-        self.playing_video_id = None
 
     def sync_position(self):
         if self.player and self.core.playback.session is not None:

@@ -5,7 +5,8 @@ from threading import Event
 import pytest
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
-from my_video_manager.subtitles import Transcription, TranscriptSegment
+from my_video_manager.subtitles import (TranscriberCancelled, TranscriberResult, TranscriptSegment,
+                                       Transcript, TranscriptLine, transcript_srt)
 
 
 NOW = datetime(2026, 10, 14, tzinfo=timezone.utc)
@@ -22,11 +23,11 @@ class FakeMedia:
 class FakeTranscriber:
     def __init__(self):
         self.calls = []
-        self.result = Transcription("en", (TranscriptSegment(1.25, 3.5, "Hello"),
+        self.result = TranscriberResult("en", (TranscriptSegment(1.25, 3.5, "Hello"),
                                            TranscriptSegment(5, 7, "World")))
         self.error = None
 
-    def transcribe(self, path, spoken_language):
+    def transcribe(self, path, spoken_language, *, cancellation):
         self.calls.append((path, spoken_language))
         if self.error:
             raise self.error
@@ -110,7 +111,7 @@ def test_failure_keeps_previous_transcript_and_next_request_runs_then_retry(setu
     adapter.error = RuntimeError("GPU unavailable")
     core.request_subtitles(a.id, "ko")
     failed = core.process_next_subtitle()
-    assert failed.state == "failed" and "GPU unavailable" in failed.error
+    assert failed.state == "failed" and "GPU unavailable" in failed.error_detail
     assert reopen(core, adapter).subtitle_queue() == (failed,)
     assert core.transcript(a.id) == old
     adapter.error = None
@@ -126,7 +127,7 @@ def test_empty_speech_is_success_and_replaces_old_lines(setup):
     core, adapter, (a, _) = setup
     core.request_subtitles(a.id)
     core.process_next_subtitle()
-    adapter.result = Transcription("en", ())
+    adapter.result = TranscriberResult("en", ())
     core.request_subtitles(a.id)
     assert core.process_next_subtitle().state == "completed"
     assert core.transcript(a.id).lines == ()
@@ -156,7 +157,7 @@ def test_invalid_adapter_result_does_not_replace_saved_transcript(setup, segment
     core.request_subtitles(a.id)
     core.process_next_subtitle()
     old = core.transcript(a.id)
-    adapter.result = Transcription("en", (segment,))
+    adapter.result = TranscriberResult("en", (segment,))
     core.request_subtitles(a.id)
     assert core.process_next_subtitle().state == "failed"
     assert core.transcript(a.id) == old
@@ -167,10 +168,10 @@ def test_busy_transcriber_does_not_block_core_and_new_language_supersedes_result
     started, release = Event(), Event()
 
     class BlockingTranscriber(FakeTranscriber):
-        def transcribe(self, path, spoken_language):
+        def transcribe(self, path, spoken_language, *, cancellation):
             started.set()
             assert release.wait(5)
-            return super().transcribe(path, spoken_language)
+            return super().transcribe(path, spoken_language, cancellation=cancellation)
 
     core = reopen(core, BlockingTranscriber())
     core.request_subtitles(a.id)
@@ -197,7 +198,7 @@ def test_interrupted_processing_remains_queued_on_restart(setup):
     core, adapter, (a, _) = setup
 
     class Interrupted(FakeTranscriber):
-        def transcribe(self, path, spoken_language):
+        def transcribe(self, path, spoken_language, *, cancellation):
             raise KeyboardInterrupt
 
     core = reopen(core, Interrupted())
@@ -214,3 +215,75 @@ def test_subtitle_key_can_be_remapped(setup):
     core.set_key_bindings({"S": Command(CommandType.TOGGLE_SUBTITLES)})
     assert core.command_for_key("/") is None
     assert core.command_for_key("S").kind == CommandType.TOGGLE_SUBTITLES
+
+
+def test_stopping_processing_cancels_adapter_and_preserves_queue_and_old_transcript(setup):
+    core, adapter, (a, b) = setup
+    core.request_subtitles(a.id)
+    core.process_next_subtitle()
+    old = core.transcript(a.id)
+    started = Event()
+
+    class Cancellable(FakeTranscriber):
+        def transcribe(self, path, spoken_language, *, cancellation):
+            started.set()
+            assert cancellation.wait(5)
+            raise TranscriberCancelled
+
+    core = reopen(core, Cancellable())
+    core.request_subtitles(a.id, "ja")
+    core.request_subtitles(b.id)
+    pending = core.subtitle_queue()
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(core.process_next_subtitle)
+        try:
+            assert started.wait(5)
+        finally:
+            core.stop_subtitle_processing()
+        assert future.result(timeout=5).state == "queued"
+    assert core.subtitle_queue() == pending
+    assert core.transcript(a.id) == old
+    assert core.process_next_subtitle() is None
+    core = reopen(core, adapter)
+    assert core.process_next_subtitle().state == "completed"
+    assert core.transcript(a.id).spoken_language == "ja"
+
+
+def test_stop_before_worker_starts_preserves_pending_request(setup):
+    core, adapter, (a, _) = setup
+    core.request_subtitles(a.id)
+    pending = core.subtitle_queue()
+    core.stop_subtitle_processing()
+    assert core.process_next_subtitle() is None
+    assert not adapter.calls
+    assert core.subtitle_queue() == pending
+
+
+@pytest.mark.parametrize("probability, segments", [(1, ()), (0.49, (TranscriptSegment(0, 1, "Hello"),))])
+def test_unknown_language_is_not_eligible_for_translation(setup, probability, segments):
+    core, adapter, (a, _) = setup
+    adapter.result = TranscriberResult("nn", segments, probability)
+    core.request_subtitles(a.id)
+    core.process_next_subtitle()
+    transcript = reopen(core, adapter).transcript(a.id)
+    assert transcript.spoken_language is None
+    assert not transcript.translation_eligible
+
+
+@pytest.mark.parametrize("language, probability, expected", [(None, 0.5, "en"), ("ko", 0.1, "ko"), ("ja", 0.1, "ja")])
+def test_confident_or_specified_language_is_retained(setup, language, probability, expected):
+    core, adapter, (a, _) = setup
+    adapter.result = TranscriberResult("en", (TranscriptSegment(0, 1, "Hello"),), probability)
+    core.request_subtitles(a.id, language)
+    core.process_next_subtitle()
+    transcript = core.transcript(a.id)
+    assert transcript.spoken_language == expected
+    assert transcript.translation_eligible == (expected != "ko")
+
+
+@pytest.mark.parametrize("seconds, timestamp", [(0.9995, "00:00:01,000"), (59.9995, "00:01:00,000"),
+                                             (3599.9995, "01:00:00,000"), (3661.125, "01:01:01,125")])
+def test_srt_rounding_carries_to_minutes_and_hours(seconds, timestamp):
+    transcript = Transcript(1, "transcript", "en", False, NOW,
+                            (TranscriptLine("line", seconds, seconds + 1, "Hello"),))
+    assert transcript_srt(transcript).startswith(f"1\n{timestamp} --> ")

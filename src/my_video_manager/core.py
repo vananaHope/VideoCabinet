@@ -179,6 +179,9 @@ class AppCore:
     def process_next_subtitle(self) -> SubtitleQueueEntry | None:
         return self._subtitles.process_next()
 
+    def stop_subtitle_processing(self) -> None:
+        self._subtitles.stop_processing()
+
     def transcript(self, video_id: int) -> Transcript | None:
         return self._subtitles.transcript(video_id)
 

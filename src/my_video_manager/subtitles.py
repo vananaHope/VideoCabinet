@@ -3,9 +3,10 @@
 from dataclasses import dataclass
 from datetime import datetime
 import math
+import json
 from pathlib import Path
 import re
-from threading import Lock
+from threading import Event, Lock
 from typing import Protocol
 from uuid import uuid4
 
@@ -18,13 +19,32 @@ class TranscriptSegment:
 
 
 @dataclass(frozen=True)
-class Transcription:
+class TranscriberResult:
     spoken_language: str
     segments: tuple[TranscriptSegment, ...]
+    language_probability: float = 1.0
+
+
+class TranscriberCancelled(Exception):
+    """취소는 실패가 아니다. 원래 요청을 대기열에 남긴다."""
+
+
+class TranscriberError(RuntimeError):
+    def __init__(self, kind: str, detail: str):
+        self.kind = kind
+        self.detail = detail
+        super().__init__({
+            "gpu_unavailable": "GPU를 사용할 수 없습니다. 드라이버와 CUDA 환경을 확인하세요.",
+            "decode": "영상의 음성을 읽을 수 없습니다.",
+            "model_download": "받아쓰기 모델을 내려받을 수 없습니다. 연결과 저장 공간을 확인하세요.",
+        }.get(kind, "받아쓰기에 실패했습니다. 자세한 내용을 확인하세요."))
 
 
 class Transcriber(Protocol):
-    def transcribe(self, path: Path, spoken_language: str | None) -> Transcription: ...
+    def transcribe(self, path: Path, spoken_language: str | None, *,
+                   cancellation: Event) -> TranscriberResult:
+        """취소 신호를 받으면 신속하게 정리하고 TranscriberCancelled를 발생시킨다."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -39,10 +59,14 @@ class TranscriptLine:
 class Transcript:
     video_id: int
     id: str
-    spoken_language: str
+    spoken_language: str | None
     language_specified: bool
     created_at: datetime
     lines: tuple[TranscriptLine, ...]
+
+    @property
+    def translation_eligible(self) -> bool:
+        return bool(self.lines) and self.spoken_language not in (None, "ko")
 
 
 @dataclass(frozen=True)
@@ -53,6 +77,7 @@ class SubtitleQueueEntry:
     requested_at: datetime
     state: str
     error: str | None
+    error_detail: str | None = None
 
 
 def normalize_spoken_language(language: str | None) -> str | None:
@@ -71,6 +96,7 @@ class Subtitles:
         self._transcriber = transcriber
         self._playback_location = playback_location
         self._processing = Lock()
+        self._cancellation = Event()
         with connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS subtitle_queue (
@@ -117,8 +143,17 @@ class Subtitles:
 
     @staticmethod
     def _entry(row):
+        message, detail = row["error"], None
+        if message:
+            try:
+                error = json.loads(message)
+                if isinstance(error, dict) and "kind" in error and "detail" in error:
+                    detail = error["detail"]
+                    message = str(TranscriberError(error["kind"], detail))
+            except (ValueError, TypeError):
+                pass  # 이전 버전의 일반 문자열 오류도 읽는다.
         return SubtitleQueueEntry(row["id"], row["video_id"], row["spoken_language"],
-                                  datetime.fromisoformat(row["requested_at"]), row["state"], row["error"])
+                                  datetime.fromisoformat(row["requested_at"]), row["state"], message, detail)
 
     def queue(self) -> tuple[SubtitleQueueEntry, ...]:
         with self._connect() as db:
@@ -133,12 +168,19 @@ class Subtitles:
             lines = tuple(TranscriptLine(line["id"], line["start"], line["end"], line["text"])
                           for line in db.execute("SELECT * FROM transcript_lines WHERE transcript_id = ? ORDER BY ordinal",
                                                  (row["id"],)))
-            return Transcript(video_id, row["id"], row["spoken_language"], bool(row["language_specified"]),
+            language = row["spoken_language"]
+            if language == "und" or (not lines and not row["language_specified"]):
+                language = None
+            return Transcript(video_id, row["id"], language, bool(row["language_specified"]),
                               datetime.fromisoformat(row["created_at"]), lines)
+
+    def stop_processing(self) -> None:
+        """현재 AppCore의 처리를 중단한다. 대기열은 다음 앱 실행에서 재개한다."""
+        self._cancellation.set()
 
     def process_next(self) -> SubtitleQueueEntry | None:
         # 한 AppCore의 작업자는 하나다. 재진입 호출은 현재 처리를 기다리거나 중복 실행하지 않는다.
-        if not self._processing.acquire(blocking=False):
+        if self._cancellation.is_set() or not self._processing.acquire(blocking=False):
             return None
         try:
             pending = next((entry for entry in self.queue() if entry.state == "queued"), None)
@@ -148,16 +190,22 @@ class Subtitles:
                 if self._transcriber is None:
                     raise RuntimeError("받아쓰기 어댑터가 설정되지 않았습니다.")
                 result = self._transcriber.transcribe(self._playback_location(pending.video_id).path,
-                                                     pending.spoken_language)
+                                                     pending.spoken_language, cancellation=self._cancellation)
+                if self._cancellation.is_set():
+                    raise TranscriberCancelled
                 language = normalize_spoken_language(pending.spoken_language or result.spoken_language)
                 if language is None:
                     raise ValueError("받아쓰기 결과에 원어가 없습니다.")
+                if pending.spoken_language is None and (not result.segments or result.language_probability < 0.5):
+                    language = "und"  # DB의 기존 NOT NULL 계약을 유지하고 공개 API에서는 None.
                 for segment in result.segments:
                     if (not math.isfinite(segment.start) or not math.isfinite(segment.end)
                             or segment.start < 0 or segment.end <= segment.start or not segment.text.strip()):
                         raise ValueError("받아쓰기 결과의 자막 줄이 올바르지 않습니다.")
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
+                    if self._cancellation.is_set():
+                        raise TranscriberCancelled
                     # 실행 도중 원어를 바꿨으면 이전 결과로 최신 요청을 덮어쓰지 않는다.
                     if not db.execute("SELECT 1 FROM subtitle_queue WHERE id = ?", (pending.id,)).fetchone():
                         return pending
@@ -172,12 +220,15 @@ class Subtitles:
                     db.execute("DELETE FROM subtitle_queue WHERE id = ?", (pending.id,))
                 return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
                                           pending.requested_at, "completed", None)
+            except TranscriberCancelled:
+                return pending
             except Exception as error:
+                failure = error if isinstance(error, TranscriberError) else TranscriberError("other", str(error))
                 with self._connect() as db:
                     db.execute("UPDATE subtitle_queue SET state = 'failed', error = ? WHERE id = ?",
-                               (str(error), pending.id))
+                               (json.dumps({"kind": failure.kind, "detail": failure.detail}, ensure_ascii=False), pending.id))
                 return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
-                                          pending.requested_at, "failed", str(error))
+                                          pending.requested_at, "failed", str(failure), failure.detail)
         finally:
             # 처리 중에도 DB에는 queued를 유지한다. 강제 종료되면 다음 실행에서 처음부터 재시도한다.
             self._processing.release()
