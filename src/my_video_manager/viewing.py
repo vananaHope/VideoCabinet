@@ -1,0 +1,219 @@
+"""시청 구간의 순수 계산과 저장. 재생 엔진/화면에 의존하지 않는다."""
+
+from dataclasses import dataclass, replace
+from datetime import datetime
+from enum import Enum
+import json
+from math import isfinite
+
+
+@dataclass(frozen=True)
+class ViewingSettings:
+    finished_ratio: float = 0.9
+    abandoned_ratio: float = 0.05
+    favorite_count: int = 2
+    resume_rewind: float = 3
+    save_interval: float = 5
+
+    def __post_init__(self):
+        if not 0 < self.abandoned_ratio < self.finished_ratio <= 1:
+            raise ValueError("시청 분류 비율은 0 < 보다 만 < 다 봄 <= 1이어야 합니다.")
+        if not isinstance(self.favorite_count, int) or self.favorite_count < 1:
+            raise ValueError("즐겨 보는 영상의 횟수는 양의 정수여야 합니다.")
+        if not isfinite(self.resume_rewind) or self.resume_rewind < 0:
+            raise ValueError("이어보기 되감기는 유한한 음이 아닌 값이어야 합니다.")
+        if not isfinite(self.save_interval) or self.save_interval <= 0:
+            raise ValueError("저장 간격은 유한한 양수여야 합니다.")
+
+
+class ViewingKind(str, Enum):
+    FINISHED = "finished"
+    ABANDONED = "abandoned"
+    GLANCE = "glance"
+
+
+def merge_intervals(intervals, duration: float) -> tuple[tuple[float, float], ...]:
+    """영상 범위로 자른 구간의 합집합. 역방향/빈 구간은 재생으로 세지 않는다."""
+    if not isfinite(duration) or duration <= 0:
+        raise ValueError("영상 길이는 유한한 양수여야 합니다.")
+    bounded = []
+    for start, end in intervals:
+        if not isfinite(start) or not isfinite(end):
+            raise ValueError("재생 위치는 유한한 값이어야 합니다.")
+        start, end = max(0, start), min(duration, end)
+        if start < end:
+            bounded.append((start, end))
+    result = []
+    for start, end in sorted(bounded):
+        if result and start <= result[-1][1]:
+            result[-1] = (result[-1][0], max(result[-1][1], end))
+        else:
+            result.append((start, end))
+    return tuple(result)
+
+
+@dataclass(frozen=True)
+class Viewing:
+    id: int
+    video_id: int
+    duration: float
+    started_at: datetime
+    updated_at: datetime
+    ended_at: datetime | None = None
+    intervals: tuple[tuple[float, float], ...] = ()
+    last_position: float | None = None
+
+    @property
+    def played_seconds(self) -> float:
+        return sum(end - start for start, end in self.intervals)
+
+    @property
+    def played_ratio(self) -> float:
+        return self.played_seconds / self.duration
+
+    def classify(self, settings: ViewingSettings) -> ViewingKind:
+        if self.played_ratio >= settings.finished_ratio:
+            return ViewingKind.FINISHED
+        if self.played_ratio >= settings.abandoned_ratio:
+            return ViewingKind.ABANDONED
+        return ViewingKind.GLANCE
+
+
+def report_position(viewing: Viewing, position: float, *, seeked: bool = False) -> Viewing:
+    """연속된 엔진 보고 사이만 누적한다. 탐색/재개 첫 보고는 새 기준점이다.
+
+    호출자는 탐색을 위치 차이나 벽시계로 추측하지 않고 엔진의 불연속 이벤트로
+    전달한다. 따라서 작은 탐색도 제외하며 배속은 계산에 개입하지 않는다.
+    """
+    if viewing.ended_at is not None:
+        raise ValueError("이미 닫힌 시청입니다.")
+    if not isfinite(position):
+        raise ValueError("재생 위치는 유한한 값이어야 합니다.")
+    position = max(0, min(viewing.duration, position))
+    intervals = viewing.intervals
+    if not seeked and viewing.last_position is not None:
+        intervals = merge_intervals((*intervals, (viewing.last_position, position)), viewing.duration)
+    return replace(viewing, intervals=intervals, last_position=position)
+
+
+@dataclass(frozen=True)
+class ViewingStatus:
+    finished: bool = False
+    abandoned: bool = False
+    favorite: bool = False
+    finished_count: int = 0
+    resume_point: float | None = None
+    stopped_percent: float | None = None
+
+
+def viewing_status(viewings: tuple[Viewing, ...], settings: ViewingSettings) -> ViewingStatus:
+    finished_count = sum(v.classify(settings) == ViewingKind.FINISHED for v in viewings)
+    finished = finished_count > 0
+    abandoned = not finished and any(v.classify(settings) == ViewingKind.ABANDONED for v in viewings)
+    # 시작 시각이 같은 가짜 시계/빠른 재실행에도 ID가 최종 순서를 보장한다.
+    last = max((v for v in viewings if v.last_position is not None), key=lambda v: v.id, default=None)
+    point = last.last_position if abandoned and last is not None else None
+    return ViewingStatus(finished, abandoned, finished_count >= settings.favorite_count,
+                         finished_count, point,
+                         point / last.duration * 100 if point is not None else None)
+
+
+class ViewingRecorder:
+    """공용 재생 수명주기와 시청 저장을 연결한다."""
+
+    def __init__(self, start, report, end):
+        self._start, self._report, self._end = start, report, end
+        self._viewing_id = None
+
+    def playback_started(self, session, position):
+        if session.record_viewing:
+            self._viewing_id = self._start(session.video_id, position).id
+
+    def playback_position(self, session, position, seeked):
+        if self._viewing_id is not None:
+            self._report(self._viewing_id, position, seeked=seeked)
+
+    def playback_ended(self, session, position):
+        if self._viewing_id is not None:
+            self._end(self._viewing_id)
+            self._viewing_id = None
+
+
+class ViewingStore:
+    """AppCore가 소유하는 시청 저장소. connect/clock은 코어에서 주입한다."""
+
+    def __init__(self, connect, clock, settings: ViewingSettings):
+        self._connect, self._clock, self.settings = connect, clock, settings
+        self._active: dict[int, Viewing] = {}
+        self._saved_at: dict[int, datetime] = {}
+        with self._connect() as db:
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS viewings (
+                    id INTEGER PRIMARY KEY,
+                    video_id INTEGER NOT NULL REFERENCES videos(id),
+                    duration REAL NOT NULL,
+                    started_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    intervals TEXT NOT NULL,
+                    last_position REAL
+                );
+                CREATE INDEX IF NOT EXISTS viewings_video ON viewings(video_id);
+                UPDATE viewings SET ended_at = updated_at WHERE ended_at IS NULL;
+            """)
+
+    def start(self, video_id: int, duration: float, position: float) -> Viewing:
+        merge_intervals((), duration)
+        now = self._clock()
+        viewing = report_position(Viewing(0, video_id, duration, now, now), position, seeked=True)
+        with self._connect() as db:
+            cursor = db.execute(
+                "INSERT INTO viewings (video_id, duration, started_at, updated_at, intervals, last_position) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (video_id, duration, now.isoformat(), now.isoformat(), "[]", viewing.last_position),
+            )
+        viewing = replace(viewing, id=cursor.lastrowid)
+        self._active[viewing.id] = viewing
+        self._saved_at[viewing.id] = now
+        return viewing
+
+    def report(self, viewing_id: int, position: float, *, seeked: bool = False) -> None:
+        viewing = report_position(self._require_active(viewing_id), position, seeked=seeked)
+        self._active[viewing_id] = replace(viewing, updated_at=self._clock())
+        self.save_due()
+
+    def _require_active(self, viewing_id):
+        if viewing_id not in self._active:
+            raise ValueError("진행 중인 시청이 아닙니다.")
+        return self._active[viewing_id]
+
+    def save_due(self) -> None:
+        now = self._clock()
+        for viewing in self._active.values():
+            if (now - self._saved_at[viewing.id]).total_seconds() >= self.settings.save_interval:
+                self._save(viewing)
+                self._saved_at[viewing.id] = now
+
+    def end(self, viewing_id: int) -> Viewing:
+        now = self._clock()
+        viewing = replace(self._require_active(viewing_id), updated_at=now, ended_at=now)
+        self._save(viewing)
+        del self._active[viewing_id]
+        del self._saved_at[viewing_id]
+        return viewing
+
+    def _save(self, viewing):
+        with self._connect() as db:
+            db.execute("UPDATE viewings SET updated_at=?, ended_at=?, intervals=?, last_position=? WHERE id=?",
+                       (viewing.updated_at.isoformat(), viewing.ended_at.isoformat() if viewing.ended_at else None,
+                        json.dumps(viewing.intervals), viewing.last_position, viewing.id))
+
+    def list(self, video_id: int) -> tuple[Viewing, ...]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM viewings WHERE video_id=? ORDER BY id", (video_id,)).fetchall()
+        return tuple(self._active[row["id"]] if row["id"] in self._active else Viewing(
+            row["id"], row["video_id"], row["duration"], datetime.fromisoformat(row["started_at"]),
+            datetime.fromisoformat(row["updated_at"]),
+            datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None,
+            tuple(tuple(pair) for pair in json.loads(row["intervals"])), row["last_position"],
+        ) for row in rows)
