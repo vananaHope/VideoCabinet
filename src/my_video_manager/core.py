@@ -122,7 +122,8 @@ class AppCore:
         self._review = Review(self._connect, clock, self._subtitles, self.playback_location)
         self._subtitles.review = self._review
         self._translations = Translations(self._connect, clock, self._subtitles, self.settings, translator,
-                                          batch_size=translation_batch_size, order=self._queue_order)
+                                          batch_size=translation_batch_size, order=self._queue_order,
+                                          protected_lines=self._review.protected_lines)
         self._review.translations = self._translations
         self._auto_subtitle_rules = AutoSubtitleRules(self._connect, self)
         self._subtitle_queue = SubtitleQueue(self, self._queue_order)
@@ -155,6 +156,9 @@ class AppCore:
 
     def request_subtitle_range(self, video_id, start, end):
         return self._review.request_range(video_id, start, end)
+
+    def subtitle_range_bounds(self, video_id, start, end):
+        return self._review.range_bounds(video_id, start, end)
 
     def subtitle_export(self, video_id, *, translated=False) -> SubtitleExport:
         return self._review.export(video_id, translated=translated)

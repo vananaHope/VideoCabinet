@@ -158,28 +158,28 @@ def test_running_translation_result_is_discarded_after_source_edit(setup):
 
 
 @pytest.mark.parametrize("count", [0, 1, 3, 6])
-def test_range_replaces_start_inside_boundary_and_preserves_other_ids_and_reviews(setup, count):
+def test_range_preserves_nonoverlapping_ids_and_reviews(setup, count):
     core, vid, transcriber, translator, _, reopen = setup
     finish(core)
     before = core.transcript(vid)
     core.edit_translation_line(vid, before.lines[0].id, "유지")
     core.edit_translation_line(vid, before.lines[1].id, "삭제")
     transcriber.result = TranscriberResult("en", tuple(TranscriptSegment(i, i + .5, f"new {i}") for i in range(count)))
-    core.request_subtitle_range(vid, 1, 20)
+    core.request_subtitle_range(vid, 5, 20)
     with pytest.raises(ValueError, match="재생성"):
         core.edit_transcript_line(vid, before.lines[0].id, "blocked")
     assert core.transcript(vid) == before
     core = reopen()
     assert core.process_next_subtitle().state == "completed"
-    assert transcriber.calls[-1]["start"] == 1
-    assert transcriber.calls[-1]["duration"] == 19
+    assert transcriber.calls[-1]["start"] == 5
+    assert transcriber.calls[-1]["duration"] == 15
     after = core.transcript(vid)
     assert after.id == before.id
-    assert after.lines[0] == before.lines[0]  # 앞 경계에 걸친 줄
+    assert after.lines[0] == before.lines[0]
     assert after.lines[-2:] == before.lines[-2:]  # 끝 시각에 시작하는 줄도 유지
     assert len(after.lines) == 3 + count
     assert {l.id for l in after.lines[1:-2]}.isdisjoint(l.id for l in before.lines)
-    assert [l.start for l in after.lines[1:-2]] == [1 + i for i in range(count)]
+    assert [l.start for l in after.lines[1:-2]] == [5 + i for i in range(count)]
     translator.calls.clear()
     finish(core)
     assert sum(len(call) for call in translator.calls) == count
@@ -204,7 +204,7 @@ def test_range_failure_or_cancel_keeps_original_and_translation(setup, error):
 def test_invalid_range_result_rolls_back_deletions(setup):
     core, vid, transcriber, _, _, _ = setup
     before = core.transcript(vid)
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 100, "outside"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, float("nan"), "invalid"),))
     core.request_subtitle_range(vid, 1, 20)
     assert core.process_next_subtitle().state == "failed"
     assert core.transcript(vid) == before
@@ -461,3 +461,159 @@ def test_search_removes_all_reviewed_lines_on_whole_regeneration(setup):
     assert_search_hits(core, vid, "전체재생성", expected)
     for query in ("이전검수", "이전직접", "source"):
         assert_search_hits(core, vid, query, [])
+
+
+@pytest.mark.parametrize("old_start,old_end,bounds", [(9, 13, (5, 13)), (0, 6, (0, 10))])
+def test_range_expands_across_both_boundaries_without_loss_or_duplicates(setup, old_start, old_end, bounds):
+    core, vid, transcriber, _, _, reopen = setup
+    transcriber.result = TranscriberResult("en", (
+        TranscriptSegment(old_start, old_end, "boundary old"), TranscriptSegment(20, 22, "retained")))
+    core.request_subtitles(vid)
+    core.process_next_subtitle()
+    finish(core)
+    before = core.transcript(vid)
+    assert core.subtitle_range_bounds(vid, 5, 10) == bounds
+    transcriber.result = TranscriberResult("en", (
+        TranscriptSegment(old_start - bounds[0], old_end - bounds[0], "boundary new"),))
+    core.request_subtitle_range(vid, 5, 10)
+    assert core.process_next_subtitle().state == "completed"
+    assert (transcriber.calls[-1]["start"], transcriber.calls[-1]["duration"]) == (bounds[0], bounds[1] - bounds[0])
+    after = reopen().transcript(vid)
+    assert len(after.lines) == 2
+    assert after.lines[0].id != before.lines[0].id
+    assert (after.lines[0].start, after.lines[0].end) == (old_start, old_end)
+    assert after.lines[1] == before.lines[1]
+    assert_search_hits(core, vid, "boundaryold", [])
+    assert_search_hits(core, vid, "boundarynew", [("transcript", "boundary new", old_start)])
+
+
+def test_range_expands_transitively_and_clips_output_to_video_bounds(setup):
+    core, vid, transcriber, *_ = setup
+    transcriber.result = TranscriberResult("en", tuple(
+        TranscriptSegment(start, end, f"old {start}") for start, end in ((0, 4), (4, 10), (9, 50), (49, 105))))
+    core.request_subtitles(vid)
+    core.process_next_subtitle()
+    before = core.transcript(vid)
+    assert core.subtitle_range_bounds(vid, 5, 6) == (4, 100)
+    transcriber.result = TranscriberResult("en", (
+        TranscriptSegment(-2, 2, "front"), TranscriptSegment(94, 110, "end"),
+        TranscriptSegment(100, 102, "outside")))
+    core.request_subtitle_range(vid, 5, 6)
+    assert core.process_next_subtitle().state == "completed"
+    after = core.transcript(vid)
+    assert after.lines[0] == before.lines[0]
+    assert [(line.start, line.end) for line in after.lines[1:]] == [(4, 6), (98, 100)]
+    assert_search_hits(core, vid, "old9", [])
+    assert_search_hits(core, vid, "end", [("transcript", "end", 98)])
+
+
+@pytest.mark.parametrize("translated", [False, True])
+@pytest.mark.parametrize("edit", [False, True])
+def test_srt_normalizes_blank_lines_for_export_and_playback(setup, translated, edit):
+    core, vid, transcriber, translator, *_ = setup
+    raw = "  first\r\n \r\n second \r third\n\n  "
+    normalized = "first\nsecond\nthird"
+    if edit:
+        finish(core)
+        line = core.transcript(vid).lines[0]
+        method = core.edit_translation_line if translated else core.edit_transcript_line
+        method(vid, line.id, raw)
+        stored = core.translation(vid) if translated else core.transcript(vid)
+        assert stored.lines[0].text == normalized
+    else:
+        transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, raw),))
+        core.request_subtitles(vid)
+        core.process_next_subtitle()
+        translator.translate = lambda lines, language, **kwargs: tuple(TranslatedLine(line.id, raw) for line in lines)
+        finish(core)
+    export = core.subtitle_export(vid, translated=translated)
+    expected_count = len(core.transcript(vid).lines)
+    assert len(export.text.strip().split("\n\n")) == expected_count
+    assert export.text.split("\n\n")[0].endswith(normalized + ("\n" if expected_count == 1 else ""))
+    assert "\r" not in export.text
+    core.playback.start(vid, 0)
+    if translated:
+        assert core.toggle_subtitle_language()[0]
+    playback = core.playback_subtitle(vid).read_text(encoding="utf-8")
+    assert playback == export.text
+
+
+def test_export_reports_pending_retranslation_until_published(setup):
+    core, vid, *_ = setup
+    finish(core)
+    assert core.subtitle_export(vid, translated=True).pending_retranslation_lines == 0
+    for line in core.transcript(vid).lines[:3]:
+        core.edit_transcript_line(vid, line.id, f"changed {line.start}")
+    core.process_next_translation()
+    export = core.subtitle_export(vid, translated=True)
+    assert export.pending_retranslation_lines == 3
+    assert "0줄 미번역" in export.warning and "재번역 대기 3줄" in export.warning
+    assert "번역 source" in export.text
+    finish(core)
+    assert core.subtitle_export(vid, translated=True).pending_retranslation_lines == 0
+
+
+def test_empty_exports_are_rejected(setup):
+    core, vid, transcriber, *_ = setup
+    with pytest.raises(ValueError, match="^내보낼 자막 줄이 없습니다$"):
+        core.subtitle_export(vid, translated=True)
+    transcriber.result = TranscriberResult("en", ())
+    core.request_subtitle_range(vid, 0, 100)
+    core.process_next_subtitle()
+    for translated in (False, True):
+        with pytest.raises(ValueError, match="^내보낼 자막 줄이 없습니다$"):
+            core.subtitle_export(vid, translated=translated)
+
+
+@pytest.mark.parametrize("failures", [1, 2, 3])
+def test_source_edit_preserves_limit_state_attempts_and_other_completed_targets(setup, failures):
+    core, vid, _, translator, time, reopen = setup
+    core.process_next_translation()
+    translator.error = TranslationError("usage_limit", "limit detail")
+    for _ in range(failures):
+        core.process_next_translation()
+        time[0] += timedelta(minutes=16)
+    before = core.translation_queue()[0]
+    line = core.transcript(vid).lines[0]
+    core.edit_transcript_line(vid, line.id, "changed")
+    core = reopen()
+    after = core.translation_queue()[0]
+    assert (after.state, after.retry_at, after.error, after.error_detail) == (
+        before.state, before.retry_at, before.error, before.error_detail)
+    assert (after.completed_lines, after.total_lines) == (1, 4)
+    # 수정해도 한도 시도 횟수를 초기화하지 않는다.
+    for _ in range(3 - failures):
+        core.process_next_translation()
+        time[0] += timedelta(minutes=16)
+    assert core.translation_queue()[0].state == "failed"
+    assert core.process_next_translation() is None
+    translator.error = None
+    translator.calls.clear()
+    core.request_translation(vid)
+    finish(core)
+    assert [line.start for call in translator.calls for line in call] == [0, 20, 30]
+    assert core.translation(vid).lines[1].text == "번역 source 10"
+
+
+def test_source_edit_preserves_nonlimit_failure_until_explicit_retry(setup):
+    core, vid, _, translator, time, reopen = setup
+    translator.error = TranslationError("authentication", "login detail")
+    before = core.process_next_translation()
+    core.edit_transcript_line(vid, core.transcript(vid).lines[2].id, "changed")
+    time[0] += timedelta(days=1)
+    core = reopen()
+    after = core.translation_queue()[0]
+    assert (after.state, after.retry_at, after.error, after.error_detail) == (
+        before.state, before.retry_at, before.error, before.error_detail)
+    assert core.process_next_translation() is None
+
+
+def test_failed_range_retains_specific_retry_guidance_after_restart(setup):
+    core, vid, transcriber, _, _, reopen = setup
+    transcriber.error = RuntimeError("failed")
+    core.request_subtitle_range(vid, 5, 15)
+    failed = core.process_next_subtitle()
+    assert failed.retry_guidance == "검수 창의 구간 다시 생성으로 재시도하세요"
+    assert reopen().subtitle_queue()[0].retry_guidance == failed.retry_guidance
+    core.request_subtitles(vid)
+    assert core.process_next_subtitle().retry_guidance == "다시 요청하면 재시도합니다"

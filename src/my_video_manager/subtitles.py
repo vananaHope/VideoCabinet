@@ -84,6 +84,7 @@ class SubtitleQueueEntry:
     error: str | None
     error_detail: str | None = None
     progress: float = 0.0
+    retry_guidance: str | None = None
 
 
 def normalize_spoken_language(language: str | None) -> str | None:
@@ -171,7 +172,12 @@ class Subtitles:
                 pass  # 이전 버전의 일반 문자열 오류도 읽는다.
         return SubtitleQueueEntry(row["id"], row["video_id"], row["spoken_language"],
                                   datetime.fromisoformat(row["requested_at"]), row["state"], message, detail,
-                                  self._progress.get(row["id"], 0))
+                                  self._progress.get(row["id"], 0),
+                                  self._retry_guidance(row["id"]) if message else None)
+
+    def _retry_guidance(self, queue_id):
+        return ("검수 창의 구간 다시 생성으로 재시도하세요"
+                if self.review and self.review.range_for(queue_id) else "다시 요청하면 재시도합니다")
 
     def queue(self) -> tuple[SubtitleQueueEntry, ...]:
         with self._connect() as db:
@@ -254,7 +260,8 @@ class Subtitles:
                     language = "und"  # DB의 기존 NOT NULL 계약을 유지하고 공개 API에서는 None.
                 for segment in result.segments:
                     if (not math.isfinite(segment.start) or not math.isfinite(segment.end)
-                            or segment.start < 0 or segment.end <= segment.start or not segment.text.strip()):
+                            or (segment.start < 0 and interval is None)
+                            or segment.end <= segment.start or not segment.text.strip()):
                         raise ValueError("받아쓰기 결과의 자막 줄이 올바르지 않습니다.")
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
@@ -289,13 +296,20 @@ class Subtitles:
                     db.execute("UPDATE subtitle_queue SET state = 'failed', error = ? WHERE id = ?",
                                (json.dumps({"kind": failure.kind, "detail": failure.detail}, ensure_ascii=False), pending.id))
                 return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
-                                          pending.requested_at, "failed", str(failure), failure.detail)
+                                          pending.requested_at, "failed", str(failure), failure.detail,
+                                          retry_guidance=self._retry_guidance(pending.id))
         finally:
             with self._activity:
                 self._active_video = self._active_cancellation = None
             if 'pending' in locals() and pending:
                 self._progress.pop(pending.id, None)
             self._processing.release()
+
+
+def normalize_subtitle_text(text: str) -> str:
+    """큐 내부의 빈 줄을 제거해 SRT 블록 경계와 혼동되지 않게 한다."""
+    return "\n".join(line.strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                     if line.strip())
 
 
 def transcript_srt(transcript: Transcript) -> str:
@@ -307,5 +321,5 @@ def transcript_srt(transcript: Transcript) -> str:
         hours, minute = divmod(minutes, 60)
         return f"{hours:02}:{minute:02}:{sec:02},{ms:03}"
 
-    return "\n\n".join(f"{i}\n{timestamp(line.start)} --> {timestamp(line.end)}\n{line.text}"
+    return "\n\n".join(f"{i}\n{timestamp(line.start)} --> {timestamp(line.end)}\n{normalize_subtitle_text(line.text)}"
                        for i, line in enumerate(transcript.lines, 1)) + "\n"

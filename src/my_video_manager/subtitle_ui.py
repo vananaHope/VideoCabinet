@@ -85,7 +85,7 @@ class SubtitleControls(QObject):
         if result is None:
             return
         if result.error:
-            self.window.statusBar().showMessage(f"자막 실패 — 다시 요청하면 재시도합니다: {result.error}")
+            self.window.statusBar().showMessage(f"자막 실패 — {result.retry_guidance}: {result.error}")
             self.window.statusBar().setToolTip(result.error_detail or result.error)
         elif result.state == "completed":
             transcript = self.core.transcript(result.video_id)

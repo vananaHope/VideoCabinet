@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from uuid import uuid4
 
-from .subtitles import TranscriptLine, transcript_srt
+from .subtitles import TranscriptLine, transcript_srt, normalize_subtitle_text
 
 
 class ReviewConfirmationRequired(ValueError):
@@ -27,6 +27,12 @@ class SubtitleExport:
     text: str
     missing_lines: int
     default_path: Path
+    pending_retranslation_lines: int = 0
+
+    @property
+    def warning(self):
+        return (f"{self.missing_lines}줄 미번역 · 재번역 대기 {self.pending_retranslation_lines}줄입니다. "
+                "저장된 번역으로 내보낼까요?")
 
 
 @dataclass(frozen=True)
@@ -55,6 +61,10 @@ class Review:
                     end REAL NOT NULL
                 );
             """)
+
+    @staticmethod
+    def protected_lines(db):
+        return {r[0] for r in db.execute("SELECT line_id FROM subtitle_reviews WHERE translation_reviewed = 1")}
 
     def lines(self, video_id, *, connection=None):
         with (nullcontext(connection) if connection is not None else self._connect()) as db:
@@ -94,7 +104,7 @@ class Review:
             raise ValueError("원어 자막 재생성이 끝난 뒤 검수하세요.")
 
     def edit(self, video_id, line_id, text, *, translated=False, overwrite_reviewed=False):
-        text = text.strip()
+        text = normalize_subtitle_text(text)
         if not text:
             raise ValueError("자막 텍스트를 입력하세요.")
         with self._connect() as db:
@@ -123,15 +133,32 @@ class Review:
                 db.execute("UPDATE subtitle_reviews SET original_reviewed = 1, translation_reviewed = 0 "
                            "WHERE line_id = ?", (line_id,))
                 if eligible:
-                    self.translations.request(video_id, [line_id], connection=db)
+                    self.translations.request(video_id, [line_id], connection=db, preserve_state=True)
+
+    def range_bounds(self, video_id, start, end, *, connection=None):
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            duration = db.execute("SELECT duration FROM videos WHERE id = ?", (video_id,)).fetchone()
+            if duration is None:
+                raise ValueError("영상을 찾을 수 없습니다.")
+            duration = duration[0]
+            if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= duration):
+                raise ValueError("구간은 0 이상 영상 길이 이하이며 끝이 시작보다 뒤여야 합니다.")
+            lines = db.execute("SELECT l.start, l.end FROM transcript_lines l JOIN transcripts t "
+                               "ON t.id = l.transcript_id WHERE t.video_id = ?", (video_id,)).fetchall()
+        while True:
+            previous = start, end
+            for line in lines:
+                if line["start"] < end and line["end"] > start:
+                    start = max(0, min(start, line["start"]))
+                    end = min(duration, max(end, line["end"]))
+            if previous == (start, end):
+                return start, end
 
     def request_range(self, video_id, start, end):
         self._playback_location(video_id)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            duration = db.execute("SELECT duration FROM videos WHERE id = ?", (video_id,)).fetchone()[0]
-            if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= duration):
-                raise ValueError("구간은 0 이상 영상 길이 이하이며 끝이 시작보다 뒤여야 합니다.")
+            start, end = self.range_bounds(video_id, start, end, connection=db)
             self._editable(db, video_id)
             transcript = db.execute("SELECT * FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
             if transcript is None:
@@ -149,13 +176,13 @@ class Review:
             return db.execute("SELECT * FROM subtitle_review_ranges WHERE queue_id = ?", (queue_id,)).fetchone()
 
     def replace_range(self, db, pending, interval, segments):
-        """상대 시각 결과를 [start, end)로 옮기고 시작이 구간 안인 줄만 교체한다."""
+        """겹치는 줄 전체를 덮는 확장 범위로 결과를 자른 뒤 원자적으로 교체한다."""
         start, end = interval["start"], interval["end"]
         transcript_id = interval["transcript_id"]
-        if any(s.start >= end - start or s.end > end - start + 0.001 for s in segments):
-            raise ValueError("받아쓰기 결과가 요청한 구간을 벗어났습니다.")
-        db.execute("DELETE FROM transcript_lines WHERE transcript_id = ? AND start >= ? AND start < ?",
-                   (transcript_id, start, end))
+        segments = tuple(replace(s, start=max(0, s.start), end=min(end - start, s.end)) for s in segments
+                         if max(0, s.start) < min(end - start, s.end))
+        db.execute("DELETE FROM transcript_lines WHERE transcript_id = ? AND start < ? AND end > ?",
+                   (transcript_id, end, start))
         retained = db.execute("SELECT id, start FROM transcript_lines WHERE transcript_id = ? ORDER BY ordinal",
                               (transcript_id,)).fetchall()
         # UNIQUE는 행마다 검사된다. 모든 기존 순서를 먼저 충돌하지 않는 음수로 이동한다.
@@ -182,8 +209,14 @@ class Review:
                 raise ValueError("내보낼 원어 자막이 없습니다.")
             lines = self.lines(video_id, connection=db)
             title = db.execute("SELECT title FROM videos WHERE id = ?", (video_id,)).fetchone()[0]
+            pending = db.execute("SELECT COUNT(*) FROM translation_targets target "
+                                 "JOIN translation_lines saved ON saved.line_id = target.line_id "
+                                 "JOIN translation_queue q ON q.id = target.queue_id "
+                                 "WHERE q.video_id = ?", (video_id,)).fetchone()[0] if translated else 0
         selected = tuple(replace(line.original, text=line.translation) if translated else line.original
                          for line in lines if not translated or line.translation is not None)
+        if not selected:
+            raise ValueError("내보낼 자막 줄이 없습니다")
         filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", title).rstrip(". ") or "영상"
         language = "ko" if translated else transcript.spoken_language or "und"
         # 파일 없음 영상도 검수·내보내기는 가능하다. 위치가 없으면 홈 폴더를 제안한다.
@@ -192,4 +225,4 @@ class Review:
         except (ValueError, FileNotFoundError):
             folder = Path.home()
         return SubtitleExport(transcript_srt(replace(transcript, lines=selected)),
-                              len(lines) - len(selected), folder / f"{filename}.{language}.srt")
+                              len(lines) - len(selected), folder / f"{filename}.{language}.srt", pending)

@@ -74,7 +74,7 @@ class TranslationQueueEntry:
 
 class Translations:
     def __init__(self, connect, clock, subtitles, settings, translator, *, batch_size=30,
-                 retry_delay=timedelta(minutes=15), format_attempts=3, order=None):
+                 retry_delay=timedelta(minutes=15), format_attempts=3, order=None, protected_lines=None):
         if batch_size < 1 or format_attempts < 1 or retry_delay.total_seconds() <= 0:
             raise ValueError("번역 묶음 크기, 재시도 횟수와 보류 시간은 양수여야 합니다.")
         self._connect, self._clock = connect, clock
@@ -85,6 +85,7 @@ class Translations:
         self._active_video = None
         self._active_cancellation = None
         self._activity = Lock()
+        self._protected_lines = protected_lines or (lambda db: set())
         with connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS translation_lines (
@@ -139,7 +140,7 @@ class Translations:
         for video_id in ids:
             self.request(video_id, automatic=True)
 
-    def request(self, video_id: int, line_ids=None, *, automatic=False, connection=None):
+    def request(self, video_id: int, line_ids=None, *, automatic=False, connection=None, preserve_state=False):
         transcript = self._subtitles.transcript(video_id, connection=connection)
         if transcript is None or not transcript.translation_eligible:
             if automatic:
@@ -154,8 +155,7 @@ class Translations:
             if not db.execute("SELECT 1 FROM transcripts WHERE id = ?", (transcript.id,)).fetchone():
                 return None  # 동시에 원어가 교체됐다. 다음 자동 등록에서 새 세대를 처리한다.
             old = db.execute("SELECT * FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
-            selected -= {r[0] for r in db.execute(
-                "SELECT line_id FROM subtitle_reviews WHERE translation_reviewed = 1")}
+            selected -= self._protected_lines(db)
             if not selected:
                 return self._entry(db, old) if old else None
             if automatic:
@@ -187,27 +187,34 @@ class Translations:
                     retained = {r["line_id"]: r["text"] for r in db.execute(
                         "SELECT * FROM translation_targets WHERE queue_id = ?", (old["id"],))}
                 retained.update({line_id: None for line_id in selected})
+                attempts = list(db.execute("SELECT cli, attempts FROM translation_limit_attempts WHERE queue_id = ?",
+                                           (old["id"],))) if old and preserve_state else []
                 db.execute("DELETE FROM translation_queue WHERE video_id = ?", (video_id,))
                 queue_id = uuid4().hex
                 db.execute("INSERT INTO translation_queue(id, video_id, transcript_id, requested_at) VALUES (?, ?, ?, ?)",
                            (queue_id, video_id, transcript.id, self._clock().isoformat()))
+                if old and preserve_state:
+                    db.execute("UPDATE translation_queue SET requested_at = ?, state = ?, retry_at = ?, "
+                               "error_kind = ?, error_detail = ? WHERE id = ?",
+                               (old["requested_at"], old["state"], old["retry_at"], old["error_kind"], old["error_detail"], queue_id))
+                    db.executemany("INSERT INTO translation_limit_attempts VALUES (?, ?, ?)",
+                                   [(queue_id, r["cli"], r["attempts"]) for r in attempts])
                 db.executemany("INSERT INTO translation_targets VALUES (?, ?, ?)",
                                [(queue_id, line_id, text) for line_id, text in retained.items()])
             return self._entry(db, db.execute("SELECT * FROM translation_queue WHERE id = ?", (queue_id,)).fetchone())
 
-    @staticmethod
-    def finish_ready(db, video_id):
+    def finish_ready(self, db, video_id):
         """검수/구간 삭제가 마지막 미완료 대상을 없앤 경우도 저장한 묶음을 확정한다."""
         row = db.execute("SELECT id FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
         if row is None or db.execute("SELECT 1 FROM translation_targets WHERE queue_id = ? AND text IS NULL",
                                      (row[0],)).fetchone():
             return
-        db.execute("DELETE FROM translation_lines WHERE line_id IN "
-                   "(SELECT line_id FROM translation_targets WHERE queue_id = ?) AND line_id NOT IN "
-                   "(SELECT line_id FROM subtitle_reviews WHERE translation_reviewed = 1)", (row[0],))
-        db.execute("INSERT INTO translation_lines SELECT line_id, text FROM translation_targets "
-                   "WHERE queue_id = ? AND line_id NOT IN "
-                   "(SELECT line_id FROM subtitle_reviews WHERE translation_reviewed = 1)", (row[0],))
+        protected = self._protected_lines(db)
+        targets = [(r["line_id"], r["text"]) for r in db.execute(
+            "SELECT line_id, text FROM translation_targets WHERE queue_id = ?", (row[0],))
+                   if r["line_id"] not in protected]
+        db.executemany("DELETE FROM translation_lines WHERE line_id = ?", [(id_,) for id_, _ in targets])
+        db.executemany("INSERT INTO translation_lines VALUES (?, ?)", targets)
         db.execute("DELETE FROM translation_queue WHERE id = ?", (row[0],))
 
     @staticmethod

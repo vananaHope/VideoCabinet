@@ -129,12 +129,24 @@ class ReviewDialog(QDialog):
             widget.setValue(value)
         layout.addRow("시작(초)", start)
         layout.addRow("끝(초)", end)
-        note = QLabel("시작 이상, 끝 미만에서 시작하는 줄과 그 번역을 교체합니다.\n구간 앞에서 시작해 걸친 줄은 유지합니다.")
+        note = QLabel()
         layout.addRow(note)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addRow(buttons)
+        def update_range():
+            try:
+                actual_start, actual_end = self.core.subtitle_range_bounds(self.video_id, start.value(), end.value())
+                note.setText(f"실제로 받아쓸 범위: {actual_start:.3f}–{actual_end:.3f}초\n"
+                             "경계에 걸친 줄 전체를 포함하도록 넓혀 원어와 번역을 교체합니다.")
+                buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
+            except ValueError as error:
+                note.setText(str(error))
+                buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
+        start.valueChanged.connect(update_range)
+        end.valueChanged.connect(update_range)
+        update_range()
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
@@ -155,8 +167,7 @@ class ReviewDialog(QDialog):
     def export(self, translated):
         try:
             export = self.core.subtitle_export(self.video_id, translated=translated)
-            if translated and export.missing_lines and not self.confirm(
-                f"{export.missing_lines}줄 미번역입니다. 번역된 줄만 내보낼까요?"):
+            if translated and (export.missing_lines or export.pending_retranslation_lines) and not self.confirm(export.warning):
                 return
             path, _ = QFileDialog.getSaveFileName(self, "SRT 저장", str(export.default_path), "SRT 자막 (*.srt)")
             if path:
