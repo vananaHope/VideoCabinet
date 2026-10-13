@@ -3,7 +3,7 @@
 from PySide6.QtCore import QEvent, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMainWindow, QMessageBox, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -12,6 +12,7 @@ from .core import AppCore, CommandType
 from .subtitle_ui import SubtitleControls
 from .highlight_ui import HighlightList, HighlightProgress, timestamp
 from .series_ui import SeriesEditor
+from .tag_ui import TagEditor, TagManager
 
 
 class ScanWorker(QThread):
@@ -62,6 +63,19 @@ class MainWindow(QMainWindow):
         self.folders = QLabel()
         self.folders.setWordWrap(True)
         layout.addWidget(self.folders)
+        tag_controls = QHBoxLayout()
+        tag_controls.addWidget(QLabel("태그 필터"))
+        self.tag_filter = QComboBox()
+        self.tag_filter.setAccessibleName("라이브러리 태그 필터")
+        self.tag_filter.currentIndexChanged.connect(self.filter_changed)
+        tag_controls.addWidget(self.tag_filter, 1)
+        self.tags_button = QPushButton("선택한 영상 태그")
+        self.tags_button.clicked.connect(self.edit_video_tags)
+        tag_controls.addWidget(self.tags_button)
+        manage_tags = QPushButton("모든 태그 관리")
+        manage_tags.clicked.connect(self.manage_tags)
+        tag_controls.addWidget(manage_tags)
+        layout.addLayout(tag_controls)
         layout.addWidget(QLabel("영상을 더블클릭하거나 방향키로 고른 뒤 Enter를 누르세요."))
         self.list = QListWidget()
         self.list.setIconSize(QSize(192, 108))
@@ -103,6 +117,14 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def refresh(self):
+        tag_id = self.tag_filter.currentData()
+        self.tag_filter.blockSignals(True)
+        self.tag_filter.clear()
+        self.tag_filter.addItem("모든 영상", None)
+        for tag in self.core.tags():
+            self.tag_filter.addItem(tag.name, tag.id)
+        self.tag_filter.setCurrentIndex(max(0, self.tag_filter.findData(tag_id)))
+        self.tag_filter.blockSignals(False)
         selected = self.list.currentItem()
         selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None
         selected_row = 0
@@ -110,7 +132,9 @@ class MainWindow(QMainWindow):
         self.list.clear()
         series_labels = {vid: f"{s.name} · {index + 1}/{len(s.video_ids)}"
                          for s in self.core.series() for index, vid in enumerate(s.video_ids)}
-        for row, video in enumerate(self.core.videos()):
+        tag_id = self.tag_filter.currentData()
+        videos = self.core.videos() if tag_id is None else self.core.videos_for_tag(tag_id)
+        for row, video in enumerate(videos):
             status = self.core.viewing_status(video.id)
             label = "다 봄" if status.finished else f"보다 만 ({status.stopped_percent:.0f}%)" if status.abandoned else ""
             if status.favorite:
@@ -118,6 +142,9 @@ class MainWindow(QMainWindow):
             if video.id in series_labels:
                 label += ("\n" if label else "") + "시리즈: " + series_labels[video.id]
             item = QListWidgetItem(QIcon(str(video.thumbnail)), video.title + (f"\n{label}" if label else ""))
+            tags = self.core.video_tags(video.id)
+            if tags:
+                item.setText(item.text() + "\n태그: " + ", ".join(tag.name for tag in tags))
             item.setData(Qt.ItemDataRole.UserRole, video.id)
             item.setSizeHint(QSize(300, 120))
             self.list.addItem(item)
@@ -126,6 +153,20 @@ class MainWindow(QMainWindow):
         if self.list.count():
             self.list.setCurrentRow(selected_row)
         self.list.setFocus()
+        self.tags_button.setEnabled(self.list.count() > 0)
+
+    def filter_changed(self):
+        self.refresh()
+        self.tag_filter.setFocus()
+
+    def edit_video_tags(self):
+        if item := self.list.currentItem():
+            TagEditor(self.core, video_id=item.data(Qt.ItemDataRole.UserRole), parent=self).exec()
+            self.refresh()
+
+    def manage_tags(self):
+        TagManager(self.core, self).exec()
+        self.refresh()
 
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "감시 폴더 선택")

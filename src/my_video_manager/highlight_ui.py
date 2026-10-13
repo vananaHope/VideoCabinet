@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from .highlight_editing import resolve_time_input, time_input_maximum
+from .tag_ui import TagEditor
 
 
 def timestamp(seconds: float) -> str:
@@ -110,18 +111,21 @@ class HighlightList(QDialog):
         self.setWindowTitle("현재 영상의 하이라이트")
         self.resize(660, 420)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("항목을 더블클릭하면 시각과 메모를 편집합니다."))
+        layout.addWidget(QLabel("항목을 더블클릭하거나 Enter를 누르면 시각과 메모를 편집합니다."))
         self.list = QListWidget()
-        self.list.itemDoubleClicked.connect(self.edit)
+        self.list.itemActivated.connect(self.edit)
         layout.addWidget(self.list)
         buttons = QHBoxLayout()
         self.edit_button = QPushButton("시각·메모 편집")
         self.delete_button = QPushButton("하이라이트 삭제")
+        self.tags_button = QPushButton("태그 편집")
         close = QPushButton("닫기")
         self.edit_button.clicked.connect(self.edit)
         self.delete_button.clicked.connect(self.delete)
+        self.tags_button.clicked.connect(self.edit_tags)
         close.clicked.connect(self.accept)
-        for button in (self.edit_button, self.delete_button, close):
+        for button in (self.edit_button, self.tags_button, self.delete_button, close):
+            button.setAutoDefault(False)
             buttons.addWidget(button)
         layout.addLayout(buttons)
         self.refresh()
@@ -133,11 +137,20 @@ class HighlightList(QDialog):
             end = f" – {timestamp(highlight.end)}" if highlight.end is not None else " (지점)"
             note = highlight.note.text if highlight.note else "메모 없음"
             item = QListWidgetItem(f"{timestamp(highlight.start)}{end}\n{note}")
+            tags = self.core.highlight_tags(highlight.id)
+            if tags:
+                item.setText(item.text() + "\n태그: " + ", ".join(tag.name for tag in tags))
             item.setData(Qt.ItemDataRole.UserRole, highlight)
             self.list.addItem(item)
         self.list.setCurrentRow(max(0, min(row, self.list.count() - 1)))
         self.edit_button.setEnabled(self.list.count() > 0)
         self.delete_button.setEnabled(self.list.count() > 0)
+        self.tags_button.setEnabled(self.list.count() > 0)
+
+    def edit_tags(self):
+        if item := self.list.currentItem():
+            TagEditor(self.core, highlight_id=item.data(Qt.ItemDataRole.UserRole).id, parent=self).exec()
+            self.refresh()
 
     def edit(self, *_):
         if item := self.list.currentItem():

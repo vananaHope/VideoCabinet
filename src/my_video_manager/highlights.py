@@ -45,6 +45,18 @@ class Highlights:
             return tuple(self._highlight(row) for row in db.execute(
                 "SELECT * FROM highlights WHERE video_id = ? ORDER BY start, id", (video_id,)))
 
+    def list_by_ids(self, highlight_ids: set[int]) -> tuple[Highlight, ...]:
+        ids = tuple(highlight_ids)
+        highlights = []
+        with self._connect() as db:
+            # SQLite의 바인딩 개수 제한 안에서 조회하고 공개 정렬 순서를 유지한다.
+            for offset in range(0, len(ids), 500):
+                batch = ids[offset:offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                highlights.extend(self._highlight(row) for row in db.execute(
+                    f"SELECT * FROM highlights WHERE id IN ({placeholders})", batch))
+        return tuple(sorted(highlights, key=lambda h: (h.video_id, h.start, h.id)))
+
     @staticmethod
     def _highlight(row) -> Highlight:
         return Highlight(row["id"], row["video_id"], row["start"], row["end"],
