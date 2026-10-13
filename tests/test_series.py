@@ -332,7 +332,7 @@ def test_switch_to_delivers_end_before_start_and_preserves_target_subtitles(tmp_
     from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 
     class Transcriber:
-        def transcribe(self, path, spoken_language, *, cancellation):
+        def transcribe(self, path, spoken_language, *, cancellation, progress=None):
             return TranscriberResult("ko", (TranscriptSegment(0, 90, path.stem),))
 
     core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc),

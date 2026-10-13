@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 from threading import Event
 
 from .subtitles import TranscriberCancelled, TranscriberError, TranscriberResult, TranscriptSegment
@@ -34,11 +35,13 @@ class FasterWhisperTranscriber:
         self.command = command or (sys.executable, "-m", "my_video_manager.transcription")
 
     def transcribe(self, path: Path, spoken_language: str | None, *,
-                   cancellation: Event | None = None) -> TranscriberResult:
+                   cancellation: Event | None = None, progress=None) -> TranscriberResult:
         cancellation = cancellation if cancellation is not None else Event()
         if cancellation.is_set():
             raise TranscriberCancelled
         job, process = None, None
+        progress_directory = tempfile.TemporaryDirectory(prefix="mvm-transcription-")
+        progress_path = Path(progress_directory.name) / "progress"
         try:
             flags = 0
             if sys.platform == "win32":
@@ -48,7 +51,7 @@ class FasterWhisperTranscriber:
             process = subprocess.Popen(
                 [*self.command, str(path), str(self.model_directory), spoken_language or "auto"],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, creationflags=flags,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8", "MVM_TRANSCRIPTION_PROGRESS": str(progress_path)}, creationflags=flags,
             )
             if job:
                 job.attach_and_resume(process.pid)
@@ -59,6 +62,11 @@ class FasterWhisperTranscriber:
                     output, error = process.communicate(timeout=0.1)
                     break
                 except subprocess.TimeoutExpired:
+                    if progress:
+                        try:
+                            progress(float(progress_path.read_text(encoding="ascii")))
+                        except (OSError, ValueError):
+                            pass  # 아직 보고가 없거나 쓰는 중이면 다음 주기에 읽는다.
                     continue
             if cancellation.is_set():
                 raise TranscriberCancelled
@@ -85,9 +93,10 @@ class FasterWhisperTranscriber:
                 process.communicate()
                 process.stdout.close()
                 process.stderr.close()
+            progress_directory.cleanup()
 
 
-def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | None) -> TranscriberResult:
+def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | None, *, progress=None) -> TranscriberResult:
     try:
         prepare_cuda_runtime()
         import ctranslate2
@@ -112,15 +121,32 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
         raise TranscriberError("gpu_unavailable", str(error)) from error
     segments, info = model.transcribe(audio, language=spoken_language, beam_size=5,
                                       vad_filter=True, condition_on_previous_text=False)
-    return TranscriberResult(info.language,
-                         tuple(TranscriptSegment(s.start, s.end, s.text.strip()) for s in segments
-                               if s.text.strip() and s.end > s.start), info.language_probability)
+    lines = []
+    for segment in segments:
+        if segment.text.strip() and segment.end > segment.start:
+            lines.append(TranscriptSegment(segment.start, segment.end, segment.text.strip()))
+        if progress:
+            progress(segment.end)
+    return TranscriberResult(info.language, tuple(lines), info.language_probability)
+
+
+def report_progress(seconds):
+    """부가 진행 보고의 파일 잠금·디스크 오류는 받아쓰기 결과에 영향을 주지 않는다."""
+    target = os.environ.get("MVM_TRANSCRIPTION_PROGRESS")
+    if not target:
+        return
+    try:
+        temporary = Path(target).with_suffix(".tmp")
+        temporary.write_text(str(seconds), encoding="ascii")
+        os.replace(temporary, target)
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":
     try:
         transcript = transcribe_on_gpu(Path(sys.argv[1]), Path(sys.argv[2]),
-                                       None if sys.argv[3] == "auto" else sys.argv[3])
+                                       None if sys.argv[3] == "auto" else sys.argv[3], progress=report_progress)
         print(json.dumps(asdict(transcript), ensure_ascii=False))
     except Exception as error:
         failure = error if isinstance(error, TranscriberError) else TranscriberError("other", str(error))

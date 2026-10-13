@@ -21,6 +21,7 @@ from .tags import Tag, Tags
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 from .translation import Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection
+from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 
 
 class CommandType(str, Enum):
@@ -99,7 +100,9 @@ class AppCore:
         if key_bindings is not None:
             self._keys.replace(key_bindings, persist=False)
         # 접속은 호출 단위로 열어 UI 작업자 스레드에서도 코어를 사용할 수 있다.
-        self._library = Library(self._connect, media, clock, self._thumbnails, self.settings)
+        self._library = Library(self._connect, media, clock, self._thumbnails, self.settings,
+                                on_registered=lambda video_id: self._auto_subtitle_rules.apply(video_id))
+
         self.playback = PlaybackHub()
         self._series = SeriesStore(self._connect)
         self._highlights = Highlights(self._connect)
@@ -113,9 +116,12 @@ class AppCore:
         }
         self._viewings = ViewingStore(self._connect, clock, viewing_settings or ViewingSettings())
         self.playback.subscribe(ViewingRecorder(self._start_viewing, self._viewings.report, self._viewings.end))
-        self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location)
+        self._queue_order = QueueOrder(self._connect)
+        self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location, self._queue_order)
         self._translations = Translations(self._connect, clock, self._subtitles, self.settings, translator,
-                                          batch_size=translation_batch_size)
+                                          batch_size=translation_batch_size, order=self._queue_order)
+        self._auto_subtitle_rules = AutoSubtitleRules(self._connect, self)
+        self._subtitle_queue = SubtitleQueue(self, self._queue_order)
         self._subtitle_selection = SubtitleSelection(self._translations)
         self.playback.subscribe(self._subtitle_selection)
         self._revisits = Revisits(self._connect, clock)
@@ -145,7 +151,10 @@ class AppCore:
         return self._translations.ready() is not None
 
     def process_next_translation(self) -> TranslationQueueEntry | None:
-        return self._translations.process_next()
+        with self._subtitle_queue.processing():
+            result = self._translations.process_next()
+            self._subtitle_queue.record(result)
+            return result
 
     def stop_translation_processing(self) -> None:
         self._translations.stop_processing()
@@ -202,20 +211,81 @@ class AppCore:
         self.playback_location(video_id)
         return self._subtitles.request(video_id, spoken_language)
 
+    def request_automatic_subtitles(self, video_id, spoken_language=None):
+        return self._subtitles.request(video_id, spoken_language, automatic=True)
+
+    def auto_subtitle_rules(self):
+        return self._auto_subtitle_rules.list()
+
+    def auto_subtitle_candidates(self, *, folder=None, tag_id=None):
+        return self._auto_subtitle_rules.candidates(folder=folder, tag_id=tag_id)
+
+    def set_auto_subtitle_rule(self, *, folder=None, tag_id=None, spoken_language=None, include_existing=False):
+        return self._auto_subtitle_rules.set(folder=folder, tag_id=tag_id, spoken_language=spoken_language,
+                                            include_existing=include_existing)
+
+    def remove_auto_subtitle_rule(self, rule_id):
+        self._auto_subtitle_rules.remove(rule_id)
+
+    def subtitle_queue_items(self):
+        return self._subtitle_queue.items()
+
+    def remove_from_subtitle_queue(self, video_id):
+        self._subtitles.remove(video_id)
+        self._translations.remove(video_id)
+        self._subtitle_queue.hide(video_id)
+
+    def promote_subtitle(self, video_id):
+        if not any(e.video_id == video_id for e in (*self.subtitle_queue(), *self.translation_queue())):
+            raise ValueError("대기열에 없는 영상입니다.")
+        self._queue_order.promote(video_id)
+
+    def retry_failed_subtitles(self):
+        failed = [e for e in self.subtitle_queue() if e.state == "failed"]
+        translated = [e for e in self.translation_queue() if e.state == "failed"]
+        retried, skipped = set(), []
+        for entries, request in ((failed, lambda e: self.request_subtitles(e.video_id, e.spoken_language)),
+                                 (translated, lambda e: self.request_translation(e.video_id))):
+            for entry in entries:
+                try:
+                    request(entry)
+                    retried.add(entry.video_id)
+                except (ValueError, OSError, RuntimeError) as error:
+                    skipped.append(SubtitleRetrySkipped(entry.video_id, str(error)))
+        return SubtitleRetryResult(len(retried), tuple(skipped))
+
+    def resume_subtitle_processing(self):
+        self._subtitles.resume_processing()
+        self._translations.resume_processing()
+
+    def take_subtitle_queue_completion(self):
+        return self._subtitle_queue.take_completion()
+
+    def acknowledge_tray_notice(self) -> bool:
+        if self.settings.get("subtitle_queue.tray_notice_shown", False):
+            return False
+        self.settings.set("subtitle_queue.tray_notice_shown", True)
+        return True
+
     def subtitle_queue(self) -> tuple[SubtitleQueueEntry, ...]:
         return self._subtitles.queue()
 
     def process_next_subtitle(self) -> SubtitleQueueEntry | None:
-        result = self._subtitles.process_next()
-        if result and result.state == "completed":
-            self._translations.enqueue_eligible()
-        return result
+        with self._subtitle_queue.processing():
+            result = self._subtitles.process_next()
+            if result and result.state == "completed":
+                self._translations.enqueue_eligible()
+            self._subtitle_queue.record(result)
+            return result
 
     def stop_subtitle_processing(self) -> None:
         self._subtitles.stop_processing()
 
     def transcript(self, video_id: int) -> Transcript | None:
         return self._subtitles.transcript(video_id)
+
+    def has_transcript(self, video_id: int) -> bool:
+        return self._subtitles.has_transcript(video_id)
 
     def playback_subtitle(self, video_id: int) -> Path | None:
         transcript = self.transcript(video_id)
@@ -283,7 +353,11 @@ class AppCore:
         return self._tags.attached("highlight", highlight_id)
 
     def add_video_tag(self, video_id: int, name: str) -> Tag:
-        return self._tags.attach("video", video_id, name)
+        attached = {tag.id for tag in self.video_tags(video_id)}
+        tag = self._tags.attach("video", video_id, name)
+        if tag.id not in attached:
+            self._auto_subtitle_rules.apply(video_id, tag_id=tag.id)
+        return tag
 
     def add_highlight_tag(self, highlight_id: int, name: str) -> Tag:
         return self._tags.attach("highlight", highlight_id, name)
@@ -419,8 +493,12 @@ class AppCore:
         self._series.regroup(self.videos() + self.excluded_videos())
         return result
 
+
     def videos(self) -> tuple[Video, ...]:
         return self._library.videos()
+
+    def video(self, video_id: int) -> Video:
+        return self._library.video(video_id)
 
     def playback_location(self, video_id: int) -> Location:
         return self._library.playback_location(video_id)

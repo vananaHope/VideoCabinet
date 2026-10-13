@@ -27,7 +27,7 @@ class FakeTranscriber:
                                            TranscriptSegment(5, 7, "World")))
         self.error = None
 
-    def transcribe(self, path, spoken_language, *, cancellation):
+    def transcribe(self, path, spoken_language, *, cancellation, progress=None):
         self.calls.append((path, spoken_language))
         if self.error:
             raise self.error
@@ -168,7 +168,7 @@ def test_busy_transcriber_does_not_block_core_and_new_language_supersedes_result
     started, release = Event(), Event()
 
     class BlockingTranscriber(FakeTranscriber):
-        def transcribe(self, path, spoken_language, *, cancellation):
+        def transcribe(self, path, spoken_language, *, cancellation, progress=None):
             started.set()
             assert release.wait(5)
             return super().transcribe(path, spoken_language, cancellation=cancellation)
@@ -198,7 +198,7 @@ def test_interrupted_processing_remains_queued_on_restart(setup):
     core, adapter, (a, _) = setup
 
     class Interrupted(FakeTranscriber):
-        def transcribe(self, path, spoken_language, *, cancellation):
+        def transcribe(self, path, spoken_language, *, cancellation, progress=None):
             raise KeyboardInterrupt
 
     core = reopen(core, Interrupted())
@@ -225,7 +225,7 @@ def test_stopping_processing_cancels_adapter_and_preserves_queue_and_old_transcr
     started = Event()
 
     class Cancellable(FakeTranscriber):
-        def transcribe(self, path, spoken_language, *, cancellation):
+        def transcribe(self, path, spoken_language, *, cancellation, progress=None):
             started.set()
             assert cancellation.wait(5)
             raise TranscriberCancelled

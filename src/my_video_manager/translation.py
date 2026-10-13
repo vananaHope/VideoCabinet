@@ -73,13 +73,17 @@ class TranslationQueueEntry:
 
 class Translations:
     def __init__(self, connect, clock, subtitles, settings, translator, *, batch_size=30,
-                 retry_delay=timedelta(minutes=15), format_attempts=3):
+                 retry_delay=timedelta(minutes=15), format_attempts=3, order=None):
         if batch_size < 1 or format_attempts < 1 or retry_delay.total_seconds() <= 0:
             raise ValueError("번역 묶음 크기, 재시도 횟수와 보류 시간은 양수여야 합니다.")
         self._connect, self._clock = connect, clock
         self._subtitles, self._settings, self._translator = subtitles, settings, translator
         self._batch_size, self._retry_delay, self._format_attempts = batch_size, retry_delay, format_attempts
         self._processing, self._cancellation = Lock(), Event()
+        self._order = order
+        self._active_video = None
+        self._active_cancellation = None
+        self._activity = Lock()
         with connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS translation_lines (
@@ -112,7 +116,11 @@ class Translations:
                     attempts INTEGER NOT NULL,
                     PRIMARY KEY(queue_id, cli)
                 );
+                CREATE TABLE IF NOT EXISTS translation_omissions (
+                    transcript_id TEXT PRIMARY KEY REFERENCES transcripts(id) ON DELETE CASCADE
+                );
             """)
+            db.execute("UPDATE translation_queue SET state = 'queued' WHERE state = 'translating'")
         self.enqueue_eligible()  # 원어 저장 직후 강제 종료된 경우도 복구한다.
 
     @property
@@ -145,6 +153,8 @@ class Translations:
                 return None  # 동시에 원어가 교체됐다. 다음 자동 등록에서 새 세대를 처리한다.
             old = db.execute("SELECT * FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
             if automatic:
+                if db.execute("SELECT 1 FROM translation_omissions WHERE transcript_id = ?", (transcript.id,)).fetchone():
+                    return None
                 if old:
                     return self._entry(db, old)
                 saved = {r[0] for r in db.execute(
@@ -153,6 +163,11 @@ class Translations:
                 selected -= saved
                 if not selected:
                     return None
+            else:
+                db.execute("DELETE FROM translation_omissions WHERE transcript_id = ?", (transcript.id,))
+            if self._order:
+                self._order.request(db, video_id, automatic=automatic,
+                                    renew=not automatic and old is not None and old["state"] == "failed")
             # 명시적인 전체 재시도는 저장한 묶음을 재사용한다.
             if old and line_ids is None:
                 db.execute("DELETE FROM translation_limit_attempts WHERE queue_id = ?", (old["id"],))
@@ -186,8 +201,20 @@ class Translations:
     def queue(self):
         with self._connect() as db:
             db.execute("BEGIN")
-            return tuple(self._entry(db, row) for row in db.execute(
+            entries = tuple(self._entry(db, row) for row in db.execute(
                 "SELECT * FROM translation_queue ORDER BY requested_at, rowid"))
+        return self._order.sort(entries) if self._order else entries
+
+    def remove(self, video_id):
+        with self._activity:
+            with self._connect() as db:
+                db.execute("INSERT OR IGNORE INTO translation_omissions SELECT id FROM transcripts WHERE video_id = ?", (video_id,))
+                db.execute("DELETE FROM translation_queue WHERE video_id = ?", (video_id,))
+            if self._active_video == video_id and self._active_cancellation:
+                self._active_cancellation.set()
+
+    def resume_processing(self):
+        self._cancellation.clear()
 
     def translation(self, video_id):
         with self._connect() as db:
@@ -205,6 +232,9 @@ class Translations:
 
     def stop_processing(self):
         self._cancellation.set()
+        with self._activity:
+            if self._active_cancellation:
+                self._active_cancellation.set()
 
     def ready(self, *, cli=None):
         # 한도는 영상이 아닌 CLI 계정의 상태다. 재요청·원어 재생성으로 우회하지 않는다.
@@ -213,7 +243,7 @@ class Translations:
             backoff = db.execute("SELECT retry_at FROM translation_cli_backoff WHERE cli = ?", (cli,)).fetchone()
         if backoff and datetime.fromisoformat(backoff[0]) > self._clock():
             return None
-        blocked = {e.video_id for e in self._subtitles.queue() if e.state == "queued"}
+        blocked = {e.video_id for e in self._subtitles.queue() if e.state in ("queued", "transcribing")}
         # 새로 진행할 영상이 반복 보류되는 영상 뒤에서 계속 기다리지 않게 한다.
         entries = sorted(self.queue(), key=lambda e: e.state == "held")
         return next((e for e in entries if e.video_id not in blocked and
@@ -238,27 +268,35 @@ class Translations:
             lines = tuple(line for line in transcript.lines if line.id in ids)[:self._batch_size]
             if not lines:
                 return None  # 요청 또는 원어 세대가 읽는 도중 교체됐다.
+            with self._activity:
+                with self._connect() as db:
+                    if not db.execute("UPDATE translation_queue SET state = 'translating' WHERE id = ?", (pending.id,)).rowcount:
+                        return None
+                self._active_video = pending.video_id
+                cancellation = self._active_cancellation = Event()
+                if self._cancellation.is_set():
+                    cancellation.set()
             try:
                 if self._translator is None:
                     raise TranslationError("missing_cli", "번역 어댑터가 설정되지 않았습니다.")
                 for attempt in range(self._format_attempts):
-                    if self._cancellation.is_set():
+                    if cancellation.is_set():
                         raise TranslationCancelled
                     try:
                         result = validate_translation(lines, self._translator.translate(
-                            lines, transcript.spoken_language, cli=cli, cancellation=self._cancellation))
+                            lines, transcript.spoken_language, cli=cli, cancellation=cancellation))
                         break
                     except TranslationError as error:
                         if error.kind != "format" or attempt + 1 == self._format_attempts:
                             raise
-                if self._cancellation.is_set():
+                if cancellation.is_set():
                     raise TranslationCancelled
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
                     current = db.execute("SELECT * FROM translation_queue WHERE id = ?", (pending.id,)).fetchone()
                     # 재생성 중이거나 요청/원어 세대가 바뀌면 진행 중의 낡은 응답을 버린다.
                     if (current is None or current["transcript_id"] != transcript.id or db.execute(
-                            "SELECT 1 FROM subtitle_queue WHERE video_id = ? AND state = 'queued'",
+                            "SELECT 1 FROM subtitle_queue WHERE video_id = ? AND state IN ('queued', 'transcribing')",
                             (pending.video_id,)).fetchone()):
                         return None
                     if self._cancellation.is_set():
@@ -281,6 +319,9 @@ class Translations:
                         db.execute("DELETE FROM translation_queue WHERE id = ?", (pending.id,))
                     return entry
             except TranslationCancelled:
+                with self._connect() as db:
+                    db.execute("UPDATE translation_queue SET state = ? WHERE id = ? AND state = 'translating'",
+                               (pending.state, pending.id))
                 return pending
             except Exception as error:
                 failure = error if isinstance(error, TranslationError) else TranslationError("other", str(error))
@@ -308,6 +349,12 @@ class Translations:
                     row = db.execute("SELECT * FROM translation_queue WHERE id = ?", (pending.id,)).fetchone()
                     return self._entry(db, row) if row else None
         finally:
+            with self._activity:
+                self._active_video = self._active_cancellation = None
+            if 'pending' in locals() and pending:
+                with self._connect() as db:
+                    db.execute("UPDATE translation_queue SET state = ? WHERE id = ? AND state = 'translating'",
+                               (pending.state, pending.id))
             self._processing.release()
 
 
