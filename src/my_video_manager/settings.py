@@ -27,7 +27,13 @@ class Settings:
     def get(self, key: str, default: Any = None) -> Any:
         with self._connect() as db:
             row = db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        return default if row is None else json.loads(row[0])
+        if row is None:
+            return default
+        try:
+            return json.loads(row[0])
+        except (TypeError, ValueError):
+            # 깨진 저장값은 기본값으로 대신하고, 다음 set에서 덮어쓴다.
+            return default
 
     def set(self, key: str, value: Any) -> None:
         encoded = json.dumps(value, ensure_ascii=False)

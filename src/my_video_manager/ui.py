@@ -16,6 +16,8 @@ from .series_ui import SeriesEditor
 from .tag_ui import TagEditor, TagManager
 from .library_ui import LibraryControls
 from .reel_ui import ReelControls
+from .key_settings_ui import SettingsDialog, key_name
+from .key_display import display_keys
 
 
 class ScanWorker(QThread):
@@ -51,6 +53,8 @@ class MainWindow(QMainWindow):
         self.resize(1100, 720)
         self.pages = QStackedWidget()
         self.setCentralWidget(self.pages)
+        self.settings_menu = self.menuBar().addMenu("설정(&S)")
+        self.settings_menu.addAction("키 배치…", self.show_settings)
 
         library = QWidget()
         layout = QVBoxLayout(library)
@@ -118,10 +122,14 @@ class MainWindow(QMainWindow):
         self.highlights_button = QPushButton("하이라이트 목록 · 시각·메모 편집")
         self.highlights_button.clicked.connect(self.show_highlights)
         playback_layout.addWidget(self.highlights_button)
-        playback_layout.addWidget(QLabel("Enter 재생/일시정지 · ←/→ 5초 · , 3초 뒤로 · ↑/↓ 속도 ±0.25 · / 자막 켜기/끄기 · . 원어/번역"))
-        self.video_navigation_label = QLabel("PgUp/PgDn 이전/다음 영상 · 시리즈 안에서는 이전/다음 화")
+        self.video_navigation_label = QLabel()
+        self.video_navigation_label.setWordWrap(True)
         playback_layout.addWidget(self.video_navigation_label)
-        playback_layout.addWidget(QLabel("Insert 지점 · Delete 구간 시작/끝 · Home/End 이전/다음 · 노랑 지점 / 초록 구간 / 주황 열린 구간"))
+        self.key_help = QLabel()
+        self.key_help.setWordWrap(True)
+        playback_layout.addWidget(self.key_help)
+        playback_layout.addWidget(QLabel("노랑 지점 / 초록 구간 / 주황 열린 구간"))
+        self.refresh_key_help()
         self.pages.addWidget(playback)
         self.reel = ReelControls(self)
         buttons.addWidget(self.reel.button())
@@ -279,7 +287,9 @@ class MainWindow(QMainWindow):
             self.progress.open_start = self.core.open_highlight_start
             self.progress.update()
             opened = self.core.open_highlight_start
-            suffix = f" · 구간 시작 {timestamp(opened)} — Delete로 끝내기" if opened is not None else ""
+            range_keys = next((display_keys(row.keys) for row in self.core.key_bindings()
+                               if row.command.kind == CommandType.RANGE_HIGHLIGHT), "키 미할당")
+            suffix = f" · 구간 시작 {timestamp(opened)} — {range_keys}: 끝내기" if opened is not None else ""
             self.position_label.setText(f"{timestamp(position)} / {timestamp(self.progress.duration)}{suffix}")
             return position
         return None
@@ -321,13 +331,29 @@ class MainWindow(QMainWindow):
         SeriesEditor(self.core, self).exec()
         self.refresh()
 
+    def refresh_key_help(self):
+        navigation = (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO)
+        rows = self.core.key_bindings()
+        self.video_navigation_label.setText(" · ".join(f"{display_keys(row.keys)} {row.label}"
+                                                      for row in rows if row.command.kind in navigation))
+        self.key_help.setText(" · ".join(f"{display_keys(row.keys)} {row.label}"
+                                        for row in rows if row.keys and row.command.kind not in
+                                        (*navigation, CommandType.TOGGLE_REEL_REPEAT)))
+
+    def show_settings(self):
+        SettingsDialog(self.core, self).exec()
+        self.refresh_key_help()
+        self.reel.update_label()
+        if self.pages.currentIndex() == 1:
+            self.surface.setFocus()
+
     def eventFilter(self, watched, event):
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()
-                or QApplication.activeModalWidget() is not None):
+                or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):
             return super().eventFilter(watched, event)
-        if event.modifiers() != Qt.KeyboardModifier.NoModifier:
-            return False
         if self.pages.currentIndex() == 0:
+            if event.modifiers() not in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier):
+                return False
             if self.list.hasFocus() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 item = self.list.currentItem()
                 if item:
@@ -346,13 +372,7 @@ class MainWindow(QMainWindow):
         if event.key() == Qt.Key.Key_Escape:
             self.back_to_list()
             return True
-        key = {Qt.Key.Key_Return: "Enter", Qt.Key.Key_Enter: "Enter", Qt.Key.Key_Left: "Left",
-               Qt.Key.Key_Right: "Right", Qt.Key.Key_Up: "Up", Qt.Key.Key_Down: "Down",
-               Qt.Key.Key_Comma: ",", Qt.Key.Key_Slash: "/", Qt.Key.Key_Period: ".", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
-               Qt.Key.Key_Home: "Home", Qt.Key.Key_End: "End",
-               Qt.Key.Key_Backslash: "\\",
-               Qt.Key.Key_PageUp: "PgUp", Qt.Key.Key_PageDown: "PgDn"}.get(event.key(), event.text())
-        command = self.core.command_for_key(key)
+        command = self.core.command_for_key(key_name(event) or "")
         if command and self.player:
             try:
                 if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):

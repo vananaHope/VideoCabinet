@@ -3,6 +3,9 @@
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import QInputDialog, QPushButton
 
+from .core import CommandType
+from .key_display import display_keys
+
 
 class TranslationWorker(QThread):
     completed = Signal(object)
@@ -71,8 +74,10 @@ class TranslationControls(QObject):
         elif result.error:
             bar.showMessage(f"번역 실패 · {result.error} 번역 CLI / 재시도에서 다시 요청하세요.")
         else:
+            keys = next((display_keys(row.keys) for row in self.core.key_bindings()
+                         if row.command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE), "키 미할당")
             bar.showMessage(f"번역 {'완료' if result.state == 'completed' else '진행'} · "
-                            f"{result.completed_lines}/{result.total_lines}줄 · . 키로 원어/번역 전환")
+                            f"{result.completed_lines}/{result.total_lines}줄 · 원어/번역 전환: {keys}")
             session = self.core.playback.session
             if result.state == "completed" and self.window.player and session and session.video_id == result.video_id:
                 try:
