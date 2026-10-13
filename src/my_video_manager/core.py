@@ -22,6 +22,7 @@ from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, V
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 from .translation import Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
+from .review import Review, ReviewPlayback, SubtitleExport
 
 
 class CommandType(str, Enum):
@@ -118,8 +119,12 @@ class AppCore:
         self.playback.subscribe(ViewingRecorder(self._start_viewing, self._viewings.report, self._viewings.end))
         self._queue_order = QueueOrder(self._connect)
         self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location, self._queue_order)
+        self._review = Review(self._connect, clock, self._subtitles, self.playback_location, self._queue_order)
+        self._subtitles.review = self._review
         self._translations = Translations(self._connect, clock, self._subtitles, self.settings, translator,
-                                          batch_size=translation_batch_size, order=self._queue_order)
+                                          batch_size=translation_batch_size, order=self._queue_order,
+                                          protected_lines=self._review.protected_lines)
+        self._review.translations = self._translations
         self._auto_subtitle_rules = AutoSubtitleRules(self._connect, self)
         self._subtitle_queue = SubtitleQueue(self, self._queue_order)
         self._subtitle_selection = SubtitleSelection(self._translations)
@@ -133,6 +138,49 @@ class AppCore:
     @property
     def translation_cli(self) -> str:
         return self._translations.cli
+
+    def review_lines(self, video_id):
+        return self._review.lines(video_id)
+
+    def reviewed_line_count(self, video_id):
+        return self._review.reviewed_count(video_id)
+
+    def subtitle_regeneration_warning(self, video_id):
+        return self._review.regeneration_warning(video_id)
+
+    def edit_transcript_line(self, video_id, line_id, text, *, overwrite_reviewed=False):
+        self._review.edit(video_id, line_id, text, overwrite_reviewed=overwrite_reviewed)
+
+    def edit_translation_line(self, video_id, line_id, text):
+        self._review.edit(video_id, line_id, text, translated=True)
+
+    def request_subtitle_range(self, video_id, start, end):
+        return self._review.request_range(video_id, start, end)
+
+    def subtitle_range_bounds(self, video_id, start, end):
+        return self._review.range_bounds(video_id, start, end)
+
+    def subtitle_export(self, video_id, *, translated=False) -> SubtitleExport:
+        return self._review.export(video_id, translated=translated)
+
+    def write_subtitle_export(self, export: SubtitleExport, path: Path):
+        """확인한 스냅샷을 사용자가 고른 경로에만 쓴다. Windows 인식을 위해 UTF-8 BOM 사용."""
+        Path(path).write_text(export.text, encoding="utf-8-sig")
+
+    def review_line_position(self, video_id, line_id):
+        line = next((line for line in self.review_lines(video_id) if line.original.id == line_id), None)
+        if line is None:
+            raise ValueError("자막 줄이 바뀌었습니다. 목록을 새로 확인하세요.")
+        self.playback_location(video_id)
+        return line.original.start
+
+    def play_review_line(self, video_id, line_id) -> ReviewPlayback:
+        start = self.review_line_position(video_id, line_id)
+        session = self.playback.session
+        if session and session.video_id == video_id and session.record_viewing and self.reel_playback is None:
+            return ReviewPlayback(video_id, start, "seek")
+        self.playback.start(video_id, start, record_viewing=True)
+        return ReviewPlayback(video_id, start, "play")
 
     def set_translation_cli(self, cli: str) -> None:
         self._translations.set_cli(cli)
@@ -244,7 +292,7 @@ class AppCore:
         failed = [e for e in self.subtitle_queue() if e.state == "failed"]
         translated = [e for e in self.translation_queue() if e.state == "failed"]
         retried, skipped = set(), []
-        for entries, request in ((failed, lambda e: self.request_subtitles(e.video_id, e.spoken_language)),
+        for entries, request in ((failed, lambda e: self._subtitles.retry_failed(e.id)),
                                  (translated, lambda e: self.request_translation(e.video_id))):
             for entry in entries:
                 try:

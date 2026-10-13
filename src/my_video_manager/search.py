@@ -105,8 +105,9 @@ class Search:
             ON CONFLICT(source, line_id) DO UPDATE SET text=excluded.text, normalized=NULL;"""
         delete = f"DELETE FROM search_subtitle_lines WHERE source='{source}' AND line_id=old.{identifier};"
         for event, body in (("INSERT", insert), ("DELETE", delete), ("UPDATE", delete + insert)):
+            trigger_event = "UPDATE OF text" if event == "UPDATE" else event
             db.execute(f"""CREATE TRIGGER search_{source}_{event.lower()}
-                AFTER {event} ON {table} BEGIN {body} END""")
+                AFTER {trigger_event} ON {table} BEGIN {body} END""")
     @staticmethod
     def _backfill_source(db, source, table, identifier):
         # 준비 전에 새 줄을 저장해도 기존 줄을 빠뜨리지 않도록 완료 표식은 별도로 둔다.

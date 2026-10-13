@@ -1,6 +1,7 @@
 """원어 자막과 영속 자막 대기열. 외부 받아쓰기 중에는 DB를 잠그지 않는다."""
 
 from dataclasses import dataclass
+from contextlib import nullcontext
 from datetime import datetime
 import math
 import json
@@ -42,8 +43,12 @@ class TranscriberError(RuntimeError):
 
 class Transcriber(Protocol):
     def transcribe(self, path: Path, spoken_language: str | None, *,
-                   cancellation: Event, progress: Callable[[float], None] | None = None) -> TranscriberResult:
-        """취소 신호를 받으면 신속하게 정리하고 TranscriberCancelled를 발생시킨다."""
+                   cancellation: Event, progress: Callable[[float], None] | None = None,
+                   start: float = 0, duration: float | None = None) -> TranscriberResult:
+        """구간은 start·duration 초로 지정하며 결과 시각은 구간 시작에 상대적이다.
+
+        취소 신호를 받으면 신속하게 정리하고 TranscriberCancelled를 발생시킨다.
+        """
         ...
 
 
@@ -79,6 +84,7 @@ class SubtitleQueueEntry:
     error: str | None
     error_detail: str | None = None
     progress: float = 0.0
+    retry_guidance: str | None = None
 
 
 def normalize_spoken_language(language: str | None) -> str | None:
@@ -103,6 +109,7 @@ class Subtitles:
         self._active_video = None
         self._active_cancellation = None
         self._activity = Lock()
+        self.review = None
         with connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS subtitle_queue (
@@ -141,7 +148,8 @@ class Subtitles:
             old = db.execute("SELECT * FROM subtitle_queue WHERE video_id = ?", (video_id,)).fetchone()
             if automatic and (old or db.execute("SELECT 1 FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()):
                 return self._entry(old) if old else None
-            if old and old["state"] in ("queued", "transcribing") and old["spoken_language"] == language:
+            is_range = self.review and self.review.range_for(old["id"]) if old else False
+            if old and not is_range and old["state"] in ("queued", "transcribing") and old["spoken_language"] == language:
                 self._order.request(db, video_id, automatic=automatic)
                 return self._entry(old)  # 같은 요청의 더블클릭은 순서를 바꾸지 않는다.
             self._order.request(db, video_id, automatic=automatic, renew=True)
@@ -151,6 +159,23 @@ class Subtitles:
                 (video_id, language, self._clock().isoformat()),
             )
             return self._entry(db.execute("SELECT * FROM subtitle_queue WHERE id = ?", (cursor.lastrowid,)).fetchone())
+
+    def retry_failed(self, queue_id):
+        """같은 요청을 다시 대기시켜 구간 정보와 원어 지정을 보존한다."""
+        with self._connect() as db:
+            row = db.execute("SELECT video_id FROM subtitle_queue WHERE id = ? AND state = 'failed'", (queue_id,)).fetchone()
+        if row is None:
+            raise ValueError("실패한 자막 요청이 바뀌었습니다.")
+        # 위치 확인은 사라진 파일을 정리할 수 있으므로 쓰기 트랜잭션 밖에서 한다.
+        self._playback_location(row["video_id"])
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM subtitle_queue WHERE id = ? AND state = 'failed'", (queue_id,)).fetchone()
+            if row is None:
+                raise ValueError("실패한 자막 요청이 바뀌었습니다.")
+            self._order.request(db, row["video_id"], renew=True)
+            db.execute("UPDATE subtitle_queue SET state = 'queued', error = NULL, requested_at = ? WHERE id = ?",
+                       (self._clock().isoformat(), queue_id))
 
     def _entry(self, row):
         message, detail = row["error"], None
@@ -164,7 +189,12 @@ class Subtitles:
                 pass  # 이전 버전의 일반 문자열 오류도 읽는다.
         return SubtitleQueueEntry(row["id"], row["video_id"], row["spoken_language"],
                                   datetime.fromisoformat(row["requested_at"]), row["state"], message, detail,
-                                  self._progress.get(row["id"], 0))
+                                  self._progress.get(row["id"], 0),
+                                  self._retry_guidance(row["id"]) if message else None)
+
+    def _retry_guidance(self, queue_id):
+        return ("검수 창의 구간 다시 생성으로 재시도하세요"
+                if self.review and self.review.range_for(queue_id) else "다시 요청하면 재시도합니다")
 
     def queue(self) -> tuple[SubtitleQueueEntry, ...]:
         with self._connect() as db:
@@ -181,9 +211,10 @@ class Subtitles:
     def resume_processing(self):
         self._cancellation.clear()
 
-    def transcript(self, video_id: int) -> Transcript | None:
-        with self._connect() as db:
-            db.execute("BEGIN")  # 생성 세대와 줄을 같은 읽기 스냅샷에서 읽는다.
+    def transcript(self, video_id: int, *, connection=None) -> Transcript | None:
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            if not db.in_transaction:
+                db.execute("BEGIN")  # 생성 세대와 줄을 같은 읽기 스냅샷에서 읽는다.
             row = db.execute("SELECT * FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
             if row is None:
                 return None
@@ -229,11 +260,14 @@ class Subtitles:
             try:
                 if self._transcriber is None:
                     raise RuntimeError("받아쓰기 어댑터가 설정되지 않았습니다.")
+                interval = self.review.range_for(pending.id) if self.review else None
+                options = {"start": interval["start"], "duration": interval["end"] - interval["start"]} if interval else {}
+                duration = options.get("duration", duration)
                 def report_progress(seconds):
                     self._progress[pending.id] = min(0.99, max(0, seconds / max(duration, 0.001)))
                 result = self._transcriber.transcribe(self._playback_location(pending.video_id).path,
                                                      pending.spoken_language, cancellation=cancellation,
-                                                     progress=report_progress)
+                                                     progress=report_progress, **options)
                 if cancellation.is_set():
                     raise TranscriberCancelled
                 language = normalize_spoken_language(pending.spoken_language or result.spoken_language)
@@ -243,7 +277,8 @@ class Subtitles:
                     language = "und"  # DB의 기존 NOT NULL 계약을 유지하고 공개 API에서는 None.
                 for segment in result.segments:
                     if (not math.isfinite(segment.start) or not math.isfinite(segment.end)
-                            or segment.start < 0 or segment.end <= segment.start or not segment.text.strip()):
+                            or (segment.start < 0 and interval is None)
+                            or segment.end <= segment.start or not segment.text.strip()):
                         raise ValueError("받아쓰기 결과의 자막 줄이 올바르지 않습니다.")
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
@@ -252,6 +287,11 @@ class Subtitles:
                     # 실행 도중 원어를 바꿨으면 이전 결과로 최신 요청을 덮어쓰지 않는다.
                     if not db.execute("SELECT 1 FROM subtitle_queue WHERE id = ?", (pending.id,)).fetchone():
                         return pending
+                    if interval:
+                        self.review.replace_range(db, pending, interval, result.segments)
+                        db.execute("DELETE FROM subtitle_queue WHERE id = ?", (pending.id,))
+                        return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
+                                                  pending.requested_at, "completed", None)
                     transcript_id = uuid4().hex
                     db.execute("DELETE FROM transcripts WHERE video_id = ?", (pending.video_id,))
                     db.execute("INSERT INTO transcripts VALUES (?, ?, ?, ?, ?)",
@@ -273,13 +313,20 @@ class Subtitles:
                     db.execute("UPDATE subtitle_queue SET state = 'failed', error = ? WHERE id = ?",
                                (json.dumps({"kind": failure.kind, "detail": failure.detail}, ensure_ascii=False), pending.id))
                 return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
-                                          pending.requested_at, "failed", str(failure), failure.detail)
+                                          pending.requested_at, "failed", str(failure), failure.detail,
+                                          retry_guidance=self._retry_guidance(pending.id))
         finally:
             with self._activity:
                 self._active_video = self._active_cancellation = None
             if 'pending' in locals() and pending:
                 self._progress.pop(pending.id, None)
             self._processing.release()
+
+
+def normalize_subtitle_text(text: str) -> str:
+    """큐 내부의 빈 줄을 제거해 SRT 블록 경계와 혼동되지 않게 한다."""
+    return "\n".join(line.strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                     if line.strip())
 
 
 def transcript_srt(transcript: Transcript) -> str:
@@ -291,5 +338,5 @@ def transcript_srt(transcript: Transcript) -> str:
         hours, minute = divmod(minutes, 60)
         return f"{hours:02}:{minute:02}:{sec:02},{ms:03}"
 
-    return "\n\n".join(f"{i}\n{timestamp(line.start)} --> {timestamp(line.end)}\n{line.text}"
+    return "\n\n".join(f"{i}\n{timestamp(line.start)} --> {timestamp(line.end)}\n{normalize_subtitle_text(line.text)}"
                        for i, line in enumerate(transcript.lines, 1)) + "\n"
