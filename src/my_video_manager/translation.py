@@ -101,6 +101,10 @@ class Translations:
                     text TEXT,
                     PRIMARY KEY(queue_id, line_id)
                 );
+                CREATE TABLE IF NOT EXISTS translation_cli_backoff (
+                    cli TEXT PRIMARY KEY,
+                    retry_at TEXT NOT NULL
+                );
             """)
         self.enqueue_eligible()  # 원어 저장 직후 강제 종료된 경우도 복구한다.
 
@@ -194,11 +198,16 @@ class Translations:
     def stop_processing(self):
         self._cancellation.set()
 
-    def ready(self):
+    def ready(self, *, cli=None):
+        # 한도는 영상이 아닌 CLI 계정의 상태다. 재요청·원어 재생성으로 우회하지 않는다.
+        cli = self.cli if cli is None else cli
+        with self._connect() as db:
+            backoff = db.execute("SELECT retry_at FROM translation_cli_backoff WHERE cli = ?", (cli,)).fetchone()
+        if backoff and datetime.fromisoformat(backoff[0]) > self._clock():
+            return None
         blocked = {e.video_id for e in self._subtitles.queue() if e.state == "queued"}
-        now = self._clock()
         return next((e for e in self.queue() if e.video_id not in blocked and
-                     (e.state == "queued" or (e.state == "held" and e.retry_at <= now))), None)
+                     e.state in ("queued", "held")), None)
 
     def process_next(self):
         """한 번에 한 묶음. 성공한 묶음은 저장하고 전체/선택 줄 교체는 마지막에 원자적으로 한다."""
@@ -206,7 +215,8 @@ class Translations:
             return None
         try:
             self.enqueue_eligible()
-            pending = self.ready()
+            cli = self.cli  # 조회와 호출은 같은 CLI를 사용한다. 실행 중 설정 변경도 분리한다.
+            pending = self.ready(cli=cli)
             if pending is None:
                 return None
             transcript = self._subtitles.transcript(pending.video_id)
@@ -221,7 +231,6 @@ class Translations:
             try:
                 if self._translator is None:
                     raise TranslationError("missing_cli", "번역 어댑터가 설정되지 않았습니다.")
-                cli = self.cli
                 for attempt in range(self._format_attempts):
                     if self._cancellation.is_set():
                         raise TranslationCancelled
@@ -267,6 +276,11 @@ class Translations:
                 retry_at = self._clock() + self._retry_delay if held else None
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
+                    if held:
+                        # 원어 세대/요청이 교체됐어도 실제로 받은 계정 한도는 유지한다.
+                        db.execute("INSERT INTO translation_cli_backoff VALUES (?, ?) "
+                                   "ON CONFLICT(cli) DO UPDATE SET retry_at = excluded.retry_at",
+                                   (cli, retry_at.isoformat()))
                     db.execute("UPDATE translation_queue SET state = ?, retry_at = ?, error_kind = ?, error_detail = ? "
                                "WHERE id = ?", ("held" if held else "failed", retry_at.isoformat() if retry_at else None,
                                                 failure.kind, failure.detail, pending.id))

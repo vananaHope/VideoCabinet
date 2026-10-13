@@ -9,7 +9,8 @@ import pytest
 from my_video_manager.subtitles import TranscriptLine
 from my_video_manager.translation import TranslationError
 from my_video_manager.translation_cli import (
-    SubscriptionCLITranslator, classify_cli_failure, cli_failure_detail, parse_translation_response, translation_prompt,
+    SubscriptionCLITranslator, classify_cli_failure, cli_failure_detail,
+    parse_translation_response, translation_prompt,
 )
 from test_translation import setup, source
 from test_transcription import assert_processes_exited, wait_file
@@ -21,6 +22,17 @@ LINES = (TranscriptLine("one", 0, 1, "Hello"), TranscriptLine("two", 1, 2, "Worl
 @pytest.mark.parametrize("output,expected", [
     ("You've hit your usage limit. Try again at 3pm", "usage_limit"),
     ("You have reached your weekly limit", "usage_limit"),
+    ("You've hit your session limit · resets 3pm", "usage_limit"),
+    ("You've hit your Opus limit", "usage_limit"),
+    ("You've hit your Sonnet limit", "usage_limit"),
+    ("You're out of usage credits. Run /usage-credits", "usage_limit"),
+    ("out of extra usage", "usage_limit"),
+    ("out of usage · resets 3pm", "usage_limit"),
+    ("You've hit your monthly spend limit", "usage_limit"),
+    ("5-hour limit reached ∙ resets 1am", "usage_limit"),
+    ("Weekly limit reached", "usage_limit"),
+    ("usage_limit_reached", "usage_limit"),
+    ("You exceeded your current quota, please check your plan", "usage_limit"),
     ('{"error":{"type":"rate_limit_error"}}', "usage_limit"),
     ("HTTP 429 Too Many Requests", "usage_limit"),
     ("quota_exceeded", "usage_limit"),
@@ -32,6 +44,11 @@ LINES = (TranscriptLine("one", 0, 1, "Hello"), TranscriptLine("two", 1, 2, "Worl
     ("Connection refused", "other"),
     ("maximum context length exceeded", "other"),
     ("The output did not match the schema", "other"),
+    ("Executable claude.cmd not found", "other"),
+    ("Session limit configuration file missing", "other"),
+    ("Context window limit reached", "other"),
+    ("Maximum output token limit reached", "other"),
+    ("Login required before checking your session limit", "authentication"),
 ])
 def test_failure_classifier(output, expected):
     assert classify_cli_failure(output) == expected
@@ -91,11 +108,20 @@ if 'exec' in args:
     assert args[args.index('--sandbox') + 1] == 'read-only'
     assert args[args.index('-a') + 1] == 'never'
     assert '--ignore-user-config' in args and '--ephemeral' in args
+    assert '--ignore-rules' in args
+    assert args[args.index('--disable') + 1] == 'hooks'
+    assert args[args.index('-c') + 1] == 'project_doc_max_bytes=0'
     Path(args[args.index('--output-last-message') + 1]).write_text(json.dumps(result), encoding='utf-8')
 else:
     assert '-p' in args and '--safe-mode' in args and '--strict-mcp-config' in args
     assert args[args.index('--tools') + 1] == ''
     assert '--no-session-persistence' in args and '--permission-prompts' in args
+    assert '--system-prompt' not in args
+    from my_video_manager.translation_cli import TRANSLATION_INSTRUCTIONS
+    instructions = Path(args[args.index('--system-prompt-file') + 1])
+    assert instructions.parent == Path.cwd()
+    assert instructions.read_text(encoding='utf-8') == TRANSLATION_INSTRUCTIONS
+    assert all('\\n' not in arg and '\\r' not in arg for arg in args)
     print(json.dumps({'structured_output':result, 'is_error':False}))
 '''
 
@@ -112,6 +138,26 @@ def test_core_with_fake_cli_process_uses_safe_arguments_utf8_and_temp_directory(
     source(core, video.id)
     while core.translation_ready():
         assert core.process_next_translation().error is None
+    assert core.translation(video.id).lines[0].text == "번역 Line 0"
+    assert list(adapter.directory.iterdir()) == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 배치 런처 인자 전달")
+@pytest.mark.parametrize("extension", ["cmd", "bat"])
+def test_claude_batch_launcher_keeps_multiline_instructions_in_file(setup, tmp_path, extension):
+    core, _, _, _, reopen = setup
+    worker = tmp_path / "fake cli.py"
+    worker.write_text(SUCCESS_SCRIPT, encoding="utf-8")
+    launcher = tmp_path / f"claude launcher.{extension}"
+    launcher.write_text(f'@echo off\n"{sys.executable}" "{worker}" %*\n', encoding="utf-8")
+    adapter = SubscriptionCLITranslator(tmp_path / "data", commands={"claude": (str(launcher),)})
+    core = reopen(adapter)
+    core.set_translation_cli("claude")
+    video = core.videos()[0]
+    source(core, video.id)
+    while core.translation_ready():
+        result = core.process_next_translation()
+        assert result.error is None, result.error_detail
     assert core.translation(video.id).lines[0].text == "번역 Line 0"
     assert list(adapter.directory.iterdir()) == []
 

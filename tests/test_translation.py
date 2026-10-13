@@ -386,13 +386,56 @@ def test_cancel_and_abnormal_exit_resume_at_last_committed_batch(setup):
     assert [len(call[0]) for call in adapter.calls] == [2, 2, 2, 1]
 
 
-def test_one_held_video_does_not_block_other_videos(setup):
-    core, _, adapter, _, _ = setup
+def test_usage_limit_pauses_all_videos_until_cli_deadline_even_after_restart_and_retry(setup):
+    core, _, adapter, time, reopen = setup
     a, b = core.videos()
     source(core, a.id)
     source(core, b.id)
     adapter.error = TranslationError("usage_limit", "rate limit")
     assert core.process_next_translation().state == "held"
+    adapter.error = None
+    core = reopen()
+    core.request_translation(a.id)
+    assert core.process_next_translation() is None
+    assert not core.translation_ready()
+    assert len(adapter.calls) == 1
+    # 원어를 다시 만들어 한도 오류를 받은 작업이 없어져도 CLI 전체 보류는 남는다.
+    source(core, a.id)
+    time[0] += timedelta(minutes=14, seconds=59)
+    assert reopen().process_next_translation() is None
+    time[0] += timedelta(seconds=1)
+    finish(core)
+    assert core.translation(a.id) and core.translation(b.id)
+
+
+def test_each_cli_keeps_its_own_usage_deadline_and_can_resume_held_video(setup):
+    core, _, adapter, time, reopen = setup
+    source(core, core.videos()[0].id)
+    adapter.error = TranslationError("usage_limit", "limit")
+    assert core.process_next_translation().state == "held"
+    time[0] += timedelta(minutes=5)
+    core.set_translation_cli("claude")
+    assert core.translation_ready()
+    assert core.process_next_translation().state == "held"
+    assert [call[2] for call in adapter.calls] == ["codex", "claude"]
+    core = reopen()
+    time[0] += timedelta(minutes=10)
+    assert not core.translation_ready()  # claude는 아직 5분 남았다.
+    core.set_translation_cli("codex")
+    assert core.translation_ready()
+    adapter.error = None
+    finish(core)
+    assert core.translation(core.videos()[0].id)
+
+
+@pytest.mark.parametrize("kind", ["authentication", "missing_cli", "format", "other", "timeout"])
+def test_one_failed_video_does_not_block_other_videos(setup, kind):
+    core, _, adapter, _, _ = setup
+    a, b = core.videos()
+    source(core, a.id)
+    source(core, b.id)
+    adapter.error = TranslationError(kind, "failure")
+    assert core.process_next_translation().state == "failed"
     adapter.error = None
     assert all(result.video_id == b.id for result in finish(core))
     assert core.translation(b.id) and core.translation(a.id) is None

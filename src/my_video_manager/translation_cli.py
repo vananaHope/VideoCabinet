@@ -54,8 +54,11 @@ def parse_translation_response(output, lines):
 def classify_cli_failure(output: str) -> str:
     """실패 진단만 전달한다. 성공한 번역 텍스트는 한도 판정에 넣지 않는다."""
     lowered = output.lower()
+    subscription_limit = r"(?:usage|session|weekly|daily|monthly(?: spend)?|\d+[ -]hour|opus|sonnet)"
     if re.search(r"usage[_ -]limit|rate[_ -]limit|quota[_ -](?:exceeded|exhausted)|"
-                 r"(?:hit|reached|exceeded) (?:your |the )?(?:usage |weekly |daily )?limit|"
+                 rf"(?:hit|reached|exceeded) (?:your |the )?(?:{subscription_limit} )?limit\b|"
+                 rf"\b{subscription_limit} limit (?:reached|exceeded)\b|"
+                 r"\bout of (?:extra )?usage\b|exceeded (?:your |the )?(?:current )?quota\b|"
                  r"too many requests|\b429\b|사용량.{0,12}한도|구독.{0,12}한도", lowered):
         return "usage_limit"
     if re.search(r"not (?:logged|signed) in|(?:login|log in|sign in|authenticate).{0,20}(?:required|first)|"
@@ -114,15 +117,19 @@ class SubscriptionCLITranslator:
                 schema_path = directory / "schema.json"
                 schema_path.write_text(json.dumps(schema, ensure_ascii=False), encoding="utf-8")
                 arguments = [*command, "-a", "never", "exec", "--sandbox", "read-only",
-                             "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
+                             "--ignore-user-config", "--ignore-rules", "--disable", "hooks",
+                             "-c", "project_doc_max_bytes=0", "--ephemeral", "--skip-git-repo-check",
                              "--color", "never", "--json", "--output-schema", str(schema_path),
                              "--output-last-message", str(response), "-"]
             else:
+                # .cmd 런처는 따옴표 안의 줄바꿈도 명령 경계로 해석할 수 있다.
+                instructions_path = directory / "system-prompt.txt"
+                instructions_path.write_text(TRANSLATION_INSTRUCTIONS, encoding="utf-8")
                 arguments = [*command, "-p", "--safe-mode", "--tools", "", "--strict-mcp-config",
                              "--permission-mode", "plan", "--permission-prompts", "none",
                              "--disable-slash-commands", "--no-session-persistence",
                              "--output-format", "json", "--json-schema", json.dumps(schema),
-                             "--system-prompt", TRANSLATION_INSTRUCTIONS]
+                             "--system-prompt-file", str(instructions_path)]
             output, error, code = self._run(arguments, directory, translation_prompt(lines, spoken_language), cancellation)
             if code:
                 detail = cli_failure_detail(cli, output, error)

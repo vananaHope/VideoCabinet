@@ -39,6 +39,7 @@ class TranslationControls(QObject):
         prompt = "한국어 번역에 사용할 구독 CLI를 고르세요. 설치와 로그인이 필요합니다."
         if waiting:
             prompt += f"\n확인하면 실패·보류 중인 번역 {len(waiting)}건을 저장한 묶음부터 재시도합니다."
+            prompt += "\n선택한 CLI의 사용량 한도 보류 시간이 남았으면 그 시각까지 기다립니다."
         selected, accepted = QInputDialog.getItem(
             self.window, "번역 CLI", prompt, choices, choices.index(self.core.translation_cli), False)
         if accepted:
@@ -66,7 +67,7 @@ class TranslationControls(QObject):
         bar = self.window.statusBar()
         bar.setToolTip(result.error_detail or "")
         if result.state == "held":
-            bar.showMessage(f"번역 보류 · {result.retry_at.astimezone():%H:%M} 자동 재시도 · {result.error}")
+            bar.showMessage(f"번역 CLI 전체 보류 · {result.retry_at.astimezone():%H:%M} 자동 재시도 · {result.error}")
         elif result.error:
             bar.showMessage(f"번역 실패 · {result.error} 번역 CLI / 재시도에서 다시 요청하세요.")
         else:
