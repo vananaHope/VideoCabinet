@@ -35,6 +35,50 @@ def test_catalog_includes_all_commands_and_amount_variants(tmp_path):
             assert core.command_for_key(key) == row.command
 
 
+def test_translation_toggle_has_korean_label_and_period_default(tmp_path):
+    core = open_core(tmp_path)
+    command = Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE)
+    row = next(row for row in core.key_bindings() if row.command == command)
+    assert row.label == "원어 / 번역 자막 전환"
+    assert row.keys == row.default_keys == (".",)
+    assert core.command_for_key(".") == command
+
+
+@pytest.mark.parametrize(("kind", "key"), [
+    (CommandType.TOGGLE_PAUSE, "."),
+    (CommandType.TOGGLE_SUBTITLE_LANGUAGE, "Enter"),
+])
+def test_translation_key_conflict_preserves_both_commands(tmp_path, kind, key):
+    core = open_core(tmp_path)
+    bindings = draft(core)
+    bindings[Command(kind)] = (key,)
+    with pytest.raises(ValueError) as error:
+        core.save_key_bindings(bindings)
+    assert "원어 / 번역 자막 전환" in str(error.value)
+    assert "재생 / 일시정지" in str(error.value)
+    for app in (core, open_core(tmp_path)):
+        assert app.command_for_key(".") == Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE)
+        assert app.command_for_key("Enter") == Command(CommandType.TOGGLE_PAUSE)
+
+
+def test_translation_toggle_remapping_persists_and_resets_without_changing_cli(tmp_path):
+    core = open_core(tmp_path)
+    core.set_translation_cli("claude")
+    command = Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE)
+    bindings = draft(core)
+    bindings[command] = ("T",)
+    core.save_key_bindings(bindings)
+    for app in (core, open_core(tmp_path)):
+        assert app.command_for_key(".") is None
+        assert app.command_for_key("T") == command
+        assert app.translation_cli == "claude"
+    core.reset_key_bindings(command)
+    reopened = open_core(tmp_path)
+    assert reopened.command_for_key(".") == command
+    assert reopened.command_for_key("T") is None
+    assert reopened.translation_cli == "claude"
+
+
 def test_save_changes_immediately_and_survives_restart(tmp_path):
     core = open_core(tmp_path)
     command = Command(CommandType.TOGGLE_PAUSE)
