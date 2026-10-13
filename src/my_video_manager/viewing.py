@@ -29,7 +29,7 @@ class ViewingSettings:
 class ViewingKind(str, Enum):
     FINISHED = "finished"
     ABANDONED = "abandoned"
-    PREVIEW = "preview"
+    GLANCE = "glance"
 
 
 def merge_intervals(intervals, duration: float) -> tuple[tuple[float, float], ...]:
@@ -76,10 +76,10 @@ class Viewing:
             return ViewingKind.FINISHED
         if self.played_ratio >= settings.abandoned_ratio:
             return ViewingKind.ABANDONED
-        return ViewingKind.PREVIEW
+        return ViewingKind.GLANCE
 
 
-def report_position(viewing: Viewing, position: float, *, discontinuity: bool = False) -> Viewing:
+def report_position(viewing: Viewing, position: float, *, seeked: bool = False) -> Viewing:
     """연속된 엔진 보고 사이만 누적한다. 탐색/재개 첫 보고는 새 기준점이다.
 
     호출자는 탐색을 위치 차이나 벽시계로 추측하지 않고 엔진의 불연속 이벤트로
@@ -91,7 +91,7 @@ def report_position(viewing: Viewing, position: float, *, discontinuity: bool = 
         raise ValueError("재생 위치는 유한한 값이어야 합니다.")
     position = max(0, min(viewing.duration, position))
     intervals = viewing.intervals
-    if not discontinuity and viewing.last_position is not None:
+    if not seeked and viewing.last_position is not None:
         intervals = merge_intervals((*intervals, (viewing.last_position, position)), viewing.duration)
     return replace(viewing, intervals=intervals, last_position=position)
 
@@ -111,15 +111,15 @@ def viewing_status(viewings: tuple[Viewing, ...], settings: ViewingSettings) -> 
     finished = finished_count > 0
     abandoned = not finished and any(v.classify(settings) == ViewingKind.ABANDONED for v in viewings)
     # 시작 시각이 같은 가짜 시계/빠른 재실행에도 ID가 최종 순서를 보장한다.
-    last = max(viewings, key=lambda v: v.id) if viewings else None
-    point = (last.last_position or 0) if abandoned else None
+    last = max((v for v in viewings if v.last_position is not None), key=lambda v: v.id, default=None)
+    point = last.last_position if abandoned and last is not None else None
     return ViewingStatus(finished, abandoned, finished_count >= settings.favorite_count,
                          finished_count, point,
                          point / last.duration * 100 if point is not None else None)
 
 
 class ViewingRecorder:
-    """공용 재생 수명주기와 시청 공개 API를 연결한다."""
+    """공용 재생 수명주기와 시청 저장을 연결한다."""
 
     def __init__(self, start, report, end):
         self._start, self._report, self._end = start, report, end
@@ -127,12 +127,11 @@ class ViewingRecorder:
 
     def playback_started(self, session, position):
         if session.record_viewing:
-            self._viewing_id = self._start(session.video_id).id
-            self._report(self._viewing_id, position, discontinuity=True)
+            self._viewing_id = self._start(session.video_id, position).id
 
     def playback_position(self, session, position, seeked):
         if self._viewing_id is not None:
-            self._report(self._viewing_id, position, discontinuity=seeked)
+            self._report(self._viewing_id, position, seeked=seeked)
 
     def playback_ended(self, session, position):
         if self._viewing_id is not None:
@@ -163,21 +162,23 @@ class ViewingStore:
                 UPDATE viewings SET ended_at = updated_at WHERE ended_at IS NULL;
             """)
 
-    def start(self, video_id: int, duration: float) -> Viewing:
+    def start(self, video_id: int, duration: float, position: float) -> Viewing:
         merge_intervals((), duration)
         now = self._clock()
+        viewing = report_position(Viewing(0, video_id, duration, now, now), position, seeked=True)
         with self._connect() as db:
             cursor = db.execute(
-                "INSERT INTO viewings (video_id, duration, started_at, updated_at, intervals) VALUES (?, ?, ?, ?, ?)",
-                (video_id, duration, now.isoformat(), now.isoformat(), "[]"),
+                "INSERT INTO viewings (video_id, duration, started_at, updated_at, intervals, last_position) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (video_id, duration, now.isoformat(), now.isoformat(), "[]", viewing.last_position),
             )
-        viewing = Viewing(cursor.lastrowid, video_id, duration, now, now)
+        viewing = replace(viewing, id=cursor.lastrowid)
         self._active[viewing.id] = viewing
         self._saved_at[viewing.id] = now
         return viewing
 
-    def report(self, viewing_id: int, position: float, *, discontinuity: bool = False) -> None:
-        viewing = report_position(self._require_active(viewing_id), position, discontinuity=discontinuity)
+    def report(self, viewing_id: int, position: float, *, seeked: bool = False) -> None:
+        viewing = report_position(self._require_active(viewing_id), position, seeked=seeked)
         self._active[viewing_id] = replace(viewing, updated_at=self._clock())
         self.save_due()
 

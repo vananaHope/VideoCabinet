@@ -93,9 +93,12 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def refresh(self):
+        selected = self.list.currentItem()
+        selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None
+        selected_row = 0
         self.folders.setText("감시 폴더: " + (", ".join(str(f.path) for f in self.core.watched_folders()) or "없음"))
         self.list.clear()
-        for video in self.core.videos():
+        for row, video in enumerate(self.core.videos()):
             status = self.core.viewing_status(video.id)
             label = "다 봄" if status.finished else f"보다 만 ({status.stopped_percent:.0f}%)" if status.abandoned else ""
             if status.favorite:
@@ -104,8 +107,10 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, video.id)
             item.setSizeHint(QSize(300, 120))
             self.list.addItem(item)
+            if video.id == selected_id:
+                selected_row = row
         if self.list.count():
-            self.list.setCurrentRow(0)
+            self.list.setCurrentRow(selected_row)
         self.list.setFocus()
 
     def add_folder(self):

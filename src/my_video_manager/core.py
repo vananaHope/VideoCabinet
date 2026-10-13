@@ -163,7 +163,7 @@ class AppCore:
             CommandType.NEXT_HIGHLIGHT: lambda: self._highlights.adjacent(forward=True),
         }
         self._viewings = ViewingStore(self._connect, clock, viewing_settings or ViewingSettings())
-        self.playback.subscribe(ViewingRecorder(self.start_viewing, self.report_playback_position, self.end_viewing))
+        self.playback.subscribe(ViewingRecorder(self._start_viewing, self._viewings.report, self._viewings.end))
 
     def _connect(self):
         connection = sqlite3.connect(self.database, timeout=30)
@@ -291,21 +291,15 @@ class AppCore:
             raise ValueError("재생할 영상의 위치가 없습니다.")
         return Location(Path(row[0]))
 
-    def start_viewing(self, video_id: int) -> Viewing:
+    def _start_viewing(self, video_id: int, position: float) -> Viewing:
         with self._connect() as db:
             row = db.execute("SELECT duration FROM videos WHERE id=?", (video_id,)).fetchone()
         if row is None:
             raise ValueError("영상이 없습니다.")
-        return self._viewings.start(video_id, row[0])
-
-    def report_playback_position(self, viewing_id: int, position: float, *, discontinuity: bool = False) -> None:
-        self._viewings.report(viewing_id, position, discontinuity=discontinuity)
+        return self._viewings.start(video_id, row[0], position)
 
     def save_viewings(self) -> None:
         self._viewings.save_due()
-
-    def end_viewing(self, viewing_id: int) -> Viewing:
-        return self._viewings.end(viewing_id)
 
     def viewings(self, video_id: int) -> tuple[Viewing, ...]:
         return self._viewings.list(video_id)

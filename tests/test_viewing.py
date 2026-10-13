@@ -1,10 +1,11 @@
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.viewing import (
-    Viewing, ViewingKind, ViewingSettings, merge_intervals, report_position,
+    Viewing, ViewingKind, ViewingSettings, merge_intervals, report_position, viewing_status,
 )
 
 
@@ -42,11 +43,15 @@ def library(tmp_path):
     return core, core.videos()[0].id, clock
 
 
+def finish(core, video_id):
+    core.playback.end()
+    return core.viewings(video_id)[-1]
+
+
 def watch(core, video_id, start, end):
-    viewing = core.start_viewing(video_id)
-    core.report_playback_position(viewing.id, start)
-    core.report_playback_position(viewing.id, end)
-    return core.end_viewing(viewing.id)
+    core.playback.start(video_id, start)
+    core.playback.report(end)
+    return finish(core, video_id)
 
 
 @pytest.mark.parametrize("intervals, expected", [
@@ -78,7 +83,7 @@ def test_invalid_position(position):
 
 
 @pytest.mark.parametrize("end, kind", [
-    (0, ViewingKind.PREVIEW), (4.999, ViewingKind.PREVIEW),
+    (0, ViewingKind.GLANCE), (4.999, ViewingKind.GLANCE),
     (5, ViewingKind.ABANDONED), (89.999, ViewingKind.ABANDONED),
     (90, ViewingKind.FINISHED), (100, ViewingKind.FINISHED),
 ])
@@ -94,18 +99,18 @@ def test_classification_boundaries(library, end, kind):
 
 def test_seek_overlap_pause_and_position_based_speed(library):
     core, video_id, clock = library
-    viewing = core.start_viewing(video_id)
-    core.report_playback_position(viewing.id, 0)
+    core.playback.start(video_id, 0)
+    core.playback.report(0)
     clock.advance(5)  # 2배속으로 영상 시간 10초를 본다.
-    core.report_playback_position(viewing.id, 10)
-    core.report_playback_position(viewing.id, 80, discontinuity=True)
+    core.playback.report(10)
+    core.playback.report(80, seeked=True)
     clock.advance(5)
-    core.report_playback_position(viewing.id, 90)
-    core.report_playback_position(viewing.id, 5, discontinuity=True)
-    core.report_playback_position(viewing.id, 15)
+    core.playback.report(90)
+    core.playback.report(5, seeked=True)
+    core.playback.report(15)
     clock.advance(60)  # 일시정지: 시계만 흘러도 누적하지 않는다.
-    core.report_playback_position(viewing.id, 15)
-    result = core.end_viewing(viewing.id)
+    core.playback.report(15)
+    result = finish(core, video_id)
     assert result.intervals == ((0, 15), (80, 90))
     assert result.played_seconds == 25
     assert result.last_position == 15
@@ -114,25 +119,26 @@ def test_seek_overlap_pause_and_position_based_speed(library):
 
 def test_tiny_forward_seek_is_not_played(library):
     core, video_id, _ = library
-    viewing = core.start_viewing(video_id)
-    for position, discontinuity in [(0, False), (4.9, False), (5.1, True), (5.15, False)]:
-        core.report_playback_position(viewing.id, position, discontinuity=discontinuity)
-    result = core.end_viewing(viewing.id)
+    core.playback.start(video_id, 0)
+    for position, seeked in [(0, False), (4.9, False), (5.1, True), (5.15, False)]:
+        core.playback.report(position, seeked=seeked)
+    result = finish(core, video_id)
     assert result.played_seconds == pytest.approx(4.95)
-    assert result.classify(ViewingSettings()) == ViewingKind.PREVIEW
+    assert result.classify(ViewingSettings()) == ViewingKind.GLANCE
 
 
-def test_first_report_is_baseline_and_reverse_report_does_not_count(library):
+def test_start_position_is_baseline_and_reverse_report_does_not_count(library):
     core, video_id, _ = library
-    viewing = core.start_viewing(video_id)
+    core.playback.start(video_id, 80)
     for position in (80, 85, 20, 25):
-        core.report_playback_position(viewing.id, position)
-    assert core.end_viewing(viewing.id).played_seconds == 10
+        core.playback.report(position)
+    assert finish(core, video_id).played_seconds == 10
 
 
 def test_empty_and_clamped_reports(library):
     core, video_id, _ = library
-    empty = core.end_viewing(core.start_viewing(video_id).id)
+    core.playback.start(video_id, 0)
+    empty = finish(core, video_id)
     assert empty.played_seconds == 0
     assert core.resume_start(video_id) == 0
     result = watch(core, video_id, -5, 105)
@@ -140,7 +146,7 @@ def test_empty_and_clamped_reports(library):
     assert result.last_position == 100
 
 
-def test_abandoned_display_uses_last_position_including_preview(library):
+def test_abandoned_display_uses_last_position_including_glance(library):
     core, video_id, _ = library
     watch(core, video_id, 0, 42)
     assert core.resume_start(video_id) == 39
@@ -197,14 +203,14 @@ def test_invalid_settings(changes):
 
 def test_periodic_checkpoint_and_crash_recovery(library):
     core, video_id, clock = library
-    viewing = core.start_viewing(video_id)
-    core.report_playback_position(viewing.id, 0)
+    core.playback.start(video_id, 0)
+    core.playback.report(0)
     clock.advance(5)
-    core.report_playback_position(viewing.id, 40)
+    core.playback.report(40)
     checkpoint_time = clock()
     clock.advance(1)
-    core.report_playback_position(viewing.id, 45)
-    # end_viewing 없이 새 앱을 열어 강제 종료 후 복구를 재현한다.
+    core.playback.report(45)
+    # playback.end() 없이 새 앱을 열어 강제 종료 후 복구를 재현한다.
     clock.advance(100)
     reopened = AppCore(media=Media(), clock=clock, database=core.database)
     recovered, = reopened.viewings(video_id)
@@ -220,26 +226,25 @@ def test_periodic_checkpoint_and_crash_recovery(library):
 
 def test_timer_saves_even_without_more_position_reports(library):
     core, video_id, clock = library
-    viewing = core.start_viewing(video_id)
-    core.report_playback_position(viewing.id, 0)
-    core.report_playback_position(viewing.id, 30)
+    core.playback.start(video_id, 0)
+    core.playback.report(0)
+    core.playback.report(30)
     clock.advance(5)
     core.save_viewings()
     reopened = AppCore(media=Media(), clock=clock, database=core.database)
     assert reopened.viewings(video_id)[0].played_seconds == 30
 
 
-def test_close_forces_save_and_rejects_late_reports(library):
+def test_close_forces_save_and_ignores_late_reports(library):
     core, video_id, clock = library
     result = watch(core, video_id, 0, 40)
     reopened = AppCore(media=Media(), clock=clock, database=core.database)
     assert reopened.viewings(video_id) == (result,)
+    core.playback.report(45)
+    core.playback.end()
+    assert core.viewings(video_id) == (result,)
     with pytest.raises(ValueError):
-        core.report_playback_position(result.id, 45)
-    with pytest.raises(ValueError):
-        core.end_viewing(result.id)
-    with pytest.raises(ValueError):
-        core.start_viewing(999)
+        core.playback.start(999, 0)
     with pytest.raises(ValueError):
         report_position(result, 45)
 
@@ -281,7 +286,7 @@ def test_non_viewing_playback_does_not_create_or_change_history(library):
     assert core.viewings(video_id)[1].played_seconds == 13
 
 
-def test_preview_viewings_never_accumulate_into_abandoned(library):
+def test_glance_viewings_never_accumulate_into_abandoned(library):
     core, video_id, _ = library
     for start in range(0, 100, 4):
         watch(core, video_id, start, start + 4)
@@ -311,3 +316,48 @@ def test_configurable_abandoned_threshold(library):
     assert not core.viewing_status(video_id).abandoned
     watch(core, video_id, 0, 10)
     assert core.viewing_status(video_id).abandoned
+
+
+def test_resume_survives_crash_before_first_save_after_reopening(tmp_path):
+    class LongMedia(Media):
+        def read(self, path):
+            return MediaInfo(1000, "matroska")
+
+    folder = tmp_path / "videos"
+    folder.mkdir()
+    (folder / "video.mkv").write_bytes(b"video")
+    clock = Clock()
+    database = tmp_path / "data/library.sqlite3"
+    core = AppCore(media=LongMedia(), clock=clock, database=database)
+    core.add_watched_folder(folder)
+    core.scan()
+    video_id = core.videos()[0].id
+    core.playback.start(video_id, 0)
+    core.playback.report(500)
+    core.playback.end()
+    assert core.resume_start(video_id) == 497
+
+    core.playback.start(video_id, core.resume_start(video_id))
+    for position in (498, 499, 500):
+        clock.advance(1)
+        core.playback.report(position)
+    # 보고서와 동일하게 첫 5초 저장 전에 end() 없이 앱을 다시 연다.
+    recovered = AppCore(media=LongMedia(), clock=clock, database=database)
+    status = recovered.viewing_status(video_id)
+    assert status.abandoned
+    assert status.resume_point == 497
+    assert status.stopped_percent == pytest.approx(49.7)
+    assert recovered.resume_start(video_id) == 494
+    assert recovered.viewings(video_id)[-1].ended_at is not None
+
+
+@pytest.mark.parametrize("last_position", [None, 0])
+def test_resume_skips_missing_positions_but_keeps_zero(library, last_position):
+    core, video_id, _ = library
+    watched = watch(core, video_id, 0, 50)
+    # 과거 버전의 위치 없는 빈 시청도 받아들이는 공개 상태 계산 함수.
+    empty = replace(watched, id=watched.id + 1, intervals=(), last_position=last_position)
+    status = viewing_status((watched, empty), ViewingSettings())
+    assert status.abandoned
+    assert status.resume_point == (50 if last_position is None else 0)
+    assert status.stopped_percent == (50 if last_position is None else 0)

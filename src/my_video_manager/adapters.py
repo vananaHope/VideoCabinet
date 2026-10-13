@@ -73,7 +73,7 @@ class MpvPlayer:
         self._seeking = True
 
         @self._player.event_callback("seek", "start-file")
-        def discontinuity(event):
+        def seek_started(event):
             self._seeking = True
 
         @self._player.event_callback("playback-restart")
