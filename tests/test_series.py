@@ -295,7 +295,7 @@ def test_review_early_episode_insertion_distinguishes_order_changes(core, tmp_pa
     (("01. 소개.mp4", "02. 설치.mp4"), "", ((1, 1), (1, 2)), "shows"),
     (("Lecture 01 - Intro.mp4", "Lecture 02 - Basics.mp4"), "", ((1, 1), (1, 2)), "shows"),
     (("런닝맨.E650.230416.720p-NEXT.mp4", "런닝맨.E651.230423.720p-NEXT.mp4"), "런닝맨", ((1, 650), (1, 651)), "런닝맨"),
-    (("[SubsPlease] Frieren - 01 (1080p) [ABCD1234].mkv", "[SubsPlease] Frieren - 02 (1080p) [EF015678].mkv"), "frieren", ((1, 1), (1, 2)), "[SubsPlease] Frieren"),
+    (("[SubsPlease] Frieren - 01 (1080p) [ABCD1234].mkv", "[SubsPlease] Frieren - 02 (1080p) [EF015678].mkv"), "frieren", ((1, 1), (1, 2)), "Frieren"),
     (("1주차 1강.mp4", "1주차 2강.mp4", "2주차 1강.mp4"), "", ((1, 1), (1, 2), (2, 1)), "shows"),
     (("드라마 제1화.mp4", "드라마 2화.mp4"), "드라마", ((1, 1), (1, 2)), "드라마"),
     (("Top 5 goals.mp4", "Top 10 goals.mp4"), "top", ((1, 5), (1, 10)), "Top"),
@@ -365,3 +365,44 @@ def test_switch_to_delivers_end_before_start_and_preserves_target_subtitles(tmp_
     assert "Show E01" in core.playback_subtitle(first).read_text(encoding="utf-8")
     assert core.command_for_key("/") == Command(CommandType.TOGGLE_SUBTITLES)
     assert core.command_for_key("PgDn") == Command(CommandType.NEXT_VIDEO)
+
+
+@pytest.mark.parametrize("names, grouped", [
+    (("01. 소개.mp4", "02. 설치.mp4", "03. 실행.mp4"), True),
+    (("12 Angry Men.mkv", "21 Jump Street.mkv"), False),
+    (("01 회의 녹화.mp4", "02 가족 여행.mp4"), True),
+    (("1 소개.mp4", "3 설치.mp4"), True),
+    (("1.mp4", "5.mp4"), False),
+    (("2.mp4", "3.mp4"), False),
+    (("0 소개.mp4", "1 설치.mp4"), True),
+    (("0 소개.mp4", "2 설치.mp4"), True),
+    (("0 소개.mp4", "3 설치.mp4"), False),
+    (("1.mp4", "3.mp4", "5.mp4"), False),
+    (("1강 소개.mp4", "5강 실행.mp4"), True),
+    (("E12 소개.mp4", "E21 실행.mp4"), True),
+    (("Lecture 12 - Intro.mp4", "Lecture 21 - Basics.mp4"), True),
+    (("1주차 1강.mp4", "2주차 1강.mp4"), True),
+    (("Movie 12.mkv", "Movie 21.mkv"), True),
+])
+def test_empty_template_bare_numbers_require_zero_or_one_start_and_at_most_one_gap(core, tmp_path, names, grouped):
+    ids = add(core, tmp_path / "shows", *reversed(names))
+    if grouped:
+        series, = core.series()
+        assert series.video_ids == tuple(ids[name.rsplit(".", 1)[0]] for name in names)
+    else:
+        assert core.series() == ()
+
+
+@pytest.mark.parametrize("edited", [False, True])
+def test_empty_template_gap_on_rescan_preserves_only_user_choices(core, tmp_path, edited):
+    folder = tmp_path / "shows"
+    ids = add(core, folder, "1.mp4", "2.mp4")
+    series, = core.series()
+    if edited:
+        core.update_series(series.id, name="내 시리즈", video_ids=series.video_ids)
+    ids = add(core, folder, "5.mp4")
+    if edited:
+        assert core.series()[0].video_ids == (ids["1"], ids["2"])
+        assert core.series_for_video(ids["5"]) is None
+    else:
+        assert core.series() == ()

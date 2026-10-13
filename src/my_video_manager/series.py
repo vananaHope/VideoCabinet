@@ -44,12 +44,13 @@ def series_filename(filename: str) -> tuple[str, tuple[int, int]] | None:
     return (normalize_series_title(parsed[0]), parsed[1]) if parsed else None
 
 
-def _filename_parts(filename: str) -> tuple[str, tuple[int, int]] | None:
+def _filename_parts(filename: str) -> tuple[str, tuple[int, int], bool] | None:
     # 인덱스가 원문을 가리키도록 꼬리표는 같은 길이의 공백으로 가린다.
     # \d는 전각 숫자도 인식하며 표시 이름은 원문 그대로 남긴다.
     stem = Path(filename).stem
     # E로 시작하는 CRC도 회차 표기로 오인하지 않는다.
     matches = list(_NUMBER.finditer(_CRC.sub(lambda m: " " * len(m[0]), stem)))
+    explicit = bool(matches)
     if matches:
         if len(matches) != 1:
             return None
@@ -64,9 +65,16 @@ def _filename_parts(filename: str) -> tuple[str, tuple[int, int]] | None:
             return None
         match = matches[0]
         season, number = 1, int(match[0])
-    if number < 1 or season < 1:
+    prefix = stem[:match.start()].strip(" ._-–—")
+    if season < 1 or (number == 0 and (explicit or normalize_series_title(prefix))):
         return None
-    return stem[:match.start()].strip(" ._-–—"), (season, number)
+    return prefix, (season, number), explicit
+
+
+def consecutive_series_numbers(numbers) -> bool:
+    """맨 번호 묶음은 0/1부터 시작하고 중간 누락 번호가 하나 이하여야 한다."""
+    numbers = sorted(set(numbers))
+    return bool(numbers) and numbers[0] in (0, 1) and numbers[-1] - numbers[0] + 1 - len(numbers) <= 1
 
 
 def adjacent_video(video_id: int, video_ids: tuple[int, ...], *, forward: bool) -> int | None:
@@ -160,13 +168,18 @@ class SeriesStore:
             path = min((loc.path for loc in video.locations), key=lambda p: (str(p).casefold(), str(p)))
             parsed = _filename_parts(path.name)
             if parsed is not None:
-                prefix, number = parsed
+                prefix, number, explicit = parsed
                 title = normalize_series_title(prefix)
-                groups[(str(path.parent).casefold(), title)].append((number, video.id, prefix if title else path.parent.name))
+                display = " ".join(re.sub(r"\[[^\]]*\]", " ", prefix).split()).strip(" ._-–—")
+                groups[(str(path.parent).casefold(), title)].append((number, video.id, display if title else path.parent.name, explicit))
         valid_groups = {}
         for key, candidates in groups.items():
-            counts = Counter(number for number, _, _ in candidates)
-            valid_groups[key] = sorted((number, vid) for number, vid, _ in candidates if counts[number] == 1)
+            counts = Counter(number for number, _, _, _ in candidates)
+            valid = sorted((number, vid) for number, vid, _, _ in candidates if counts[number] == 1)
+            if (not key[1] and not any(explicit for _, _, _, explicit in candidates)
+                    and not consecutive_series_numbers(number[1] for number, _ in valid)):
+                valid = []
+            valid_groups[key] = valid
         with self._connect() as db:
             # 검사 작업자와 편집 화면이 겹쳐도 사용자 결정을 읽고 쓰는 단위를 보장한다.
             db.execute("BEGIN IMMEDIATE")
