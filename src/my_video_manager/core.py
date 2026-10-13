@@ -10,6 +10,9 @@ import sqlite3
 import stat
 from typing import Callable, Mapping, Protocol
 
+from .highlights import Highlight, Highlights
+from .playback import PlaybackHub
+
 
 @dataclass(frozen=True)
 class MediaInfo:
@@ -51,6 +54,10 @@ class CommandType(str, Enum):
     TOGGLE_PAUSE = "toggle_pause"
     SEEK = "seek"
     CHANGE_SPEED = "change_speed"
+    POINT_HIGHLIGHT = "point_highlight"
+    RANGE_HIGHLIGHT = "range_highlight"
+    PREVIOUS_HIGHLIGHT = "previous_highlight"
+    NEXT_HIGHLIGHT = "next_highlight"
 
 
 @dataclass(frozen=True)
@@ -66,6 +73,10 @@ DEFAULT_KEY_BINDINGS = {
     ",": Command(CommandType.SEEK, -3),
     "Up": Command(CommandType.CHANGE_SPEED, 0.25),
     "Down": Command(CommandType.CHANGE_SPEED, -0.25),
+    "Insert": Command(CommandType.POINT_HIGHLIGHT),
+    "Delete": Command(CommandType.RANGE_HIGHLIGHT),
+    "Home": Command(CommandType.PREVIOUS_HIGHLIGHT),
+    "End": Command(CommandType.NEXT_HIGHLIGHT),
 }
 
 MIN_PLAYBACK_SPEED = 0.25
@@ -140,6 +151,15 @@ class AppCore:
                 );
                 PRAGMA user_version = 1;
             """)
+        self.playback = PlaybackHub()
+        self._highlights = Highlights(self._connect)
+        self.playback.subscribe(self._highlights)
+        self._highlight_commands = {
+            CommandType.POINT_HIGHLIGHT: self._highlights.add_point,
+            CommandType.RANGE_HIGHLIGHT: self._highlights.toggle_range,
+            CommandType.PREVIOUS_HIGHLIGHT: lambda: self._highlights.adjacent(forward=False),
+            CommandType.NEXT_HIGHLIGHT: lambda: self._highlights.adjacent(forward=True),
+        }
 
     def _connect(self):
         connection = sqlite3.connect(self.database, timeout=30)
@@ -153,6 +173,31 @@ class AppCore:
 
     def command_for_key(self, key: str) -> Command | None:
         return self._key_bindings.get(key)
+
+    def highlights(self, video_id: int) -> tuple[Highlight, ...]:
+        return self._highlights.list(video_id)
+
+    def update_highlight(self, highlight_id: int, *, start: float, end: float | None,
+                         note: str) -> Highlight:
+        return self._highlights.update(highlight_id, start=start, end=end, note=note)
+
+    def delete_highlight(self, highlight_id: int) -> None:
+        self._highlights.delete(highlight_id)
+
+    @property
+    def open_highlight_start(self) -> float | None:
+        return self._highlights.open_start
+
+    def is_highlight_command(self, command: Command) -> bool:
+        return command.kind in self._highlight_commands
+
+    def execute_highlight_command(self, command: Command) -> float | None:
+        """하이라이트 명령을 적용하고, 탐색할 때만 목표 시각을 반환한다."""
+        handler = self._highlight_commands.get(command.kind)
+        if handler is None:
+            raise ValueError("하이라이트 명령이 아닙니다.")
+        result = handler()
+        return None if isinstance(result, Highlight) else result
 
     def add_watched_folder(self, path: Path) -> WatchedFolder:
         path = Path(path).resolve()
