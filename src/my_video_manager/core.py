@@ -3,57 +3,19 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import hashlib
-import os
 from pathlib import Path
 import sqlite3
-import stat
-from typing import Callable, Mapping, Protocol
+from typing import Callable, Mapping
 
+from .library import Library, Location, MediaInfo, MediaReader, ScanIssue, ScanResult, Video, WatchedFolder
+from .settings import Settings
 from .highlights import Highlight, Highlights
 from .playback import PlaybackHub
 from .series import Series, SeriesStore, adjacent_video
 from .tags import Tag, Tags
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
-from .settings import Settings
 from .translation import Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection
-
-
-@dataclass(frozen=True)
-class MediaInfo:
-    duration: float
-    format: str
-
-
-class MediaReader(Protocol):
-    def read(self, path: Path) -> MediaInfo | None:
-        """영상이 아니면 None, 읽기 실패 시 예외를 반환한다."""
-        ...
-
-    def capture(self, path: Path, destination: Path, seconds: float) -> None: ...
-
-
-@dataclass(frozen=True)
-class Location:
-    path: Path
-
-
-@dataclass(frozen=True)
-class WatchedFolder:
-    path: Path
-
-
-@dataclass(frozen=True)
-class Video:
-    id: int
-    title: str
-    fingerprint: str
-    duration: float
-    format: str
-    thumbnail: Path
-    registered_at: datetime
-    locations: tuple[Location, ...]
 
 
 class CommandType(str, Enum):
@@ -101,33 +63,8 @@ def playback_speed(current: float, change: float) -> float:
     return max(MIN_PLAYBACK_SPEED, min(MAX_PLAYBACK_SPEED, current + change))
 
 
-@dataclass(frozen=True)
-class ScanIssue:
-    path: Path
-    message: str
-
-
-@dataclass(frozen=True)
-class ScanResult:
-    added: int
-    issues: tuple[ScanIssue, ...]
-
-
 def default_data_directory() -> Path:
     return Path.home() / ".my-video-manager"
-
-
-def _fingerprint(path: Path) -> str:
-    # v1: 크기 + 최대 64 KiB씩 앞/중앙/뒤. 전체 해시가 아니므로
-    # 샘플 밖만 달라지는 같은 크기의 파일은 구별하지 못할 수 있다.
-    sample_size = 64 * 1024
-    with path.open("rb") as source:
-        size = path.stat().st_size
-        digest = hashlib.sha256(str(size).encode("ascii"))
-        for offset in (0, max(0, (size - sample_size) // 2), max(0, size - sample_size)):
-            source.seek(offset)
-            digest.update(source.read(sample_size))
-    return f"v1:{size}:{digest.hexdigest()}"
 
 
 class AppCore:
@@ -151,24 +88,8 @@ class AppCore:
         self._clock = clock
         self.set_key_bindings(DEFAULT_KEY_BINDINGS if key_bindings is None else key_bindings)
         # 접속은 호출 단위로 열어 UI 작업자 스레드에서도 코어를 사용할 수 있다.
-        with self._connect() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS watched_folders (path TEXT PRIMARY KEY);
-                CREATE TABLE IF NOT EXISTS videos (
-                    id INTEGER PRIMARY KEY,
-                    fingerprint TEXT NOT NULL UNIQUE,
-                    title TEXT NOT NULL,
-                    duration REAL NOT NULL,
-                    format TEXT NOT NULL,
-                    thumbnail TEXT NOT NULL,
-                    registered_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS locations (
-                    path TEXT PRIMARY KEY,
-                    video_id INTEGER NOT NULL REFERENCES videos(id)
-                );
-                PRAGMA user_version = 1;
-            """)
+        self.settings = Settings(self._connect)
+        self._library = Library(self._connect, media, clock, self._thumbnails, self.settings)
         self.playback = PlaybackHub()
         self._series = SeriesStore(self._connect)
         self._highlights = Highlights(self._connect)
@@ -183,7 +104,6 @@ class AppCore:
         self._viewings = ViewingStore(self._connect, clock, viewing_settings or ViewingSettings())
         self.playback.subscribe(ViewingRecorder(self._start_viewing, self._viewings.report, self._viewings.end))
         self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location)
-        self.settings = Settings(self._connect)
         self._translations = Translations(self._connect, clock, self._subtitles, self.settings, translator,
                                           batch_size=translation_batch_size)
         self._subtitle_selection = SubtitleSelection(self._translations)
@@ -219,6 +139,7 @@ class AppCore:
         return self._subtitle_selection.toggle()
 
     def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:
+        self.playback_location(video_id)
         return self._subtitles.request(video_id, spoken_language)
 
     def subtitle_queue(self) -> tuple[SubtitleQueueEntry, ...]:
@@ -332,16 +253,40 @@ class AppCore:
         return None if isinstance(result, Highlight) else result
 
     def add_watched_folder(self, path: Path) -> WatchedFolder:
-        path = Path(path).resolve()
-        if not path.is_dir():
-            raise ValueError(f"폴더가 아닙니다: {path}")
-        with self._connect() as db:
-            db.execute("INSERT OR IGNORE INTO watched_folders VALUES (?)", (str(path),))
-        return WatchedFolder(path)
+        return self._library.add_watched_folder(path)
 
     def watched_folders(self) -> tuple[WatchedFolder, ...]:
-        with self._connect() as db:
-            return tuple(WatchedFolder(Path(row[0])) for row in db.execute("SELECT path FROM watched_folders ORDER BY path"))
+        return self._library.watched_folders()
+
+    def remove_watched_folder(self, path: Path) -> None:
+        self._library.remove_watched_folder(path)
+
+    def add_file(self, path: Path) -> ScanResult:
+        result = self._library.add_file(path)
+        self._series.regroup(self.videos() + self.excluded_videos())
+        return result
+
+    def reconnect_video(self, video_id: int, path: Path) -> None:
+        self._library.reconnect_video(video_id, path)
+
+    def rename_video(self, video_id: int, title: str) -> None:
+        self._library.rename_video(video_id, title)
+
+    def exclude_video(self, video_id: int) -> None:
+        self._library.set_excluded(video_id, True)
+
+    def restore_video(self, video_id: int) -> None:
+        self._library.set_excluded(video_id, False)
+
+    def excluded_videos(self) -> tuple[Video, ...]:
+        return self._library.videos(excluded=True)
+
+    @property
+    def minimum_duration(self) -> float:
+        return self._library.minimum_duration
+
+    def set_minimum_duration(self, seconds: float) -> None:
+        self._library.set_minimum_duration(seconds)
 
     def series(self) -> tuple[Series, ...]:
         """시리즈와 각 시리즈의 영상 ID를 사용자 지정 순서로 조회한다."""
@@ -362,81 +307,15 @@ class AppCore:
         return adjacent_video(video_id, series.video_ids if series else tuple(visible_video_ids), forward=forward)
 
     def scan(self) -> ScanResult:
-        added = 0
-        issues = []
-        pending = [folder.path for folder in reversed(self.watched_folders())]
-        visited: set[Path] = set()
-        while pending:
-            directory = pending.pop()
-            try:
-                real_path = directory.resolve()
-                if real_path in visited:
-                    continue
-                visited.add(real_path)
-                with os.scandir(directory) as entries:
-                    for entry in entries:
-                        path = Path(entry.path)
-                        try:
-                            info = entry.stat(follow_symlinks=False)
-                            if (stat.S_ISLNK(info.st_mode)
-                                    or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
-                                continue  # 정션·심볼릭 링크 등은 따라가지 않는다.
-                            if stat.S_ISDIR(info.st_mode):
-                                pending.append(path)
-                            elif stat.S_ISREG(info.st_mode):
-                                added += self._register(path.resolve())
-                        except (OSError, ValueError, RuntimeError) as error:
-                            issues.append(ScanIssue(path, str(error)))
-            except (OSError, RuntimeError) as error:
-                # 한 디렉터리의 열거 실패로 나머지 감시 폴더/하위 폴더를 막지 않는다.
-                issues.append(ScanIssue(directory, str(error)))
-        self._series.regroup(self.videos())
-        return ScanResult(added, tuple(issues))
-
-    def _register(self, path: Path) -> int:
-        with self._connect() as db:
-            if db.execute("SELECT 1 FROM locations WHERE path = ?", (str(path),)).fetchone():
-                return 0  # 기존 위치의 변경/이동 처리는 이슈 #3 범위
-        info = self._media.read(path)
-        if info is None:
-            return 0
-        fingerprint = _fingerprint(path)
-        with self._connect() as db:
-            existing = db.execute("SELECT id FROM videos WHERE fingerprint = ?", (fingerprint,)).fetchone()
-        if existing:
-            with self._connect() as db:
-                db.execute("INSERT OR IGNORE INTO locations VALUES (?, ?)", (str(path), existing[0]))
-            return 0
-        thumbnail = self._thumbnails / (fingerprint.split(":")[-1] + ".jpg")
-        self._media.capture(path, thumbnail, min(10, info.duration / 10))
-        with self._connect() as db:
-            cursor = db.execute(
-                "INSERT INTO videos (fingerprint, title, duration, format, thumbnail, registered_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (fingerprint, path.stem, info.duration, info.format,
-                 str(Path("thumbnails") / thumbnail.name), self._clock().isoformat()),
-            )
-            db.execute("INSERT INTO locations VALUES (?, ?)", (str(path), cursor.lastrowid))
-        return 1
+        result = self._library.scan()
+        self._series.regroup(self.videos() + self.excluded_videos())
+        return result
 
     def videos(self) -> tuple[Video, ...]:
-        with self._connect() as db:
-            locations: dict[int, list[Location]] = {}
-            for row in db.execute("SELECT video_id, path FROM locations ORDER BY path"):
-                locations.setdefault(row["video_id"], []).append(Location(Path(row["path"])))
-            return tuple(
-                Video(row["id"], row["title"], row["fingerprint"], row["duration"], row["format"],
-                      # 최초 골격의 절대 경로 레코드도 파일 이름으로 읽어 호환한다.
-                      self._thumbnails / Path(row["thumbnail"]).name, datetime.fromisoformat(row["registered_at"]),
-                      tuple(locations.get(row["id"], [])))
-                for row in db.execute("SELECT * FROM videos ORDER BY title, id")
-            )
+        return self._library.videos()
 
     def playback_location(self, video_id: int) -> Location:
-        with self._connect() as db:
-            row = db.execute("SELECT path FROM locations WHERE video_id = ? ORDER BY path LIMIT 1", (video_id,)).fetchone()
-        if row is None:
-            raise ValueError("재생할 영상의 위치가 없습니다.")
-        return Location(Path(row[0]))
+        return self._library.playback_location(video_id)
 
     def _start_viewing(self, video_id: int, position: float) -> Viewing:
         with self._connect() as db:

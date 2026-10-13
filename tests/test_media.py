@@ -12,9 +12,11 @@ from my_video_manager.media import parse_ffprobe_result
     (".png", '{"format":{"format_name":"png_pipe","duration":"0.04"},'
      '"streams":[{"codec_type":"video","codec_name":"png"}]}', None),
     (".gif", '{"format":{"format_name":"gif","duration":"2.0"},'
-     '"streams":[{"codec_type":"video","nb_frames":"20"}]}', MediaInfo(2, "gif")),
+     '"streams":[{"codec_type":"video","nb_frames":"20"}]}', None),
     (".gif", '{"format":{"format_name":"gif","duration":"0.1"},'
      '"streams":[{"codec_type":"video","nb_frames":"1"}]}', None),
+    (".mkv", '{"format":{"format_name":"gif","duration":"600"},'
+     '"streams":[{"codec_type":"video","nb_frames":"6000"}]}', None),
     (".mp3", '{"format":{"format_name":"mp3","duration":"120.0"},'
      '"streams":[{"codec_type":"audio"}]}', None),
     (".mp3", '{"format":{"format_name":"mp3","duration":"120.0"},'

@@ -10,10 +10,7 @@ VIDEO_SUFFIXES = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv", ".ts"
 
 
 def parse_ffprobe_result(output: str, *, suffix: str, returncode: int = 0, error: str = "") -> MediaInfo | None:
-    """정지 이미지·음성·일반 문서는 건너뛰고, 손상된 영상은 오류로 알린다.
-
-    움직이는 GIF는 기존 동작을 유지한다. GIF 분류 변경은 이슈 #3 범위다.
-    """
+    """GIF·정지 이미지·음성·문서는 건너뛰고, 손상된 영상은 오류로 알린다."""
     if returncode:
         if suffix.lower() in VIDEO_SUFFIXES:
             raise RuntimeError(error.strip() or "영상 정보를 읽을 수 없습니다.")
@@ -25,7 +22,7 @@ def parse_ffprobe_result(output: str, *, suffix: str, returncode: int = 0, error
     media_format = data.get("format", {})
     format_name = media_format.get("format_name", "")
     formats = format_name.split(",")
-    if any(name in {"image2", "image2pipe"} or name.endswith("_pipe") for name in formats):
+    if any(name in {"gif", "image2", "image2pipe"} or name.endswith("_pipe") for name in formats):
         return None
     streams = [stream for stream in data.get("streams", [])
                if stream.get("codec_type") == "video"
