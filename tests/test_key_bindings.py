@@ -4,6 +4,7 @@ import pytest
 
 from my_video_manager.core import AppCore, Command, CommandType, DEFAULT_KEY_BINDINGS, MediaInfo
 from my_video_manager.key_bindings import normalize_key
+from my_video_manager.key_display import display_key, display_keys
 
 
 class Media:
@@ -237,3 +238,49 @@ def test_remapped_highlight_and_series_commands_keep_context_behavior(tmp_path):
     ("shift+ctrl+a", "Ctrl+Shift+A"), ("Ctrl++", "Ctrl++"), ("PgDown", "PgDn"), ("\\", "\\")])
 def test_key_name_normalization(key, expected):
     assert normalize_key(key) == expected
+
+
+@pytest.mark.parametrize("key", ["Alt+S", "alt+s"])
+def test_settings_menu_key_is_reserved_without_changing_saved_bindings(tmp_path, key):
+    core = open_core(tmp_path)
+    bindings = draft(core)
+    bindings[Command(CommandType.TOGGLE_PAUSE)] = (key,)
+    with pytest.raises(ValueError, match="설정 메뉴.*예약 키"):
+        core.save_key_bindings(bindings)
+    assert draft(core) == draft(open_core(tmp_path)) == {
+        row.command: row.default_keys for row in core.key_bindings()}
+
+
+@pytest.mark.parametrize("stored", [
+    "garbage", ["Enter"], {"gone:0": ["F8"]},
+    {"toggle_pause:0": ["Invalid"]}, {"toggle_pause:0": ["Esc"]},
+    {"toggle_pause:0": "Space"}, {"toggle_pause:0": [5]},
+    {"toggle_pause:0": ["Alt+S"]},
+    {"toggle_pause:0": ["Space"], "point_highlight:0": ["Space"]},
+    {"toggle_pause:0": ["ctrl+a"], "point_highlight:0": ["Ctrl+A"]},
+])
+def test_corrupt_saved_key_bindings_fall_back_to_defaults(tmp_path, stored):
+    core = open_core(tmp_path)
+    core.settings.set("keys.bindings", stored)
+    reopened = open_core(tmp_path)
+    for row in reopened.key_bindings():
+        assert row.keys == row.default_keys
+        for key in row.keys:
+            assert reopened.command_for_key(key) == row.command
+
+
+@pytest.mark.parametrize(("key", "expected"), [
+    ("Left", "←"), ("Right", "→"), ("Up", "↑"), ("Down", "↓"),
+    ("Ctrl+Shift+Left", "Ctrl+Shift+←"), ("PgUp", "Page Up"), ("PgDn", "Page Down"),
+    ("Enter", "Enter"), ("Space", "Space"), ("F8", "F8"), ("Ctrl++", "Ctrl++"),
+    (".", "."), ("Meta+T", "Win+T"),
+])
+def test_display_key_names(key, expected):
+    assert display_key(key) == expected
+
+
+@pytest.mark.parametrize(("keys", "expected"), [
+    ((), "키 미할당"), (("Left", "Ctrl+T"), "← / Ctrl+T"),
+])
+def test_display_multiple_or_unassigned_keys(keys, expected):
+    assert display_keys(keys) == expected

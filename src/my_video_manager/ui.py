@@ -17,6 +17,7 @@ from .tag_ui import TagEditor, TagManager
 from .library_ui import LibraryControls
 from .reel_ui import ReelControls
 from .key_settings_ui import SettingsDialog, key_name
+from .key_display import display_keys
 
 
 class ScanWorker(QThread):
@@ -285,9 +286,9 @@ class MainWindow(QMainWindow):
             self.progress.open_start = self.core.open_highlight_start
             self.progress.update()
             opened = self.core.open_highlight_start
-            range_keys = next((" / ".join(row.keys) for row in self.core.key_bindings()
-                               if row.command.kind == CommandType.RANGE_HIGHLIGHT), "")
-            suffix = f" · 구간 시작 {timestamp(opened)} — {range_keys or '키 미할당'}: 끝내기" if opened is not None else ""
+            range_keys = next((display_keys(row.keys) for row in self.core.key_bindings()
+                               if row.command.kind == CommandType.RANGE_HIGHLIGHT), "키 미할당")
+            suffix = f" · 구간 시작 {timestamp(opened)} — {range_keys}: 끝내기" if opened is not None else ""
             self.position_label.setText(f"{timestamp(position)} / {timestamp(self.progress.duration)}{suffix}")
             return position
         return None
@@ -330,7 +331,7 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def refresh_key_help(self):
-        self.key_help.setText(" · ".join(f"{' / '.join(row.keys)} {row.label}"
+        self.key_help.setText(" · ".join(f"{display_keys(row.keys)} {row.label}"
                                         for row in self.core.key_bindings() if row.keys))
 
     def show_settings(self):

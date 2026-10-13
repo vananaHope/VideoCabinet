@@ -17,6 +17,7 @@ _NAMED_KEYS = ("Enter", "Space", "Tab", "Backspace", "Left", "Right", "Up", "Dow
 _ALIASES = {key.casefold(): key for key in _NAMED_KEYS}
 _ALIASES.update(pageup="PgUp", pagedown="PgDn", pgdown="PgDn", esc="Esc", escape="Esc")
 _ALIASES["return"] = "Enter"
+RESERVED_KEYS = {"Alt+S": "설정 메뉴를 여는 예약 키"}
 
 
 def normalize_key(key: str) -> str:
@@ -40,7 +41,10 @@ def normalize_key(key: str) -> str:
         key = key.upper()
     elif key not in _NAMED_KEYS:
         raise ValueError("지원하지 않는 키입니다. 문자, 숫자, 방향키 또는 기능키를 눌러 주세요.")
-    return "".join(f"{m}+" for m in ("Ctrl", "Alt", "Shift", "Meta") if m in modifiers) + key
+    normalized = "".join(f"{m}+" for m in ("Ctrl", "Alt", "Shift", "Meta") if m in modifiers) + key
+    if normalized in RESERVED_KEYS:
+        raise ValueError(f"{normalized}는 {RESERVED_KEYS[normalized]}이므로 할당할 수 없습니다.")
+    return normalized
 
 
 def command_label(command: Command) -> str:
@@ -54,9 +58,8 @@ def command_label(command: Command) -> str:
         "range_highlight": "구간 하이라이트 시작 / 끝", "previous_highlight": "이전 하이라이트",
         "next_highlight": "다음 하이라이트", "toggle_subtitles": "자막 켜기 / 끄기",
         "previous_video": "이전 영상 / 시리즈 이전 화", "next_video": "다음 영상 / 시리즈 다음 화",
-        "toggle_translation": "원어 / 번역 자막 전환", "toggle_subtitle_language": "원어 / 번역 자막 전환",
-        "toggle_repeat": "하이라이트 반복 켜기 / 끄기",
-    }.get(kind, f"명령: {kind}")
+        "toggle_subtitle_language": "원어 / 번역 자막 전환",
+    }.get(kind, kind)
 
 
 @dataclass(frozen=True)
@@ -80,7 +83,6 @@ class KeyBindings:
         if isinstance(stored, dict):
             # 새 명령의 기본 키보다 기존 사용자 설정을 우선한다.
             # 겹치는 새 기본 키는 미할당으로 표시하고 다른 사용자 설정은 유지한다.
-            claimed = set()
             customized = {}
             for command in self.defaults:
                 keys = stored.get(self.identifier(command))
@@ -90,9 +92,15 @@ class KeyBindings:
                     normalized = tuple(dict.fromkeys(normalize_key(key) for key in keys))
                 except ValueError:
                     continue
-                if not claimed.intersection(normalized):
-                    customized[command] = normalized
-                    claimed.update(normalized)
+                customized[command] = normalized
+            # 서로 다른 사용자 명령의 중복 키는 어느 쪽도 임의로 우선하지 않는다.
+            owners = {}
+            for command, keys in customized.items():
+                for key in keys:
+                    owners.setdefault(key, set()).add(command)
+            conflicting = {command for commands in owners.values() if len(commands) > 1 for command in commands}
+            customized = {command: keys for command, keys in customized.items() if command not in conflicting}
+            claimed = {key for keys in customized.values() for key in keys}
             self.bindings = {command: customized.get(command, tuple(key for key in keys if key not in claimed))
                              for command, keys in self.defaults.items()}
 

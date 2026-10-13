@@ -2,6 +2,8 @@
 
 import sqlite3
 
+from .key_display import display_keys
+
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QHBoxLayout, QHeaderView, QLabel, QMessageBox,
@@ -94,8 +96,8 @@ class KeySettings(QWidget):
             button.clicked.connect(callback)
             buttons.addWidget(button)
         layout.addLayout(buttons)
-        note = QLabel("Home/End는 현재 화면의 하이라이트, PgUp/PgDn은 시리즈·현재 목록에 따라 동작합니다.\n"
-                      "Esc는 취소·목록 복귀 전용입니다. 목록 탐색과 편집 대화상자의 키는 바뀌지 않습니다.")
+        note = QLabel("이전/다음 하이라이트 명령은 현재 화면에, 이전/다음 영상 명령은 시리즈·현재 목록에 따라 동작합니다.\n"
+                      "취소·목록 복귀 및 설정 메뉴 키는 예약되어 있습니다. 목록 탐색과 편집 대화상자의 키는 바뀌지 않습니다.")
         note.setWordWrap(True)
         layout.addWidget(note)
         self.refresh()
@@ -104,8 +106,8 @@ class KeySettings(QWidget):
 
     def refresh(self):
         for index, row in enumerate(self.rows):
-            for column, text in enumerate((row.label, " / ".join(self.draft[row.command]) or "미할당",
-                                           " / ".join(row.default_keys) or "미할당")):
+            for column, text in enumerate((row.label, display_keys(self.draft[row.command]),
+                                           display_keys(row.default_keys))):
                 self.table.setItem(index, column, QTableWidgetItem(text))
 
     def capture(self, *_):
