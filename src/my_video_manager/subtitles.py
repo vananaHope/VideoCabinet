@@ -101,6 +101,9 @@ class Subtitles:
         self._cancellation = Event()
         self._order = order
         self._progress = {}
+        self._active_video = None
+        self._active_cancellation = None
+        self._activity = Lock()
         with connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS subtitle_queue (
@@ -170,8 +173,11 @@ class Subtitles:
         return self._order.sort(entries)
 
     def remove(self, video_id):
-        with self._connect() as db:
-            db.execute("DELETE FROM subtitle_queue WHERE video_id = ?", (video_id,))
+        with self._activity:
+            with self._connect() as db:
+                db.execute("DELETE FROM subtitle_queue WHERE video_id = ?", (video_id,))
+            if self._active_video == video_id and self._active_cancellation:
+                self._active_cancellation.set()
 
     def resume_processing(self):
         self._cancellation.clear()
@@ -194,6 +200,9 @@ class Subtitles:
     def stop_processing(self) -> None:
         """현재 AppCore의 처리를 중단한다. 대기열은 다음 앱 실행에서 재개한다."""
         self._cancellation.set()
+        with self._activity:
+            if self._active_cancellation:
+                self._active_cancellation.set()
 
     def process_next(self) -> SubtitleQueueEntry | None:
         # 한 AppCore의 작업자는 하나다. 재진입 호출은 현재 처리를 기다리거나 중복 실행하지 않는다.
@@ -203,23 +212,28 @@ class Subtitles:
             pending = next((entry for entry in self.queue() if entry.state == "queued"), None)
             if pending is None:
                 return None
-            with self._connect() as db:
-                changed = db.execute("UPDATE subtitle_queue SET state = 'transcribing' WHERE id = ? AND state = 'queued'",
-                                     (pending.id,)).rowcount
-                duration = db.execute("SELECT duration FROM videos WHERE id = ?", (pending.video_id,)).fetchone()[0]
+            with self._activity:
+                with self._connect() as db:
+                    changed = db.execute("UPDATE subtitle_queue SET state = 'transcribing' WHERE id = ? AND state = 'queued'",
+                                         (pending.id,)).rowcount
+                    duration = db.execute("SELECT duration FROM videos WHERE id = ?", (pending.video_id,)).fetchone()[0]
+                self._active_video = pending.video_id
+                cancellation = self._active_cancellation = Event()
+                if self._cancellation.is_set():
+                    cancellation.set()
             if not changed:
                 return None
             try:
                 if self._transcriber is None:
                     raise RuntimeError("받아쓰기 어댑터가 설정되지 않았습니다.")
-                kwargs = {"cancellation": self._cancellation}
+                kwargs = {"cancellation": cancellation}
                 # 기존 주입 어댑터와 호환한다. 진행 보고 어댑터는 처리한 오디오 초를 전달한다.
                 if "progress" in inspect.signature(self._transcriber.transcribe).parameters:
                     kwargs["progress"] = lambda seconds: self._progress.update(
                         {pending.id: min(0.99, max(0, seconds / max(duration, 0.001)))})
                 result = self._transcriber.transcribe(self._playback_location(pending.video_id).path,
                                                      pending.spoken_language, **kwargs)
-                if self._cancellation.is_set():
+                if cancellation.is_set():
                     raise TranscriberCancelled
                 language = normalize_spoken_language(pending.spoken_language or result.spoken_language)
                 if language is None:
@@ -260,6 +274,8 @@ class Subtitles:
                 return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
                                           pending.requested_at, "failed", str(failure), failure.detail)
         finally:
+            with self._activity:
+                self._active_video = self._active_cancellation = None
             if 'pending' in locals() and pending:
                 self._progress.pop(pending.id, None)
             self._processing.release()

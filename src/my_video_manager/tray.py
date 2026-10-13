@@ -98,6 +98,5 @@ class TrayControls(QObject):
             if self.dialog:
                 self.dialog.hide()
             event.ignore()
-            if not self.core.settings.get("subtitle_queue.tray_notice_shown", False):
+            if self.core.acknowledge_tray_notice():
                 self.icon.showMessage("영상 라이브러리", "트레이에서 계속 처리합니다. 트레이 메뉴에서 열거나 완전 종료할 수 있습니다.")
-                self.core.settings.set("subtitle_queue.tray_notice_shown", True)

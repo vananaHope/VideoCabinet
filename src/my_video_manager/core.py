@@ -256,6 +256,12 @@ class AppCore:
     def take_subtitle_queue_completion(self):
         return self._subtitle_queue.take_completion()
 
+    def acknowledge_tray_notice(self) -> bool:
+        if self.settings.get("subtitle_queue.tray_notice_shown", False):
+            return False
+        self.settings.set("subtitle_queue.tray_notice_shown", True)
+        return True
+
     def subtitle_queue(self) -> tuple[SubtitleQueueEntry, ...]:
         return self._subtitles.queue()
 

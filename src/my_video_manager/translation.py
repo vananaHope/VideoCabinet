@@ -81,6 +81,9 @@ class Translations:
         self._batch_size, self._retry_delay, self._format_attempts = batch_size, retry_delay, format_attempts
         self._processing, self._cancellation = Lock(), Event()
         self._order = order
+        self._active_video = None
+        self._active_cancellation = None
+        self._activity = Lock()
         with connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS translation_lines (
@@ -202,9 +205,12 @@ class Translations:
         return self._order.sort(entries) if self._order else entries
 
     def remove(self, video_id):
-        with self._connect() as db:
-            db.execute("INSERT OR IGNORE INTO translation_omissions SELECT id FROM transcripts WHERE video_id = ?", (video_id,))
-            db.execute("DELETE FROM translation_queue WHERE video_id = ?", (video_id,))
+        with self._activity:
+            with self._connect() as db:
+                db.execute("INSERT OR IGNORE INTO translation_omissions SELECT id FROM transcripts WHERE video_id = ?", (video_id,))
+                db.execute("DELETE FROM translation_queue WHERE video_id = ?", (video_id,))
+            if self._active_video == video_id and self._active_cancellation:
+                self._active_cancellation.set()
 
     def resume_processing(self):
         self._cancellation.clear()
@@ -225,6 +231,9 @@ class Translations:
 
     def stop_processing(self):
         self._cancellation.set()
+        with self._activity:
+            if self._active_cancellation:
+                self._active_cancellation.set()
 
     def ready(self, *, cli=None):
         # 한도는 영상이 아닌 CLI 계정의 상태다. 재요청·원어 재생성으로 우회하지 않는다.
@@ -258,23 +267,28 @@ class Translations:
             lines = tuple(line for line in transcript.lines if line.id in ids)[:self._batch_size]
             if not lines:
                 return None  # 요청 또는 원어 세대가 읽는 도중 교체됐다.
-            with self._connect() as db:
-                if not db.execute("UPDATE translation_queue SET state = 'translating' WHERE id = ?", (pending.id,)).rowcount:
-                    return None
+            with self._activity:
+                with self._connect() as db:
+                    if not db.execute("UPDATE translation_queue SET state = 'translating' WHERE id = ?", (pending.id,)).rowcount:
+                        return None
+                self._active_video = pending.video_id
+                cancellation = self._active_cancellation = Event()
+                if self._cancellation.is_set():
+                    cancellation.set()
             try:
                 if self._translator is None:
                     raise TranslationError("missing_cli", "번역 어댑터가 설정되지 않았습니다.")
                 for attempt in range(self._format_attempts):
-                    if self._cancellation.is_set():
+                    if cancellation.is_set():
                         raise TranslationCancelled
                     try:
                         result = validate_translation(lines, self._translator.translate(
-                            lines, transcript.spoken_language, cli=cli, cancellation=self._cancellation))
+                            lines, transcript.spoken_language, cli=cli, cancellation=cancellation))
                         break
                     except TranslationError as error:
                         if error.kind != "format" or attempt + 1 == self._format_attempts:
                             raise
-                if self._cancellation.is_set():
+                if cancellation.is_set():
                     raise TranslationCancelled
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
@@ -333,6 +347,8 @@ class Translations:
                     row = db.execute("SELECT * FROM translation_queue WHERE id = ?", (pending.id,)).fetchone()
                     return self._entry(db, row) if row else None
         finally:
+            with self._activity:
+                self._active_video = self._active_cancellation = None
             if 'pending' in locals() and pending:
                 with self._connect() as db:
                     db.execute("UPDATE translation_queue SET state = 'queued' WHERE id = ? AND state = 'translating'",

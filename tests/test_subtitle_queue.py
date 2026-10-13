@@ -226,3 +226,87 @@ def test_invalid_rule_rejected(setup, kwargs):
     core, _, _ = setup
     with pytest.raises(ValueError):
         core.set_auto_subtitle_rule(**kwargs)
+
+
+def test_direct_file_registration_and_missing_excluded_are_not_automatic_targets(setup, tmp_path):
+    core, _, (a, b) = setup
+    folder = a.locations[0].path.parent
+    core.set_auto_subtitle_rule(folder=folder, spoken_language="ko")
+    path = folder / "직접 추가.mkv"
+    path.write_bytes(b"direct")
+    core.add_file(path)
+    assert len(core.subtitle_queue()) == 1
+    core.exclude_video(a.id)
+    b.locations[0].path.unlink()
+    core.scan()
+    assert core.auto_subtitle_candidates(folder=folder) == ()
+    core.remove_watched_folder(folder)
+    assert core.auto_subtitle_rules() == ()
+
+
+def test_remove_active_cancels_only_that_video_and_next_can_run(setup):
+    core, adapter, (a, b) = setup
+    entered = Event()
+
+    class Cancellable(FakeTranscriber):
+        def transcribe(self, path, language, *, cancellation):
+            if path.name == "a.mkv":
+                entered.set()
+                assert cancellation.wait(5)
+                raise TranscriberCancelled
+            return self.result
+
+    core = reopen(core, Cancellable())
+    core.request_subtitles(a.id)
+    core.request_subtitles(b.id, "ko")
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(core.process_next_subtitle)
+        assert entered.wait(5)
+        core.remove_from_subtitle_queue(a.id)
+        future.result(5)
+    assert core.process_next_subtitle().video_id == b.id
+    assert core.take_subtitle_queue_completion() == (1, 0)
+
+
+def test_completed_removal_and_first_tray_notice_survive_restart(setup):
+    core, adapter, (a, _) = setup
+    core.request_subtitles(a.id, "ko")
+    core.process_next_subtitle()
+    assert core.subtitle_queue_items()[0].state == "completed"
+    core.remove_from_subtitle_queue(a.id)
+    assert core.acknowledge_tray_notice()
+    core = reopen(core, adapter)
+    assert core.subtitle_queue_items() == ()
+    assert core.transcript(a.id) is not None
+    assert not core.acknowledge_tray_notice()
+    core.request_subtitles(a.id, "ko")
+    assert core.subtitle_queue_items()[0].state == "queued"
+
+
+def test_progress_from_subprocess_reaches_core_public_queue(setup, tmp_path):
+    import sys
+    from my_video_manager.transcription import FasterWhisperTranscriber
+
+    core, _, (a, _) = setup
+    child = tmp_path / "progress.py"
+    child.write_text('''
+import json, os, time
+from pathlib import Path
+Path(os.environ["MVM_TRANSCRIPTION_PROGRESS"]).write_text("40", encoding="ascii")
+time.sleep(1)
+print(json.dumps({"spoken_language": "ko", "segments": []}))
+''', encoding="utf-8")
+    core = reopen(core, FasterWhisperTranscriber(tmp_path / "models", command=(sys.executable, str(child))))
+    core.request_subtitles(a.id)
+    from time import monotonic, sleep
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(core.process_next_subtitle)
+        deadline = monotonic() + 5
+        observed = False
+        while monotonic() < deadline and not future.done():
+            if any(i.state == "transcribing" and i.progress == .4 for i in core.subtitle_queue_items()):
+                observed = True
+                break
+            sleep(.02)
+        assert future.result(5).state == "completed"
+    assert observed
