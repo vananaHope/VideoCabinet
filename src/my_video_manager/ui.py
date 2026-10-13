@@ -11,6 +11,7 @@ from .adapters import MpvPlayer
 from .core import AppCore, CommandType
 from .subtitle_ui import SubtitleControls
 from .highlight_ui import HighlightList, HighlightProgress, timestamp
+from .series_ui import SeriesEditor
 
 
 class ScanWorker(QThread):
@@ -34,6 +35,7 @@ class MainWindow(QMainWindow):
         self.core = core
         self.player = None
         self.player_factory = player_factory
+        self.playback_list = ()
         self.position_timer = QTimer(self)
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
@@ -52,6 +54,9 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self.add_button)
         buttons.addWidget(self.scan_button)
         buttons.addWidget(self.subtitles.button())
+        self.series_button = QPushButton("시리즈 편집")
+        self.series_button.clicked.connect(self.show_series)
+        buttons.addWidget(self.series_button)
         buttons.addStretch()
         layout.addLayout(buttons)
         self.folders = QLabel()
@@ -87,6 +92,7 @@ class MainWindow(QMainWindow):
         self.highlights_button.clicked.connect(self.show_highlights)
         playback_layout.addWidget(self.highlights_button)
         playback_layout.addWidget(QLabel("Enter 재생/일시정지 · ←/→ 5초 · , 3초 뒤로 · ↑/↓ 속도 ±0.25 · / 자막 켜기/끄기"))
+        playback_layout.addWidget(QLabel("PgUp/PgDn 이전/다음 영상 · 시리즈 안에서는 이전/다음 화"))
         playback_layout.addWidget(QLabel("Insert 지점 · Delete 구간 시작/끝 · Home/End 이전/다음 · 노랑 지점 / 초록 구간 / 주황 열린 구간"))
         self.pages.addWidget(playback)
 
@@ -102,11 +108,15 @@ class MainWindow(QMainWindow):
         selected_row = 0
         self.folders.setText("감시 폴더: " + (", ".join(str(f.path) for f in self.core.watched_folders()) or "없음"))
         self.list.clear()
+        series_labels = {vid: f"{s.name} · {index + 1}/{len(s.video_ids)}"
+                         for s in self.core.series() for index, vid in enumerate(s.video_ids)}
         for row, video in enumerate(self.core.videos()):
             status = self.core.viewing_status(video.id)
             label = "다 봄" if status.finished else f"보다 만 ({status.stopped_percent:.0f}%)" if status.abandoned else ""
             if status.favorite:
                 label += " · 즐겨 보는 영상"
+            if video.id in series_labels:
+                label += ("\n" if label else "") + "시리즈: " + series_labels[video.id]
             item = QListWidgetItem(QIcon(str(video.thumbnail)), video.title + (f"\n{label}" if label else ""))
             item.setData(Qt.ItemDataRole.UserRole, video.id)
             item.setSizeHint(QSize(300, 120))
@@ -154,9 +164,12 @@ class MainWindow(QMainWindow):
         self.worker = None
 
     def play(self, item):
+        self.playback_list = tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
+        self.play_video(item.data(Qt.ItemDataRole.UserRole))
+
+    def play_video(self, video_id):
         try:
             self.end_playback()
-            video_id = item.data(Qt.ItemDataRole.UserRole)
             location = self.core.playback_location(video_id)
             start = self.core.resume_start(video_id)
             self.pages.setCurrentIndex(1)
@@ -221,6 +234,10 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentIndex(0)
         self.refresh()
 
+    def show_series(self):
+        SeriesEditor(self.core, self).exec()
+        self.refresh()
+
     def eventFilter(self, watched, event):
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()
                 or QApplication.activeModalWidget() is not None):
@@ -241,11 +258,18 @@ class MainWindow(QMainWindow):
         key = {Qt.Key.Key_Return: "Enter", Qt.Key.Key_Enter: "Enter", Qt.Key.Key_Left: "Left",
                Qt.Key.Key_Right: "Right", Qt.Key.Key_Up: "Up", Qt.Key.Key_Down: "Down",
                Qt.Key.Key_Comma: ",", Qt.Key.Key_Slash: "/", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
-               Qt.Key.Key_Home: "Home", Qt.Key.Key_End: "End"}.get(event.key(), event.text())
+               Qt.Key.Key_Home: "Home", Qt.Key.Key_End: "End",
+               Qt.Key.Key_PageUp: "PgUp", Qt.Key.Key_PageDown: "PgDn"}.get(event.key(), event.text())
         command = self.core.command_for_key(key)
         if command and self.player:
             try:
-                if self.core.is_highlight_command(command):
+                if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):
+                    if not event.isAutoRepeat() and self.core.playback.session is not None:
+                        target = self.core.adjacent_video(self.core.playback.session.video_id, self.playback_list,
+                                                          forward=command.kind == CommandType.NEXT_VIDEO)
+                        if target is not None:
+                            self.play_video(target)
+                elif self.core.is_highlight_command(command):
                     if event.isAutoRepeat() or self.sync_position() is None:
                         return True
                     target = self.core.execute_highlight_command(command)
