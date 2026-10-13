@@ -126,7 +126,8 @@ class MpvPlayer:
         if path:
             self._player.command("sub-add", str(path), "select")
         else:
-            self._player.sid = "auto"
+            remaining = [track for track in self._player.track_list if track.get("type") == "sub"]
+            self._player.sid = remaining[0]["id"] if remaining else "no"
 
     def take_positions(self) -> tuple[tuple[float, bool], ...]:
         """mpv 스레드의 (위치, 탐색 여부) 보고를 순서대로 UI 스레드에 넘긴다."""

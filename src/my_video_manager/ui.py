@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from .adapters import MpvPlayer
 from .core import AppCore, CommandType
 from .subtitle_ui import SubtitleControls
+from .translation_ui import TranslationControls
 from .highlight_ui import HighlightList, HighlightProgress, timestamp
 from .series_ui import SeriesEditor
 from .tag_ui import TagEditor, TagManager
@@ -42,6 +43,7 @@ class MainWindow(QMainWindow):
         self.position_timer.timeout.connect(self.poll_position)
         self.worker = None
         self.subtitles = SubtitleControls(self)
+        self.translations = TranslationControls(self)
         self.setWindowTitle("영상 라이브러리")
         self.resize(1100, 720)
         self.pages = QStackedWidget()
@@ -58,6 +60,7 @@ class MainWindow(QMainWindow):
         self.series_button = QPushButton("시리즈 편집")
         self.series_button.clicked.connect(self.show_series)
         buttons.addWidget(self.series_button)
+        buttons.addWidget(self.translations.button())
         buttons.addStretch()
         layout.addLayout(buttons)
         self.folders = QLabel()
@@ -92,6 +95,7 @@ class MainWindow(QMainWindow):
         self.back_button.clicked.connect(self.show_library)
         playback_layout.addWidget(self.back_button)
         playback_layout.addWidget(self.subtitles.button())
+        playback_layout.addWidget(self.translations.button())
         self.surface = QWidget()
         self.surface.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         self.surface.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
@@ -105,7 +109,7 @@ class MainWindow(QMainWindow):
         self.highlights_button = QPushButton("하이라이트 목록 · 시각·메모 편집")
         self.highlights_button.clicked.connect(self.show_highlights)
         playback_layout.addWidget(self.highlights_button)
-        playback_layout.addWidget(QLabel("Enter 재생/일시정지 · ←/→ 5초 · , 3초 뒤로 · ↑/↓ 속도 ±0.25 · / 자막 켜기/끄기"))
+        playback_layout.addWidget(QLabel("Enter 재생/일시정지 · ←/→ 5초 · , 3초 뒤로 · ↑/↓ 속도 ±0.25 · / 자막 켜기/끄기 · . 원어/번역"))
         playback_layout.addWidget(QLabel("PgUp/PgDn 이전/다음 영상 · 시리즈 안에서는 이전/다음 화"))
         playback_layout.addWidget(QLabel("Insert 지점 · Delete 구간 시작/끝 · Home/End 이전/다음 · 노랑 지점 / 초록 구간 / 주황 열린 구간"))
         self.pages.addWidget(playback)
@@ -300,7 +304,7 @@ class MainWindow(QMainWindow):
             return True
         key = {Qt.Key.Key_Return: "Enter", Qt.Key.Key_Enter: "Enter", Qt.Key.Key_Left: "Left",
                Qt.Key.Key_Right: "Right", Qt.Key.Key_Up: "Up", Qt.Key.Key_Down: "Down",
-               Qt.Key.Key_Comma: ",", Qt.Key.Key_Slash: "/", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
+               Qt.Key.Key_Comma: ",", Qt.Key.Key_Slash: "/", Qt.Key.Key_Period: ".", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
                Qt.Key.Key_Home: "Home", Qt.Key.Key_End: "End",
                Qt.Key.Key_PageUp: "PgUp", Qt.Key.Key_PageDown: "PgDn"}.get(event.key(), event.text())
         command = self.core.command_for_key(key)
@@ -320,6 +324,9 @@ class MainWindow(QMainWindow):
                         self.player.seek_to(target)
                     self.refresh_highlights()
                     self.sync_position()
+                elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
+                    if not event.isAutoRepeat():
+                        self.translations.toggle()
                 else:
                     if command.kind == CommandType.SEEK:
                         self.sync_position()
@@ -337,6 +344,7 @@ class MainWindow(QMainWindow):
         if not self.subtitles.shutdown():
             event.ignore()
             return
+        self.translations.shutdown()
         try:
             self.end_playback()
         except Exception as error:
