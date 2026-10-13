@@ -7,6 +7,7 @@ from queue import Empty, SimpleQueue
 import shutil
 import subprocess
 import sys
+from threading import Lock
 
 from .core import Command, CommandType, MediaInfo, playback_speed
 from .media import parse_ffprobe_result
@@ -69,6 +70,17 @@ class MpvPlayer:
 
         self._player = mpv.MPV(wid=str(window_id), input_default_bindings=False,
                                input_vo_keyboard=False, osc=False, config=False, keep_open=True)
+        self._subtitle_path = None
+        self._closing = False
+        self._callback_lock = Lock()
+
+        @self._player.event_callback("file-loaded")
+        def select_app_subtitle(_event):
+            with self._callback_lock:
+                if not self._closing:
+                    for track in self._app_subtitle_tracks():
+                        self._player.sid = track["id"]
+
         self._positions = SimpleQueue()
         self._seeking = True
 
@@ -79,20 +91,42 @@ class MpvPlayer:
         @self._player.event_callback("playback-restart")
         def restarted(event):
             # 탐색 도중의 임시 위치는 버리고 실제 재생 재개 위치를 새 기준점으로 보낸다.
-            position = self._player.time_pos
-            if position is not None:
-                self._positions.put((position, True))
-            self._seeking = False
+            with self._callback_lock:
+                if self._closing:
+                    return
+                position = self._player.time_pos
+                if position is not None:
+                    self._positions.put((position, True))
+                self._seeking = False
 
         @self._player.property_observer("time-pos")
         def position_changed(name, position):
             if position is not None and not self._seeking:
                 self._positions.put((position, False))
 
-    def play(self, path: Path, start: float = 0) -> None:
+    def _app_subtitle_tracks(self):
+        if self._subtitle_path is None:
+            return []
+        return [track for track in self._player.track_list
+                if track.get("type") == "sub" and track.get("external-filename")
+                and Path(track["external-filename"]).resolve() == self._subtitle_path]
+
+    def play(self, path: Path, start: float = 0, *, subtitle: Path | None = None) -> None:
         self._player.start = start
-        self._player.play(str(path))
+        self._subtitle_path = subtitle.resolve() if subtitle else None
+        # loadfile 옵션으로 전달해 비동기 file-loaded 이전의 sub-add 경합을 피한다.
+        options = {"sub-files": str(subtitle)} if subtitle else {}
+        self._player.loadfile(str(path), "replace", **options)
         self._player.pause = False
+
+    def set_subtitle(self, path: Path | None) -> None:
+        for track in self._app_subtitle_tracks():
+            self._player.command("sub-remove", track["id"])
+        self._subtitle_path = path.resolve() if path else None
+        if path:
+            self._player.command("sub-add", str(path), "select")
+        else:
+            self._player.sid = "auto"
 
     def take_positions(self) -> tuple[tuple[float, bool], ...]:
         """mpv 스레드의 (위치, 탐색 여부) 보고를 순서대로 UI 스레드에 넘긴다."""
@@ -110,6 +144,8 @@ class MpvPlayer:
             self._player.command("seek", command.amount, "relative+exact")
         elif command.kind == CommandType.CHANGE_SPEED:
             self._player.speed = playback_speed(self._player.speed, command.amount)
+        elif command.kind == CommandType.TOGGLE_SUBTITLES:
+            self._player.cycle("sub-visibility")
 
     def position(self) -> float | None:
         return self._player.time_pos
@@ -118,4 +154,8 @@ class MpvPlayer:
         self._player.command("seek", position, "absolute+exact")
 
     def close(self) -> None:
+        # 콜백의 native handle 접근을 끝낸 뒤 핸들을 해제한다.
+        # terminate는 이벤트 스레드를 기다리므로 lock 밖에서 실행한다.
+        with self._callback_lock:
+            self._closing = True
         self._player.terminate()

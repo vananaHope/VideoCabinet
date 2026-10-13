@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 
 from .adapters import MpvPlayer
 from .core import AppCore, CommandType
+from .subtitle_ui import SubtitleControls
 from .highlight_ui import HighlightList, HighlightProgress, timestamp
 
 
@@ -37,6 +38,7 @@ class MainWindow(QMainWindow):
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
         self.worker = None
+        self.subtitles = SubtitleControls(self)
         self.setWindowTitle("영상 라이브러리")
         self.resize(1100, 720)
         self.pages = QStackedWidget()
@@ -49,6 +51,7 @@ class MainWindow(QMainWindow):
         self.scan_button = QPushButton("다시 검사")
         buttons.addWidget(self.add_button)
         buttons.addWidget(self.scan_button)
+        buttons.addWidget(self.subtitles.button())
         buttons.addStretch()
         layout.addLayout(buttons)
         self.folders = QLabel()
@@ -69,6 +72,7 @@ class MainWindow(QMainWindow):
         self.back_button = QPushButton("목록으로 (Esc)")
         self.back_button.clicked.connect(self.show_library)
         playback_layout.addWidget(self.back_button)
+        playback_layout.addWidget(self.subtitles.button())
         self.surface = QWidget()
         self.surface.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         self.surface.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
@@ -82,7 +86,7 @@ class MainWindow(QMainWindow):
         self.highlights_button = QPushButton("하이라이트 목록 · 시각·메모 편집")
         self.highlights_button.clicked.connect(self.show_highlights)
         playback_layout.addWidget(self.highlights_button)
-        playback_layout.addWidget(QLabel("Enter 재생/일시정지 · ←/→ 5초 · , 3초 뒤로 · ↑/↓ 속도 ±0.25"))
+        playback_layout.addWidget(QLabel("Enter 재생/일시정지 · ←/→ 5초 · , 3초 뒤로 · ↑/↓ 속도 ±0.25 · / 자막 켜기/끄기"))
         playback_layout.addWidget(QLabel("Insert 지점 · Delete 구간 시작/끝 · Home/End 이전/다음 · 노랑 지점 / 초록 구간 / 주황 열린 구간"))
         self.pages.addWidget(playback)
 
@@ -159,7 +163,7 @@ class MainWindow(QMainWindow):
             if self.player is None:
                 self.player = self.player_factory(int(self.surface.winId()))
             self.core.playback.start(video_id, start)
-            self.player.play(location.path, start)
+            self.player.play(location.path, start, subtitle=self.core.playback_subtitle(video_id))
             self.progress.duration = next(v.duration for v in self.core.videos() if v.id == video_id)
             self.refresh_highlights()
             self.position_timer.start()
@@ -236,7 +240,7 @@ class MainWindow(QMainWindow):
             return True
         key = {Qt.Key.Key_Return: "Enter", Qt.Key.Key_Enter: "Enter", Qt.Key.Key_Left: "Left",
                Qt.Key.Key_Right: "Right", Qt.Key.Key_Up: "Up", Qt.Key.Key_Down: "Down",
-               Qt.Key.Key_Comma: ",", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
+               Qt.Key.Key_Comma: ",", Qt.Key.Key_Slash: "/", Qt.Key.Key_Insert: "Insert", Qt.Key.Key_Delete: "Delete",
                Qt.Key.Key_Home: "Home", Qt.Key.Key_End: "End"}.get(event.key(), event.text())
         command = self.core.command_for_key(key)
         if command and self.player:
@@ -261,6 +265,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
             self.status.setText("검사가 끝난 뒤 창을 닫아 주세요.")
+            event.ignore()
+            return
+        if not self.subtitles.shutdown():
             event.ignore()
             return
         try:
