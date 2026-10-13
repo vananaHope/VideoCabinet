@@ -366,6 +366,14 @@ class AppCore:
         point = self.viewing_status(video_id).resume_point
         return max(0, point - self._viewings.settings.resume_rewind) if point is not None else 0
 
+    def switch_to(self, video_id: int) -> float:
+        """현재 시청·열린 구간을 닫고 대상 영상의 이어볼 위치에서 새 시청을 시작한다."""
+        self.playback_location(video_id)
+        self.playback.end()
+        start = self.resume_start(video_id)
+        self.playback.start(video_id, start)
+        return start
+
 
 class _Connection:
     def __init__(self, connection):

@@ -17,10 +17,13 @@ class Series:
 
 # 해상도/코덱은 번호 후보에서 먼저 빼고, 그 외 숫자를 임의로 추측하지 않는다.
 _LABEL = re.compile(r"(?<![a-z0-9])(?:\d{3,4}[pi]|[248]k|[hx][ ._-]?26[45]|hevc|avc|av1|xvid|aac|ac3|dts)(?![a-z0-9])", re.I)
+_METADATA = re.compile(r"\[[^\]]*\]|\([^)]*\)|(?<![\w])(?:\d{4}|\d{6}|[a-f0-9]{8})(?![\w])", re.I)
+_CRC = re.compile(r"(?<![a-z0-9])[a-f0-9]{8}(?![a-z0-9])", re.I)
 _NUMBER = re.compile(
-    r"(?<![a-z0-9])s(?P<season>\d+)\s*e(?P<episode>\d+)(?!\d)"
-    r"|(?<!\d)(?P<korean>\d+)\s*(?:강|화|회)(?![가-힣])"
-    r"|(?<![a-z0-9])(?:e|ep|episode|part)\s*[._-]?\s*(?P<english>\d+)(?![a-z0-9])",
+    r"(?<!\d)(?P<week>\d+)\s*주차\s*(?:제\s*)?(?P<lecture>\d+)\s*강(?![가-힣])"
+    r"|(?<![a-z0-9])s(?P<season>\d+)\s*e(?P<episode>\d+)(?![a-z0-9])"
+    r"|(?<!\d)(?:제\s*)?(?P<korean>\d+)\s*(?:강|화|회)(?![가-힣])"
+    r"|(?<![a-z0-9])(?:episode|lecture|part|ep|e)\s*[._-]?\s*(?P<english>\d+)(?![a-z0-9])",
     re.I,
 )
 
@@ -28,34 +31,42 @@ _NUMBER = re.compile(
 def normalize_series_title(title: str) -> str:
     """대소문자·공백·구분자를 통일하고 알려진 기술 꼬리표를 제거한다."""
     title = unicodedata.normalize("NFKC", title).casefold()
-    return " ".join(re.sub(r"[\W_]+", " ", _LABEL.sub(" ", title)).split())
+    return " ".join(re.sub(r"[\W_]+", " ", _LABEL.sub(" ", _METADATA.sub(" ", title))).split())
 
 
 def series_filename(filename: str) -> tuple[str, tuple[int, int]] | None:
-    """파일 이름 → (정규화 제목 틀, (시즌, 번호)). 애매한 복수 번호는 제외한다.
+    """파일 이름 → (번호 앞의 정규화 제목 틀, (시즌/주차, 번호)).
 
-    명시적인 표기가 없을 때는 구분자로 분리된 1~3자리 숫자 하나만 인정한다.
-    따라서 연도·해상도·제목 중간의 숫자를 화 번호로 추측하지 않는다.
+    명시적인 표기를 우선하고, 없으면 꼬리표 제거 후 독립된 번호 하나를 쓴다.
+    화별 부제는 키에 넣지 않는다. 다중 화 표기와 모호한 복수 번호는 제외한다.
     """
-    stem = unicodedata.normalize("NFKC", Path(filename).stem)
-    stem = _LABEL.sub(" ", stem)
-    matches = list(_NUMBER.finditer(stem))
+    parsed = _filename_parts(filename)
+    return (normalize_series_title(parsed[0]), parsed[1]) if parsed else None
+
+
+def _filename_parts(filename: str) -> tuple[str, tuple[int, int]] | None:
+    # 인덱스가 원문을 가리키도록 꼬리표는 같은 길이의 공백으로 가린다.
+    # \d는 전각 숫자도 인식하며 표시 이름은 원문 그대로 남긴다.
+    stem = Path(filename).stem
+    # E로 시작하는 CRC도 회차 표기로 오인하지 않는다.
+    matches = list(_NUMBER.finditer(_CRC.sub(lambda m: " " * len(m[0]), stem)))
     if matches:
         if len(matches) != 1:
             return None
         match = matches[0]
-        season = int(match["season"] or 1)
-        number = int(match["episode"] or match["korean"] or match["english"])
+        season = int(match["week"] or match["season"] or 1)
+        number = int(match["lecture"] or match["episode"] or match["korean"] or match["english"])
     else:
-        matches = list(re.finditer(r"(?<![^\W_])\d{1,3}(?![^\W_])", stem))
+        masked = _METADATA.sub(lambda m: " " * len(m[0]), stem)
+        masked = _LABEL.sub(lambda m: " " * len(m[0]), masked)
+        matches = list(re.finditer(r"(?<![^\W_])\d{1,3}(?![^\W_])", masked))
         if len(matches) != 1:
             return None
         match = matches[0]
         season, number = 1, int(match[0])
     if number < 1 or season < 1:
         return None
-    title = normalize_series_title(stem[:match.start()] + " " + stem[match.end():])
-    return title, (season, number)
+    return stem[:match.start()].strip(" ._-–—"), (season, number)
 
 
 def adjacent_video(video_id: int, video_ids: tuple[int, ...], *, forward: bool) -> int | None:
@@ -88,6 +99,9 @@ class SeriesStore:
                 );
                 CREATE TABLE IF NOT EXISTS series_overrides (
                     video_id INTEGER PRIMARY KEY REFERENCES videos(id)
+                );
+                CREATE TABLE IF NOT EXISTS series_order_changes (
+                    series_id INTEGER PRIMARY KEY REFERENCES series(id) ON DELETE CASCADE
                 );
             """)
 
@@ -128,7 +142,11 @@ class SeriesStore:
                     raise ValueError("다른 시리즈에서 먼저 영상을 빼 주세요.")
             if series_id is None:
                 series_id = db.execute("INSERT INTO series (name, edited) VALUES (?, 1)", (name,)).lastrowid
-            old = [row[0] for row in db.execute("SELECT video_id FROM series_videos WHERE series_id=?", (series_id,))]
+            old = [row[0] for row in db.execute("SELECT video_id FROM series_videos WHERE series_id=? ORDER BY position", (series_id,))]
+            common = set(old) & set(video_ids)
+            if [vid for vid in old if vid in common] != [vid for vid in video_ids if vid in common]:
+                # 넣기·빼기는 순서 변경이 아니다. 남아 있는 영상의 상대 순서만 비교한다.
+                db.execute("INSERT OR IGNORE INTO series_order_changes VALUES (?)", (series_id,))
             db.executemany("INSERT OR IGNORE INTO series_overrides VALUES (?)", ((v,) for v in set(old) | set(video_ids)))
             db.execute("UPDATE series SET name=?, edited=1 WHERE id=?", (name, series_id))
             self._write_members(db, series_id, video_ids)
@@ -140,10 +158,11 @@ class SeriesStore:
             if not video.locations:
                 continue
             path = min((loc.path for loc in video.locations), key=lambda p: (str(p).casefold(), str(p)))
-            parsed = series_filename(path.name)
+            parsed = _filename_parts(path.name)
             if parsed is not None:
-                title, number = parsed
-                groups[(str(path.parent).casefold(), title)].append((number, video.id, path.parent.name))
+                prefix, number = parsed
+                title = normalize_series_title(prefix)
+                groups[(str(path.parent).casefold(), title)].append((number, video.id, prefix if title else path.parent.name))
         valid_groups = {}
         for key, candidates in groups.items():
             counts = Counter(number for number, _, _ in candidates)
@@ -154,6 +173,7 @@ class SeriesStore:
             rows = list(db.execute("SELECT * FROM series"))
             existing = {(row["folder"], row["title_template"]): row for row in rows}
             protected = {row[0] for row in db.execute("SELECT video_id FROM series_overrides")}
+            reordered = {row[0] for row in db.execute("SELECT series_id FROM series_order_changes")}
             db.execute("DELETE FROM series_videos WHERE series_id IN (SELECT id FROM series WHERE edited=0)")
             for row in rows:
                 if row["edited"]:
@@ -175,6 +195,10 @@ class SeriesStore:
                             continue
                         preceding = [(numbers[v], v) for v in ids if v in numbers and numbers[v] < number]
                         index = ids.index(max(preceding)[1]) + 1 if preceding else len(ids)
+                        if not preceding and row["id"] not in reordered:
+                            following = [(numbers[v], v) for v in ids if v in numbers and numbers[v] > number]
+                            if following:
+                                index = ids.index(min(following)[1])
                         ids.insert(index, vid)
                         assigned.add(vid)
                     self._write_members(db, row["id"], ids)
@@ -182,9 +206,11 @@ class SeriesStore:
                 ids = [vid for _, vid in valid if vid not in protected and vid not in assigned]
                 if len(ids) < 2:
                     continue
+                display_name = min(c for c in candidates if c[1] in ids)[2]
                 series_id = row["id"] if row else db.execute(
                     "INSERT INTO series (name, folder, title_template) VALUES (?, ?, ?)",
-                    (key[1] or candidates[0][2], *key)).lastrowid
+                    (display_name, *key)).lastrowid
+                db.execute("UPDATE series SET name=? WHERE id=?", (display_name, series_id))
                 self._write_members(db, series_id, ids)
                 assigned.update(ids)
                 retained.add(series_id)

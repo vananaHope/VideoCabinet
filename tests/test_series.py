@@ -40,8 +40,8 @@ def add(core, folder, *names):
     ("Lecture Part 3.mp4", ("lecture", (1, 3))),
     ("Lecture EP 003.mp4", ("lecture", (1, 3))),
     ("Lecture Episode 3.mp4", ("lecture", (1, 3))),
-    ("Lecture_003.mp4", ("lecture", (1, 3))),
-    ("01 - 강의.mp4", ("강의", (1, 1))),
+    ("Lecture_003.mp4", ("", (1, 3))),
+    ("01 - 강의.mp4", ("", (1, 1))),
     ("01.mp4", ("", (1, 1))),
     ("강의 ０２강.mp4", ("강의", (1, 2))),
     ("Movie 2026.mkv", None), ("Movie 1080p.mkv", None),
@@ -49,6 +49,9 @@ def add(core, folder, *names):
     ("3D 영상.mp4", None), ("Lesson2.mp4", None),
     ("Show 1 2.mkv", None), ("Show E01-E02.mkv", None),
     ("Show S00E01.mkv", None), ("Show E00.mkv", None),
+    ("Show 01 [E1234567].mkv", ("show", (1, 1))),
+    ("Show E01 [E1234567].mkv", ("show", (1, 1))),
+    ("Show_01_230416_2026_ABCD1234.mkv", ("show", (1, 1))),
 ])
 def test_filename_number_and_template(filename, expected):
     assert series_filename(filename) == expected
@@ -253,8 +256,7 @@ def test_navigation_lifecycle_closes_viewing_and_highlight_then_resumes(core, tm
     core.execute_highlight_command(core.command_for_key("Delete"))
     core.playback.report(25)
     target = core.adjacent_video(first, (), forward=True)
-    core.playback.end()
-    core.playback.start(target, core.resume_start(target))
+    assert core.switch_to(target) == 37
     assert core.playback.position == 37
     assert core.viewings(first)[0].ended_at is not None
     assert core.highlights(first)[0].end == 25
@@ -263,4 +265,103 @@ def test_navigation_lifecycle_closes_viewing_and_highlight_then_resumes(core, tm
     core.playback.start(second, 0)
     core.playback.report(90)
     core.playback.end()
-    assert core.resume_start(second) == 0
+    assert core.switch_to(second) == 0
+
+
+@pytest.mark.parametrize("edit", ["rename", "remove", "add", "reorder"])
+def test_review_early_episode_insertion_distinguishes_order_changes(core, tmp_path, edit):
+    folder = tmp_path / "shows"
+    ids = add(core, folder, "Show E02.mkv", "Show E03.mkv", "Show E04.mkv", "extra.mkv")
+    series, = core.series()
+    members = series.video_ids
+    if edit == "remove":
+        members = members[:-1]
+    elif edit == "add":
+        members = (*members, ids["extra"])
+    elif edit == "reorder":
+        members = tuple(reversed(members))
+    core.update_series(series.id, name="내 쇼", video_ids=members)
+    # 순서 변경 여부는 재시작 후 이름을 한 번 더 바꾸어도 보존된다.
+    reopened = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database)
+    reopened.update_series(series.id, name="내 쇼 변경", video_ids=members)
+    ids = add(reopened, folder, "Show E01.mkv")
+    expected = (*members, ids["Show E01"]) if edit == "reorder" else (ids["Show E01"], *members)
+    assert reopened.series()[0].video_ids == expected
+
+
+@pytest.mark.parametrize("names, template, numbers, name", [
+    (("1강 오리엔테이션.mp4", "2강 변수.mp4"), "", ((1, 1), (1, 2)), "shows"),
+    (("파이썬 강의 1강 - 변수.mp4", "파이썬 강의 2강 - 함수.mp4"), "파이썬 강의", ((1, 1), (1, 2)), "파이썬 강의"),
+    (("01. 소개.mp4", "02. 설치.mp4"), "", ((1, 1), (1, 2)), "shows"),
+    (("Lecture 01 - Intro.mp4", "Lecture 02 - Basics.mp4"), "", ((1, 1), (1, 2)), "shows"),
+    (("런닝맨.E650.230416.720p-NEXT.mp4", "런닝맨.E651.230423.720p-NEXT.mp4"), "런닝맨", ((1, 650), (1, 651)), "런닝맨"),
+    (("[SubsPlease] Frieren - 01 (1080p) [ABCD1234].mkv", "[SubsPlease] Frieren - 02 (1080p) [EF015678].mkv"), "frieren", ((1, 1), (1, 2)), "[SubsPlease] Frieren"),
+    (("1주차 1강.mp4", "1주차 2강.mp4", "2주차 1강.mp4"), "", ((1, 1), (1, 2), (2, 1)), "shows"),
+    (("드라마 제1화.mp4", "드라마 2화.mp4"), "드라마", ((1, 1), (1, 2)), "드라마"),
+    (("Top 5 goals.mp4", "Top 10 goals.mp4"), "top", ((1, 5), (1, 10)), "Top"),
+    (("Drama S01E01 1080p.mkv", "Drama S01E02 1080p.mkv"), "drama", ((1, 1), (1, 2)), "Drama"),
+    (("Show 01 2026 230416 1080p [00123456] (Group 7).mkv", "Show 02 2026 230423 720p [1234ABCD] (Group 8).mkv"), "show", ((1, 1), (1, 2)), "Show"),
+])
+def test_review_filename_examples_group_in_number_order(core, tmp_path, names, template, numbers, name):
+    for filename, number in zip(names, numbers):
+        assert series_filename(filename) == (template, number)
+    ids = add(core, tmp_path / "shows", *reversed(names))
+    series, = core.series()
+    assert series.video_ids == tuple(ids[filename.rsplit(".", 1)[0]] for filename in names)
+    assert series.name == name
+
+
+def test_review_multiple_episode_filename_is_excluded(core, tmp_path):
+    assert series_filename("Show.S01E01E02.mkv") is None
+    add(core, tmp_path / "shows", "Show.S01E01E02.mkv", "Show S01E03.mkv")
+    assert core.series() == ()
+
+
+def test_switch_to_same_video_finishes_before_computing_resume(core, tmp_path):
+    ids = add(core, tmp_path / "shows", "first.mkv")
+    video_id = ids["first"]
+    core.switch_to(video_id)
+    core.playback.report(40)
+    assert core.switch_to(video_id) == 37
+    first, second = core.viewings(video_id)
+    assert first.ended_at is not None and first.last_position == 40
+    assert second.ended_at is None and second.last_position == 37
+
+
+def test_switch_to_delivers_end_before_start_and_preserves_target_subtitles(tmp_path):
+    from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
+
+    class Transcriber:
+        def transcribe(self, path, spoken_language, *, cancellation):
+            return TranscriberResult("ko", (TranscriptSegment(0, 90, path.stem),))
+
+    core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc),
+                   transcriber=Transcriber(), database=tmp_path / "data/library.sqlite3")
+    ids = add(core, tmp_path / "shows", "Show E01.mkv", "Show E02.mkv")
+    first, second = ids["Show E01"], ids["Show E02"]
+    for video_id in (first, second):
+        core.request_subtitles(video_id)
+        assert core.process_next_subtitle().state == "completed"
+
+    events = []
+
+    class Listener:
+        def playback_started(self, session, position):
+            events.append(("start", session.video_id, position))
+
+        def playback_position(self, session, position, seeked):
+            pass
+
+        def playback_ended(self, session, position):
+            events.append(("end", session.video_id, position))
+
+    core.playback.subscribe(Listener())
+    core.switch_to(first)
+    core.playback.report(12)
+    assert core.switch_to(second) == 0
+    assert events == [("start", first, 0), ("end", first, 12), ("start", second, 0)]
+    assert core.viewings(first)[0].ended_at is not None
+    assert "Show E02" in core.playback_subtitle(second).read_text(encoding="utf-8")
+    assert "Show E01" in core.playback_subtitle(first).read_text(encoding="utf-8")
+    assert core.command_for_key("/") == Command(CommandType.TOGGLE_SUBTITLES)
+    assert core.command_for_key("PgDn") == Command(CommandType.NEXT_VIDEO)

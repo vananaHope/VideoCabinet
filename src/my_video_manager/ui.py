@@ -169,13 +169,12 @@ class MainWindow(QMainWindow):
 
     def play_video(self, video_id):
         try:
-            self.end_playback()
+            self.stop_player()
             location = self.core.playback_location(video_id)
-            start = self.core.resume_start(video_id)
             self.pages.setCurrentIndex(1)
             if self.player is None:
                 self.player = self.player_factory(int(self.surface.winId()))
-            self.core.playback.start(video_id, start)
+            start = self.core.switch_to(video_id)
             self.player.play(location.path, start, subtitle=self.core.playback_subtitle(video_id))
             self.progress.duration = next(v.duration for v in self.core.videos() if v.id == video_id)
             self.refresh_highlights()
@@ -187,12 +186,15 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "재생 실패", str(error))
 
     def end_playback(self):
+        self.stop_player()
+        self.core.playback.end()
+
+    def stop_player(self):
         self.position_timer.stop()
         if self.player:
             self.player.close()
             self.sync_position()
             self.player = None
-        self.core.playback.end()
 
     def sync_position(self):
         if self.player and self.core.playback.session is not None:
