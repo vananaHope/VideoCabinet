@@ -30,10 +30,12 @@ Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처�
 
 이슈마다:
 
-1. [task-template.md](task-template.md)를 채워 `.local/orchestration/issue-<n>/task.md`로 저장한다. 이슈의 범위 밖 항목(다른 이슈가 맡은 기능)을 명세에 구체적으로 적는다.
+1. [task-template.md](task-template.md)를 채워 `.local/orchestration/issue-<n>/task.md`로 저장한다. 명세 파일은 Write 도구로 쓴다(셸 heredoc을 거친 python 스크립트로 만들면 한국어가 깨진다). 이슈의 범위 밖 항목(다른 이슈가 맡은 기능)을 명세에 구체적으로 적는다.
 2. Run이 없으면 만든다(이번 지휘 세션 전체에 Run 하나).
 3. `worker-start --spec "<명세>" --worktree new-top-level --name issue-<n>-<slug> --base-branch main --agent codex`로 시작한다.
 4. **입력이 실제로 제출됐는지 확인한다.** 작업자 화면을 읽어 `draft`에 `[Pasted Content ...]`가 남아 있으면 붙여넣기만 되고 제출되지 않은 것이다. 이때는 같은 명세를 다시 보내지 말고 `orca terminal send --terminal <handle> --enter`로 Enter만 보낸다. 특히 기존 터미널을 재사용할 때(`--terminal`) 잘 생긴다.
+
+동시에 맡긴 이슈들이 같은 연결 지점(예: 재생 위치 보고)을 각자 만들 것 같으면, 관리자가 그 **공용 계약** 파일을 `.local/orchestration/`에 직접 써서 "내용 그대로 복사"하라고 모두에게 보낸다. 같은 내용의 파일은 병합 때 충돌하지 않는다. #4·#5·#7의 `playback.py`가 첫 사례다.
 
 **완료 기준**: 맡긴 이슈마다 작업자 화면에서 "Working"이 보인다.
 
