@@ -1,0 +1,228 @@
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+
+import pytest
+
+from my_video_manager.core import AppCore
+from my_video_manager.subtitles import TranscriberCancelled
+from my_video_manager.translation import TranslationError
+from test_subtitles import FakeMedia, FakeTranscriber, NOW, setup, reopen
+from test_translation import Translator
+
+
+def test_folder_rule_registration_language_and_no_rescan_requeue(setup):
+    core, adapter, (a, b) = setup
+    folder = a.locations[0].path.parent
+    rule = core.set_auto_subtitle_rule(folder=folder, spoken_language=" JA ")
+    assert core.subtitle_queue() == ()
+    (folder / "c.mkv").write_bytes(b"new")
+    core.scan()
+    entry, = core.subtitle_queue()
+    assert entry.spoken_language == "ja"
+    assert entry.video_id not in (a.id, b.id)
+    core.process_next_subtitle()
+    core.scan()
+    assert core.subtitle_queue() == ()
+    assert reopen(core, adapter).auto_subtitle_rules() == (rule,)
+
+
+def test_existing_confirmation_tag_attachment_and_transcript_skip(setup):
+    core, adapter, (a, b) = setup
+    tag = core.add_video_tag(a.id, "영어")
+    assert core.auto_subtitle_candidates(tag_id=tag.id) == (a.id,)
+    core.set_auto_subtitle_rule(tag_id=tag.id, spoken_language="en", include_existing=False)
+    assert core.subtitle_queue() == ()
+    core.add_video_tag(b.id, "영어")
+    assert [e.video_id for e in core.subtitle_queue()] == [b.id]
+    core.set_auto_subtitle_rule(tag_id=tag.id, spoken_language="ja", include_existing=True)
+    assert [(e.video_id, e.spoken_language) for e in core.subtitle_queue()] == [(b.id, "en"), (a.id, "ja")]
+    core.process_next_subtitle()
+    core.add_video_tag(b.id, "영어")
+    assert [e.video_id for e in core.subtitle_queue()] == [a.id]
+    core.delete_tag(tag.id)
+    assert core.auto_subtitle_rules() == ()
+
+
+def test_overlapping_rules_oldest_wins_and_removal_stops_new_targets(setup):
+    core, _, (a, b) = setup
+    folder = a.locations[0].path.parent
+    tag = core.create_tag("대상")
+    first = core.set_auto_subtitle_rule(folder=folder, spoken_language="en")
+    core.set_auto_subtitle_rule(tag_id=tag.id, spoken_language="ja")
+    core.add_video_tag(a.id, tag.name)
+    assert core.subtitle_queue()[0].spoken_language == "en"
+    core.remove_auto_subtitle_rule(first.id)
+    core.add_video_tag(b.id, tag.name)
+    assert core.subtitle_queue()[1].spoken_language == "ja"
+
+
+def test_manual_before_automatic_fifo_and_promote_overrides_priority(setup):
+    core, adapter, (a, b) = setup
+    core.request_automatic_subtitles(a.id, "en")
+    core.request_subtitles(b.id, "ja")
+    assert [e.video_id for e in core.subtitle_queue()] == [b.id, a.id]
+    core.promote_subtitle(a.id)
+    core = reopen(core, adapter)
+    assert core.process_next_subtitle().video_id == a.id
+    assert core.process_next_subtitle().video_id == b.id
+
+
+def test_automatic_fifo_and_manual_upgrade_never_loses_explicit_language(setup):
+    core, _, (a, b) = setup
+    core.request_automatic_subtitles(b.id, "en")
+    core.request_automatic_subtitles(a.id, "en")
+    assert [e.video_id for e in core.subtitle_queue()] == [b.id, a.id]
+    core.request_subtitles(a.id, "ja")
+    core.request_automatic_subtitles(a.id, "ko")
+    assert [(e.video_id, e.spoken_language) for e in core.subtitle_queue()] == [(a.id, "ja"), (b.id, "en")]
+
+
+def test_active_state_progress_remove_discards_result_and_does_not_preempt(setup):
+    core, _, (a, b) = setup
+    entered, release = Event(), Event()
+
+    class Reporting(FakeTranscriber):
+        def transcribe(self, path, language, *, cancellation, progress):
+            progress(25)
+            entered.set()
+            assert release.wait(5)
+            return self.result
+
+    core = reopen(core, Reporting())
+    core.request_subtitles(a.id)
+    core.request_subtitles(b.id)
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(core.process_next_subtitle)
+        try:
+            assert entered.wait(5)
+            item = next(i for i in core.subtitle_queue_items() if i.video_id == a.id)
+            assert (item.state, item.progress) == ("transcribing", .25)
+            core.promote_subtitle(b.id)
+            assert core.process_next_subtitle() is None
+            core.remove_from_subtitle_queue(a.id)
+        finally:
+            release.set()
+        future.result(5)
+    assert core.transcript(a.id) is None
+    assert [e.video_id for e in core.subtitle_queue()] == [b.id]
+
+
+def test_cancel_then_resume_without_restart(setup):
+    core, adapter, (a, _) = setup
+    core.request_subtitles(a.id)
+    core.stop_subtitle_processing()
+    core.stop_translation_processing()
+    assert core.process_next_subtitle() is None
+    core.resume_subtitle_processing()
+    assert core.process_next_subtitle().state == "completed"
+
+
+def test_interrupted_transcribing_is_visible_then_recovered(setup):
+    core, adapter, (a, _) = setup
+
+    class Interrupted(FakeTranscriber):
+        def transcribe(self, *args, **kwargs):
+            raise KeyboardInterrupt
+
+    core = reopen(core, Interrupted())
+    core.request_subtitles(a.id)
+    with pytest.raises(KeyboardInterrupt):
+        core.process_next_subtitle()
+    assert core.subtitle_queue()[0].state == "transcribing"
+    core = reopen(core, adapter)
+    assert core.subtitle_queue()[0].state == "queued"
+    assert core.process_next_subtitle().state == "completed"
+
+
+def translation_core(core, adapter, translator):
+    return AppCore(media=FakeMedia(), clock=lambda: NOW, database=core.database,
+                   transcriber=adapter, translator=translator, translation_batch_size=1)
+
+
+def test_unified_translation_progress_held_failure_retry_and_notification(setup):
+    core, adapter, (a, b) = setup
+    translator = Translator()
+    core = translation_core(core, adapter, translator)
+    core.request_subtitles(a.id)
+    core.request_subtitles(b.id, "ko")
+    core.process_next_subtitle()
+    core.process_next_subtitle()
+    assert core.take_subtitle_queue_completion() is None
+    translator.error = TranslationError("authentication", "로그인")
+    core.process_next_translation()
+    assert {i.video_id: i.state for i in core.subtitle_queue_items()} == {a.id: "failed", b.id: "completed"}
+    assert core.take_subtitle_queue_completion() == (1, 1)
+    assert core.take_subtitle_queue_completion() is None
+    assert core.retry_failed_subtitles() == 1
+    translator.error = None
+    assert core.process_next_translation().state == "queued"
+    item = next(i for i in core.subtitle_queue_items() if i.video_id == a.id)
+    assert (item.state, item.progress) == ("queued", .5)
+    assert core.take_subtitle_queue_completion() is None
+    core.process_next_translation()
+    assert core.take_subtitle_queue_completion() == (1, 0)
+
+
+def test_retry_all_transcription_failures_and_remove_translation_survives_restart(setup):
+    core, adapter, (a, b) = setup
+    adapter.error = RuntimeError("GPU")
+    core.request_subtitles(a.id)
+    core.request_subtitles(b.id)
+    core.process_next_subtitle()
+    core.process_next_subtitle()
+    assert core.retry_failed_subtitles() == 2
+    adapter.error = None
+    core.process_next_subtitle()
+    core.process_next_subtitle()
+    core.remove_from_subtitle_queue(a.id)
+    core = translation_core(core, adapter, Translator())
+    assert [e.video_id for e in core.translation_queue()] == [b.id]
+    core.request_translation(a.id)
+    assert {e.video_id for e in core.translation_queue()} == {a.id, b.id}
+
+
+def test_translation_active_state_and_promoted_order(setup):
+    core, adapter, (a, b) = setup
+    entered, release = Event(), Event()
+
+    class Blocking(Translator):
+        def translate(self, *args, **kwargs):
+            entered.set()
+            assert release.wait(5)
+            return super().translate(*args, **kwargs)
+
+    core = translation_core(core, adapter, Blocking())
+    core.request_subtitles(a.id)
+    core.request_subtitles(b.id)
+    core.process_next_subtitle()
+    core.process_next_subtitle()
+    core.promote_subtitle(b.id)
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(core.process_next_translation)
+        try:
+            assert entered.wait(5)
+            assert next(i for i in core.subtitle_queue_items() if i.video_id == b.id).state == "translating"
+            core.remove_from_subtitle_queue(b.id)
+        finally:
+            release.set()
+        future.result(5)
+    assert core.translation(b.id) is None
+
+
+def test_held_translation_prevents_premature_notification(setup):
+    core, adapter, (a, _) = setup
+    translator = Translator()
+    translator.error = TranslationError("usage_limit", "한도")
+    core = translation_core(core, adapter, translator)
+    core.request_subtitles(a.id)
+    core.process_next_subtitle()
+    core.process_next_translation()
+    assert core.subtitle_queue_items()[0].state == "held"
+    assert core.take_subtitle_queue_completion() is None
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"tag_id": 999}, {"folder": "missing"}, {"folder": ".", "tag_id": 1}])
+def test_invalid_rule_rejected(setup, kwargs):
+    core, _, _ = setup
+    with pytest.raises(ValueError):
+        core.set_auto_subtitle_rule(**kwargs)

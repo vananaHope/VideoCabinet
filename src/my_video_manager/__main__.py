@@ -14,15 +14,22 @@ def main():
     from .transcription import FasterWhisperTranscriber
     from .translation_cli import SubscriptionCLITranslator
     from .ui import MainWindow
+    from .single_instance import SingleInstance
 
     app = QApplication(sys.argv[:1])
+    app.setQuitOnLastWindowClosed(False)
     try:
         data_directory = args.data_dir or default_data_directory()
+        instance = SingleInstance(data_directory, app)
+        if not instance.start():
+            return 0
         core = AppCore(media=FFmpegMediaReader(), clock=lambda: datetime.now(timezone.utc),
                        transcriber=FasterWhisperTranscriber(data_directory / "models"),
                        translator=SubscriptionCLITranslator(data_directory),
                        database=args.data_dir / "library.sqlite3" if args.data_dir else None)
         window = MainWindow(core)
+        instance.activated.connect(window.tray.open)
+        app.aboutToQuit.connect(instance.close)
     except Exception as error:
         QMessageBox.critical(None, "시작 실패", str(error))
         return 1

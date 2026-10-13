@@ -19,6 +19,7 @@ from .library_ui import LibraryControls
 from .reel_ui import ReelControls
 from .key_settings_ui import SettingsDialog, key_name
 from .key_display import display_keys
+from .tray import TrayControls
 
 
 class ScanWorker(QThread):
@@ -50,6 +51,9 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.subtitles = SubtitleControls(self)
         self.translations = TranslationControls(self)
+        self.tray = TrayControls(self)
+        self.menuBar().addAction("대기열 보기", self.tray.show_queue)
+        self.menuBar().addAction("완전 종료", self.tray.quit)
         self.setWindowTitle("영상 라이브러리")
         self.resize(1100, 720)
         self.pages = QStackedWidget()
@@ -422,19 +426,4 @@ class MainWindow(QMainWindow):
         return False
 
     def closeEvent(self, event):
-        if self.worker and self.worker.isRunning():
-            self.status.setText("검사가 끝난 뒤 창을 닫아 주세요.")
-            event.ignore()
-            return
-        if not self.subtitles.shutdown():
-            event.ignore()
-            return
-        self.translations.shutdown()
-        try:
-            self.end_playback()
-        except Exception as error:
-            QMessageBox.warning(self, "재생 종료 실패", str(error))
-            event.ignore()
-            return
-        QApplication.instance().removeEventFilter(self)
-        event.accept()
+        self.tray.close_window(event)

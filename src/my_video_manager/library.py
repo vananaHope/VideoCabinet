@@ -106,10 +106,11 @@ def migrate_library(db) -> None:
 
 
 class Library:
-    def __init__(self, connect, media, clock, thumbnails, settings):
+    def __init__(self, connect, media, clock, thumbnails, settings, *, on_registered=None):
         self._connect, self._media, self._clock = connect, media, clock
         self._thumbnails = thumbnails
         self._settings = settings
+        self._on_registered = on_registered or (lambda video_id: None)
         # 검사와 화면에서 하는 위치/제외 변경의 순서를 보장한다.
         self._lock = RLock()
         with connect() as db:
@@ -185,6 +186,16 @@ class Library:
                                if excluded else "이미 등록된 영상입니다.")
 
     def _register(self, path: Path) -> ScanResult:
+        with self._connect() as db:
+            previous = db.execute("SELECT video_id FROM locations WHERE path = ?", (str(path),)).fetchone()
+        result = self._register_video(path)
+        with self._connect() as db:
+            current = db.execute("SELECT video_id FROM locations WHERE path = ?", (str(path),)).fetchone()
+        if current and (previous is None or previous[0] != current[0]):
+            self._on_registered(current[0])
+        return result
+
+    def _register_video(self, path: Path) -> ScanResult:
         signature = _signature(path)
         minimum = self.minimum_duration
         with self._connect() as db:
