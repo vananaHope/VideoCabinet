@@ -15,7 +15,7 @@ from .highlight_ui import HighlightList, HighlightProgress, timestamp
 from .series_ui import SeriesEditor
 from .tag_ui import TagEditor, TagManager
 from .library_ui import LibraryControls
-from .revisit_ui import RevisitControls
+from .reel_ui import ReelControls
 
 
 class ScanWorker(QThread):
@@ -99,10 +99,10 @@ class MainWindow(QMainWindow):
         self.back_button = QPushButton("목록으로 (Esc)")
         self.back_button.clicked.connect(self.back_to_list)
         playback_layout.addWidget(self.back_button)
-        self.revisit_label = QLabel()
-        self.revisit_label.setWordWrap(True)
-        self.revisit_label.hide()
-        playback_layout.addWidget(self.revisit_label)
+        self.reel_label = QLabel()
+        self.reel_label.setWordWrap(True)
+        self.reel_label.hide()
+        playback_layout.addWidget(self.reel_label)
         playback_layout.addWidget(self.subtitles.button())
         playback_layout.addWidget(self.translations.button())
         self.surface = QWidget()
@@ -123,8 +123,8 @@ class MainWindow(QMainWindow):
         playback_layout.addWidget(self.video_navigation_label)
         playback_layout.addWidget(QLabel("Insert 지점 · Delete 구간 시작/끝 · Home/End 이전/다음 · 노랑 지점 / 초록 구간 / 주황 열린 구간"))
         self.pages.addWidget(playback)
-        self.revisits = RevisitControls(self)
-        buttons.addWidget(self.revisits.button())
+        self.reel = ReelControls(self)
+        buttons.addWidget(self.reel.button())
 
         self.add_button.clicked.connect(self.add_folder)
         self.scan_button.clicked.connect(self.scan)
@@ -251,8 +251,8 @@ class MainWindow(QMainWindow):
     def end_playback(self):
         self.stop_player()
         self.core.playback.end()
-        self.revisits.shown = None
-        self.revisit_label.hide()
+        self.reel.shown = None
+        self.reel_label.hide()
 
     def stop_player(self):
         self.position_timer.stop()
@@ -267,8 +267,12 @@ class MainWindow(QMainWindow):
             session = self.core.playback.session
             for position, seeked in self.player.take_positions():
                 self.core.playback.report(position, seeked=seeked)
+                self.core.advance_reel_if_due()
                 if self.core.playback.session is not session:
                     break  # 자동 전환 뒤 이전 엔진의 나머지 보고는 버린다.
+            eof = self.player.take_eof()
+            if self.core.playback.session is session and eof:
+                self.core.advance_reel_if_due(eof=True)
             self.core.save_viewings()
             position = self.core.playback.position
             self.progress.position = position
@@ -283,7 +287,7 @@ class MainWindow(QMainWindow):
     def poll_position(self):
         try:
             self.sync_position()
-            self.revisits.sync()
+            self.reel.sync()
         except Exception as error:
             self.position_timer.stop()
             self.position_label.setText(f"재생 위치 확인 실패: {error}")
@@ -308,8 +312,8 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def back_to_list(self):
-        if self.revisits.shown is not None or self.core.revisit_playback is not None:
-            self.revisits.open()
+        if self.reel.shown is not None or self.core.reel_playback is not None:
+            self.reel.open()
         else:
             self.show_library()
 
@@ -331,12 +335,12 @@ class MainWindow(QMainWindow):
                 # 화면을 연 Enter가 부모로 전파되어 곧바로 pause를 실행하지 않게 소비한다.
                 return True
             return False
-        if self.pages.currentWidget() is self.revisits.page:
+        if self.pages.currentWidget() is self.reel.page:
             if event.key() == Qt.Key.Key_Escape:
                 self.show_library()
                 return True
-            if self.revisits.list.hasFocus() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self.revisits.play_selected(self.revisits.list.currentItem())
+            if self.reel.list.hasFocus() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self.reel.play_selected(self.reel.list.currentItem())
                 return True  # 목록을 연 Enter가 재생 화면까지 전파되어 멈추지 않게 한다.
             return False
         if event.key() == Qt.Key.Key_Escape:
@@ -358,17 +362,17 @@ class MainWindow(QMainWindow):
                         if target is not None:
                             self.play_video(target)
                         else:
-                            self.revisits.sync()
+                            self.reel.sync()
                 elif self.core.is_highlight_command(command):
                     if event.isAutoRepeat() or self.sync_position() is None:
                         return True
-                    self.revisits.sync()
+                    self.reel.sync()
                     if self.core.playback.session is None:
                         return True
                     target = self.core.execute_highlight_command(command)
                     if target is not None:
                         self.player.seek_to(target)
-                    self.revisits.sync()
+                    self.reel.sync()
                     self.refresh_highlights()
                     self.sync_position()
                 elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
@@ -377,7 +381,7 @@ class MainWindow(QMainWindow):
                 else:
                     if command.kind == CommandType.SEEK:
                         self.sync_position()
-                        self.revisits.sync()
+                        self.reel.sync()
                     if self.player:
                         self.player.execute(command)
             except Exception as error:

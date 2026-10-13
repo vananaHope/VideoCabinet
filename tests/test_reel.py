@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
-from my_video_manager.revisit import RevisitSettings, ordered_revisit_entries
+from my_video_manager.reel import ReelSettings, ordered_reel_entries
 
 
 class Clock:
@@ -59,7 +59,7 @@ def mark(core, video, start, end=None):
 
 
 def current_id(core):
-    return core.revisit_playback.entry.highlight.id if core.revisit_playback else None
+    return core.reel_playback.entry.highlight.id if core.reel_playback else None
 
 
 def test_list_order_tag_filter_and_missing(library):
@@ -72,17 +72,17 @@ def test_list_order_tag_filter_and_missing(library):
     core.add_highlight_tag(first.id, "복습")
     core.add_video_tag(c.id, "복습")
     core.missing = (a.id,)
-    assert [e.highlight for e in core.revisit_entries()] == [first, second, last]
-    assert [e.playable for e in core.revisit_entries()] == [False, False, True]
-    assert [e.highlight for e in core.revisit_entries(tag.id)] == [first, last]
-    assert core.revisit_entries(tag.id)[0].last_revisited_at is None
+    assert [e.highlight for e in core.reel_entries()] == [first, second, last]
+    assert [e.playable for e in core.reel_entries()] == [False, False, True]
+    assert [e.highlight for e in core.reel_entries(tag.id)] == [first, last]
+    assert core.reel_entries(tag.id)[0].last_revisited_at is None
 
 
 def test_sort_ties_are_stable(library):
     core, _ = library
     a, b, _ = core.videos()
     ha, hb = mark(core, a, 30), mark(core, b, 10)
-    entries = ordered_revisit_entries([replace(b, title=a.title), a], [hb, ha], {})
+    entries = ordered_reel_entries([replace(b, title=a.title), a], [hb, ha], {})
     assert [e.highlight.video_id for e in entries] == sorted([a.id, b.id])
 
 
@@ -90,19 +90,22 @@ def test_point_range_cross_video_auto_advance_and_end(library):
     core, clock = library
     a, b, _ = core.videos()
     first, second, last = mark(core, a, 10), mark(core, a, 30, 32), mark(core, b, 98)
-    core.start_revisit()
-    assert (core.revisit_playback.start, core.revisit_playback.end) == (10, 20)
+    core.start_reel()
+    assert (core.reel_playback.start, core.reel_playback.end) == (10, 20)
     assert not core.playback.session.record_viewing
     core.playback.report(20)
+    core.advance_reel_if_due()
     assert current_id(core) == second.id
     assert core.last_highlight_revisited_at(first.id) == clock.now
     core.playback.report(32)
+    core.advance_reel_if_due()
     assert current_id(core) == last.id
     assert core.last_highlight_revisited_at(second.id) == clock.now
     assert core.playback.session.video_id == b.id
-    assert core.revisit_playback.end == 100
+    assert core.reel_playback.end == 100
     core.playback.report(100)
-    assert core.playback.session is None and core.revisit_playback is None
+    core.advance_reel_if_due()
+    assert core.playback.session is None and core.reel_playback is None
     assert core.last_highlight_revisited_at(last.id) == clock.now
 
 
@@ -110,16 +113,16 @@ def test_home_end_use_list_in_revisit_and_timestamps_in_normal_playback(library)
     core, _ = library
     a, b, _ = core.videos()
     first, second = mark(core, a, 10), mark(core, b, 30)
-    core.start_revisit()
-    original = core.revisit_playback
+    core.start_reel()
+    original = core.reel_playback
     press(core, "Home")
-    assert core.revisit_playback == original
+    assert core.reel_playback == original
     press(core, "End")
     assert current_id(core) == second.id
     press(core, "Home")
     assert current_id(core) == first.id
     core.switch_to(a.id)
-    assert core.revisit_playback is None
+    assert core.reel_playback is None
     assert press(core, "End") == 10
 
 
@@ -128,40 +131,51 @@ def test_repeat_point_and_range_updates_timestamp_once_each_pass(library, end):
     core, clock = library
     a = core.videos()[0]
     h = mark(core, a, 10, end)
-    core.start_revisit()
-    assert core.command_for_key("\\") == Command(CommandType.TOGGLE_REVISIT_REPEAT)
+    core.start_reel()
+    assert core.command_for_key("\\") == Command(CommandType.TOGGLE_REEL_REPEAT)
     press(core, "\\")
-    serial = core.revisit_playback.serial
-    core.playback.report(core.revisit_playback.end)
-    assert current_id(core) == h.id and core.revisit_playback.serial > serial
-    assert core.revisit_repeat
+    serial = core.reel_playback.serial
+    core.playback.report(core.reel_playback.end)
+    core.advance_reel_if_due()
+    assert current_id(core) == h.id and core.reel_playback.serial > serial
+    assert core.reel_repeat
     assert core.last_highlight_revisited_at(h.id) == clock.now
     clock.now += timedelta(days=31)
-    core.playback.report(core.revisit_playback.end)
+    core.playback.report(core.reel_playback.end)
+    core.advance_reel_if_due()
     assert core.last_highlight_revisited_at(h.id) == clock.now
     press(core, "\\")
-    core.playback.report(core.revisit_playback.end)
-    assert core.revisit_playback is None
+    core.playback.report(core.reel_playback.end)
+    core.advance_reel_if_due()
+    assert core.reel_playback is None
 
 
 def test_pause_seek_rewind_and_threshold(library):
     core, clock = library
     a = core.videos()[0]
     h = mark(core, a, 10, 50)
-    core.start_revisit()
+    core.start_reel()
     clock.now += timedelta(seconds=50)
     core.playback.report(10)  # 벽시계와 일시정지는 복습이 아니다.
+    core.advance_reel_if_due()
     core.playback.report(40, seeked=True)
+    core.advance_reel_if_due()
     assert core.last_highlight_revisited_at(h.id) is None
     core.playback.report(42)
+    core.advance_reel_if_due()
     core.playback.report(40, seeked=True)
+    core.advance_reel_if_due()
     core.playback.report(42)  # 중복 구간은 두 번 세지 않는다.
+    core.advance_reel_if_due()
     core.playback.report(42.999)
+    core.advance_reel_if_due()
     assert core.last_highlight_revisited_at(h.id) is None
     core.playback.report(43)
+    core.advance_reel_if_due()
     assert core.last_highlight_revisited_at(h.id) == clock.now
     clock.now += timedelta(seconds=5)
     core.playback.report(44)
+    core.advance_reel_if_due()
     assert core.last_highlight_revisited_at(h.id) == clock.now - timedelta(seconds=5)
 
 
@@ -169,11 +183,13 @@ def test_seek_to_end_does_not_record_and_short_partial_does_not_count(library):
     core, _ = library
     a = core.videos()[0]
     first, second = mark(core, a, 10, 12), mark(core, a, 20, 22)
-    core.start_revisit()
+    core.start_reel()
     core.playback.report(12, seeked=True)
+    core.advance_reel_if_due()
     assert current_id(core) == second.id
     assert core.last_highlight_revisited_at(first.id) is None
     core.playback.report(21)
+    core.advance_reel_if_due()
     core.playback.end()
     assert core.last_highlight_revisited_at(second.id) is None
 
@@ -185,19 +201,22 @@ def test_viewing_classification_and_resume_are_unchanged_and_records_survive_res
     first, second = mark(core, a, 10), mark(core, b, 20)
     core.playback.start(a.id, 0)
     core.playback.report(watched_end)
+    core.advance_reel_if_due()
     core.playback.end()
     before = [(core.viewings(v.id), core.viewing_status(v.id), core.resume_start(v.id)) for v in (a, b)]
-    core.start_revisit()
+    core.start_reel()
     core.playback.report(13)
+    core.advance_reel_if_due()
     press(core, "End")
     clock.now += timedelta(days=1)
     core.playback.report(30)
+    core.advance_reel_if_due()
     reopened = AppCore(media=Media(), clock=clock, database=core.database)
     after = [(reopened.viewings(v.id), reopened.viewing_status(v.id), reopened.resume_start(v.id)) for v in (a, b)]
     assert before == after
     assert reopened.last_highlight_revisited_at(first.id) == clock.now - timedelta(days=1)
     assert reopened.last_video_revisited_at(b.id) == clock.now
-    assert reopened.revisit_entries()[1].last_revisited_at == clock.now
+    assert reopened.reel_entries()[1].last_revisited_at == clock.now
 
 
 def test_video_last_revisit_aggregates_and_delete_cleans_up(library):
@@ -205,12 +224,14 @@ def test_video_last_revisit_aggregates_and_delete_cleans_up(library):
     a = core.videos()[0]
     first, second = mark(core, a, 10), mark(core, a, 20)
     assert core.last_video_revisited_at(a.id) is None
-    core.start_revisit()
+    core.start_reel()
     core.playback.report(13)
+    core.advance_reel_if_due()
     earlier = clock.now
     clock.now += timedelta(days=2)
     press(core, "End")
     core.playback.report(23)
+    core.advance_reel_if_due()
     assert core.last_video_revisited_at(a.id) == clock.now
     core.delete_highlight(second.id)
     assert core.last_highlight_revisited_at(second.id) is None
@@ -224,16 +245,16 @@ def test_missing_skipped_both_directions_and_selected_missing_refused(library):
     a, b, c = core.videos()
     first, missing, last = mark(core, a, 10), mark(core, b, 20), mark(core, c, 30)
     core.missing = (b.id,)
-    core.start_revisit()
+    core.start_reel()
     press(core, "End")
     assert current_id(core) == last.id
     press(core, "Home")
     assert current_id(core) == first.id
     with pytest.raises(ValueError, match="파일 없음"):
-        core.start_revisit(highlight_id=missing.id)
+        core.start_reel(highlight_id=missing.id)
     assert current_id(core) == first.id
     core.missing = (a.id, b.id, c.id)
-    assert core.start_revisit() is None
+    assert core.start_reel() is None
     assert core.playback.session is None
 
 
@@ -242,34 +263,36 @@ def test_selected_filter_snapshot_creation_and_open_range_close(library):
     a, b, _ = core.videos()
     first, second = mark(core, a, 10), mark(core, b, 20)
     tag = core.add_highlight_tag(first.id, "선택")
-    core.start_revisit(tag.id)
+    core.start_reel(tag.id)
     core.playback.report(11)
+    core.advance_reel_if_due()
     press(core, "Insert")
     press(core, "Delete")
     core.playback.report(12)
+    core.advance_reel_if_due()
     press(core, "End")
     assert core.playback.session is None
     assert [(h.start, h.end) for h in core.highlights(a.id)] == [(10, None), (11, None), (11, 12)]
-    assert len(core.revisit_entries()) == 4
-    core.start_revisit(highlight_id=second.id)
+    assert len(core.reel_entries()) == 4
+    core.start_reel(highlight_id=second.id)
     assert current_id(core) == second.id
 
 
 def test_empty_and_point_at_video_end_are_skipped(library):
     core, _ = library
-    assert core.start_revisit() is None
+    assert core.start_reel() is None
     mark(core, core.videos()[0], 100)
-    assert len(core.revisit_entries()) == 1
-    assert core.start_revisit() is None
+    assert len(core.reel_entries()) == 1
+    assert core.start_reel() is None
 
 
 def test_custom_point_length_and_record_threshold(library):
     core, clock = library
     h = mark(core, core.videos()[0], 10)
     custom = AppCore(media=Media(), clock=clock, database=core.database,
-                     revisit_settings=RevisitSettings(point_duration=5, minimum_played=1))
-    custom.start_revisit()
-    assert custom.revisit_playback.end == 15
+                     reel_settings=ReelSettings(point_duration=5, minimum_played=1))
+    custom.start_reel()
+    assert custom.reel_playback.end == 15
     custom.playback.report(11)
     assert custom.last_highlight_revisited_at(h.id) == clock.now
 
@@ -278,12 +301,16 @@ def test_first_engine_report_and_eof_complete_a_short_fractional_range(library):
     core, clock = library
     a = core.videos()[0]
     h = mark(core, a, 98.7654, 100)
-    core.start_revisit()
+    core.start_reel()
     core.playback.report(98.7654, seeked=True)  # 엔진의 최초 재생 시작 기준
+    core.advance_reel_if_due()
     core.playback.report(98.8)  # 첫 화면 보고까지 재생된 시간
+    core.advance_reel_if_due()
     core.playback.report(99.98)
+    core.advance_reel_if_due()
     assert core.last_highlight_revisited_at(h.id) is None
     core.playback.report(100)  # 실제 EOF 보고로 마지막 프레임의 남은 길이 반영
+    core.advance_reel_if_due()
     assert core.last_highlight_revisited_at(h.id) == clock.now
 
 
@@ -291,50 +318,54 @@ def test_deleting_current_or_queued_highlight_does_not_resurrect_it(library):
     core, _ = library
     a, b, _ = core.videos()
     first, second, last = mark(core, a, 10), mark(core, a, 20), mark(core, b, 10)
-    core.start_revisit()
+    core.start_reel()
     core.delete_highlight(first.id)
     core.delete_highlight(second.id)
     core.playback.report(20)
+    core.advance_reel_if_due()
     assert core.last_highlight_revisited_at(first.id) is None
     assert current_id(core) == last.id
 
 
-def test_start_revisit_closes_normal_viewing_and_open_highlight(library):
+def test_start_reel_closes_normal_viewing_and_open_highlight(library):
     core, _ = library
     a = core.videos()[0]
     mark(core, a, 10)
     core.switch_to(a.id)
     core.playback.report(10)
+    core.advance_reel_if_due()
     press(core, "Delete")
     core.playback.report(15)
-    core.start_revisit()
+    core.advance_reel_if_due()
+    core.start_reel()
     viewing, = core.viewings(a.id)
     assert viewing.ended_at is not None
     assert viewing.played_seconds == 15
     assert core.highlights(a.id)[-1].end == 15
     core.playback.report(20)
+    core.advance_reel_if_due()
     assert core.viewings(a.id) == (viewing,)
 
 
 def test_repeat_rebinding_and_normal_playback_noop(library):
     core, _ = library
     press(core, "\\")
-    assert not core.revisit_repeat
-    core.set_key_bindings({"Space": Command(CommandType.TOGGLE_REVISIT_REPEAT)})
+    assert not core.reel_repeat
+    core.set_key_bindings({"Space": Command(CommandType.TOGGLE_REEL_REPEAT)})
     assert core.command_for_key("\\") is None
     core.playback.start(core.videos()[0].id, 10, record_viewing=False)
     core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
     core.playback.end()
-    core.start_revisit()
+    core.start_reel()
     press(core, "Space")
-    assert core.revisit_repeat
+    assert core.reel_repeat
 
 
 @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan")])
 @pytest.mark.parametrize("field", ["point_duration", "minimum_played"])
 def test_invalid_settings(value, field):
     with pytest.raises(ValueError):
-        RevisitSettings(**{field: value})
+        ReelSettings(**{field: value})
 
 
 def test_pgup_pgdn_stay_in_revisit_and_use_video_groups(library):
@@ -344,7 +375,7 @@ def test_pgup_pgdn_stay_in_revisit_and_use_video_groups(library):
                            mark(core, b, 20), mark(core, c, 10))
     def video_key(key):
         return core.execute_video_command(core.command_for_key(key), ())
-    core.start_revisit()
+    core.start_reel()
     video_key("PgUp")
     assert current_id(core) == a1.id
     press(core, "End")
@@ -372,6 +403,165 @@ def test_regular_player_keys_unchanged_in_revisit(library, key):
     core, _ = library
     before = core.command_for_key(key)
     mark(core, core.videos()[0], 10)
-    core.start_revisit()
+    core.start_reel()
     assert core.command_for_key(key) == before
     assert not core.is_highlight_command(before)
+
+
+def test_reel_instructs_seek_within_video_and_open_across_videos(library):
+    core, _ = library
+    a, b, _ = core.videos()
+    mark(core, a, 10)
+    mark(core, a, 30)
+    mark(core, b, 10)
+    core.start_reel()
+    assert core.reel_playback.action == "open"
+    press(core, "End")
+    assert core.reel_playback.action == "seek"
+    core.playback.report(30, seeked=True)
+    assert core.last_highlight_revisited_at(current_id(core)) is None
+    press(core, "\\")
+    core.playback.report(40)
+    core.advance_reel_if_due()
+    assert core.reel_playback.action == "seek"
+    press(core, "End")
+    assert core.reel_playback.action == "open"
+    core.execute_video_command(core.command_for_key("PgUp"), ())
+    assert core.reel_playback.action == "open"
+    press(core, "End")
+    core.execute_video_command(core.command_for_key("PgUp"), ())
+    assert core.reel_playback.action == "seek"
+
+
+def test_all_listeners_receive_position_before_reel_transition(library):
+    core, _ = library
+    a, b, _ = core.videos()
+    first, second = mark(core, a, 10, 12), mark(core, b, 20)
+    events = []
+
+    class Listener:
+        session = None
+
+        def playback_started(self, session, position):
+            assert self.session is None
+            self.session = session
+            events.append(("start", session.video_id, position))
+
+        def playback_position(self, session, position, seeked):
+            assert self.session is session
+            events.append(("position", session.video_id, position))
+
+        def playback_ended(self, session, position):
+            assert self.session is session
+            self.session = None
+            events.append(("end", session.video_id, position))
+
+    # 기존 시청·하이라이트·모아보기 뒤에 새 리스너가 추가되어도 계약을 지킨다.
+    core.playback.subscribe(Listener())
+    core.start_reel()
+    press(core, "Delete")
+    events.clear()
+    core.playback.report(12)
+    assert events == [("position", a.id, 12)]
+    assert current_id(core) == first.id and core.open_highlight_start == 10
+    core.advance_reel_if_due()
+    assert events == [("position", a.id, 12), ("end", a.id, 12), ("start", b.id, 20)]
+    assert current_id(core) == second.id and core.open_highlight_start is None
+    assert core.highlights(a.id)[-1].end == 12
+    assert core.viewings(a.id) == core.viewings(b.id) == ()
+    core.advance_reel_if_due()  # 같은 완료 보고를 두 번 처리하지 않는다.
+    assert current_id(core) == second.id
+
+
+@pytest.mark.parametrize("duration", [99.96, 100.04])
+def test_eof_advances_despite_engine_database_duration_difference(library, duration):
+    core, clock = library
+    a, b, _ = core.videos()
+    first, second = mark(core, a, 98, 100), mark(core, b, 10)
+    core.start_reel()
+    core.playback.report(duration)
+    core.advance_reel_if_due(eof=True)
+    assert current_id(core) == second.id
+    assert core.last_highlight_revisited_at(first.id) == clock.now
+
+
+def test_seek_to_shorter_engine_eof_does_not_count_as_revisit(library):
+    core, _ = library
+    h = mark(core, core.videos()[0], 98, 100)
+    core.start_reel()
+    core.playback.report(99.98, seeked=True)
+    core.advance_reel_if_due(eof=True)
+    assert core.reel_playback is None
+    assert core.last_highlight_revisited_at(h.id) is None
+
+
+def test_natural_video_title_sort_preserves_time_order(library):
+    core, _ = library
+    a, b, c = core.videos()
+    marks = [mark(core, a, 20), mark(core, a, 5), mark(core, b, 10), mark(core, c, 30)]
+    videos = [replace(a, title="강의 2강"), replace(b, title="강의 10강"), replace(c, title="강의 1강")]
+    entries = ordered_reel_entries(videos, marks, {})
+    assert [(e.video_title, e.highlight.start) for e in entries] == [
+        ("강의 1강", 30), ("강의 2강", 5), ("강의 2강", 20), ("강의 10강", 10)]
+
+
+@pytest.mark.parametrize("key", ["End", "Home", "PgUp", "PgDn"])
+def test_repeat_survives_manual_movement_and_ends_only_on_toggle_or_exit(library, key):
+    core, _ = library
+    a, b, _ = core.videos()
+    mark(core, a, 10)
+    middle = mark(core, a, 30)
+    mark(core, b, 10)
+    core.start_reel(highlight_id=middle.id)
+    press(core, "\\")
+    if key.startswith("Pg"):
+        core.execute_video_command(core.command_for_key(key), ())
+    else:
+        press(core, key)
+    target = current_id(core)
+    assert core.reel_repeat
+    core.playback.report(core.reel_playback.end)
+    core.advance_reel_if_due()
+    assert current_id(core) == target
+    press(core, "\\")
+    assert not core.reel_repeat
+    press(core, "\\")
+    core.playback.end()
+    assert not core.reel_repeat
+
+
+def test_selecting_zero_length_item_is_rejected_without_changing_current_playback(library):
+    core, _ = library
+    a, b, _ = core.videos()
+    first, zero = mark(core, a, 10), mark(core, a, 100)
+    mark(core, b, 20)
+    core.start_reel()
+    with pytest.raises(ValueError, match="재생할 길이"):
+        core.start_reel(highlight_id=zero.id)
+    assert current_id(core) == first.id
+
+
+def test_list_and_pgdn_read_each_public_snapshot_once(library):
+    original, clock = library
+    for video in original.videos():
+        for time in (10, 20, 30):
+            mark(original, video, time)
+
+    class CountingCore(AppCore):
+        video_reads = highlight_reads = 0
+
+        def videos(self):
+            self.video_reads += 1
+            return super().videos()
+
+        def all_highlights(self, tag_id=None):
+            self.highlight_reads += 1
+            return super().all_highlights(tag_id)
+
+    core = CountingCore(media=Media(), clock=clock, database=original.database)
+    core.reel_entries()
+    assert (core.video_reads, core.highlight_reads) == (1, 1)
+    core.start_reel()
+    core.video_reads = core.highlight_reads = 0
+    core.execute_video_command(core.command_for_key("PgDn"), ())
+    assert (core.video_reads, core.highlight_reads) == (1, 1)

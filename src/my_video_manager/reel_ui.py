@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 from .highlight_ui import timestamp
 
 
-class RevisitControls:
+class ReelControls:
     def __init__(self, window):
         self.window, self.core = window, window.core
         self.shown = None
@@ -74,7 +74,7 @@ class RevisitControls:
         selected = self.list.currentItem()
         selected_id = selected.data(Qt.ItemDataRole.UserRole).highlight.id if selected else None
         self.list.clear()
-        entries = self.core.revisit_entries(self.filter.currentData())
+        entries = self.core.reel_entries(self.filter.currentData())
         row = 0
         for index, entry in enumerate(entries):
             h = entry.highlight
@@ -112,15 +112,22 @@ class RevisitControls:
     def start(self, highlight_id=None):
         try:
             self.window.end_playback()
-            self.core.start_revisit(self.filter.currentData(), highlight_id)
+            self.core.start_reel(self.filter.currentData(), highlight_id)
             self.sync()
         except Exception as error:
             self.open()
             QMessageBox.warning(self.window, "모아보기 재생 실패", str(error))
 
     def sync(self):
-        current = self.core.revisit_playback
+        current = self.core.reel_playback
         if current == self.shown:
+            self.update_label()
+            return
+        if current is not None and current.action == "seek" and self.window.player:
+            # 같은 영상은 파일을 다시 열지 않는다. 명령의 판단은 코어가 담당한다.
+            self.window.player.seek_to(current.start, resume=True)
+            self.shown = current
+            self.window.refresh_highlights()
             self.update_label()
             return
         options = None
@@ -153,12 +160,12 @@ class RevisitControls:
             raise
 
     def update_label(self):
-        current = self.core.revisit_playback
-        self.window.revisit_label.setVisible(current is not None)
+        current = self.core.reel_playback
+        self.window.reel_label.setVisible(current is not None)
         self.window.video_navigation_label.setVisible(current is None)
         self.window.back_button.setText("모아보기 목록으로 (Esc)" if current else "목록으로 (Esc)")
         if current:
-            repeat = "켜짐" if self.core.revisit_repeat else "꺼짐"
-            self.window.revisit_label.setText(
+            repeat = "켜짐" if self.core.reel_repeat else "꺼짐"
+            self.window.reel_label.setText(
                 f"모아보기 · {current.entry.video_title} · {timestamp(current.start)} — {timestamp(current.end)}\n"
                 f"반복 {repeat} (\\) · Home/End 이전/다음 하이라이트 · PgUp/PgDn 영상 단위 이동")

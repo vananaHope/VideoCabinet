@@ -57,6 +57,11 @@ class Highlights:
                     f"SELECT * FROM highlights WHERE id IN ({placeholders})", batch))
         return tuple(sorted(highlights, key=lambda h: (h.video_id, h.start, h.id)))
 
+    def list_all(self) -> tuple[Highlight, ...]:
+        with self._connect() as db:
+            return tuple(self._highlight(row) for row in db.execute(
+                "SELECT * FROM highlights ORDER BY video_id, start, id"))
+
     @staticmethod
     def _highlight(row) -> Highlight:
         return Highlight(row["id"], row["video_id"], row["start"], row["end"],

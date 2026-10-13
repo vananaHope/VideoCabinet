@@ -82,18 +82,21 @@ class MpvPlayer:
                         self._player.sid = track["id"]
 
         self._positions = SimpleQueue()
+        self._eof = SimpleQueue()
         self._seeking = True
+        self._awaiting_seek = False
         self._initial_start = None
 
         @self._player.event_callback("seek", "start-file")
         def seek_started(event):
             self._seeking = True
+            self._awaiting_seek = False
 
         @self._player.event_callback("playback-restart")
         def restarted(event):
             # 탐색 도중의 임시 위치는 버리고 실제 재생 재개 위치를 새 기준점으로 보낸다.
             with self._callback_lock:
-                if self._closing:
+                if self._closing or self._awaiting_seek:
                     return
                 position = self._player.time_pos
                 if position is not None:
@@ -109,8 +112,9 @@ class MpvPlayer:
 
         @self._player.property_observer("time-pos")
         def position_changed(name, position):
-            if position is not None and not self._seeking:
-                self._positions.put((position, False))
+            with self._callback_lock:
+                if position is not None and not self._seeking and not self._closing:
+                    self._positions.put((position, False))
 
         @self._player.property_observer("eof-reached")
         def reached_end(name, reached):
@@ -120,6 +124,7 @@ class MpvPlayer:
                     duration = self._player.duration
                     if duration is not None:
                         self._positions.put((duration, False))
+                    self._eof.put(True)
 
     def _app_subtitle_tracks(self):
         if self._subtitle_path is None:
@@ -170,6 +175,14 @@ class MpvPlayer:
     def position(self) -> float | None:
         return self._player.time_pos
 
+    def take_eof(self) -> bool:
+        reached = False
+        while True:
+            try:
+                reached = self._eof.get_nowait() or reached
+            except Empty:
+                return reached
+
     def playback_options(self) -> tuple[float, bool]:
         """모아보기의 항목 전환에도 사용자가 정한 배속과 자막 표시를 유지한다."""
         return self._player.speed, self._player.sub_visibility
@@ -177,9 +190,16 @@ class MpvPlayer:
     def apply_playback_options(self, options: tuple[float, bool]) -> None:
         self._player.speed, self._player.sub_visibility = options
 
-    def seek_to(self, position: float) -> None:
-        self._initial_start = None
-        self._player.command("seek", position, "absolute+exact")
+    def seek_to(self, position: float, *, resume: bool = False) -> None:
+        with self._callback_lock:
+            self._seeking = self._awaiting_seek = True
+            self.take_positions()
+            self.take_eof()
+            # 모아보기의 새 항목은 요청 시작점부터 센다. 첫 보고 자체는 seeked=True다.
+            self._initial_start = position if resume else None
+            self._player.command("seek", position, "absolute+exact")
+            if resume:
+                self._player.pause = False
 
     def close(self) -> None:
         # 콜백의 native handle 접근을 끝낸 뒤 핸들을 해제한다.
