@@ -14,19 +14,21 @@ from .translation_ui import TranslationControls
 from .highlight_ui import HighlightList, HighlightProgress, timestamp
 from .series_ui import SeriesEditor
 from .tag_ui import TagEditor, TagManager
+from .library_ui import LibraryControls
 
 
 class ScanWorker(QThread):
     completed = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, core, parent):
+    def __init__(self, core, parent, operation=None):
         super().__init__(parent)
         self.core = core
+        self.operation = operation or core.scan
 
     def run(self):
         try:
-            self.completed.emit(self.core.scan())
+            self.completed.emit(self.operation())
         except Exception as error:
             self.failed.emit(str(error))
 
@@ -63,6 +65,8 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self.translations.button())
         buttons.addStretch()
         layout.addLayout(buttons)
+        self.library_controls = LibraryControls(self)
+        layout.addWidget(self.library_controls)
         self.folders = QLabel()
         self.folders.setWordWrap(True)
         layout.addWidget(self.folders)
@@ -143,6 +147,10 @@ class MainWindow(QMainWindow):
             label = "다 봄" if status.finished else f"보다 만 ({status.stopped_percent:.0f}%)" if status.abandoned else ""
             if status.favorite:
                 label += " · 즐겨 보는 영상"
+            if video.missing:
+                label = "파일 없음" + (f" · {label}" if label else "")
+            elif len(video.locations) > 1:
+                label += (" · " if label else "") + f"위치 {len(video.locations)}개"
             if video.id in series_labels:
                 label += ("\n" if label else "") + "시리즈: " + series_labels[video.id]
             item = QListWidgetItem(QIcon(str(video.thumbnail)), video.title + (f"\n{label}" if label else ""))
@@ -181,13 +189,14 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "감시 폴더", str(error))
 
-    def scan(self):
+    def scan(self, checked=False, *, operation=None):
         if self.worker and self.worker.isRunning():
             return
         self.add_button.setEnabled(False)
         self.scan_button.setEnabled(False)
+        self.library_controls.setEnabled(False)
         self.status.setText("영상을 검사하고 썸네일을 만드는 중입니다…")
-        self.worker = ScanWorker(self.core, self)
+        self.worker = ScanWorker(self.core, self, operation)
         self.worker.completed.connect(self.scan_completed)
         self.worker.failed.connect(lambda error: self.status.setText(f"검사 실패: {error}"))
         self.worker.finished.connect(self.scan_finished)
@@ -195,16 +204,17 @@ class MainWindow(QMainWindow):
 
     def scan_completed(self, result):
         self.refresh()
-        self.status.setText(f"영상 {result.added}개 등록 · 전체 {self.list.count()}개 · 오류 {len(result.issues)}개")
+        self.status.setText(f"영상 {result.added}개 등록 · 전체 {self.list.count()}개 · 안내 {len(result.issues)}개")
         if result.issues:
-            dialog = QMessageBox(QMessageBox.Icon.Warning, "일부 파일 검사 실패",
-                                 "나머지 영상은 등록했습니다. 자세히 보기에서 실패한 위치를 확인하세요.", parent=self)
+            dialog = QMessageBox(QMessageBox.Icon.Information, "검사·추가 안내",
+                                 "\n".join(issue.message for issue in result.issues[:3]), parent=self)
             dialog.setDetailedText("\n".join(f"{i.path}: {i.message}" for i in result.issues))
             dialog.exec()
 
     def scan_finished(self):
         self.add_button.setEnabled(True)
         self.scan_button.setEnabled(True)
+        self.library_controls.setEnabled(True)
         self.worker.deleteLater()
         self.worker = None
 

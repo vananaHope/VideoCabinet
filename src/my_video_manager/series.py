@@ -131,7 +131,8 @@ class SeriesStore:
         db.executemany("INSERT INTO series_videos VALUES (?, ?, ?)",
                        ((series_id, video_id, position) for position, video_id in enumerate(video_ids)))
 
-    def edit(self, series_id: int | None, name: str, video_ids: tuple[int, ...]) -> Series:
+    def edit(self, series_id: int | None, name: str, video_ids: tuple[int, ...], *,
+             preserved_video_ids: set[int] | frozenset[int] = frozenset()) -> Series:
         video_ids = tuple(video_ids)
         name = name.strip()
         if not name:
@@ -151,6 +152,12 @@ class SeriesStore:
             if series_id is None:
                 series_id = db.execute("INSERT INTO series (name, edited) VALUES (?, 1)", (name,)).lastrowid
             old = [row[0] for row in db.execute("SELECT video_id FROM series_videos WHERE series_id=? ORDER BY position", (series_id,))]
+            # 화면에 없는 구성원은 기존 순번에 남긴다. 보이는 구성원의 편집만 반영한다.
+            merged = list(video_ids)
+            for index, vid in enumerate(old):
+                if vid in preserved_video_ids:
+                    merged.insert(min(index, len(merged)), vid)
+            video_ids = tuple(merged)
             common = set(old) & set(video_ids)
             if [vid for vid in old if vid in common] != [vid for vid in video_ids if vid in common]:
                 # 넣기·빼기는 순서 변경이 아니다. 남아 있는 영상의 상대 순서만 비교한다.
@@ -162,8 +169,9 @@ class SeriesStore:
 
     def regroup(self, videos) -> None:
         groups = defaultdict(list)
+        missing = {video.id for video in videos if not video.locations or video.excluded}
         for video in videos:
-            if not video.locations:
+            if video.id in missing:
                 continue
             path = min((loc.path for loc in video.locations), key=lambda p: (str(p).casefold(), str(p)))
             parsed = _filename_parts(path.name)
@@ -187,16 +195,23 @@ class SeriesStore:
             existing = {(row["folder"], row["title_template"]): row for row in rows}
             protected = {row[0] for row in db.execute("SELECT video_id FROM series_overrides")}
             reordered = {row[0] for row in db.execute("SELECT series_id FROM series_order_changes")}
+            # 파일 없음/제외는 영상 기록을 지우는 명령이 아니다. 기존 위치의 순서도 기억한다.
+            missing_members = {row["id"]: [(index, vid) for index, vid in enumerate(
+                r[0] for r in db.execute("SELECT video_id FROM series_videos WHERE series_id=? ORDER BY position", (row["id"],)))
+                if vid in missing] for row in rows}
             db.execute("DELETE FROM series_videos WHERE series_id IN (SELECT id FROM series WHERE edited=0)")
+            for row in rows:
+                if not row["edited"]:
+                    self._write_members(db, row["id"], [vid for _, vid in missing_members[row["id"]]])
             for row in rows:
                 if row["edited"]:
                     valid_ids = {vid for _, vid in valid_groups.get((row["folder"], row["title_template"]), ())}
                     ids = [r[0] for r in db.execute("SELECT video_id FROM series_videos WHERE series_id=? ORDER BY position", (row["id"],))]
                     # 편집 후 자동으로 들어온 화에는 아직 사용자 결정이 없다.
                     # 뒤늦게 중복 번호/다른 기준 위치가 생기면 이 화만 재계산한다.
-                    self._write_members(db, row["id"], [vid for vid in ids if vid in protected or vid in valid_ids])
+                    self._write_members(db, row["id"], [vid for vid in ids if vid in protected or vid in valid_ids or vid in missing])
             assigned = {row[0] for row in db.execute("SELECT video_id FROM series_videos")}
-            retained = set()
+            retained = {sid for sid, members in missing_members.items() if members}
             for key, candidates in sorted(groups.items()):
                 valid = valid_groups[key]
                 row = existing.get(key)
@@ -217,9 +232,13 @@ class SeriesStore:
                     self._write_members(db, row["id"], ids)
                     continue
                 ids = [vid for _, vid in valid if vid not in protected and vid not in assigned]
+                if row:
+                    for index, vid in missing_members[row["id"]]:
+                        ids.insert(min(index, len(ids)), vid)
                 if len(ids) < 2:
                     continue
-                display_name = min(c for c in candidates if c[1] in ids)[2]
+                named = [c for c in candidates if c[1] in ids]
+                display_name = min(named)[2] if named else row["name"]
                 series_id = row["id"] if row else db.execute(
                     "INSERT INTO series (name, folder, title_template) VALUES (?, ?, ?)",
                     (display_name, *key)).lastrowid

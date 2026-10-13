@@ -19,7 +19,7 @@ class FakeMedia:
             return None
         if path.name == "broken.mkv":
             raise ValueError("손상된 영상")
-        return MediaInfo(12.5, "matroska")
+        return MediaInfo(125, "matroska")
 
     def capture(self, path, destination, seconds):
         destination.write_bytes(b"fake-thumbnail")
@@ -45,7 +45,7 @@ def test_watch_scan_register_and_reopen(core, tmp_path):
     assert not result.issues
     videos = core.videos()
     assert {video.title for video in videos} == {"첫 영상", "둘째 영상"}
-    assert all(video.duration == 12.5 and video.format == "matroska" for video in videos)
+    assert all(video.duration == 125 and video.format == "matroska" for video in videos)
     assert all(video.thumbnail.read_bytes() == b"fake-thumbnail" for video in videos)
     assert all(video.registered_at == NOW for video in videos)
     assert all(core.playback_location(video.id) in video.locations for video in videos)
@@ -197,6 +197,7 @@ def test_thumbnail_capture_time_policy(tmp_path, duration, expected):
     folder.mkdir()
     (folder / "video.mkv").write_bytes(b"video")
     core = AppCore(media=RecordingMedia(), clock=lambda: NOW, database=tmp_path / "data/library.sqlite3")
+    core.set_minimum_duration(0)
     core.add_watched_folder(folder)
     assert core.scan().added == 1
     assert captures == [expected]
