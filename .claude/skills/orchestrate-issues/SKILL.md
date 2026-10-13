@@ -39,7 +39,7 @@ Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처�
 
 ### 3. 기다리며 메시지 처리
 
-`check --wait --types "worker_done,escalation,question"`을 백그라운드로 돌리고, 출력은 파일로 받는다(파이프를 거치면 한국어가 깨진다). JSON을 읽을 때는 `PYTHONIOENCODING=utf-8`을 붙인다.
+`check --run <run> --wait --types "worker_done,escalation,question"`을 백그라운드로 돌려 **깨어나는 신호로만** 쓴다. 그 출력은 파일로 받든 grep을 거치든 한국어가 깨진다. 깨어나면 내용은 `check --run <run> --json | PYTHONIOENCODING=utf-8 python -I -c "..."`처럼 python으로 바로 넘겨 다시 읽는다. ack하기 전까지는 같은 묶음이 다시 나온다.
 
 - **heartbeat**: ack하고 계속 기다린다. 사용자에게는 단계만 한 줄로 알린다.
 - **question**: 이슈, 스펙 #1, `CONTEXT.md`, ADR에 답이 있으면 답한다. 사용자만 정할 수 있는 결정이면 사용자에게 묻고, 받은 답을 전달한다.
