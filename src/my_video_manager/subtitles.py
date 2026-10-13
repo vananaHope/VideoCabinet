@@ -1,6 +1,7 @@
 """원어 자막과 영속 자막 대기열. 외부 받아쓰기 중에는 DB를 잠그지 않는다."""
 
 from dataclasses import dataclass
+from contextlib import nullcontext
 from datetime import datetime
 import math
 import json
@@ -42,7 +43,8 @@ class TranscriberError(RuntimeError):
 
 class Transcriber(Protocol):
     def transcribe(self, path: Path, spoken_language: str | None, *,
-                   cancellation: Event, progress: Callable[[float], None] | None = None) -> TranscriberResult:
+                   cancellation: Event, progress: Callable[[float], None] | None = None,
+                   start: float = 0, duration: float | None = None) -> TranscriberResult:
         """취소 신호를 받으면 신속하게 정리하고 TranscriberCancelled를 발생시킨다."""
         ...
 
@@ -103,6 +105,7 @@ class Subtitles:
         self._active_video = None
         self._active_cancellation = None
         self._activity = Lock()
+        self.review = None
         with connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS subtitle_queue (
@@ -141,7 +144,8 @@ class Subtitles:
             old = db.execute("SELECT * FROM subtitle_queue WHERE video_id = ?", (video_id,)).fetchone()
             if automatic and (old or db.execute("SELECT 1 FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()):
                 return self._entry(old) if old else None
-            if old and old["state"] in ("queued", "transcribing") and old["spoken_language"] == language:
+            is_range = self.review and self.review.range_for(old["id"]) if old else False
+            if old and not is_range and old["state"] in ("queued", "transcribing") and old["spoken_language"] == language:
                 self._order.request(db, video_id, automatic=automatic)
                 return self._entry(old)  # 같은 요청의 더블클릭은 순서를 바꾸지 않는다.
             self._order.request(db, video_id, automatic=automatic, renew=True)
@@ -181,9 +185,10 @@ class Subtitles:
     def resume_processing(self):
         self._cancellation.clear()
 
-    def transcript(self, video_id: int) -> Transcript | None:
-        with self._connect() as db:
-            db.execute("BEGIN")  # 생성 세대와 줄을 같은 읽기 스냅샷에서 읽는다.
+    def transcript(self, video_id: int, *, connection=None) -> Transcript | None:
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            if not db.in_transaction:
+                db.execute("BEGIN")  # 생성 세대와 줄을 같은 읽기 스냅샷에서 읽는다.
             row = db.execute("SELECT * FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
             if row is None:
                 return None
@@ -229,11 +234,14 @@ class Subtitles:
             try:
                 if self._transcriber is None:
                     raise RuntimeError("받아쓰기 어댑터가 설정되지 않았습니다.")
+                interval = self.review.range_for(pending.id) if self.review else None
+                options = {"start": interval["start"], "duration": interval["end"] - interval["start"]} if interval else {}
+                duration = options.get("duration", duration)
                 def report_progress(seconds):
                     self._progress[pending.id] = min(0.99, max(0, seconds / max(duration, 0.001)))
                 result = self._transcriber.transcribe(self._playback_location(pending.video_id).path,
                                                      pending.spoken_language, cancellation=cancellation,
-                                                     progress=report_progress)
+                                                     progress=report_progress, **options)
                 if cancellation.is_set():
                     raise TranscriberCancelled
                 language = normalize_spoken_language(pending.spoken_language or result.spoken_language)
@@ -252,6 +260,11 @@ class Subtitles:
                     # 실행 도중 원어를 바꿨으면 이전 결과로 최신 요청을 덮어쓰지 않는다.
                     if not db.execute("SELECT 1 FROM subtitle_queue WHERE id = ?", (pending.id,)).fetchone():
                         return pending
+                    if interval:
+                        self.review.replace_range(db, pending, interval, result.segments)
+                        db.execute("DELETE FROM subtitle_queue WHERE id = ?", (pending.id,))
+                        return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
+                                                  pending.requested_at, "completed", None)
                     transcript_id = uuid4().hex
                     db.execute("DELETE FROM transcripts WHERE video_id = ?", (pending.video_id,))
                     db.execute("INSERT INTO transcripts VALUES (?, ?, ?, ?, ?)",

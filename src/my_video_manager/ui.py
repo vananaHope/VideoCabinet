@@ -21,6 +21,8 @@ from .key_settings_ui import SettingsDialog, key_name
 from .key_display import display_keys
 from .tray import TrayControls
 
+from .review_ui import ReviewDialog, review_button
+
 
 class ScanWorker(QThread):
     completed = Signal(object)
@@ -78,6 +80,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self.search_button)
         buttons.addStretch()
         layout.addLayout(buttons)
+        layout.addWidget(review_button(self))
         self.library_controls = LibraryControls(self)
         layout.addWidget(self.library_controls)
         self.folders = QLabel()
@@ -117,6 +120,7 @@ class MainWindow(QMainWindow):
         playback_layout.addWidget(self.reel_label)
         playback_layout.addWidget(self.subtitles.button())
         playback_layout.addWidget(self.translations.button())
+        playback_layout.addWidget(review_button(self))
         self.surface = QWidget()
         self.surface.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         self.surface.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
@@ -362,6 +366,27 @@ class MainWindow(QMainWindow):
         self.reel.update_label()
         if self.pages.currentIndex() == 1:
             self.surface.setFocus()
+
+    def show_review(self):
+        session = self.core.playback.session
+        item = self.list.currentItem()
+        video_id = session.video_id if session else item.data(Qt.ItemDataRole.UserRole) if item else None
+        if video_id is not None:
+            ReviewDialog(self.core, video_id, self.review_jump, self.review_changed, self).exec()
+
+    def review_jump(self, video_id, position):
+        session = self.core.playback.session
+        if self.player and session and session.video_id == video_id:
+            self.sync_position()
+            self.player.seek_to(position, resume=True)
+        else:
+            self.playback_list = tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
+            self.play_video(video_id, position=position)
+
+    def review_changed(self, video_id):
+        session = self.core.playback.session
+        if self.player and session and session.video_id == video_id:
+            self.player.set_subtitle(self.core.playback_subtitle(video_id))
 
     def eventFilter(self, watched, event):
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()

@@ -58,7 +58,7 @@ class SubtitleControls(QObject):
         if not accepted:
             return
         if existing and QMessageBox.question(
-            self.window, "원어 자막 다시 생성", "다시 생성하면 기존 원어 자막·번역 자막과 검수한 줄이 교체됩니다. 계속할까요?",
+            self.window, "원어 자막 다시 생성", self.core.subtitle_regeneration_warning(video_id),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         ) != QMessageBox.StandardButton.Yes:

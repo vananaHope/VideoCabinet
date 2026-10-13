@@ -1,6 +1,7 @@
 """번역 자막, 묶음 진행 저장, 보류와 재시도. CLI 호출 중 DB 잠금은 없다."""
 
 from dataclasses import dataclass
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from threading import Event, Lock
 from typing import Protocol
@@ -138,8 +139,8 @@ class Translations:
         for video_id in ids:
             self.request(video_id, automatic=True)
 
-    def request(self, video_id: int, line_ids=None, *, automatic=False):
-        transcript = self._subtitles.transcript(video_id)
+    def request(self, video_id: int, line_ids=None, *, automatic=False, connection=None):
+        transcript = self._subtitles.transcript(video_id, connection=connection)
         if transcript is None or not transcript.translation_eligible:
             if automatic:
                 return None
@@ -147,11 +148,16 @@ class Translations:
         selected = set(line_ids) if line_ids is not None else {line.id for line in transcript.lines}
         if not selected or not selected <= {line.id for line in transcript.lines}:
             raise ValueError("번역할 원어 자막 줄 ID를 확인하세요.")
-        with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            if not db.in_transaction:
+                db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM transcripts WHERE id = ?", (transcript.id,)).fetchone():
                 return None  # 동시에 원어가 교체됐다. 다음 자동 등록에서 새 세대를 처리한다.
             old = db.execute("SELECT * FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
+            selected -= {r[0] for r in db.execute(
+                "SELECT line_id FROM subtitle_reviews WHERE translation_reviewed = 1")}
+            if not selected:
+                return self._entry(db, old) if old else None
             if automatic:
                 if db.execute("SELECT 1 FROM translation_omissions WHERE transcript_id = ?", (transcript.id,)).fetchone():
                     return None
@@ -188,6 +194,21 @@ class Translations:
                 db.executemany("INSERT INTO translation_targets VALUES (?, ?, ?)",
                                [(queue_id, line_id, text) for line_id, text in retained.items()])
             return self._entry(db, db.execute("SELECT * FROM translation_queue WHERE id = ?", (queue_id,)).fetchone())
+
+    @staticmethod
+    def finish_ready(db, video_id):
+        """검수/구간 삭제가 마지막 미완료 대상을 없앤 경우도 저장한 묶음을 확정한다."""
+        row = db.execute("SELECT id FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
+        if row is None or db.execute("SELECT 1 FROM translation_targets WHERE queue_id = ? AND text IS NULL",
+                                     (row[0],)).fetchone():
+            return
+        db.execute("DELETE FROM translation_lines WHERE line_id IN "
+                   "(SELECT line_id FROM translation_targets WHERE queue_id = ?) AND line_id NOT IN "
+                   "(SELECT line_id FROM subtitle_reviews WHERE translation_reviewed = 1)", (row[0],))
+        db.execute("INSERT INTO translation_lines SELECT line_id, text FROM translation_targets "
+                   "WHERE queue_id = ? AND line_id NOT IN "
+                   "(SELECT line_id FROM subtitle_reviews WHERE translation_reviewed = 1)", (row[0],))
+        db.execute("DELETE FROM translation_queue WHERE id = ?", (row[0],))
 
     @staticmethod
     def _entry(db, row):

@@ -35,7 +35,8 @@ class FasterWhisperTranscriber:
         self.command = command or (sys.executable, "-m", "my_video_manager.transcription")
 
     def transcribe(self, path: Path, spoken_language: str | None, *,
-                   cancellation: Event | None = None, progress=None) -> TranscriberResult:
+                   cancellation: Event | None = None, progress=None, start: float = 0,
+                   duration: float | None = None) -> TranscriberResult:
         cancellation = cancellation if cancellation is not None else Event()
         if cancellation.is_set():
             raise TranscriberCancelled
@@ -49,7 +50,8 @@ class FasterWhisperTranscriber:
                 job = WindowsJob()
                 flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS | 0x4  # CREATE_SUSPENDED
             process = subprocess.Popen(
-                [*self.command, str(path), str(self.model_directory), spoken_language or "auto"],
+                [*self.command, str(path), str(self.model_directory), spoken_language or "auto",
+                 *([str(start), str(duration)] if duration is not None else [])],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                 env={**os.environ, "PYTHONIOENCODING": "utf-8", "MVM_TRANSCRIPTION_PROGRESS": str(progress_path)}, creationflags=flags,
             )
@@ -96,7 +98,8 @@ class FasterWhisperTranscriber:
             progress_directory.cleanup()
 
 
-def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | None, *, progress=None) -> TranscriberResult:
+def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | None, *,
+                      progress=None, start: float = 0, duration: float | None = None) -> TranscriberResult:
     try:
         prepare_cuda_runtime()
         import ctranslate2
@@ -108,7 +111,18 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
     except Exception as error:
         raise TranscriberError("gpu_unavailable", str(error)) from error
     try:
-        audio = decode_audio(str(path))
+        if duration is None:
+            audio = decode_audio(str(path))
+        else:
+            import numpy as np
+            from .adapters import FFmpegMediaReader
+            # 자식 프로세스 트리 안에서 지정 구간만 디코드한다. 결과 시각은 구간 상대값이다.
+            decoded = subprocess.run(
+                [FFmpegMediaReader().ffmpeg, "-v", "error", "-nostdin", "-ss", str(start),
+                 "-i", str(path), "-t", str(duration), "-vn", "-ac", "1", "-ar", "16000",
+                 "-f", "f32le", "pipe:1"], capture_output=True, check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+            audio = np.frombuffer(decoded.stdout, dtype=np.float32)
     except Exception as error:
         raise TranscriberError("decode", str(error)) from error
     try:
@@ -123,8 +137,8 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
                                       vad_filter=True, condition_on_previous_text=False)
     lines = []
     for segment in segments:
-        if segment.text.strip() and segment.end > segment.start:
-            lines.append(TranscriptSegment(segment.start, segment.end, segment.text.strip()))
+        if segment.text.strip() and segment.end > segment.start and (duration is None or segment.start < duration):
+            lines.append(TranscriptSegment(segment.start, min(segment.end, duration) if duration is not None else segment.end, segment.text.strip()))
         if progress:
             progress(segment.end)
     return TranscriberResult(info.language, tuple(lines), info.language_probability)
@@ -146,7 +160,9 @@ def report_progress(seconds):
 if __name__ == "__main__":
     try:
         transcript = transcribe_on_gpu(Path(sys.argv[1]), Path(sys.argv[2]),
-                                       None if sys.argv[3] == "auto" else sys.argv[3], progress=report_progress)
+                                       None if sys.argv[3] == "auto" else sys.argv[3], progress=report_progress,
+                                       start=float(sys.argv[4]) if len(sys.argv) > 4 else 0,
+                                       duration=float(sys.argv[5]) if len(sys.argv) > 5 else None)
         print(json.dumps(asdict(transcript), ensure_ascii=False))
     except Exception as error:
         failure = error if isinstance(error, TranscriberError) else TranscriberError("other", str(error))
