@@ -122,11 +122,14 @@ def test_cli_setting_defaults_persists_and_is_used_for_next_batch(setup):
     core.set_translation_cli("claude")
     core = reopen()
     assert core.translation_cli == "claude"
+    assert core.settings.get("translation.cli") == "claude"
     core.process_next_translation()
     assert [call[2] for call in adapter.calls] == ["codex", "claude"]
     with pytest.raises(ValueError):
         core.set_translation_cli("unknown")
     assert core.translation_cli == "claude"
+    core.settings.reset("translation.cli")
+    assert core.translation_cli == "codex"
 
 
 def test_usage_limit_preserves_progress_and_retries_only_after_due_time(setup):
@@ -393,3 +396,43 @@ def test_one_held_video_does_not_block_other_videos(setup):
     adapter.error = None
     assert all(result.video_id == b.id for result in finish(core))
     assert core.translation(b.id) and core.translation(a.id) is None
+
+
+def test_series_switch_to_resets_language_and_keeps_translations_with_their_video(setup):
+    core, _, adapter, _, _ = setup
+    a, b = core.videos()
+    source(core, a.id)
+    finish(core)
+    adapter.prefix = "다른 영상"
+    source(core, b.id)
+    finish(core)
+    core.create_series("번역 시리즈", (a.id, b.id))
+    core.switch_to(a.id)
+    core.toggle_subtitle_language()
+    assert "번역" in core.playback_subtitle(a.id).read_text(encoding="utf-8")
+    target = core.adjacent_video(a.id, (b.id, a.id), forward=True)
+    assert target == b.id
+    core.switch_to(target)
+    assert "다른 영상" not in core.playback_subtitle(b.id).read_text(encoding="utf-8")
+    assert core.toggle_subtitle_language() == (True, "번역 자막")
+    assert "다른 영상" in core.playback_subtitle(b.id).read_text(encoding="utf-8")
+    core.switch_to(core.adjacent_video(b.id, (), forward=False))
+    assert "번역" not in core.playback_subtitle(a.id).read_text(encoding="utf-8")
+    assert core.command_for_key("PgUp").kind == CommandType.PREVIOUS_VIDEO
+    assert core.command_for_key("PgDn").kind == CommandType.NEXT_VIDEO
+
+
+def test_translation_completion_after_switch_to_does_not_change_new_video_subtitle(setup):
+    core, _, _, _, _ = setup
+    a, b = core.videos()
+    source(core, a.id)
+    source(core, b.id, "ko")
+    core.switch_to(a.id)
+    core.process_next_translation()
+    core.switch_to(b.id)
+    original = core.playback_subtitle(b.id).read_text(encoding="utf-8")
+    finish(core)
+    assert core.translation(a.id) is not None
+    assert core.translation(b.id) is None
+    assert core.toggle_subtitle_language()[0] is False
+    assert core.playback_subtitle(b.id).read_text(encoding="utf-8") == original

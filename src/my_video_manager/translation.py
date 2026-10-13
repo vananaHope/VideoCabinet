@@ -104,6 +104,15 @@ class Translations:
             """)
         self.enqueue_eligible()  # 원어 저장 직후 강제 종료된 경우도 복구한다.
 
+    @property
+    def cli(self):
+        return self._settings.get("translation.cli", "codex")
+
+    def set_cli(self, cli):
+        if cli not in ("codex", "claude"):
+            raise ValueError("번역 CLI는 codex 또는 claude를 고르세요.")
+        self._settings.set("translation.cli", cli)
+
     def enqueue_eligible(self):
         with self._connect() as db:
             ids = [row[0] for row in db.execute("SELECT video_id FROM transcripts")]
@@ -212,7 +221,7 @@ class Translations:
             try:
                 if self._translator is None:
                     raise TranslationError("missing_cli", "번역 어댑터가 설정되지 않았습니다.")
-                cli = self._settings.translation_cli
+                cli = self.cli
                 for attempt in range(self._format_attempts):
                     if self._cancellation.is_set():
                         raise TranslationCancelled

@@ -183,18 +183,18 @@ class AppCore:
         self._viewings = ViewingStore(self._connect, clock, viewing_settings or ViewingSettings())
         self.playback.subscribe(ViewingRecorder(self._start_viewing, self._viewings.report, self._viewings.end))
         self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location)
-        self._settings = Settings(self._connect)
-        self._translations = Translations(self._connect, clock, self._subtitles, self._settings, translator,
+        self.settings = Settings(self._connect)
+        self._translations = Translations(self._connect, clock, self._subtitles, self.settings, translator,
                                           batch_size=translation_batch_size)
         self._subtitle_selection = SubtitleSelection(self._translations)
         self.playback.subscribe(self._subtitle_selection)
 
     @property
     def translation_cli(self) -> str:
-        return self._settings.translation_cli
+        return self._translations.cli
 
     def set_translation_cli(self, cli: str) -> None:
-        self._settings.set_translation_cli(cli)
+        self._translations.set_cli(cli)
 
     def request_translation(self, video_id: int, line_ids=None) -> TranslationQueueEntry | None:
         """전체 또는 지정한 원어 줄 ID만 번역한다. 실패/보류 재요청은 완료한 묶음을 유지한다."""
