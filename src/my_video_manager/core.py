@@ -11,6 +11,7 @@ from .library import Library, Location, MediaInfo, MediaReader, ScanIssue, ScanR
 from .settings import Settings
 from .highlights import Highlight, Highlights
 from .playback import PlaybackHub
+from .revisit import RevisitEntry, RevisitPlayback, RevisitSettings, Revisits
 from .series import Series, SeriesStore, adjacent_video
 from .tags import Tag, Tags
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
@@ -30,6 +31,7 @@ class CommandType(str, Enum):
     PREVIOUS_VIDEO = "previous_video"
     NEXT_VIDEO = "next_video"
     TOGGLE_SUBTITLE_LANGUAGE = "toggle_subtitle_language"
+    TOGGLE_REVISIT_REPEAT = "toggle_revisit_repeat"
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ DEFAULT_KEY_BINDINGS = {
     "PgUp": Command(CommandType.PREVIOUS_VIDEO),
     "PgDn": Command(CommandType.NEXT_VIDEO),
     ".": Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE),
+    "\\": Command(CommandType.TOGGLE_REVISIT_REPEAT),
 }
 
 MIN_PLAYBACK_SPEED = 0.25
@@ -79,6 +82,7 @@ class AppCore:
         transcriber: Transcriber | None = None,
         translator: Translator | None = None,
         translation_batch_size: int = 30,
+        revisit_settings: RevisitSettings | None = None,
     ):
         self.database = (Path(database) if database is not None else default_data_directory() / "library.sqlite3").resolve()
         self.database.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +112,11 @@ class AppCore:
                                           batch_size=translation_batch_size)
         self._subtitle_selection = SubtitleSelection(self._translations)
         self.playback.subscribe(self._subtitle_selection)
+        self._revisits = Revisits(self._connect, clock, self.playback, self.videos,
+                                  self.highlights, self.highlights_for_tag,
+                                  revisit_settings or RevisitSettings())
+        # 마지막 리스너가 전환해야 앞선 기능들이 이전 영상의 최종 위치를 먼저 받는다.
+        self.playback.subscribe(self._revisits)
 
     @property
     def translation_cli(self) -> str:
@@ -137,6 +146,28 @@ class AppCore:
 
     def toggle_subtitle_language(self) -> tuple[bool, str]:
         return self._subtitle_selection.toggle()
+
+    def revisit_entries(self, tag_id: int | None = None) -> tuple[RevisitEntry, ...]:
+        return self._revisits.list(tag_id)
+
+    def start_revisit(self, tag_id: int | None = None,
+                      highlight_id: int | None = None) -> RevisitPlayback | None:
+        return self._revisits.start(tag_id, highlight_id)
+
+    @property
+    def revisit_playback(self) -> RevisitPlayback | None:
+        return self._revisits.current
+
+    @property
+    def revisit_repeat(self) -> bool:
+        return self._revisits.repeat
+
+    def last_highlight_revisited_at(self, highlight_id: int) -> datetime | None:
+        return self._revisits.last_for_highlight(highlight_id)
+
+    def last_video_revisited_at(self, video_id: int) -> datetime | None:
+        """해당 영상의 남아 있는 하이라이트 중 가장 최근 복습 시각. 미복습은 None."""
+        return self._revisits.last_for_video(video_id)
 
     def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:
         self.playback_location(video_id)
@@ -242,10 +273,18 @@ class AppCore:
         return self._highlights.open_start
 
     def is_highlight_command(self, command: Command) -> bool:
-        return command.kind in self._highlight_commands
+        return (command.kind in self._highlight_commands
+                or command.kind == CommandType.TOGGLE_REVISIT_REPEAT)
 
     def execute_highlight_command(self, command: Command) -> float | None:
         """하이라이트 명령을 적용하고, 탐색할 때만 목표 시각을 반환한다."""
+        if command.kind == CommandType.TOGGLE_REVISIT_REPEAT:
+            self._revisits.toggle_repeat()
+            return None
+        if self.revisit_playback is not None and command.kind in (
+                CommandType.PREVIOUS_HIGHLIGHT, CommandType.NEXT_HIGHLIGHT):
+            self._revisits.adjacent(forward=command.kind == CommandType.NEXT_HIGHLIGHT)
+            return None
         handler = self._highlight_commands.get(command.kind)
         if handler is None:
             raise ValueError("하이라이트 명령이 아닙니다.")
@@ -320,6 +359,18 @@ class AppCore:
         playable = {video.id for video in self.videos() if not video.missing}
         order = tuple(vid for vid in order if vid == video_id or vid in playable)
         return adjacent_video(video_id, order, forward=forward)
+
+    def execute_video_command(self, command: Command, visible_video_ids: tuple[int, ...]) -> int | None:
+        """모아보기에서는 영상별 첫 하이라이트로, 일반 재생에서는 이전·다음 영상으로."""
+        if command.kind not in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):
+            raise ValueError("영상 이동 명령이 아닙니다.")
+        forward = command.kind == CommandType.NEXT_VIDEO
+        if self.revisit_playback is not None:
+            self._revisits.adjacent_video(forward=forward)
+            return None
+        if self.playback.session is None:
+            return None
+        return self.adjacent_video(self.playback.session.video_id, visible_video_ids, forward=forward)
 
     def scan(self) -> ScanResult:
         result = self._library.scan()

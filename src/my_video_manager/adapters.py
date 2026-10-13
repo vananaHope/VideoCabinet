@@ -83,6 +83,7 @@ class MpvPlayer:
 
         self._positions = SimpleQueue()
         self._seeking = True
+        self._initial_start = None
 
         @self._player.event_callback("seek", "start-file")
         def seek_started(event):
@@ -96,13 +97,29 @@ class MpvPlayer:
                     return
                 position = self._player.time_pos
                 if position is not None:
-                    self._positions.put((position, True))
+                    if self._initial_start is not None:
+                        # loadfile의 첫 보고까지 실제 재생된 부분도 포함한다.
+                        # 사용자 탐색은 아래 명령 진입점에서 이 시작 기준을 폐기한다.
+                        self._positions.put((self._initial_start, True))
+                        self._positions.put((position, False))
+                        self._initial_start = None
+                    else:
+                        self._positions.put((position, True))
                 self._seeking = False
 
         @self._player.property_observer("time-pos")
         def position_changed(name, position):
             if position is not None and not self._seeking:
                 self._positions.put((position, False))
+
+        @self._player.property_observer("eof-reached")
+        def reached_end(name, reached):
+            # time-pos는 마지막 프레임 시작까지만 보고할 수 있다. EOF로 마지막 구간을 닫는다.
+            with self._callback_lock:
+                if reached and not self._closing and not self._seeking:
+                    duration = self._player.duration
+                    if duration is not None:
+                        self._positions.put((duration, False))
 
     def _app_subtitle_tracks(self):
         if self._subtitle_path is None:
@@ -112,6 +129,7 @@ class MpvPlayer:
                 and Path(track["external-filename"]).resolve() == self._subtitle_path]
 
     def play(self, path: Path, start: float = 0, *, subtitle: Path | None = None) -> None:
+        self._initial_start = start
         self._player.start = start
         self._subtitle_path = subtitle.resolve() if subtitle else None
         # loadfile 옵션으로 전달해 비동기 file-loaded 이전의 sub-add 경합을 피한다.
@@ -142,6 +160,7 @@ class MpvPlayer:
         if command.kind == CommandType.TOGGLE_PAUSE:
             self._player.cycle("pause")
         elif command.kind == CommandType.SEEK:
+            self._initial_start = None
             self._player.command("seek", command.amount, "relative+exact")
         elif command.kind == CommandType.CHANGE_SPEED:
             self._player.speed = playback_speed(self._player.speed, command.amount)
@@ -151,7 +170,15 @@ class MpvPlayer:
     def position(self) -> float | None:
         return self._player.time_pos
 
+    def playback_options(self) -> tuple[float, bool]:
+        """모아보기의 항목 전환에도 사용자가 정한 배속과 자막 표시를 유지한다."""
+        return self._player.speed, self._player.sub_visibility
+
+    def apply_playback_options(self, options: tuple[float, bool]) -> None:
+        self._player.speed, self._player.sub_visibility = options
+
     def seek_to(self, position: float) -> None:
+        self._initial_start = None
         self._player.command("seek", position, "absolute+exact")
 
     def close(self) -> None:
