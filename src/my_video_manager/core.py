@@ -21,7 +21,7 @@ from .tags import Tag, Tags
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 from .translation import Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection
-from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue
+from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 
 
 class CommandType(str, Enum):
@@ -243,11 +243,16 @@ class AppCore:
     def retry_failed_subtitles(self):
         failed = [e for e in self.subtitle_queue() if e.state == "failed"]
         translated = [e for e in self.translation_queue() if e.state == "failed"]
-        for entry in failed:
-            self.request_subtitles(entry.video_id, entry.spoken_language)
-        for entry in translated:
-            self.request_translation(entry.video_id)
-        return len({e.video_id for e in (*failed, *translated)})
+        retried, skipped = set(), []
+        for entries, request in ((failed, lambda e: self.request_subtitles(e.video_id, e.spoken_language)),
+                                 (translated, lambda e: self.request_translation(e.video_id))):
+            for entry in entries:
+                try:
+                    request(entry)
+                    retried.add(entry.video_id)
+                except (ValueError, OSError, RuntimeError) as error:
+                    skipped.append(SubtitleRetrySkipped(entry.video_id, str(error)))
+        return SubtitleRetryResult(len(retried), tuple(skipped))
 
     def resume_subtitle_processing(self):
         self._subtitles.resume_processing()
@@ -278,6 +283,9 @@ class AppCore:
 
     def transcript(self, video_id: int) -> Transcript | None:
         return self._subtitles.transcript(video_id)
+
+    def has_transcript(self, video_id: int) -> bool:
+        return self._subtitles.has_transcript(video_id)
 
     def playback_subtitle(self, video_id: int) -> Path | None:
         transcript = self.transcript(video_id)
@@ -345,8 +353,10 @@ class AppCore:
         return self._tags.attached("highlight", highlight_id)
 
     def add_video_tag(self, video_id: int, name: str) -> Tag:
+        attached = {tag.id for tag in self.video_tags(video_id)}
         tag = self._tags.attach("video", video_id, name)
-        self._auto_subtitle_rules.apply(video_id)
+        if tag.id not in attached:
+            self._auto_subtitle_rules.apply(video_id, tag_id=tag.id)
         return tag
 
     def add_highlight_tag(self, highlight_id: int, name: str) -> Tag:
@@ -486,6 +496,9 @@ class AppCore:
 
     def videos(self) -> tuple[Video, ...]:
         return self._library.videos()
+
+    def video(self, video_id: int) -> Video:
+        return self._library.video(video_id)
 
     def playback_location(self, video_id: int) -> Location:
         return self._library.playback_location(video_id)

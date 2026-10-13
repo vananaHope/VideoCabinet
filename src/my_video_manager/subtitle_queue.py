@@ -25,6 +25,27 @@ class SubtitleQueueItem:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class SubtitleRetrySkipped:
+    video_id: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class SubtitleRetryResult:
+    retried: int
+    skipped: tuple[SubtitleRetrySkipped, ...]
+
+    @property
+    def skipped_count(self):
+        return len(self.skipped)
+
+
+def subtitle_order_key(video_id, positions):
+    """옛 항목은 직접 요청 등급의 마지막에서 기존 상대 순서를 유지한다."""
+    return positions.get(video_id, (0, 0, float("inf")))
+
+
 class QueueOrder:
     def __init__(self, connect):
         self.connect = connect
@@ -51,11 +72,17 @@ class QueueOrder:
             db.execute("UPDATE subtitle_queue_order SET automatic = 0 WHERE video_id = ?", (video_id,))
 
     def sort(self, entries):
+        if not entries:
+            return ()
+        order = {}
+        ids = list({e.video_id for e in entries})
         with self.connect() as db:
-            order = {r["video_id"]: (-r["promoted"], r["automatic"], r["sequence"])
-                     for r in db.execute("SELECT * FROM subtitle_queue_order")}
-        # 이전 버전 항목은 원래 FIFO를 유지하는 직접 요청으로 취급한다.
-        return tuple(sorted(entries, key=lambda e: order.get(e.video_id, (0, 0, 0))))
+            for start in range(0, len(ids), 800):
+                batch = ids[start:start + 800]
+                order.update({r["video_id"]: (-r["promoted"], r["automatic"], r["sequence"])
+                              for r in db.execute("SELECT * FROM subtitle_queue_order WHERE video_id IN (" +
+                                                  ",".join("?" for _ in batch) + ")", batch)})
+        return tuple(sorted(entries, key=lambda e: subtitle_order_key(e.video_id, order)))
 
     def promote(self, video_id):
         with self.connect() as db:
@@ -98,7 +125,7 @@ class AutoSubtitleRules:
         else:
             videos = self.core.videos_for_tag(tag_id)
         pending = {e.video_id for e in self.core.subtitle_queue()}
-        return tuple(v.id for v in videos if not v.missing and v.id not in pending and self.core.transcript(v.id) is None)
+        return tuple(v.id for v in videos if not v.missing and v.id not in pending and not self.core.has_transcript(v.id))
 
     def set(self, *, folder=None, tag_id=None, spoken_language=None, include_existing=False):
         language = normalize_spoken_language(spoken_language)
@@ -119,14 +146,16 @@ class AutoSubtitleRules:
         with self.connect() as db:
             db.execute("DELETE FROM auto_subtitle_rules WHERE id = ?", (rule_id,))
 
-    def apply(self, video_id):
-        video = next((v for v in self.core.videos() if v.id == video_id), None)
-        if video is None or video.missing or self.core.transcript(video_id) is not None:
+    def apply(self, video_id, *, tag_id=None):
+        # 등록 계기는 폴더 규칙, 태그 부착 계기는 그 태그 규칙만 적용한다.
+        rules = [r for r in self.list() if (r.folder is not None if tag_id is None else r.tag_id == tag_id)]
+        if not rules:
             return
-        tags = {t.id for t in self.core.video_tags(video_id)}
-        for rule in self.list():
-            if ((rule.tag_id is not None and rule.tag_id in tags) or
-                    (rule.folder is not None and any(loc.path.is_relative_to(rule.folder) for loc in video.locations))):
+        video = self.core.video(video_id)
+        if video.excluded or video.missing or self.core.has_transcript(video_id):
+            return
+        for rule in rules:
+            if tag_id is not None or any(loc.path.is_relative_to(rule.folder) for loc in video.locations):
                 self.core.request_automatic_subtitles(video_id, rule.spoken_language)
                 return  # 겹치는 규칙은 먼저 만든 규칙을 따른다.
 
@@ -136,6 +165,7 @@ class SubtitleQueue:
         self.core, self.order = core, order
         self._lock = RLock()
         self._outcomes = {}
+        self._completed = set()
         self._active = 0
 
     @contextmanager
@@ -151,6 +181,7 @@ class SubtitleQueue:
     def hide(self, video_id):
         with self._lock:
             self._outcomes.pop(video_id, None)
+            self._completed.discard(video_id)
             with self.order.connect() as db:
                 db.execute("INSERT OR IGNORE INTO subtitle_queue_hidden VALUES (?)", (video_id,))
 
@@ -158,20 +189,29 @@ class SubtitleQueue:
         core = self.core
         subtitles = {e.video_id: e for e in core.subtitle_queue()}
         translations = {e.video_id: e for e in core.translation_queue()}
+        with self._lock:
+            ids = list(subtitles.keys() | translations.keys() | self._completed)
+        if not ids:
+            return ()
+        videos = []
         with self.order.connect() as db:
-            hidden = {r[0] for r in db.execute("SELECT video_id FROM subtitle_queue_hidden")}
+            for start in range(0, len(ids), 800):
+                batch = ids[start:start + 800]
+                videos.extend(db.execute(
+                    "SELECT id, title, EXISTS(SELECT 1 FROM transcripts WHERE video_id = v.id) AS has_transcript "
+                    "FROM videos v WHERE id IN (" + ",".join("?" for _ in batch) + ") "
+                    "AND NOT EXISTS(SELECT 1 FROM subtitle_queue_hidden WHERE video_id = v.id)", batch).fetchall())
         result = []
-        for video in core.videos() + core.excluded_videos():
-            if video.id in hidden:
-                continue
-            s, t = subtitles.get(video.id), translations.get(video.id)
+        for video in videos:
+            video_id, title = video["id"], video["title"]
+            s, t = subtitles.get(video_id), translations.get(video_id)
             if s:
-                result.append(SubtitleQueueItem(video.id, video.title, s.state, s.progress, s.error_detail or s.error))
+                result.append(SubtitleQueueItem(video_id, title, s.state, s.progress, s.error_detail or s.error))
             elif t:
-                result.append(SubtitleQueueItem(video.id, video.title, t.state,
+                result.append(SubtitleQueueItem(video_id, title, t.state,
                                                t.completed_lines / max(1, t.total_lines), t.error_detail or t.error))
-            elif core.transcript(video.id) is not None:
-                result.append(SubtitleQueueItem(video.id, video.title, "completed", 1))
+            elif video["has_transcript"]:
+                result.append(SubtitleQueueItem(video_id, title, "completed", 1))
         return self.order.sort(result)
 
     def record(self, result):
@@ -182,16 +222,21 @@ class SubtitleQueue:
                 if db.execute("SELECT 1 FROM subtitle_queue_hidden WHERE video_id = ?", (result.video_id,)).fetchone():
                     return
             self._outcomes[result.video_id] = result.state
+            if result.state == "completed":
+                self._completed.add(result.video_id)
+            else:
+                self._completed.discard(result.video_id)
 
     def take_completion(self):
         with self._lock:
-            if self._active:
+            if self._active or not self._outcomes:
                 return None
             # 보류도 남은 작업이다. 한도 대기 중에는 완료 알림을 내지 않는다.
-            if any(i.state in ("queued", "transcribing", "translating", "held") for i in self.items()):
-                return None
-            if not self._outcomes:
-                return None
+            with self.order.connect() as db:
+                pending = db.execute("SELECT EXISTS(SELECT 1 FROM subtitle_queue WHERE state IN ('queued', 'transcribing')) "
+                                     "OR EXISTS(SELECT 1 FROM translation_queue WHERE state IN ('queued', 'translating', 'held'))").fetchone()[0]
+                if pending:
+                    return None
             counts = (sum(s == "completed" for s in self._outcomes.values()),
                       sum(s == "failed" for s in self._outcomes.values()))
             self._outcomes.clear()

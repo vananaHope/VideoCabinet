@@ -30,7 +30,7 @@ class Media:
 
 
 class Transcriber:
-    def transcribe(self, path, spoken_language, *, cancellation):
+    def transcribe(self, path, spoken_language, *, cancellation, progress=None):
         return TranscriberResult("en", (TranscriptSegment(1, 3, "remember this"),))
 
 

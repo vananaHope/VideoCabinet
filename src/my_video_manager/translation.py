@@ -166,7 +166,8 @@ class Translations:
             else:
                 db.execute("DELETE FROM translation_omissions WHERE transcript_id = ?", (transcript.id,))
             if self._order:
-                self._order.request(db, video_id, automatic=automatic)
+                self._order.request(db, video_id, automatic=automatic,
+                                    renew=not automatic and old is not None and old["state"] == "failed")
             # 명시적인 전체 재시도는 저장한 묶음을 재사용한다.
             if old and line_ids is None:
                 db.execute("DELETE FROM translation_limit_attempts WHERE queue_id = ?", (old["id"],))
@@ -319,7 +320,8 @@ class Translations:
                     return entry
             except TranslationCancelled:
                 with self._connect() as db:
-                    db.execute("UPDATE translation_queue SET state = 'queued' WHERE id = ?", (pending.id,))
+                    db.execute("UPDATE translation_queue SET state = ? WHERE id = ? AND state = 'translating'",
+                               (pending.state, pending.id))
                 return pending
             except Exception as error:
                 failure = error if isinstance(error, TranslationError) else TranslationError("other", str(error))
@@ -351,8 +353,8 @@ class Translations:
                 self._active_video = self._active_cancellation = None
             if 'pending' in locals() and pending:
                 with self._connect() as db:
-                    db.execute("UPDATE translation_queue SET state = 'queued' WHERE id = ? AND state = 'translating'",
-                               (pending.id,))
+                    db.execute("UPDATE translation_queue SET state = ? WHERE id = ? AND state = 'translating'",
+                               (pending.state, pending.id))
             self._processing.release()
 
 

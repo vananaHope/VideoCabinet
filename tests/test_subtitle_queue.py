@@ -43,14 +43,14 @@ def test_existing_confirmation_tag_attachment_and_transcript_skip(setup):
     assert core.auto_subtitle_rules() == ()
 
 
-def test_overlapping_rules_oldest_wins_and_removal_stops_new_targets(setup):
+def test_tag_event_uses_only_tag_rule_even_when_folder_rule_exists(setup):
     core, _, (a, b) = setup
     folder = a.locations[0].path.parent
     tag = core.create_tag("대상")
     first = core.set_auto_subtitle_rule(folder=folder, spoken_language="en")
     core.set_auto_subtitle_rule(tag_id=tag.id, spoken_language="ja")
     core.add_video_tag(a.id, tag.name)
-    assert core.subtitle_queue()[0].spoken_language == "en"
+    assert core.subtitle_queue()[0].spoken_language == "ja"
     core.remove_auto_subtitle_rule(first.id)
     core.add_video_tag(b.id, tag.name)
     assert core.subtitle_queue()[1].spoken_language == "ja"
@@ -153,7 +153,7 @@ def test_unified_translation_progress_held_failure_retry_and_notification(setup)
     assert {i.video_id: i.state for i in core.subtitle_queue_items()} == {a.id: "failed", b.id: "completed"}
     assert core.take_subtitle_queue_completion() == (1, 1)
     assert core.take_subtitle_queue_completion() is None
-    assert core.retry_failed_subtitles() == 1
+    assert core.retry_failed_subtitles().retried == 1
     translator.error = None
     assert core.process_next_translation().state == "queued"
     item = next(i for i in core.subtitle_queue_items() if i.video_id == a.id)
@@ -170,7 +170,7 @@ def test_retry_all_transcription_failures_and_remove_translation_survives_restar
     core.request_subtitles(b.id)
     core.process_next_subtitle()
     core.process_next_subtitle()
-    assert core.retry_failed_subtitles() == 2
+    assert core.retry_failed_subtitles().retried == 2
     adapter.error = None
     core.process_next_subtitle()
     core.process_next_subtitle()
@@ -249,7 +249,7 @@ def test_remove_active_cancels_only_that_video_and_next_can_run(setup):
     entered = Event()
 
     class Cancellable(FakeTranscriber):
-        def transcribe(self, path, language, *, cancellation):
+        def transcribe(self, path, language, *, cancellation, progress=None):
             if path.name == "a.mkv":
                 entered.set()
                 assert cancellation.wait(5)

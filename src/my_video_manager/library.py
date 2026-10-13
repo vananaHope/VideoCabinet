@@ -115,6 +115,7 @@ class Library:
         self._lock = RLock()
         with connect() as db:
             migrate_library(db)
+            db.execute("CREATE INDEX IF NOT EXISTS locations_video_id ON locations(video_id)")
 
     def add_watched_folder(self, path: Path) -> WatchedFolder:
         path = Path(path).resolve()
@@ -186,16 +187,6 @@ class Library:
                                if excluded else "이미 등록된 영상입니다.")
 
     def _register(self, path: Path) -> ScanResult:
-        with self._connect() as db:
-            previous = db.execute("SELECT video_id FROM locations WHERE path = ?", (str(path),)).fetchone()
-        result = self._register_video(path)
-        with self._connect() as db:
-            current = db.execute("SELECT video_id FROM locations WHERE path = ?", (str(path),)).fetchone()
-        if current and (previous is None or previous[0] != current[0]):
-            self._on_registered(current[0])
-        return result
-
-    def _register_video(self, path: Path) -> ScanResult:
         signature = _signature(path)
         minimum = self.minimum_duration
         with self._connect() as db:
@@ -258,7 +249,21 @@ class Library:
             db.execute("INSERT OR REPLACE INTO locations(path, video_id, size, mtime_ns) VALUES (?, ?, ?, ?)",
                        (str(path), video_id, *signature))
             db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
+        if not existing:
+            self._on_registered(video_id)
         return self._already_registered(path, existing["excluded"]) if existing else ScanResult(1, ())
+
+    def video(self, video_id: int) -> Video:
+        with self._connect() as db:
+            db.execute("BEGIN")
+            row = db.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+            if row is None:
+                raise ValueError("영상을 찾을 수 없습니다.")
+            locations = tuple(Location(Path(r[0])) for r in db.execute(
+                "SELECT path FROM locations WHERE video_id = ? ORDER BY path", (video_id,)))
+            return Video(row["id"], row["title"], row["fingerprint"], row["duration"], row["format"],
+                         self._thumbnails / Path(row["thumbnail"]).name, datetime.fromisoformat(row["registered_at"]),
+                         locations, bool(row["excluded"]))
 
     @staticmethod
     def _check_unchanged(path, signature):

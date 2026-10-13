@@ -7,8 +7,7 @@ import json
 from pathlib import Path
 import re
 from threading import Event, Lock
-from typing import Protocol
-import inspect
+from typing import Callable, Protocol
 from uuid import uuid4
 
 
@@ -43,7 +42,7 @@ class TranscriberError(RuntimeError):
 
 class Transcriber(Protocol):
     def transcribe(self, path: Path, spoken_language: str | None, *,
-                   cancellation: Event) -> TranscriberResult:
+                   cancellation: Event, progress: Callable[[float], None] | None = None) -> TranscriberResult:
         """취소 신호를 받으면 신속하게 정리하고 TranscriberCancelled를 발생시킨다."""
         ...
 
@@ -197,6 +196,10 @@ class Subtitles:
             return Transcript(video_id, row["id"], language, bool(row["language_specified"]),
                               datetime.fromisoformat(row["created_at"]), lines)
 
+    def has_transcript(self, video_id: int) -> bool:
+        with self._connect() as db:
+            return db.execute("SELECT 1 FROM transcripts WHERE video_id = ?", (video_id,)).fetchone() is not None
+
     def stop_processing(self) -> None:
         """현재 AppCore의 처리를 중단한다. 대기열은 다음 앱 실행에서 재개한다."""
         self._cancellation.set()
@@ -226,13 +229,11 @@ class Subtitles:
             try:
                 if self._transcriber is None:
                     raise RuntimeError("받아쓰기 어댑터가 설정되지 않았습니다.")
-                kwargs = {"cancellation": cancellation}
-                # 기존 주입 어댑터와 호환한다. 진행 보고 어댑터는 처리한 오디오 초를 전달한다.
-                if "progress" in inspect.signature(self._transcriber.transcribe).parameters:
-                    kwargs["progress"] = lambda seconds: self._progress.update(
-                        {pending.id: min(0.99, max(0, seconds / max(duration, 0.001)))})
+                def report_progress(seconds):
+                    self._progress[pending.id] = min(0.99, max(0, seconds / max(duration, 0.001)))
                 result = self._transcriber.transcribe(self._playback_location(pending.video_id).path,
-                                                     pending.spoken_language, **kwargs)
+                                                     pending.spoken_language, cancellation=cancellation,
+                                                     progress=report_progress)
                 if cancellation.is_set():
                     raise TranscriberCancelled
                 language = normalize_spoken_language(pending.spoken_language or result.spoken_language)

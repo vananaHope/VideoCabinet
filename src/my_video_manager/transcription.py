@@ -130,13 +130,21 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
     return TranscriberResult(info.language, tuple(lines), info.language_probability)
 
 
+def report_progress(seconds):
+    """부가 진행 보고의 파일 잠금·디스크 오류는 받아쓰기 결과에 영향을 주지 않는다."""
+    target = os.environ.get("MVM_TRANSCRIPTION_PROGRESS")
+    if not target:
+        return
+    try:
+        temporary = Path(target).with_suffix(".tmp")
+        temporary.write_text(str(seconds), encoding="ascii")
+        os.replace(temporary, target)
+    except OSError:
+        pass
+
+
 if __name__ == "__main__":
     try:
-        def report_progress(seconds):
-            target = os.environ.get("MVM_TRANSCRIPTION_PROGRESS")
-            if target:
-                Path(target).write_text(str(seconds), encoding="ascii")
-
         transcript = transcribe_on_gpu(Path(sys.argv[1]), Path(sys.argv[2]),
                                        None if sys.argv[3] == "auto" else sys.argv[3], progress=report_progress)
         print(json.dumps(asdict(transcript), ensure_ascii=False))

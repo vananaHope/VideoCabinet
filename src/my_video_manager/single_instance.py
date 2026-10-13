@@ -21,7 +21,8 @@ class SingleInstance(QObject):
         directory = Path(data_directory).resolve()
         directory.mkdir(parents=True, exist_ok=True)
         self.name = instance_name(directory)
-        self.lock = QLockFile(str(directory / "instance.lock"))
+        self.lock_path = directory / "instance.lock"
+        self.lock = QLockFile(str(self.lock_path))
         self.lock.setStaleLockTime(0)  # 살아 있는 장시간 실행 프로세스를 오래됐다고 제거하지 않는다.
         self.server = QLocalServer(self)
         self.server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
@@ -38,7 +39,9 @@ class SingleInstance(QObject):
         socket = QLocalSocket(self)
         socket.connectToServer(self.name)
         if not socket.waitForConnected(3000):
-            raise RuntimeError("같은 데이터 폴더의 앱이 시작 또는 종료 중입니다. 잠시 뒤 다시 실행하세요.")
+            raise RuntimeError("같은 데이터 폴더의 앱에 연결할 수 없습니다. 잠시 뒤 다시 실행하세요.\n"
+                               "계속 실패하면 작업 관리자에서 영상 라이브러리 프로세스가 모두 종료됐는지 확인한 뒤, "
+                               f"아래 잠금 파일만 삭제하고 다시 실행하세요.\n잠금 파일: {self.lock_path}")
         socket.disconnectFromServer()
         return False
 

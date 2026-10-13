@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMessageBox, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
 )
+from .key_display import display_key, display_keys
 
 
 STATES = {"queued": "대기", "transcribing": "받아쓰는 중", "translating": "번역 중",
@@ -18,7 +19,8 @@ class SubtitleQueueDialog(QDialog):
         self.setWindowTitle("자막 대기열")
         self.resize(800, 450)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("방향키로 선택 · Tab으로 버튼 이동 · Space로 실행 · Esc로 닫기"))
+        layout.addWidget(QLabel(f"{display_keys(('Up', 'Down'))} 선택 · {display_key('Tab')} 버튼 이동 · "
+                                f"{display_key('Space')} 실행 · {display_key('Esc')} 닫기"))
         self.list = QTreeWidget()
         self.list.setHeaderLabels(["영상", "상태", "진행률", "안내"])
         self.list.setRootIsDecorated(False)
@@ -34,10 +36,20 @@ class SubtitleQueueDialog(QDialog):
             button.clicked.connect(callback)
             buttons.addWidget(button)
         layout.addLayout(buttons)
+        self.retry_status = QLabel()
+        self.retry_status.setWordWrap(True)
+        layout.addWidget(self.retry_status)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
-        self.timer.start(500)
+
+    def showEvent(self, event):
+        super().showEvent(event)
         self.refresh()
+        self.timer.start(500)
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
 
     def selected(self):
         item = self.list.currentItem()
@@ -79,7 +91,12 @@ class SubtitleQueueDialog(QDialog):
             self.act(lambda: self.core.remove_from_subtitle_queue(self.selected()))
 
     def retry(self):
-        self.act(self.core.retry_failed_subtitles)
+        def retry_all():
+            result = self.core.retry_failed_subtitles()
+            details = "\n".join(f"영상 {item.video_id}: {item.reason}" for item in result.skipped)
+            self.retry_status.setText(f"재시도 {result.retried}개 · 건너뜀 {result.skipped_count}개" +
+                                      (f"\n{details}" if details else ""))
+        self.act(retry_all)
 
     def retry_held(self):
         if any(e.video_id == self.selected() and e.state == "held" for e in self.core.translation_queue()):

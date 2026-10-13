@@ -26,7 +26,7 @@ class Transcriber:
         TranscriptSegment(60, 63, "체중 이동은 천천히"),
     ))
 
-    def transcribe(self, path, spoken_language, *, cancellation):
+    def transcribe(self, path, spoken_language, *, cancellation, progress=None):
         return self.result
 
 
