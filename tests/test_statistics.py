@@ -304,7 +304,7 @@ def test_library_snapshot_includes_statistics_with_one_viewing_query(library, mo
 
     monkeypatch.setattr(sqlite3, "connect", traced_connect)
     snapshot = core.library_snapshot()
-    assert snapshot.viewing_statistics == expected_statistics
+    assert snapshot.video_statistics == expected_statistics
     assert snapshot.statuses == expected_statuses
     assert sum("FROM viewings" in sql for sql in statements) == 1
 

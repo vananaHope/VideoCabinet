@@ -88,7 +88,7 @@ class LibrarySnapshot:
     statuses: dict[int, ViewingStatus]
     tags: dict[int, tuple[Tag, ...]]
     series: tuple[Series, ...]
-    viewing_statistics: dict[int, VideoViewingStatistics] = field(default_factory=dict)
+    video_statistics: dict[int, VideoViewingStatistics] = field(default_factory=dict)
 
 
 class AppCore:
