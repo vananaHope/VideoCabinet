@@ -10,6 +10,11 @@ class TagData(TypedDict):
     name: str
 
 
+class ShellData(TypedDict):
+    tab: str
+    status: str
+
+
 class VideoData(TypedDict):
     id: int
     title: str

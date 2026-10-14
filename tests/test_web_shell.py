@@ -1,5 +1,6 @@
 """웹 탭과 Qt 전환, 생성된 공개 브리지의 실제 Qt 시그니처 계약."""
 import json
+import pytest
 
 from PySide6.QtCore import QMetaMethod
 from PySide6.QtTest import QTest
@@ -18,8 +19,10 @@ def test_tab_routes_keep_one_web_view_and_native_numbering(window_factory):
         window.navigate_web_tab(tab)
         target = page if index in (0, 4) else window.navigation_pages[index if index < 4 else index - 1]
         assert window.pages.currentWidget() is target
-        assert json.loads(page.bridge.shellSnapshot()) == {'tab': tab}
+        assert json.loads(page.bridge.shellSnapshot()) == {'tab': tab, 'status': ''}
         assert not window.sidebar.isVisible()
+        assert not window.menuBar().isVisible()
+        assert not window.statusBar().isVisible()
         assert len(window.findChildren(QWebEngineView)) == 1
     window.return_to_web()
     assert page.active_tab == 'statistics'
@@ -46,6 +49,8 @@ def test_qt_switch_keeps_six_original_destinations(window_factory):
         window.navigate(index)
         assert window.pages.currentWidget() is window.navigation_pages[index]
         assert window.sidebar.isVisible()
+        assert window.menuBar().isVisible()
+        assert window.statusBar().isVisible()
 
 
 def test_actual_qt_public_slots_and_signals_match_generator_contract(window_factory):
@@ -59,7 +64,7 @@ def test_actual_qt_public_slots_and_signals_match_generator_contract(window_fact
         method = methods[name]
         assert method.methodType() == QMetaMethod.MethodType.Slot
         assert method.typeName() == 'QString'
-        assert [bytes(t).decode() for t in method.parameterTypes()] == [names[t] for _, t in arguments]
+        assert [bytes(t).decode() for t in method.parameterTypes()] == [names[arg.python_type] for arg in arguments]
     for name, kind in SIGNALS.items():
         assert methods[name].methodType() == QMetaMethod.MethodType.Signal
         assert [bytes(t).decode() for t in methods[name].parameterTypes()] == [names[kind]]
@@ -123,3 +128,38 @@ def test_public_javascript_wrapper_hides_qobject_methods_and_signal_emit():
     result = subprocess.run(['node', '-e', script], input=json.dumps({'slots': list(SLOTS), 'signals': list(SIGNALS)}),
                             cwd=root / 'frontend', text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+def test_chrome_visibility_survives_fullscreen_exit_and_native_window_restore(window_factory, core, mode):
+    from test_library_return_ui import Player
+    window = window_factory(mode)
+    window.player_factory = Player
+    window.play(core.videos()[0].id)
+    window.set_playback_fullscreen(True)
+    assert not window.menuBar().isVisible()
+    assert not window.statusBar().isVisible()
+    window.set_playback_fullscreen(False)
+    assert window.menuBar().isVisible() == (mode == '0')
+    window.set_playback_fullscreen(True)
+    window.showNormal()  # changeEvent 경로도 숨김 정책을 유지한다.
+    QApplication.processEvents()
+    assert window.menuBar().isVisible() == (mode == '0')
+    window.back_to_list()
+    assert window.menuBar().isVisible() == (mode == '0')
+    assert window.statusBar().isVisible() == (mode == '0')
+
+
+def test_hidden_status_bar_delivers_notices_to_web_and_native_fallback(window_factory):
+    window = window_factory('1')
+    changes = []
+    window.library_page.bridge.shellStatusChanged.connect(changes.append)
+    window.show_status('등록 작업 완료')
+    assert changes == ['등록 작업 완료']
+    assert json.loads(window.library_page.bridge.shellSnapshot())['status'] == '등록 작업 완료'
+    window.navigate_web_tab('folders')
+    assert window.web_notice.isVisible() and window.web_notice.text() == '등록 작업 완료'
+    assert not window.statusBar().isVisible()
+    window.statusBar().clearMessage()
+    assert changes == ['등록 작업 완료', '']
+    assert not window.web_notice.isVisible()

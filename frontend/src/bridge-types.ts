@@ -5,6 +5,11 @@ export interface TagData {
   name: string
 }
 
+export interface ShellData {
+  tab: string
+  status: string
+}
+
 export interface VideoData {
   id: number
   title: string
@@ -67,6 +72,7 @@ export interface Bridge {
   libraryFocusRequested: Signal<string>
   libraryError: Signal<string>
   shellChanged: Signal<string>
+  shellStatusChanged: Signal<string>
 }
 export function publicBridge(raw: Bridge): Bridge {
   return Object.freeze({
@@ -83,5 +89,6 @@ export function publicBridge(raw: Bridge): Bridge {
     libraryFocusRequested: Object.freeze({ connect: raw.libraryFocusRequested.connect.bind(raw.libraryFocusRequested), disconnect: raw.libraryFocusRequested.disconnect.bind(raw.libraryFocusRequested) }),
     libraryError: Object.freeze({ connect: raw.libraryError.connect.bind(raw.libraryError), disconnect: raw.libraryError.disconnect.bind(raw.libraryError) }),
     shellChanged: Object.freeze({ connect: raw.shellChanged.connect.bind(raw.shellChanged), disconnect: raw.shellChanged.disconnect.bind(raw.shellChanged) }),
+    shellStatusChanged: Object.freeze({ connect: raw.shellStatusChanged.connect.bind(raw.shellStatusChanged), disconnect: raw.shellStatusChanged.disconnect.bind(raw.shellStatusChanged) }),
   })
 }

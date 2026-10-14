@@ -5,7 +5,7 @@ import types
 from typing import get_args, get_origin, get_type_hints, is_typeddict
 
 from my_video_manager import web_library_data
-from my_video_manager.web_contract import ACTIONS, SCAN_LOCKED_ACTIONS, SIGNALS, SLOTS, TABS
+from my_video_manager.web_contract import MENU_ACTIONS, GEM_ACTIONS, SCAN_LOCKED_ACTIONS, SIGNALS, SLOTS, TABS
 from my_video_manager.web_tokens import web_tokens
 import json
 
@@ -26,15 +26,15 @@ def render_types():
         if is_typeddict(value):
             fields = '\n'.join(f'  {key}: {ts_type(kind)}' for key, kind in get_type_hints(value).items())
             blocks.append(f'export interface {name} {{\n{fields}\n}}\n')
-    blocks.append('export type Action = ' + ' | '.join(json.dumps(name) for name in ACTIONS))
+    blocks.append('export type Action = ' + ' | '.join(json.dumps(name) for name in (*MENU_ACTIONS, *GEM_ACTIONS)))
     blocks.append('export type Tab = ' + ' | '.join(json.dumps(name) for name, _ in TABS))
     blocks.append('export const tabs = ' + json.dumps(TABS, ensure_ascii=False) + ' as const')
-    blocks.append('export const actions = ' + json.dumps(list(ACTIONS.items())[:-2], ensure_ascii=False) + ' as const')
+    blocks.append('export const actions = ' + json.dumps(list(MENU_ACTIONS.items()), ensure_ascii=False) + ' as const')
     blocks.append('export const scanLockedActions: readonly Action[] = ' + json.dumps(SCAN_LOCKED_ACTIONS))
     blocks.append('export type Reply = (json: string) => void\nexport type Signal<T> = { connect: (handler: (value: T) => void) => void; disconnect: (handler: (value: T) => void) => void }')
     fields = []
     for name, args in SLOTS.items():
-        parameters = [f'{key}: ' + ('Action' if name == 'action' and key == 'name' else 'Tab' if name == 'navigate' else ts_type(kind)) for key, kind in args]
+        parameters = [f'{arg.name}: {arg.typescript_type}' for arg in args]
         fields.append(f'  {name}: (' + ', '.join(parameters + ['reply: Reply']) + ') => void')
     fields.extend(f'  {name}: Signal<{ts_type(kind)}>' for name, kind in SIGNALS.items())
     blocks.append('export interface Bridge {\n' + '\n'.join(fields) + '\n}')

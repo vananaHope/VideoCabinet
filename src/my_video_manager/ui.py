@@ -51,8 +51,11 @@ class MainWindow(QMainWindow):
         import os
         self.web_ui = os.environ.get("MVM_WEB_UI") == "1"
         if self.web_ui:
+            self.menuBar().hide()
+            self.statusBar().hide()
             from .web_library_page import WebLibraryPage
             self.library_page = WebLibraryPage(self)
+            self.statusBar().messageChanged.connect(self.library_page.bridge.shellStatusChanged.emit)
         else:
             self.library_page = LibraryPage(self)
         self.pages.addWidget(self.library_page)
@@ -83,7 +86,7 @@ class MainWindow(QMainWindow):
         self.sidebar.setVisible(not playing and not self.web_ui)
         if self.web_ui:
             self.web_return_bar.setVisible(not playing and page_is_native(self))
-        self.statusBar().setVisible(not playing)
+        self.statusBar().setVisible(not playing and not self.web_ui)
         if page in self.navigation_pages:
             index = self.navigation_pages.index(page)
             self.sidebar.select(index)
@@ -100,25 +103,28 @@ class MainWindow(QMainWindow):
             self.showNormal()
             if getattr(self, "_playback_was_maximized", False):
                 self.showMaximized()
-        self.menuBar().setVisible(not enabled)
+        self.menuBar().setVisible(not enabled and not self.web_ui)
         self.playback_page.set_fullscreen(enabled)
         playing = self.pages.currentWidget() is self.playback_page
         self.sidebar.setVisible(not playing and not self.web_ui)
         if self.web_ui:
             self.web_return_bar.setVisible(not playing and page_is_native(self))
-        self.statusBar().setVisible(not playing)
+        self.statusBar().setVisible(not playing and not self.web_ui)
 
     def changeEvent(self, event):
         super().changeEvent(event)
         # 트레이의 showNormal 등 창 바깥 경로도 실제 창 상태와 표시를 맞춘다.
         if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "playback_page"):
             self.fullscreen_settings_shortcut.setEnabled(self.isFullScreen())
-            self.menuBar().setVisible(not self.isFullScreen())
+            self.menuBar().setVisible(not self.isFullScreen() and not self.web_ui)
             self.playback_page.set_fullscreen(self.isFullScreen())
 
     def show_fullscreen_settings_menu(self):
         self.playback_page.close_help()
-        self.settings_menu.popup(self.mapToGlobal(QPoint(12, 12)))
+        if self.web_ui:
+            self.library_page.popup_settings_menu()
+        else:
+            self.settings_menu.popup(self.mapToGlobal(QPoint(12, 12)))
 
     def navigate(self, index):
         if not 0 <= index < len(self.navigation_pages):
@@ -342,8 +348,11 @@ class MainWindow(QMainWindow):
             return True
         if event.modifiers() == Qt.KeyboardModifier.AltModifier and event.key() == Qt.Key.Key_S:
             if not event.isAutoRepeat():
-                self.settings_menu.popup(self.menuBar().mapToGlobal(self.menuBar().actionGeometry(
-                    self.settings_menu.menuAction()).bottomLeft()))
+                if self.web_ui:
+                    self.library_page.popup_settings_menu()
+                else:
+                    self.settings_menu.popup(self.menuBar().mapToGlobal(self.menuBar().actionGeometry(
+                        self.settings_menu.menuAction()).bottomLeft()))
             return True
         if (self.web_ui and page_is_native(self) and event.key() == Qt.Key.Key_Escape
                 and event.modifiers() == Qt.KeyboardModifier.NoModifier):

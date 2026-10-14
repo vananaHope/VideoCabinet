@@ -211,6 +211,24 @@ if args.verify_shell and args.mode == 'qt':
 
 if args.verify_shell and args.mode == 'web':
     from my_video_manager.web_contract import TABS
+
+    def shell_key(target, key, modifiers=Qt.KeyboardModifier.NoModifier):
+        # 전역 필터는 비활성 창의 키를 의도적으로 무시한다. 다른 검증 창이
+        # 포커스를 가져갔다면 먼저 이 실창을 활성화한 뒤 키를 보낸다.
+        if not window.isActiveWindow():
+            window.raise_()
+            window.activateWindow()
+            assert QTest.qWaitForWindowActive(window, 5000), '검증 창 활성화 실패'
+        QTest.keyClick(target, key, modifiers)
+
+    assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
+    assert js("document.querySelector('[aria-label=\"라이브러리 등록·표시 개수\"]').textContent") == window.library_count.text()
+    window.show_status('검사 완료 · 웹 작업 알림 확인')
+    wait_until(lambda: js("document.querySelector('[role=status]')?.textContent") == '검사 완료 · 웹 작업 알림 확인')
+    settle()  # DOM 커밋 뒤 Chromium paint까지 기다린다.
+    window.grab().save(str(screens / f'web-notice-{args.count}.png'))
+    window.statusBar().clearMessage()
+    wait_until(lambda: not js("!!document.querySelector('[role=status]')"))
     # 탭 클릭은 실제 DOM 버튼을 사용하고, 복귀 키는 Qt WebEngine 포커스 프록시에 전달한다.
     for index, (tab, _) in enumerate(TABS):
         window.navigate_web_tab('library')
@@ -220,26 +238,39 @@ if args.verify_shell and args.mode == 'web':
         assert page.active_tab == tab
         target = page if index in (0, 4) else window.navigation_pages[index if index < 4 else index - 1]
         assert window.pages.currentWidget() is target
+        assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
         window.grab().save(str(screens / f'tab-{tab}-{args.count}.png'))
         if target is not page:
-            QTest.keyClick(window.focusWidget(), Qt.Key.Key_Escape)
+            shell_key(window.focusWidget(), Qt.Key.Key_Escape)
             assert window.pages.currentWidget() is page, (tab, window.isActiveWindow(), QApplication.activeModalWidget(), QApplication.activePopupWidget(), window.focusWidget())
-        QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
+        shell_key(page.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
         settle()
         assert page.active_tab == 'library'
     for index, (tab, _) in enumerate(TABS):
         window.navigate_web_tab('library')
         settle()
-        QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
+        shell_key(page.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
         settle()
-        assert page.active_tab == tab
+        assert page.active_tab == tab, (tab, page.active_tab, window.isActiveWindow())
     # Qt 페이지에서 다른 Qt 페이지/웹 페이지로 연속 이동한다.
     for index in (1, 2, 3, 5, 6, 4, 0):
-        QTest.keyClick(window.focusWidget(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
+        shell_key(window.focusWidget(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
         settle()
         assert page.active_tab == TABS[index][0]
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
-    assert window.settings_menu.isVisible()
+    shell_key(page.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+    wait_until(window.settings_menu.isVisible)
+    anchor = js_json("(() => {const r = document.querySelector('nav [data-tab=settings]').getBoundingClientRect(); return [r.right, r.bottom]})()")
+    anchor = page.view.mapToGlobal(QPoint(*[round(v * page.view.zoomFactor()) for v in anchor]))
+    assert abs(window.settings_menu.y() - anchor.y()) <= 3, (window.settings_menu.pos(), anchor)
+    assert abs(window.settings_menu.x() + window.settings_menu.width() - anchor.x()) <= 3
+    metrics['settingsMenuAnchor'] = {'tabBottomRight': [anchor.x(), anchor.y()], 'menuPosition': [window.settings_menu.x(), window.settings_menu.y()]}
+    # 화면 전체 grab에는 동시에 사용하는 다른 앱이 섞일 수 있다.
+    # 실제 앱/팝업 픽셀만 각각 잡아 검증한 전역 위치에 합성한다.
+    capture = window.grab()
+    painter = QPainter(capture)
+    painter.drawPixmap(window.mapFromGlobal(window.settings_menu.pos()), window.settings_menu.grab())
+    painter.end()
+    capture.save(str(screens / f'web-settings-menu-{args.count}.png'))
     window.settings_menu.hide()
     settle()
     assert not window.sidebar.isVisible()
@@ -497,6 +528,13 @@ if args.verify and args.mode == 'web':
         QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Return)
         wait_until(lambda: window.pages.currentWidget() is window.playback_page)
         QTest.qWait(500)
+        QTest.keyClick(window.surface, Qt.Key.Key_Apostrophe)
+        wait_until(window.isFullScreen)
+        assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
+        QTest.keyClick(window.surface, Qt.Key.Key_Escape)
+        wait_until(lambda: not window.isFullScreen())
+        assert window.pages.currentWidget() is window.playback_page
+        assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
         window.grab().save(str(screens / f'mpv-{args.count}.png'))
         QTest.keyClick(window.surface, Qt.Key.Key_Escape)
         wait_until(lambda: window.pages.currentWidget() is page)

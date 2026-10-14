@@ -1,9 +1,10 @@
 """단일 웹 셸과 라이브러리 어댑터. 기존 Qt 페이지·대화상자 계약을 유지한다."""
 
 import os
+import json
 from pathlib import Path
 
-from PySide6.QtCore import QUrl, Signal, Qt
+from PySide6.QtCore import QPoint, QUrl, Signal, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtWebChannel import QWebChannel
@@ -201,6 +202,33 @@ class WebLibraryPage(LibraryOperations, QWidget):
         if self.window.pages.currentWidget() is self:
             from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self.focus_content)
+
+    def popup_settings_menu(self):
+        """웹 설정 탭의 실제 CSS 좌표를 Qt 전역 좌표로 바꾼다. 숨은 웹은 창 우측 위를 쓴다."""
+        window = self.window
+        menu = window.settings_menu
+
+        def popup(rect=None):
+            from shiboken6 import isValid
+            if not isValid(self) or not isValid(window) or not window.isActiveWindow():
+                return
+            rect = json.loads(rect) if rect else None
+            if self.isVisible() and rect:
+                zoom = self.view.zoomFactor()
+                point = self.view.mapToGlobal(QPoint(round(rect[0] * zoom) - menu.sizeHint().width(),
+                                                    round(rect[1] * zoom)))
+            else:
+                point = window.mapToGlobal(QPoint(window.width() - menu.sizeHint().width() - 16, 12))
+            menu.popup(point)
+
+        if self.isVisible() and self._frontend_ready:
+            self.engine_page.runJavaScript("""JSON.stringify((() => {
+              const tab = document.querySelector('nav [data-tab="settings"]');
+              if (!tab) return null;
+              const rect = tab.getBoundingClientRect(); return [rect.right, rect.bottom];
+            })())""", popup)
+        else:
+            popup()
 
     def showEvent(self, event):
         super().showEvent(event)
