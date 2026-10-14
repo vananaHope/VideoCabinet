@@ -1,4 +1,4 @@
-param([switch]$SkipFFmpeg)
+﻿param([switch]$SkipFFmpeg)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 
@@ -8,6 +8,13 @@ function Confirm-Exit([string]$Step) {
 
 python -c "import struct, sys; assert sys.version_info >= (3, 10) and struct.calcsize('P') == 8, '64-bit Python 3.10+ is required'"
 Confirm-Exit 'Python check'
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    throw 'Node.js 22.12 이상이 필요합니다. https://nodejs.org/en/download 에서 설치하고 새 터미널에서 다시 실행하세요 (README 환경 준비 참고).'
+}
+node -e "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major < 22 || (major === 22 && minor < 12) ? 1 : 0)"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Node.js 22.12 이상이 필요합니다. https://nodejs.org/en/download 에서 업데이트하고 새 터미널에서 다시 실행하세요 (README 환경 준비 참고).'
+}
 if (-not (Test-Path '.venv/Scripts/python.exe')) {
     python -m venv .venv
     Confirm-Exit 'venv'
@@ -16,6 +23,21 @@ if (-not (Test-Path '.venv/Scripts/python.exe')) {
 Confirm-Exit 'pip upgrade'
 & .venv/Scripts/python.exe -m pip install -e '.[dev,cuda]'
 Confirm-Exit 'Python dependencies'
+& .venv/Scripts/python.exe -c "from PySide6 import QtWebEngineWidgets, QtWebChannel"
+Confirm-Exit 'Qt WebEngine / WebChannel'
+& .venv/Scripts/python.exe scripts/generate_web_types.py --check
+Confirm-Exit 'Web bridge types'
+Push-Location frontend
+try {
+    npm ci
+    Confirm-Exit 'Frontend dependencies'
+    npm run lint
+    Confirm-Exit 'Frontend lint'
+    npm run typecheck
+    Confirm-Exit 'Frontend typecheck'
+    npm run build
+    Confirm-Exit 'Frontend build'
+} finally { Pop-Location }
 
 if (-not $SkipFFmpeg -and -not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
     winget install --id Gyan.FFmpeg --version 9.0.2 --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity

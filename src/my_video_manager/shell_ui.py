@@ -1,6 +1,7 @@
 """사이드바 탐색과 후속 페이지로 교체할 임시 작업 진입 화면.
 
 페이지는 handle_key(event) -> bool을 둘 수 있으며, 처리한 키에는 True를 돌려준다.
+focus_content()는 페이지의 주 작업 영역으로 포커스를 옮긴다. 웹 내부 키는 웹 페이지가 처리한다.
 """
 
 from PySide6.QtCore import QSize, Qt, Signal

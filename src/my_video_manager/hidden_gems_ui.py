@@ -130,47 +130,51 @@ class HiddenGemControls(QWidget):
             self.dismiss_video(item.data(Qt.ItemDataRole.UserRole))
 
     def show_dismissed(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("관심 없음 되돌리기")
-        dialog.resize(600, 400)
-        layout = space_layout(QVBoxLayout(dialog))
-        layout.addWidget(hint_label("되돌린 영상은 다시 숨겨진 보석으로 추천될 수 있습니다. 라이브러리 표시는 원래 그대로입니다."))
-        listing = QListWidget()
-        listing.setAccessibleName("관심 없음 영상 목록")
-        empty = EmptyState(listing)
-        layout.addWidget(listing, 1)
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-        restore = primary_button(QPushButton("선택 영상 되돌리기"))
-        close = QPushButton("닫기")
-        close.clicked.connect(dialog.accept)
-        buttons.addWidget(restore)
-        buttons.addWidget(close)
-        layout.addLayout(buttons)
+        show_dismissed_dialog(self, self.core, self.refresh)
 
-        def refresh():
-            row = max(0, listing.currentRow())
-            listing.clear()
-            for video in self.core.dismissed_videos():
-                suffix = " · 제외" if video.excluded else " · 파일 없음" if video.missing else ""
-                item = QListWidgetItem(video.title + suffix)
-                item.setData(Qt.ItemDataRole.UserRole, video.id)
-                listing.addItem(item)
-            listing.setCurrentRow(min(row, listing.count() - 1))
-            restore.setEnabled(listing.count() > 0)
-            if listing.count():
-                empty.clear()
-            else:
-                empty.show_message("관심 없음으로 뺀 영상이 없습니다")
 
-        def restore_selected():
-            if item := listing.currentItem():
-                self.core.restore_dismissed_video(item.data(Qt.ItemDataRole.UserRole))
-                refresh()
-                self.refresh()
-                listing.setFocus()
+def show_dismissed_dialog(parent, core, on_changed):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("관심 없음 되돌리기")
+    dialog.resize(600, 400)
+    layout = space_layout(QVBoxLayout(dialog))
+    layout.addWidget(hint_label("되돌린 영상은 다시 숨겨진 보석으로 추천될 수 있습니다. 라이브러리 표시는 원래 그대로입니다."))
+    listing = QListWidget()
+    listing.setAccessibleName("관심 없음 영상 목록")
+    empty = EmptyState(listing)
+    layout.addWidget(listing, 1)
+    buttons = QHBoxLayout()
+    buttons.addStretch()
+    restore = primary_button(QPushButton("선택 영상 되돌리기"))
+    close = QPushButton("닫기")
+    close.clicked.connect(dialog.accept)
+    buttons.addWidget(restore)
+    buttons.addWidget(close)
+    layout.addLayout(buttons)
 
-        restore.clicked.connect(restore_selected)
-        listing.itemActivated.connect(lambda _: restore_selected())
-        refresh()
-        dialog.exec()
+    def refresh():
+        row = max(0, listing.currentRow())
+        listing.clear()
+        for video in core.dismissed_videos():
+            suffix = " · 제외" if video.excluded else " · 파일 없음" if video.missing else ""
+            item = QListWidgetItem(video.title + suffix)
+            item.setData(Qt.ItemDataRole.UserRole, video.id)
+            listing.addItem(item)
+        listing.setCurrentRow(min(row, listing.count() - 1))
+        restore.setEnabled(listing.count() > 0)
+        if listing.count():
+            empty.clear()
+        else:
+            empty.show_message("관심 없음으로 뺀 영상이 없습니다")
+
+    def restore_selected():
+        if item := listing.currentItem():
+            core.restore_dismissed_video(item.data(Qt.ItemDataRole.UserRole))
+            refresh()
+            on_changed()
+            listing.setFocus()
+
+    restore.clicked.connect(restore_selected)
+    listing.itemActivated.connect(lambda _: restore_selected())
+    refresh()
+    dialog.exec()

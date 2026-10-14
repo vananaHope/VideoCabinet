@@ -5,15 +5,18 @@ Python + PySide6 + libmpv로 만든 Windows 개인 영상 라이브러리입니�
 
 ## 환경 준비
 
-Windows x64, **64비트 Python 3.10 이상**, `winget`, 인터넷 연결이 필요합니다.
+Windows x64, **64비트 Python 3.10 이상**, **Node.js 22.12 이상**, `winget`, 인터넷 연결이 필요합니다.
 저장소 루트의 PowerShell에서 실행합니다. Python 3.10.6으로 검증했습니다.
+Node는 [공식 다운로드](https://nodejs.org/en/download)에서 22 LTS 이상을 설치하고
+새 터미널의 `node --version`, `npm --version`으로 확인합니다.
 이미 실행 중인 앱은 종료한 뒤 설치 스크립트를 실행하세요(DLL을 교체합니다).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
 ```
 
-스크립트는 `.venv`를 만들고 Python 의존성을 설치합니다.
+스크립트는 `.venv`를 만들고 Python 의존성을 설치합니다. 이어서 `frontend/`에서
+`npm ci`, lint, 타입 검사, 빌드를 실행합니다. PySide6 6.10.2에 WebEngine과 WebChannel이 포함돼 있습니다.
 FFmpeg가 없으면 winget의 `Gyan.FFmpeg` **9.0.2**를 설치하며,
 7-Zip이 없으면 `7zip.7zip` **26.04**를 설치합니다(관리자 권한 확인이 표시될 수 있습니다).
 FFmpeg를 이미 별도로 설치했다면 `-SkipFFmpeg`를 붙일 수 있습니다.
@@ -32,6 +35,10 @@ DLL은 `.runtime/mpv/libmpv-2.dll`에만 둡니다. 아카이브의 BCJ2 필터 
 python -m venv .venv
 .venv/Scripts/python -m pip install --upgrade pip
 .venv/Scripts/python -m pip install -e '.[dev,cuda]'
+npm --prefix frontend ci
+npm --prefix frontend run lint
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
 winget install --id Gyan.FFmpeg --version 9.0.2 --exact --source winget --accept-package-agreements --accept-source-agreements
 winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-package-agreements --accept-source-agreements
 .venv/Scripts/python scripts/install_libmpv.py
@@ -43,6 +50,54 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 ```powershell
 .venv/Scripts/python -m my_video_manager
 ```
+
+### 웹 라이브러리 시험판 (#43)
+
+기본값은 기존 Qt 라이브러리입니다. 아래 환경 변수로 라이브러리 페이지 하나만 React 웹 화면으로 바꿉니다.
+다른 페이지·대화상자는 Qt이며 재생은 같은 네이티브 mpv를 사용합니다.
+
+```powershell
+$env:MVM_WEB_UI = '1'
+.venv/Scripts/python -m my_video_manager
+# 기존 Qt 화면으로 돌아가기
+Remove-Item Env:MVM_WEB_UI
+```
+
+배포용 빌드는 `src/my_video_manager/web/`에 생성되며 package-data로 포함됩니다.
+이 폴더와 `node_modules`는 커밋하지 않습니다. 소스 체크아웃이나 패키징 전에
+`scripts/setup.ps1` 또는 `npm --prefix frontend ci`와 `npm --prefix frontend run build`를 실행하세요.
+빌드된 앱은 CDN이나 개발 서버 없이 오프라인으로 실행됩니다.
+
+개발 시 첫 터미널에서 `npm --prefix frontend run dev`를 실행하고 다른 터미널에서 연결합니다.
+
+```powershell
+$env:MVM_WEB_UI = '1'
+$env:MVM_WEB_DEV_URL = 'http://127.0.0.1:5173/'
+.venv/Scripts/python -m my_video_manager
+# 오프라인 빌드로 돌아가기
+Remove-Item Env:MVM_WEB_DEV_URL
+```
+
+웹과 Python의 데이터 계약은 `web_library_data.py`의 TypedDict가 원본입니다.
+변경 후 `.venv/Scripts/python scripts/generate_web_types.py`로 TypeScript 타입을 생성합니다.
+`--check`는 생성 파일이 원본과 다르면 실패하며 setup과 pytest가 이를 확인합니다.
+썸네일 주소는 `mvm-thumb://video/<id>`이며 코어가 아는 해당 영상의 썸네일만 읽습니다.
+외부 페이지로의 이동과 패키지 자산·썸네일·설정한 개발 서버 외 요청은 차단합니다.
+
+ESLint 9는 공식 flat config와 TypeScript parser로 shadcn 6규칙을 함께 검사하기 쉬워 선택했습니다.
+TanStack Virtual은 행 단위 가상화·overscan·scrollToIndex를 제공하면서 카드의 DOM과 디자인을 강제하지 않아 선택했습니다.
+
+격자에서는 방향키로 선택하고 Enter·더블클릭으로 재생합니다. 메뉴 키·Shift+F10·우클릭은 같은 작업 메뉴를 엽니다.
+Tab/Shift+Tab은 검색·태그·추천·격자·상세 작업을 이동합니다. 숨겨진 보석은 클릭·Enter로 재생하고
+Backspace·우클릭 메뉴로 관심 없음을 처리합니다. Ctrl+1~6과 Alt+S는 Qt 셸이 먼저 처리합니다.
+Esc로 재생에서 돌아오면 선택·스크롤과 출발한 목록의 포커스를 복원합니다.
+
+화면 비교와 대량 목록 측정은 Windows에서 `scripts/check_web_library.py`를 사용합니다.
+`--prepare --count 24 --source <테스트 영상 폴더>`는 원본을 `.local/issue43/`로 복사하고 데모 데이터를 등록합니다.
+`--prepare --count 5000`은 합성 영상 5,000개를 공개 코어 API로 등록합니다.
+`--mode qt`와 `--mode web`에 같은 `--count`를 지정하면 1100×720 스크린샷과 측정 JSON을
+`.local/screens-43/`에 남깁니다. `--verify`는 웹 키보드·composition 이벤트·복사본 mpv 복귀를 추가 확인합니다.
+실제 Windows 한국어 IME의 조합·후보 선택은 사람이 별도로 확인해야 합니다.
 
 앱 전체는 맑은 고딕을 사용하는 다크 테마이며, 키보드 포커스는 강조색 테두리로 표시합니다.
 왼쪽 사이드바에서 방향키로 항목을 고르고, Tab으로 페이지 안의 입력·버튼으로 이동합니다.
