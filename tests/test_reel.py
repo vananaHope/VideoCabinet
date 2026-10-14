@@ -721,3 +721,18 @@ def test_subtitle_language_survives_same_video_reel_moves_but_resets_on_new_vide
     core.toggle_subtitle_language()
     core.start_reel()  # 새 모아보기 역시 원어로 시작한다.
     assert "source" in core.playback_subtitle(a.id).read_text(encoding="utf-8")
+
+
+def test_playback_exposes_filtered_snapshot_position_and_total(library):
+    core, _ = library
+    a, b, _ = core.videos()
+    first, ignored, last = mark(core, a, 10), mark(core, a, 20), mark(core, b, 30)
+    tag = core.add_highlight_tag(first.id, "복습")
+    core.add_highlight_tag(last.id, "복습")
+    core.start_reel(tag.id, first.id)
+    assert (core.reel_playback.index, core.reel_playback.total) == (1, 2)
+    press(core, "End")
+    assert current_id(core) == last.id
+    assert (core.reel_playback.index, core.reel_playback.total) == (2, 2)
+    press(core, "Home")
+    assert (core.reel_playback.index, core.reel_playback.total) == (1, 2)

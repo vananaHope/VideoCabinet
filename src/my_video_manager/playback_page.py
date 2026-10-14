@@ -1,90 +1,298 @@
-"""재생 페이지의 영상 영역·진행 표시·키 안내 구성."""
+"""영상 중심 재생 페이지. 창 상태는 셸, 도메인 상태는 AppCore가 소유한다."""
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import (
+    QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox,
+    QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+)
 from .core import CommandType
 from .highlight_ui import HighlightProgress, timestamp
 from .key_settings_ui import key_name
-from .key_display import display_keys
-from .review_ui import review_button
+from .playback_help import PlaybackHelp
+from .theme import BORDER, SURFACE, WARNING
 
 
 class PlaybackPage(QWidget):
     def __init__(self, window):
         super().__init__(window)
-        self.core = window.core
-        self.shell = window
-        playback_layout = QVBoxLayout(self)
-        self.back_button = QPushButton("목록으로 (Esc)")
+        self.core, self.shell = window.core, window
+        self.fullscreen = False
+        self._shown_session = None
+        self._help_requested = False
+        self._error = ""
+        self._details = None
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+        self.header = QWidget()
+        top = QHBoxLayout(self.header)
+        top.setContentsMargins(8, 4, 8, 4)
+        self.back_button = QPushButton("목록으로 · Esc")
         self.back_button.clicked.connect(window.back_to_list)
-        playback_layout.addWidget(self.back_button)
+        top.addWidget(self.back_button)
+        self.title_label = QLabel()
+        self.title_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        top.addWidget(self.title_label, 1)
         self.reel_label = QLabel()
-        self.reel_label.setWordWrap(True)
-        self.reel_label.hide()
-        playback_layout.addWidget(self.reel_label)
-        playback_layout.addWidget(window.subtitles.button())
-        playback_layout.addWidget(window.translations.button())
-        playback_layout.addWidget(review_button(window))
+        top.addWidget(self.reel_label)
+        self._layout.addWidget(self.header)
         self.surface = QWidget()
         self.surface.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         self.surface.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
         self.surface.setObjectName("videoSurface")
         self.surface.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        playback_layout.addWidget(self.surface, 1)
+        self.surface.setMouseTracking(True)
+        self._layout.addWidget(self.surface, 1)
+        self.bottom_bar = QWidget()
+        self.bottom_bar.setObjectName("playbackBar")
+        self.bottom_bar.setStyleSheet(f"#playbackBar {{ background: {SURFACE}; border-top: 1px solid {BORDER}; }}")
+        bottom = QVBoxLayout(self.bottom_bar)
+        bottom.setContentsMargins(8, 0, 8, 4)
+        bottom.setSpacing(0)
         self.progress = HighlightProgress()
-        playback_layout.addWidget(self.progress)
-        self.position_label = QLabel()
-        playback_layout.addWidget(self.position_label)
-        self.highlights_button = QPushButton("하이라이트 목록 · 시각·메모 편집")
-        self.highlights_button.clicked.connect(window.show_highlights)
-        playback_layout.addWidget(self.highlights_button)
-        self.video_navigation_label = QLabel()
-        self.video_navigation_label.setWordWrap(True)
-        playback_layout.addWidget(self.video_navigation_label)
-        self.key_help = QLabel()
-        self.key_help.setWordWrap(True)
-        playback_layout.addWidget(self.key_help)
-        playback_layout.addWidget(QLabel("노랑 지점 / 초록 구간 / 주황 열린 구간"))
-        self.refresh_key_help()
+        self.progress.setFixedHeight(30)
+        bottom.addWidget(self.progress)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self.position_label = QLabel("00:00:00.000 / 00:00:00.000")
+        self.speed_label = QLabel("1×")
+        self.subtitle_label = QLabel("자막 없음")
+        self.subtitle_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        row.addWidget(self.position_label)
+        row.addWidget(self.speed_label)
+        row.addWidget(self.subtitle_label, 1)
+        self.menu_button = QToolButton()
+        self.menu_button.setText("메뉴 ⋯")
+        self.menu_button.setAccessibleName("재생 작업 메뉴")
+        self.menu_button.setToolTip("재생 작업 메뉴 · 키 안내는 F1")
+        self.menu_button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.menu = QMenu(self.menu_button)
+        for label, callback in (
+            ("하이라이트 목록 · 시각·메모 편집", window.show_highlights),
+            ("자막 만들기 / 원어 지정", window.subtitles.request),
+            ("번역 CLI / 재시도", window.translations.settings),
+            ("자막 검수 / SRT 내보내기", window.show_review),
+        ):
+            self.menu.addAction(label, lambda checked=False, action=callback: self.run_action(action))
+        self.menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.focus_content))
+        self.menu_button.setMenu(self.menu)
+        row.addWidget(self.menu_button)
+        bottom.addLayout(row)
+        self.message_label = QLabel()
+        self.message_label.setWordWrap(True)
+        self.message_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.message_label.setStyleSheet(f"color: {WARNING};")
+        self.message_label.hide()
+        bottom.addWidget(self.message_label)
+        self._layout.addWidget(self.bottom_bar)
+        self.help_panel = PlaybackHelp(window)
+        self.bar_timer = QTimer(self)
+        self.bar_timer.setSingleShot(True)
+        self.bar_timer.setInterval(2500)
+        self.bar_timer.timeout.connect(self.hide_temporary_bar)
+        self.pointer_timer = QTimer(self)
+        self.pointer_timer.setInterval(150)
+        self.pointer_timer.timeout.connect(self.check_pointer)
+        self._pointer_position = QCursor.pos()
+        self.details_timer = QTimer(self)
+        self.details_timer.setInterval(1000)
+        self.details_timer.timeout.connect(self.refresh_details)
+        self.details_timer.start()
+        window.statusBar().messageChanged.connect(self.show_notice)
+        QApplication.instance().installEventFilter(self)
+        QWidget.setTabOrder(self.surface, self.menu_button)
+        QWidget.setTabOrder(self.menu_button, self.back_button)
+
+    def focus_content(self):
+        if self.isVisible() and QApplication.activeModalWidget() is None:
+            self.surface.setFocus()
+
+    def run_action(self, action):
+        self.close_help()
+        try:
+            action()
+        finally:
+            self.refresh_details()
+            self.focus_content()
 
     def refresh_key_help(self):
-        navigation = (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO)
-        rows = self.core.key_bindings()
-        self.video_navigation_label.setText(" · ".join(f"{display_keys(row.keys)} {row.label}"
-                                                      for row in rows if row.command.kind in navigation))
-        self.key_help.setText(" · ".join(f"{display_keys(row.keys)} {row.label}"
-                                        for row in rows if row.keys and row.command.kind not in
-                                        (*navigation, CommandType.TOGGLE_REEL_REPEAT)))
+        self.help_panel.refresh(self.core)
+        if self._help_requested:
+            self.help_panel.place_over(self.surface)
+
+    def toggle_help(self):
+        if self._help_requested:
+            self.close_help()
+        else:
+            self._help_requested = True
+            self.refresh_key_help()
+            self.help_panel.place_over(self.surface)
+            self.help_panel.show()
+            self.help_panel.raise_()
+
+    def close_help(self):
+        self._help_requested = False
+        self.help_panel.hide()
+
+    def set_fullscreen(self, enabled):
+        self.fullscreen = enabled
+        self.header.setVisible(not enabled)
+        self.bar_timer.stop()
+        self.bottom_bar.setVisible(not enabled)
+        self._pointer_position = QCursor.pos()
+        if enabled:
+            self.pointer_timer.start()
+        else:
+            self.pointer_timer.stop()
+        if self._help_requested:
+            QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))
+
+    def reveal_bar(self):
+        if self.fullscreen:
+            # 레이아웃 공간을 사용해 네이티브 mpv 위젯과 겹치지 않는다.
+            self.bottom_bar.show()
+            self.bar_timer.start()
+
+    def check_pointer(self):
+        # mpv의 네이티브 자식 창이 Qt MouseMove를 받지 않는 경우도 감지한다.
+        position = QCursor.pos()
+        moved = position != self._pointer_position
+        self._pointer_position = position
+        if (moved and self.isVisible() and self.shell.isActiveWindow()
+                and self.rect().contains(self.mapFromGlobal(position))):
+            self.reveal_bar()
+
+    def hide_temporary_bar(self):
+        if self.fullscreen:
+            if self.menu.isVisible() or self.bottom_bar.isAncestorOf(QApplication.focusWidget()):
+                self.bar_timer.start()
+            elif not self._error:
+                self.bottom_bar.hide()
+
+    def eventFilter(self, watched, event):
+        kind = event.type()
+        if watched is self.shell:
+            if kind in (QEvent.Type.Move, QEvent.Type.Resize) and self._help_requested:
+                QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))
+            elif kind in (QEvent.Type.Hide, QEvent.Type.WindowDeactivate):
+                self.help_panel.hide()
+            elif kind == QEvent.Type.WindowActivate and self._help_requested and self.isVisible():
+                self.help_panel.place_over(self.surface)
+                self.help_panel.show()
+        if kind == QEvent.Type.MouseMove and self.isVisible() and self.shell.isActiveWindow():
+            if isinstance(watched, QWidget) and (watched is self or self.isAncestorOf(watched)):
+                self.reveal_bar()
+        return super().eventFilter(watched, event)
+
+    def show_notice(self, text):
+        self.message_label.setText(self._error or text)
+        self.message_label.setVisible(bool(self._error or text))
+        if text and self.isVisible():
+            self.reveal_bar()
+
+    def refresh_details(self):
+        if not self.isVisible() or self.core.playback.session is None:
+            return
+        video_id = self.core.playback.session.video_id
+        self._details = self.core.library_details(video_id)
+        self.update_subtitle_label()
+
+    def update_subtitle_label(self):
+        player = self.shell.player
+        # stop_player는 엔진을 닫은 뒤 마지막 위치 보고를 저장한다.
+        # 그 보고로 화면을 갱신할 때는 종료된 mpv 속성을 다시 읽지 않는다.
+        if not player or not self.shell.position_timer.isActive():
+            return
+        options = getattr(player, "playback_options", None)
+        speed, visible = options() if options else (1, True)
+        self.speed_label.setText(f"{speed:g}×")
+        details = self._details
+        if details is None:
+            return
+        state = "번역" if self.core.playback_subtitle_language == "translated" else "원어"
+        if not visible:
+            state = "꺼짐"
+        elif not details.original_lines:
+            state = "없음"
+        work = {"queued": "대기", "transcribing": "만드는 중", "translating": "진행 중",
+                "held": "보류", "failed": "실패"}
+        labels = [f"자막 {state}"]
+        if details.subtitle_state in work:
+            labels.append(f"원어 {work[details.subtitle_state]}")
+        if details.translation_state in work:
+            labels.append(f"번역 {work[details.translation_state]}")
+        self.subtitle_label.setText(" · ".join(labels))
+        self.subtitle_label.setToolTip(self.subtitle_label.text())
 
     def show_position(self, position, duration, open_start, range_keys):
+        session = self.core.playback.session
+        if session and self._shown_session is not session:
+            self._shown_session = session
+            self._error = ""
+            self.show_notice("")
+            video = self.core.video(session.video_id)
+            series = self.core.series_for_video(session.video_id)
+            episode = f" · {series.video_ids.index(video.id) + 1}/{len(series.video_ids)}" if series else ""
+            self.title_label.setText(video.title + episode)
+            self.title_label.setToolTip(video.title + episode)
+            self.refresh_details()
         self.progress.duration = duration
         self.progress.position = position
         self.progress.open_start = open_start
         self.progress.update()
-        suffix = f" · 구간 시작 {timestamp(open_start)} — {range_keys}: 끝내기" if open_start is not None else ""
-        self.position_label.setText(f"{timestamp(position)} / {timestamp(duration)}{suffix}")
+        self.position_label.setText(f"{timestamp(position)} / {timestamp(duration)}")
+        self.position_label.setToolTip(f"구간 시작 {timestamp(open_start)} · {range_keys}: 끝내기"
+                                      if open_start is not None else "")
+        self.update_subtitle_label()
 
     def show_reel(self, current, repeat, keys):
         self.reel_label.setVisible(current is not None)
-        self.video_navigation_label.setVisible(current is None)
-        self.back_button.setText("모아보기 목록으로 (Esc)" if current else "목록으로 (Esc)")
+        self.back_button.setText("모아보기 목록 · Esc" if current else "목록으로 · Esc")
         if current:
-            repeat_label = "켜짐" if repeat else "꺼짐"
-            self.reel_label.setText(
-                f"모아보기 · {current.entry.video_title} · {timestamp(current.start)} — {timestamp(current.end)}\n"
-                f"반복 {repeat_label} ({keys[CommandType.TOGGLE_REEL_REPEAT]}) · "
-                f"이전/다음 하이라이트: {keys[CommandType.PREVIOUS_HIGHLIGHT]} / {keys[CommandType.NEXT_HIGHLIGHT]} · "
-                f"영상 단위 이동: {keys[CommandType.PREVIOUS_VIDEO]} / {keys[CommandType.NEXT_VIDEO]}")
+            self.reel_label.setText(f"하이라이트 {current.index}/{current.total} · 반복 {'켜짐' if repeat else '꺼짐'}")
+        if self._help_requested:
+            self.refresh_key_help()
 
     def show_error(self, text):
-        self.position_label.setText(text)
+        self._error = text
+        self.show_notice(text)
+        self.reveal_bar()
 
     def handle_key(self, event) -> bool:
         window = self.shell
-        if event.key() == Qt.Key.Key_Escape:
-            window.back_to_list()
+        self.reveal_bar()
+        if event.key() == Qt.Key.Key_F1 and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            if not event.isAutoRepeat():
+                self.toggle_help()
             return True
+        if event.key() == Qt.Key.Key_Escape:
+            if not event.isAutoRepeat():
+                if self._help_requested:
+                    self.close_help()
+                elif window.isFullScreen():
+                    window.set_playback_fullscreen(False)
+                else:
+                    window.back_to_list()
+            return True
+        focus = QApplication.focusWidget()
+        if focus in (self.menu_button, self.back_button) and event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+            return False
+        if (focus in (self.menu_button, self.back_button)
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down)):
+            if focus is self.menu_button:
+                if not event.isAutoRepeat():
+                    self.menu.popup(self.menu_button.mapToGlobal(self.menu_button.rect().topRight()))
+                return True
+            return False
         command = window.core.command_for_key(key_name(event) or "")
+        if command and command.kind == CommandType.TOGGLE_FULLSCREEN:
+            if not event.isAutoRepeat():
+                window.set_playback_fullscreen(not window.isFullScreen())
+            return True
         if command and window.player:
             try:
                 if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):

@@ -52,6 +52,8 @@ class ReelPlayback:
     end: float
     serial: int
     action: Literal["open", "seek"]
+    index: int  # 시작할 때 확정한 목록에서의 순번(1부터)
+    total: int
 
     @property
     def start(self) -> float:
@@ -118,7 +120,7 @@ class HighlightReel:
                     self._playback.end()
                     self._index = index
                     self._serial += 1
-                    self.current = ReelPlayback(entry, end, self._serial, action)
+                    self.current = ReelPlayback(entry, end, self._serial, action, index + 1, len(self._entries))
                     self._intervals, self._recorded = (), False
                     self._due = self._last_seeked = False
                     self._position = entry.highlight.start

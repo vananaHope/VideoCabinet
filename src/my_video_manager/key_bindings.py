@@ -18,6 +18,7 @@ _ALIASES = {key.casefold(): key for key in _NAMED_KEYS}
 _ALIASES.update(pageup="PgUp", pagedown="PgDn", pgdown="PgDn", esc="Esc", escape="Esc")
 _ALIASES["return"] = "Enter"
 RESERVED_KEYS = {"Alt+S": "설정 메뉴를 여는 예약 키",
+                 "F1": "키 안내를 여는 예약 키",
                  **{f"Ctrl+{i}": "사이드바 페이지를 여는 예약 키" for i in range(1, 7)}}
 
 
@@ -61,6 +62,7 @@ def command_label(command: Command) -> str:
         "previous_video": "이전 영상 / 시리즈 이전 화", "next_video": "다음 영상 / 시리즈 다음 화",
         "toggle_subtitle_language": "원어 / 번역 자막 전환",
         "toggle_reel_repeat": "구간 반복 켜기 / 끄기",
+        "toggle_fullscreen": "전체 화면 켜기 / 끄기",
     }.get(kind, kind)
 
 

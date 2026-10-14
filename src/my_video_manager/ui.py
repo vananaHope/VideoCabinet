@@ -65,10 +65,35 @@ class MainWindow(QMainWindow):
         if playing and self._active_page is not self.playback_page:
             self._return_page = self._active_page
         self._active_page = page
+        if not playing:
+            self.set_playback_fullscreen(False)
+            self.playback_page.close_help()
         self.sidebar.setVisible(not playing)
         self.statusBar().setVisible(not playing)
         if page in self.navigation_pages:
             self.sidebar.select(self.navigation_pages.index(page))
+
+    def set_playback_fullscreen(self, enabled):
+        enabled = enabled and self.pages.currentWidget() is self.playback_page
+        if enabled and not self.isFullScreen():
+            self._playback_was_maximized = self.isMaximized()
+            self.showFullScreen()
+        elif not enabled and self.isFullScreen():
+            self.showNormal()
+            if getattr(self, "_playback_was_maximized", False):
+                self.showMaximized()
+        self.menuBar().setVisible(not enabled)
+        self.playback_page.set_fullscreen(enabled)
+        playing = self.pages.currentWidget() is self.playback_page
+        self.sidebar.setVisible(not playing)
+        self.statusBar().setVisible(not playing)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        # 트레이의 showNormal 등 창 바깥 경로도 실제 창 상태와 표시를 맞춘다.
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "playback_page"):
+            self.menuBar().setVisible(not self.isFullScreen())
+            self.playback_page.set_fullscreen(self.isFullScreen())
 
     def navigate(self, index):
         if not 0 <= index < len(self.navigation_pages):

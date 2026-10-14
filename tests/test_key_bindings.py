@@ -341,3 +341,57 @@ def test_display_key_names(key, expected):
 ])
 def test_display_multiple_or_unassigned_keys(keys, expected):
     assert display_keys(keys) == expected
+
+
+def test_fullscreen_default_label_rebinding_and_reset(tmp_path):
+    core = open_core(tmp_path)
+    command = Command(CommandType.TOGGLE_FULLSCREEN)
+    row = next(row for row in core.key_bindings() if row.command == command)
+    assert row.label == "전체 화면 켜기 / 끄기"
+    assert row.keys == row.default_keys == ("'",)
+    assert core.command_for_key("'") == command
+    bindings = draft(core)
+    bindings[command] = ("F11",)
+    core.save_key_bindings(bindings)
+    for app in (core, open_core(tmp_path)):
+        assert app.command_for_key("F11") == command
+        assert app.command_for_key("'") is None
+    core.reset_key_bindings(command)
+    assert open_core(tmp_path).command_for_key("'") == command
+
+
+def test_fullscreen_old_custom_apostrophe_wins_and_reset_reports_conflict(tmp_path):
+    core = open_core(tmp_path)
+    core.settings.set("keys.bindings", {"toggle_pause:0": ["'"], "point_highlight:0": ["H"]})
+    reopened = open_core(tmp_path)
+    command = Command(CommandType.TOGGLE_FULLSCREEN)
+    assert reopened.command_for_key("'") == Command(CommandType.TOGGLE_PAUSE)
+    assert reopened.command_for_key("H") == Command(CommandType.POINT_HIGHLIGHT)
+    assert draft(reopened)[command] == ()
+    with pytest.raises(ValueError, match="전체 화면"):
+        reopened.reset_key_bindings(command)
+    assert draft(open_core(tmp_path))[command] == ()
+
+
+def test_fullscreen_conflict_does_not_save(tmp_path):
+    core = open_core(tmp_path)
+    bindings = draft(core)
+    bindings[Command(CommandType.TOGGLE_FULLSCREEN)] = ("Enter",)
+    with pytest.raises(ValueError, match="전체 화면"):
+        core.save_key_bindings(bindings)
+    assert open_core(tmp_path).command_for_key("'") == Command(CommandType.TOGGLE_FULLSCREEN)
+
+
+def test_help_f1_is_reserved_and_legacy_binding_uses_existing_fallback(tmp_path):
+    core = open_core(tmp_path)
+    bindings = draft(core)
+    bindings[Command(CommandType.TOGGLE_PAUSE)] = ("F1",)
+    with pytest.raises(ValueError, match="키 안내.*예약 키"):
+        core.save_key_bindings(bindings)
+    with pytest.raises(ValueError, match="키 안내.*예약 키"):
+        core.set_key_bindings({"F1": Command(CommandType.TOGGLE_PAUSE)})
+    core.settings.set("keys.bindings", {"toggle_pause:0": ["F1"], "point_highlight:0": ["H"]})
+    reopened = open_core(tmp_path)
+    assert reopened.command_for_key("F1") is None
+    assert reopened.command_for_key("Enter") == Command(CommandType.TOGGLE_PAUSE)
+    assert reopened.command_for_key("H") == Command(CommandType.POINT_HIGHLIGHT)

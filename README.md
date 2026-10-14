@@ -547,7 +547,8 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 - `library_detail_ui.py`: 선택 영상 정보와 상세 패널·우클릭 메뉴가 공유하는 작업 버튼.
 - `library_details.py`: 선택 영상의 상세 요약 결과. `AppCore.library_details`는 자막·번역·하이라이트 소유 모듈에서 한 영상만 조회한다.
 - `folder_page.py`: 감시 폴더 목록, 추가·해제·검사, 제외·관심 없음 복원과 검사 안내.
-- `playback_page.py`: 기존 재생 배치·키 명령 처리와 `show_position`·`show_reel` 표시 API. 셸은 키를 현재 페이지의 `handle_key`로 전달한다.
+- `playback_page.py`: 영상 중심 재생 배치·아래쪽 바·작업 메뉴와 `show_position`·`show_reel` 표시 API. 전체 화면의 임시 바와 Esc 우선순위를 처리한다.
+- `playback_help.py`: F1으로 켜는 별도 반투명 안내 창. 현재 키 배치·모아보기 키 의미·하이라이트 색 범례를 mpv 위에 표시한다.
 - `settings.py`: JSON 값을 저장하는 공용 `Settings` 저장소. 라이브러리·번역·키 배치 설정이 함께 사용하며 키 배치는 `keys.bindings`에 저장.
 - `single_instance.py`: 데이터 폴더별 중복 실행 방지와 기존 창 활성화 요청.
 - `tray.py`: 트레이 숨기기·복귀·완전 종료와 대기열 완료 알림.
