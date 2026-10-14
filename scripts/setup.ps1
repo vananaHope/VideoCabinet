@@ -1,4 +1,4 @@
-param([switch]$SkipFFmpeg)
+﻿param([switch]$SkipFFmpeg)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 
