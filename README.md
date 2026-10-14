@@ -51,10 +51,13 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 .venv/Scripts/python -m my_video_manager
 ```
 
-### 웹 라이브러리 시험판 (#43)
+### 웹 셸 시험판 (#46)
 
-기본값은 기존 Qt 라이브러리입니다. 아래 환경 변수로 라이브러리 페이지 하나만 React 웹 화면으로 바꿉니다.
-다른 페이지·대화상자는 Qt이며 재생은 같은 네이티브 mpv를 사용합니다.
+기본값은 기존 Qt 화면입니다. 아래 환경 변수로 단일 웹 뷰의 위쪽 탭 셸을 켭니다.
+웹 탭은 라이브러리 `Ctrl+1`, 모아보기 `Ctrl+2`, 검색 `Ctrl+3`, 자막 대기열 `Ctrl+4`,
+통계 `Ctrl+5`(준비 중), 폴더 관리 `Ctrl+6`, 설정 `Ctrl+7`입니다.
+미전환 페이지는 기존 Qt 화면으로 열리며 돌아가기 버튼·Esc·페이지 단축키로 돌아옵니다.
+`Alt+S` 설정 메뉴와 네이티브 mpv 재생은 유지됩니다. 웹을 끄면 기존 Qt 번호를 그대로 씁니다.
 
 ```powershell
 $env:MVM_WEB_UI = '1'
@@ -78,8 +81,11 @@ $env:MVM_WEB_DEV_URL = 'http://127.0.0.1:5173/'
 Remove-Item Env:MVM_WEB_DEV_URL
 ```
 
-웹과 Python의 데이터 계약은 `web_library_data.py`의 TypedDict가 원본입니다.
-변경 후 `.venv/Scripts/python scripts/generate_web_types.py`로 TypeScript 타입을 생성합니다.
+웹 데이터 계약은 `web_library_data.py`, 슬롯·신호·작업·탭 계약은 `web_contract.py`가 원본입니다.
+웹은 생성된 `publicBridge()` 래퍼만 사용하며 QObject 내부 메서드는 공개 API에 포함하지 않습니다.
+`web_tokens.json`은 웹 CSS와 후속 Qt 재생 화면에서 공유하는 색·간격·글꼴의 단일 원본입니다.
+Python에서는 `web_tokens.web_tokens()`로 읽습니다.
+변경 후 `.venv/Scripts/python scripts/generate_web_types.py`로 TypeScript 계약과 CSS 토큰을 생성합니다.
 `--check`는 생성 파일이 원본과 다르면 실패하며 setup과 pytest가 이를 확인합니다.
 썸네일 주소는 `mvm-thumb://video/<id>`이며 코어가 아는 해당 영상의 썸네일만 읽습니다.
 외부 페이지로의 이동과 패키지 자산·썸네일·설정한 개발 서버 외 요청은 차단합니다.
@@ -89,14 +95,15 @@ TanStack Virtual은 행 단위 가상화·overscan·scrollToIndex를 제공하�
 
 격자에서는 방향키로 선택하고 Enter·더블클릭으로 재생합니다. 메뉴 키·Shift+F10·우클릭은 같은 작업 메뉴를 엽니다.
 Tab/Shift+Tab은 검색·태그·추천·격자·상세 작업을 이동합니다. 숨겨진 보석은 클릭·Enter로 재생하고
-Backspace·우클릭 메뉴로 관심 없음을 처리합니다. Ctrl+1~6과 Alt+S는 Qt 셸이 먼저 처리합니다.
+Backspace·우클릭 메뉴로 관심 없음을 처리합니다. Ctrl+1~7과 Alt+S는 앱 전역 필터가 먼저 처리합니다.
 Esc로 재생에서 돌아오면 선택·스크롤과 출발한 목록의 포커스를 복원합니다.
 
 화면 비교와 대량 목록 측정은 Windows에서 `scripts/check_web_library.py`를 사용합니다.
-`--prepare --count 24 --source <테스트 영상 폴더>`는 원본을 `.local/issue43/`로 복사하고 데모 데이터를 등록합니다.
+`--prepare --count 24 --source <테스트 영상 폴더>`는 원본을 `.local/issue46/`로 복사하고 데모 데이터를 등록합니다.
 `--prepare --count 5000`은 합성 영상 5,000개를 공개 코어 API로 등록합니다.
 `--mode qt`와 `--mode web`에 같은 `--count`를 지정하면 1100×720 스크린샷과 측정 JSON을
-`.local/screens-43/`에 남깁니다. `--verify`는 웹 키보드·composition 이벤트·복사본 mpv 복귀를 추가 확인합니다.
+`.local/screens-46/`에 남깁니다. `--verify`는 웹 키보드·composition 이벤트·복사본 mpv 복귀를 추가 확인합니다.
+`--verify-shell`은 각 탭 스크린샷과 웹/Qt 왕복을, `--long-content`는 긴 제목·태그를 확인합니다.
 실제 Windows 한국어 IME의 조합·후보 선택은 사람이 별도로 확인해야 합니다.
 
 앱 전체는 맑은 고딕을 사용하는 다크 테마이며, 키보드 포커스는 강조색 테두리로 표시합니다.
@@ -217,7 +224,7 @@ mpv 자체 키 바인딩은 끕니다. 검사 중에도 창을 트레이로 숨�
 명령을 방향키로 고른 뒤 Enter 또는 **키 바꾸기**를 누르고 새 키를 누르세요.
 문자·숫자·방향키·기능키와 Ctrl/Alt/Shift 조합을 지원합니다. 숫자 패드 Enter도 Enter로 처리합니다.
 키 캡처 중 Esc는 취소하며, Esc 자체는 목록 복귀·취소 전용이라 할당할 수 없습니다.
-Alt+S와 Ctrl+1~Ctrl+6은 설정 메뉴·사이드바 페이지 이동 예약 키이므로 재생 명령에 할당할 수 없습니다.
+Alt+S와 Ctrl+1~Ctrl+7은 설정 메뉴·페이지 이동 예약 키이므로 재생 명령에 할당할 수 없습니다.
 Tab으로 버튼 사이를 이동하고 Space로 실행할 수 있습니다.
 
 **적용** 또는 **저장 후 닫기**를 누르면 즉시 반영되고 다음 실행에도 유지됩니다.

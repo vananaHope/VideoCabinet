@@ -19,7 +19,7 @@ _ALIASES.update(pageup="PgUp", pagedown="PgDn", pgdown="PgDn", esc="Esc", escape
 _ALIASES["return"] = "Enter"
 RESERVED_KEYS = {"Alt+S": "설정 메뉴를 여는 예약 키",
                  "F1": "키 안내를 여는 예약 키",
-                 **{f"Ctrl+{i}": "사이드바 페이지를 여는 예약 키" for i in range(1, 7)}}
+                 **{f"Ctrl+{i}": "페이지를 여는 예약 키" for i in range(1, 8)}}
 
 
 def normalize_key(key: str) -> str:

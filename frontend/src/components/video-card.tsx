@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import type { VideoData } from "@/bridge-types"
 
 const cardVariants = cva("group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring", {
-  variants: { variant: { default: "border-border bg-card hover:border-primary", selected: "border-primary bg-accent" } },
+  variants: { variant: { default: "border-border bg-card hover:border-ring", selected: "border-ring bg-accent" } },
   defaultVariants: { variant: "default" },
 })
 

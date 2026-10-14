@@ -280,7 +280,7 @@ def test_settings_menu_key_is_reserved_without_changing_saved_bindings(tmp_path,
         row.command: row.default_keys for row in core.key_bindings()}
 
 
-@pytest.mark.parametrize("number", range(1, 7))
+@pytest.mark.parametrize("number", range(1, 8))
 def test_sidebar_keys_reject_both_save_apis_and_preserve_custom_keys(tmp_path, number):
     core = open_core(tmp_path)
     pause = Command(CommandType.TOGGLE_PAUSE)
@@ -289,9 +289,9 @@ def test_sidebar_keys_reject_both_save_apis_and_preserve_custom_keys(tmp_path, n
     core.save_key_bindings(bindings)
     invalid = dict(bindings)
     invalid[pause] = (f"ctrl+{number}",)
-    with pytest.raises(ValueError, match="사이드바.*예약 키"):
+    with pytest.raises(ValueError, match="페이지.*예약 키"):
         core.save_key_bindings(invalid)
-    with pytest.raises(ValueError, match="사이드바.*예약 키"):
+    with pytest.raises(ValueError, match="페이지.*예약 키"):
         core.set_key_bindings({f"Ctrl+{number}": pause})
     for app in (core, open_core(tmp_path)):
         assert draft(app) == bindings
@@ -299,7 +299,7 @@ def test_sidebar_keys_reject_both_save_apis_and_preserve_custom_keys(tmp_path, n
         assert app.command_for_key("Space") == pause
 
 
-@pytest.mark.parametrize("number", range(1, 7))
+@pytest.mark.parametrize("number", range(1, 8))
 def test_old_saved_sidebar_keys_use_existing_invalid_settings_fallback(tmp_path, number):
     core = open_core(tmp_path)
     core.settings.set("keys.bindings", {"toggle_pause:0": [f"Ctrl+{number}"]})
