@@ -302,10 +302,17 @@ def gem_layout():
         const r = el.getBoundingClientRect(); return r.top >= panel.top && r.bottom <= panel.bottom;
       }).length, gems: cards.length, visibleGems: cards.filter(visible).length,
       rowHeight: bounds?.height ?? 0, gridHeight: document.getElementById('library-grid').clientHeight,
+      visibleGridRows: (document.getElementById('library-grid').clientHeight - 8) /
+        document.querySelector('#library-grid [role=row]').getBoundingClientRect().height,
+      scrollbarColor: row ? getComputedStyle(row).scrollbarColor : null,
       cardWidth: cards[0]?.getBoundingClientRect().width ?? 0,
       rows: new Set(cards.map(el => el.getBoundingClientRect().top)).size,
       horizontalOverflow: row ? row.scrollWidth > row.clientWidth : false};
     })()""")
+
+
+if args.mode == 'web' and core.videos():
+    metrics['layout'] = gem_layout()
 
 
 def verify_detail_access():
@@ -551,6 +558,10 @@ if args.verify and args.mode == 'web':
         QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Return)
         wait_until(lambda: window.pages.currentWidget() is window.playback_page)
         QTest.qWait(500)
+        window.raise_()
+        window.activateWindow()
+        assert QTest.qWaitForWindowActive(window, 5000), '재생 검증 창 활성화 실패'
+        window.playback_page.focus_content()
         QTest.keyClick(window.surface, Qt.Key.Key_Apostrophe)
         wait_until(window.isFullScreen)
         assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
@@ -615,7 +626,8 @@ if args.verify_library and args.mode == 'web':
     metrics['layout'] = layout
     stats = core.video_viewing_statistics()[page.selected_id]
     card = js(f"document.getElementById('video-{page.selected_id}').textContent")
-    assert f'{stats.viewing_count}회' in card and '시청 시간' in card and '마지막 시청' in card
+    assert f'{stats.viewing_count}회' in card and '횟수 · 시간' in card and '마지막 시청' in card
+    assert layout['visibleGridRows'] >= 1.5, layout
     if args.long_content:
         assert '+3' in card or '+2' in card, card
         assert js("""[...document.querySelectorAll('[role=gridcell] [aria-label="태그"] span')].some(el => getComputedStyle(el).textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth)"""), '긴 태그 말줄임'
@@ -649,7 +661,19 @@ if args.verify_library and args.mode == 'web':
     js("document.getElementById('detail-scroll').focus()")
     settle()
     window.grab().save(str(screens / 'web-highlights-many.png'))
-    for _ in range(6):
+    metrics['visibleHighlights'] = js("""(() => {
+      const bounds = document.getElementById('detail-scroll').getBoundingClientRect();
+      return [...document.querySelectorAll('[id^=highlight-]')].filter(el => {
+        const r = el.getBoundingClientRect(); return r.top >= bounds.top && r.bottom <= bounds.bottom;
+      }).length;
+    })()""")
+    assert metrics['visibleHighlights'] >= 6, metrics
+    assert js("[...document.querySelectorAll('[id^=highlight-] button')].every(el => el.tabIndex === -1)")
+    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
+    settle()
+    assert js("!document.getElementById('detail-scroll').contains(document.activeElement)")
+    js("document.getElementById('detail-scroll').focus()")
+    for _ in range(16):
         QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Down)
     settle()
     selection = js("document.getElementById('detail-scroll').getAttribute('aria-activedescendant')")
@@ -689,12 +713,13 @@ if args.verify_library and args.mode == 'web':
     closer.setInterval(20)
     closer.timeout.connect(edit_note)
     closer.start()
-    js(f"document.getElementById('{selection}').querySelectorAll('button')[1].click()")
+    js("document.getElementById('detail-scroll').focus()")
+    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_F2)
     wait_until(lambda: bool(observed) and not page.bridge.busy)
     closer.stop()
     wait_until(lambda: js(f"document.getElementById('{selection}').textContent.includes('웹에서 연 기존 편집기로 저장한 메모')"))
     assert observed == [hid]
-    metrics['checks'].append('하이라이트 클릭 재생·기존 HighlightEditor 저장 후 목록 반영')
+    metrics['checks'].append('하이라이트 클릭 재생·F2 기존 HighlightEditor 저장 후 목록 반영·행 버튼 Tab 제외')
     js("document.querySelector('aside [data-tab=info]').click()")
     settle()
 

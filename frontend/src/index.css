@@ -62,5 +62,6 @@
   gap: calc(2 * var(--spacing));
   overflow-x: scroll;
   scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 @utility virtual-row { position: absolute; inset-inline: 0; top: var(--virtual-top); height: var(--grid-row-height); display: grid; grid-template-columns: repeat(var(--virtual-columns), minmax(0, 1fr)); }

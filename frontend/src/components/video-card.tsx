@@ -6,7 +6,7 @@ import { VideoTags } from "@/components/video-tags"
 import type { VideoData } from "@/bridge-types"
 
 const cardVariants = cva("group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring", {
-  variants: { variant: { default: "border-border bg-card hover:border-ring", selected: "border-ring bg-accent" } },
+  variants: { variant: { default: "border-border bg-card hover:border-ring", selected: "border-ring bg-card" } },
   defaultVariants: { variant: "default" },
 })
 
@@ -20,7 +20,7 @@ export function viewing(video: VideoData) {
   return video.missing ? "파일 없음" : video.finished ? "다 봄" : video.abandoned ? `보다 만 ${Math.round(video.stoppedPercent ?? 0)}%` : "아직 안 봄"
 }
 const thumbnailVariants = cva("relative flex w-full shrink-0 items-center justify-center overflow-hidden bg-muted", {
-  variants: { variant: { default: "aspect-video", card: "h-24", gem: "h-20", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
+  variants: { variant: { default: "aspect-video", card: "h-14", gem: "h-16", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
 })
 export function Thumbnail({ video, variant }: { video: VideoData } & VariantProps<typeof thumbnailVariants>) {
   return <div className={thumbnailVariants({ variant })}>
@@ -36,22 +36,22 @@ function lastViewed(value: string | null) {
 }
 function VideoStatistics({ video }: { video: VideoData }) {
   return <span aria-label="시청 통계" className="grid grid-cols-2 gap-1 rounded-lg border bg-background/40 p-1.5 text-xs">
-    <span className="flex flex-col gap-1 rounded-md border p-2"><span className="text-muted-foreground">시청 횟수</span><span className="font-medium tabular-nums">{video.viewingCount}회</span></span>
-    <span className="flex flex-col gap-1 rounded-md border p-2"><span className="text-muted-foreground">시청 시간</span><span className="font-medium tabular-nums">{duration(video.watchedSeconds)}</span></span>
-    <span className="col-span-2 flex items-center justify-between gap-1 rounded-md border px-2 py-1.5"><span className="text-muted-foreground">마지막 시청</span><span className="tabular-nums">{lastViewed(video.lastViewedAt)}</span></span>
+    <span className="flex min-w-0 flex-col"><span className="text-muted-foreground">횟수 · 시간</span><span className="truncate font-medium tabular-nums" title={`${video.viewingCount}회 · ${duration(video.watchedSeconds)}`}>{video.viewingCount}회 · {duration(video.watchedSeconds)}</span></span>
+    <span className="flex min-w-0 flex-col"><span className="text-muted-foreground">마지막 시청</span><span className="truncate tabular-nums" title={lastViewed(video.lastViewedAt)}>{lastViewed(video.lastViewedAt)}</span></span>
   </span>
 }
 export function VideoCard({ video, variant, ...props }: Props) {
   return <button {...props} className={cardVariants({ variant })} title={video.title}>
     <Thumbnail video={video} variant="card" />
-    <div className="flex min-h-0 w-full flex-1 flex-col gap-1.5 p-3">
-      <span className="line-clamp-2 min-h-10 leading-5 font-medium wrap-anywhere">{video.title}</span>
-      <span className="truncate text-xs text-muted-foreground" title={video.series}>{duration(video.duration)}{video.series && ` · ${video.series}`}</span>
-      <span className="flex flex-wrap gap-1">
+    <div className="flex min-h-0 w-full flex-1 flex-col gap-0.5 p-2">
+      <span className="shrink-0 truncate leading-5 font-medium">{video.title}</span>
+      <span className="flex flex-wrap items-center gap-1">
+        <span className="text-xs text-muted-foreground tabular-nums">{duration(video.duration)}</span>
         <StatusBadge variant={video.missing ? "destructive" : video.finished ? "success" : video.abandoned ? "info" : "muted"}>{viewing(video)}</StatusBadge>
-        {video.hasSubtitles && <StatusBadge variant="info">자막 있음</StatusBadge>}
+        {video.hasSubtitles && <StatusBadge variant="muted">자막 있음</StatusBadge>}
         {video.favorite && <StatusBadge variant="highlight">즐겨 보는</StatusBadge>}
       </span>
+      {video.series && <span className="shrink-0 truncate text-xs text-muted-foreground" title={video.series}>{video.series}</span>}
       <VideoStatistics video={video} />
       <span className="mt-auto min-w-0"><VideoTags tags={video.tags} /></span>
     </div>

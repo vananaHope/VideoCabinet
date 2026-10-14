@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { GemCard } from "@/components/gem-card"
 import { VideoMenu } from "@/components/video-menu"
 import { LibraryGrid, openKeyboardMenu } from "@/components/library-grid"
+import type { HighlightSnapshot } from "@/components/highlight-panel"
 import { DetailPanel } from "@/components/detail-panel"
 import { connectBridge, getSnapshot, getDetails, request, type Bridge, type Action } from "@/bridge"
 import type { LibraryData, DetailsData, HighlightData } from "@/bridge-types"
@@ -14,7 +15,7 @@ export default function LibraryPage() {
   const [bridge, setBridge] = useState<Bridge | null>(null)
   const [data, setData] = useState<LibraryData | null>(null)
   const [details, setDetails] = useState<DetailsData | null>(null)
-  const [highlights, setHighlights] = useState<HighlightData[] | null>(null)
+  const [highlights, setHighlights] = useState<HighlightSnapshot | null>(null)
   const [detailTab, setDetailTab] = useState("info")
   const detailVideo = useRef<number | null>(null)
   const highlightReturn = useRef(false)
@@ -100,7 +101,7 @@ export default function LibraryPage() {
   useEffect(() => {
     let current = true
     const videoId = data?.selectedId
-    if (bridge && videoId != null && detailTab === "highlights") request<HighlightData[]>(reply => bridge.highlights(videoId, reply)).then(value => { if (current) setHighlights(value) }).catch(error => { if (current) showError(error) })
+    if (bridge && videoId != null && detailTab === "highlights") request<HighlightData[]>(reply => bridge.highlights(videoId, reply)).then(value => { if (current) setHighlights({ videoId, revision: detailRevision, items: value }) }).catch(error => { if (current) showError(error) })
     return () => { current = false }
   }, [bridge, data?.selectedId, detailRevision, detailTab, showError])
 
@@ -220,7 +221,7 @@ export default function LibraryPage() {
     </section>
     <div className="flex min-h-0 flex-1 gap-2">
       <LibraryGrid videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} />
-      <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} />
+      <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} />
     </div>
   </main>
 }

@@ -31,7 +31,7 @@
   "layout": {
     "radius": "0.75rem",
     "spacing": "0.25rem",
-    "grid-row-height": "23rem",
+    "grid-row-height": "15.5rem",
     "grid-card-width": "14rem"
   },
   "typography": {

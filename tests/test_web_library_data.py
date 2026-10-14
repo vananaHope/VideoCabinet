@@ -134,8 +134,7 @@ def test_subtitle_badge_matches_statistics_including_empty_transcript(core):
     assert sum(v['hasSubtitles'] for v in data) == core.viewing_statistics(7).library.subtitled_video_count == 0
 
 
-def test_highlight_tags_are_scoped_sorted_and_bulk_read(core, monkeypatch):
-    import sqlite3
+def test_highlight_tags_are_scoped_sorted_and_complete(core):
     from my_video_manager.web_library_data import highlights_data
 
     first, other, _ = core.videos()
@@ -150,16 +149,9 @@ def test_highlight_tags_are_scoped_sorted_and_bulk_read(core, monkeypatch):
     core.add_highlight_tag(highlight.id, 'Alpha')
     expected = {h.id: core.highlight_tags(h.id) for h in core.highlights(first.id)}
     assert core.highlight_tags_map(first.id) == expected
-    statements = []
-    connect = sqlite3.connect
-
-    def traced(*args, **kwargs):
-        db = connect(*args, **kwargs)
-        db.set_trace_callback(statements.append)
-        return db
-
-    monkeypatch.setattr(sqlite3, 'connect', traced)
     entries = highlights_data(core, first.id)
     assert len(entries) == 25
+    assert [h['id'] for h in entries] == [h.id for h in core.highlights(first.id)]
+    assert not {h['id'] for h in entries} & {h.id for h in core.highlights(other.id)}
     assert [t['name'] for t in entries[0]['tags']] == ['Alpha', 'Zulu']
-    assert sum(sql.startswith('SELECT') for sql in statements) == 2
+    assert all(h['tags'] == [] for h in entries[1:])

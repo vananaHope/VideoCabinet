@@ -1,9 +1,9 @@
 import { cva, type VariantProps } from "class-variance-authority"
 import { Button } from "@/components/ui/button"
 import { EmptyState, Tabs } from "@/components/page-parts"
-import { HighlightPanel } from "@/components/highlight-panel"
+import { HighlightPanel, type HighlightSnapshot } from "@/components/highlight-panel"
 import { Thumbnail, duration, viewing } from "@/components/video-card"
-import type { VideoData, DetailsData, HighlightData } from "@/bridge-types"
+import type { VideoData, DetailsData } from "@/bridge-types"
 import { actions, lockedDuringScan, type Action } from "@/bridge"
 
 const detailVariants = cva("flex h-full w-72 shrink-0 flex-col gap-2 overflow-hidden rounded-lg border border-border bg-card p-3", {
@@ -25,13 +25,13 @@ function DetailActions({ videoId, scanning, onAction }: { videoId: number; scann
   </div>
 }
 const queueLabels: Record<string, string> = { queued: "대기", transcribing: "받아쓰는 중", translating: "번역 중", completed: "완료", failed: "실패", held: "보류" }
-type Props = VariantProps<typeof detailVariants> & { video?: VideoData; details: DetailsData | null; highlights: HighlightData[] | null; tab: string; onTabChange: (tab: string) => void; scanning: boolean; onAction: (action: Action, id: number) => void; onHighlight: (videoId: number, highlightId: number, edit: boolean) => void }
-export function DetailPanel({ video, details, highlights, tab, onTabChange, scanning, onAction, onHighlight, variant }: Props) {
+type Props = VariantProps<typeof detailVariants> & { video?: VideoData; details: DetailsData | null; highlights: HighlightSnapshot | null; revision: number; tab: string; onTabChange: (tab: string) => void; scanning: boolean; onAction: (action: Action, id: number) => void; onHighlight: (videoId: number, highlightId: number, edit: boolean) => void }
+export function DetailPanel({ video, details, highlights, revision, tab, onTabChange, scanning, onAction, onHighlight, variant }: Props) {
   return <aside aria-label="선택 영상 상세" className={detailVariants({ variant })}>
     {!video ? <EmptyState title="선택한 영상 없음" description="영상을 선택하면 상세 정보와 작업이 표시됩니다." /> : <>
       <h2 title={video.title} className="line-clamp-2 shrink-0 text-sm leading-5 font-semibold wrap-anywhere">{video.title}</h2>
-      <Tabs label="영상 상세 탭" value={tab} onChange={onTabChange} items={[{ value: "info", label: "정보" }, { value: "highlights", label: `하이라이트${details ? ` · ${details.highlight_count}` : ""}` }]} />
-      {tab === "highlights" ? <HighlightPanel key={video.id} videoId={video.id} highlights={highlights} onAction={onHighlight} /> : <>
+      <Tabs variant="panel" label="영상 상세 탭" value={tab} onChange={onTabChange} items={[{ value: "info", label: "정보" }, { value: "highlights", label: `하이라이트${details ? ` · ${details.highlight_count}` : ""}` }]} />
+      {tab === "highlights" ? <HighlightPanel key={video.id} videoId={video.id} snapshot={highlights} revision={revision} onAction={onHighlight} /> : <>
       <DetailActions videoId={video.id} scanning={scanning} onAction={onAction} />
       <div id="detail-scroll" className="min-h-0 flex-1 space-y-2 overflow-y-auto border-t pt-2 text-xs leading-5 text-muted-foreground wrap-anywhere">
         <Thumbnail video={video} variant="detail" />
