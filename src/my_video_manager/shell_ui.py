@@ -96,17 +96,8 @@ def queue_page(window):
 
 
 def folder_page(window):
-    library = window.library_page
-    controls = library.library_controls
-    page = ActionPage("폴더 관리", (
-        ("감시 폴더 추가", library.add_folder), ("감시 폴더 해제", controls.remove_folder),
-        ("다시 검사", window.scan), ("파일 직접 추가", controls.add_file),
-        ("제외 목록", controls.show_excluded), ("최소 길이 설정", controls.settings),
-        ("관심 없음 되돌리기", library.hidden_gems.show_dismissed),
-        ("선택 영상 제목 변경", controls.rename), ("선택 영상 파일 다시 연결", controls.reconnect),
-    ))
-    library.scan_state_changed.connect(page.setDisabled)
-    return page
+    from .folder_page import FolderPage
+    return FolderPage(window)
 
 
 def settings_page(window):

@@ -4,8 +4,10 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QMenu,
-    QPushButton, QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
+from .library_grid import CARD_ROLE, VideoCard, VideoCardDelegate
+from .thumbnail_ui import ThumbnailIcons
 
 
 class GemList(QListWidget):
@@ -36,30 +38,27 @@ class GemList(QListWidget):
 class HiddenGemControls(QWidget):
     def __init__(self, window):
         super().__init__(window)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.window, self.core = window, window.core
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         bar = QHBoxLayout()
         self.label = QLabel("숨겨진 보석")
         self.label.setWordWrap(True)
-        bar.addWidget(self.label)
-        bar.addStretch()
-        self.dismiss = QPushButton("선택 영상 관심 없음")
-        self.dismiss.clicked.connect(self.dismiss_selected)
-        bar.addWidget(self.dismiss)
-        restore = QPushButton("관심 없음 되돌리기")
-        restore.clicked.connect(self.show_dismissed)
-        bar.addWidget(restore)
+        bar.addWidget(self.label, 1)
         layout.addLayout(bar)
-        layout.addWidget(QLabel("←/→로 선택 · Enter 또는 클릭으로 재생 · 카드에서 Backspace 또는 우클릭으로 관심 없음"))
+        self.help = QLabel("←/→로 선택 · Enter 또는 클릭으로 재생 · 카드에서 Backspace 또는 우클릭으로 관심 없음")
+        layout.addWidget(self.help)
         self.list = GemList()
+        self.icons = ThumbnailIcons()
+        self.list.setItemDelegate(VideoCardDelegate(self.icons, self.list, compact=True))
         self.list.setAccessibleName("숨겨진 보석 추천 카드")
         self.list.setFlow(QListView.Flow.LeftToRight)
         self.list.setWrapping(False)
         self.list.setWordWrap(True)
         self.list.setIconSize(QSize(96, 54))
         self.list.setSpacing(4)
-        self.list.setFixedHeight(150)
+        self.list.setFixedHeight(226)
         self.list.itemClicked.connect(self.play)
         self.list.play_requested.connect(self.play)
         self.list.dismiss_requested.connect(self.dismiss_selected)
@@ -68,6 +67,7 @@ class HiddenGemControls(QWidget):
         layout.addWidget(self.list)
 
     def refresh(self, *, snapshot=None):
+        snapshot = snapshot or self.core.library_snapshot()
         selected = self.list.currentItem()
         selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None
         row = max(0, self.list.currentRow())
@@ -75,8 +75,9 @@ class HiddenGemControls(QWidget):
         try:
             gems = self.core.hidden_gems(snapshot=snapshot)
         except Exception as error:
-            self.dismiss.setEnabled(False)
             self.label.setText(f"숨겨진 보석을 불러오지 못했어요: {error}")
+            self.list.hide()
+            self.help.hide()
             return
         for index, gem in enumerate(gems):
             # 작은 카드의 디코딩 크기가 목록의 공유 아이콘에 남지 않게 분리한다.
@@ -84,12 +85,16 @@ class HiddenGemControls(QWidget):
                                    f"{gem.video.title}\n{gem.reason}")
             item.setData(Qt.ItemDataRole.UserRole, gem.video.id)
             item.setToolTip(item.text())
-            item.setSizeHint(QSize(280, 112))
+            item.setData(CARD_ROLE, VideoCard(gem.video, snapshot.statuses[gem.video.id],
+                                             snapshot.tags.get(gem.video.id, ()), reason=gem.reason))
+            item.setSizeHint(QSize(192, 204))
             self.list.addItem(item)
             if gem.video.id == selected_id:
                 row = index
         self.list.setCurrentRow(min(row, len(gems) - 1))
-        self.dismiss.setEnabled(bool(gems))
+        self.icons.retain(gem.video.thumbnail for gem in gems)
+        self.list.setVisible(bool(gems))
+        self.help.setVisible(bool(gems))
         self.label.setText(f"숨겨진 보석 · {len(gems)}개" if gems else "숨겨진 보석 · 지금은 추천할 영상이 없어요")
 
     def play(self, item):
@@ -111,7 +116,7 @@ class HiddenGemControls(QWidget):
     def dismiss_video(self, video_id):
         self.core.dismiss_video(video_id)
         self.refresh()
-        self.list.setFocus()
+        (self.list if self.list.count() else self.window.library_page.grid).setFocus()
 
     def dismiss_selected(self):
         if item := self.list.currentItem():

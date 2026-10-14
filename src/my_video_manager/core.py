@@ -1,6 +1,6 @@
 """UI/재생 엔진과 독립된 앱 코어의 공개 경계."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 import math
@@ -24,6 +24,7 @@ from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, t
 from .translation import Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewPlayback, SubtitleExport
+from .library_details import LibraryDetails, read_library_details
 
 
 class CommandType(str, Enum):
@@ -84,6 +85,7 @@ class LibrarySnapshot:
     statuses: dict[int, ViewingStatus]
     tags: dict[int, tuple[Tag, ...]]
     series: tuple[Series, ...]
+    details: dict[int, LibraryDetails] = field(default_factory=dict)
 
 
 class AppCore:
@@ -272,7 +274,12 @@ class AppCore:
         visible = {v.id for v in videos}
         series = tuple(replace(s, video_ids=tuple(vid for vid in s.video_ids if vid in visible))
                        for s in self._series.list())
-        return LibrarySnapshot(videos, self.viewing_status_map(), self.video_tags_map(), series)
+        return LibrarySnapshot(videos, self.viewing_status_map(), self.video_tags_map(), series,
+                               self.library_details_map())
+
+    def library_details_map(self) -> dict[int, LibraryDetails]:
+        """제외하지 않은 영상의 자막·대기열·하이라이트 요약을 일괄 조회한다."""
+        return read_library_details(self._connect)
 
     def hidden_gems(self, *, snapshot: LibrarySnapshot | None = None) -> tuple[HiddenGem, ...]:
         snapshot = self.library_snapshot() if snapshot is None else snapshot

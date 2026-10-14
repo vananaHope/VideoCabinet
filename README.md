@@ -542,7 +542,11 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 - `theme.py`: 다크 테마 색 상수·QPalette·전역 스타일시트와 맑은 고딕 기본 글꼴.
 - `shell_ui.py`: 사이드바와 페이지 연결. 검색 결과 선택을 재생에 연결하고 검색·대기열 페이지를 등록한다.
 - `dialog_ui.py`: 대화상자·보조 페이지의 공통 여백과 위젯 단위 주 작업 표시, 저장/확인·취소 버튼 줄.
-- `library_page.py`: 기존 라이브러리 배치, 목록·태그 갱신과 검사 작업자 스레드. `handle_key`가 목록 Enter를 처리하고 `visible_video_ids`·`selected_video_id`가 위젯과 무관한 선택 정보를 제공한다.
+- `library_page.py`: 제목·태그 복합 필터, 격자·상세 선택과 검사 작업자 스레드. `handle_key`가 Enter·메뉴 키를 처리하고 `visible_video_ids`·`selected_video_id`가 위젯과 무관한 선택 정보를 제공한다.
+- `library_grid.py`: 일괄 스냅숏 기반 모델, 썸네일 격자와 숨겨진 보석의 공유 카드 그리기.
+- `library_detail_ui.py`: 선택 영상 정보와 상세 패널·우클릭 메뉴가 공유하는 작업 버튼.
+- `library_details.py`: 원어·번역·대기열 상태와 하이라이트 수의 일괄 요약 조회.
+- `folder_page.py`: 감시 폴더 목록, 추가·해제·검사, 제외·관심 없음 복원과 검사 안내.
 - `playback_page.py`: 기존 재생 배치·키 명령 처리와 `show_position`·`show_reel` 표시 API. 셸은 키를 현재 페이지의 `handle_key`로 전달한다.
 - `settings.py`: JSON 값을 저장하는 공용 `Settings` 저장소. 라이브러리·번역·키 배치 설정이 함께 사용하며 키 배치는 `keys.bindings`에 저장.
 - `single_instance.py`: 데이터 폴더별 중복 실행 방지와 기존 창 활성화 요청.
@@ -588,7 +592,9 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 - `tests/test_settings.py`: 공용 설정의 손상된 저장 값·기본값·재저장 검증.
 - `tests/test_key_bindings.py`: 공개 코어 API로 즉시 반영·재실행·충돌·복원·새 기본 명령 추가를 검증.
 - `tests/test_library.py`: 이동·복사·파일 없음·제외·길이 설정·캐시와 이전 DB의 기록 보존 검증.
-- `tests/test_library_return_ui.py`: 실제 Qt 화면에서 트레이 복귀와 모아보기 전환 뒤 목록 갱신 검증.
+- `tests/test_library_return_ui.py`: 실제 Qt 화면에서 트레이 복귀와 모아보기 전환 뒤 격자 갱신 검증.
+- `tests/test_library_grid_ui.py`: 제목·태그 복합 필터, 네 방향 이동·재생·메뉴, 상세 선택과 검사 중 작업 검증.
+- `tests/test_library_details.py`: 공개 AppCore API로 상세 요약과 파일 없음·제외 시 기록 보존 검증.
 - `tests/test_aux_pages_ui.py`: 검색 재생·복귀, 준비·파일 없음 안내, 일치 강조, 대기열 상태·작업과 보이는 탭의 갱신 경계 검증.
 - `tests/test_media.py`: 고정 ffprobe JSON으로 미디어 판정을 검증.
 - `tests/test_series.py`: 번호·제목 틀 순수 함수와 공개 코어 API로 묶기·복사본·편집·재검사·탐색 검증.

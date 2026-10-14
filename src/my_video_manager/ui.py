@@ -45,8 +45,6 @@ class MainWindow(QMainWindow):
         self.playback_page = PlaybackPage(self)
         self.pages.addWidget(self.playback_page)
         # 기존 화면 어댑터용 연결점. 위젯 구성과 갱신은 각 페이지 모듈이 소유한다.
-        self.list = self.library_page.list
-        self.hidden_gems = self.library_page.hidden_gems
         self.surface = self.playback_page.surface
         self.progress = self.playback_page.progress
         self.reel = ReelControls(self)
@@ -93,6 +91,10 @@ class MainWindow(QMainWindow):
 
     def refresh(self, *, focus_gems=None):
         self.library_page.refresh(focus_gems=focus_gems)
+
+    def show_status(self, text):
+        """현재 페이지와 관계없이 창 아래에 작업 결과를 표시한다."""
+        self.statusBar().showMessage(text)
 
     def scan(self, checked=False, *, operation=None):
         self.library_page.scan(checked, operation=operation)
