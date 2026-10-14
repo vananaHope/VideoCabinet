@@ -52,6 +52,20 @@ def test_add_file_distinguishes_missing_return_from_unchanged_registration(core,
     stat = path.stat()
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
     assert core.add_file(path).issues[0].message == "이미 등록된 영상입니다."
+
+    core.add_watched_folder(path.parent)
+    moved = path.with_name("moved.mkv")
+    path.rename(moved)
+    result = core.scan()
+    assert [(issue.path, issue.message) for issue in result.issues] == [
+        (moved, "옮겨진 영상의 새 위치를 찾았습니다.")]
+    moved.unlink()
+    core.scan()
+    moved.write_bytes(b"original video")
+    result = core.scan()
+    assert [(issue.path, issue.message) for issue in result.issues] == [
+        (moved, "파일 없음이던 영상을 다시 찾았습니다.")]
+    path = moved
     contents = path.read_bytes()
     path.unlink()
     core.scan()

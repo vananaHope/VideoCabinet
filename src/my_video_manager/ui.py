@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
         if result.issues:
             icon = QMessageBox.Icon.Warning if any(issue.failed for issue in result.issues) else QMessageBox.Icon.Information
             dialog = QMessageBox(icon, "검사·추가 안내",
-                                 "\n".join(issue.message for issue in result.issues[:3]), parent=self)
+                                 "\n".join(f"{issue.path}: {issue.message}" for issue in result.issues[:3]), parent=self)
             dialog.setDetailedText("\n".join(f"{i.path}: {i.message}" for i in result.issues))
             dialog.exec()
 
