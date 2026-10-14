@@ -215,6 +215,13 @@ class ViewingStore:
             rows = db.execute("SELECT * FROM viewings WHERE video_id=? ORDER BY id", (video_id,)).fetchall()
         return tuple(self._from_row(row) for row in rows)
 
+    def list_all(self, *, connection=None) -> tuple[Viewing, ...]:
+        """전체 시청을 한 번에 읽으며 저장 전 진행분도 기존 조회와 같이 반영한다."""
+        from contextlib import nullcontext
+
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            return tuple(self._from_row(row) for row in db.execute("SELECT * FROM viewings ORDER BY id"))
+
     def status_map(self) -> dict[int, ViewingStatus]:
         """시청 없는 영상도 포함하며 저장 전의 진행 중 시청을 즉시 반영한다."""
         with self._connect() as db:

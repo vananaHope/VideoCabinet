@@ -346,6 +346,25 @@ Enter를 누르거나 카드를 한 번 클릭하면 바로 재생합니다. 보
 목록과 `hidden_gems(snapshot=...)`가 같은 결과를 공유합니다. 태그 필터는 목록에만 적용하고 추천은 전체 영상을 기준으로 합니다.
 썸네일 아이콘은 경로와 파일 수정 시각으로 캐시하여 반복 갱신 비용을 줄이며 파일이 바뀌면 다시 읽습니다.
 
+### 시청 통계 코어
+
+`AppCore.viewing_statistics(days, *, tz=None)`는 오늘을 포함한 최근 7·30·90·365일의
+`ViewingStatistics`를 반환합니다. 기본은 시스템 로컬 시간대이며, 테스트에서는 `tz`에
+`datetime.tzinfo`를 주입합니다. 시청을 시작한 날짜에 실제 재생 구간의 합집합을 세며,
+틀어보기·모아보기 복습은 빼고 저장 전 진행 중인 시청도 포함합니다.
+일별 시간·횟수(빈 날은 0), 이전 같은 기간 대비 증감, 최장 연속 일수, 상위 영상 5개와
+전체 기간의 라이브러리 현황을 제공합니다. 이전 값이 0이면 증감률은 `None`이며 화면에서는
+"이전 기록 없음"으로 표시합니다. 상위 영상은 시청 시간·횟수 내림차순, 제목 오름차순이고
+제외·파일 없음 상태를 함께 반환합니다. 라이브러리 현황과 새 영상 수는 제외 영상만 뺍니다.
+
+`AppCore.video_viewing_statistics()`는 영상 ID별 `VideoViewingStatistics`를 일괄 조회합니다.
+시청 횟수·시간은 전체 기간이고, 마지막 시청은 틀어보기를 포함한 `updated_at` 최댓값입니다.
+제외·파일 없음·시청 없는 영상도 반환하며, 영상 수와 무관하게 SELECT 2회로 조회합니다.
+기간 통계는 SELECT 5회입니다. 반환 dataclass의 시간 단위는 초, 날짜·시각은 ISO 문자열이며
+`dataclasses.asdict()` 후 JSON으로 직렬화할 수 있습니다. 순수 계산은 `statistics.py`의
+`viewing_statistics(viewings, videos, days, today, tz, settings)`와
+`video_viewing_statistics(viewings, video_ids, settings)`에 있습니다. 화면은 후속 이슈 범위입니다.
+
 ### 원어 자막
 
 목록에서 영상을 고르거나 재생 중 **자막 만들기 / 원어 지정**을 누릅니다.

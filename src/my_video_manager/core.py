@@ -632,6 +632,25 @@ class AppCore:
     def viewing_status_map(self) -> dict[int, ViewingStatus]:
         return self._viewings.status_map()
 
+    def viewing_statistics(self, days: int, *, tz=None):
+        """ViewingStatistics 반환. 오늘 포함 7·30·90·365일, 기본은 시스템 로컬 시간대.
+
+        테스트에서는 datetime.tzinfo를 tz로 주입한다. 날짜/시각은 ISO 문자열,
+        시청 시간은 초이며 dataclasses.asdict 결과를 JSON으로 직렬화할 수 있다.
+        """
+        from .statistics import StatisticsReader
+
+        return StatisticsReader(self._connect, self._clock, self._viewings).period(days, tz=tz)
+
+    def video_viewing_statistics(self):
+        """영상 ID → VideoViewingStatistics. 제외·파일 없음·시청 없는 영상도 포함한다.
+
+        전체 기간을 일괄 조회하며 마지막 시청 시각에는 틀어보기도 포함한다.
+        """
+        from .statistics import StatisticsReader
+
+        return StatisticsReader(self._connect, self._clock, self._viewings).video_map()
+
     def resume_start(self, video_id: int) -> float:
         point = self.viewing_status(video_id).resume_point
         return max(0, point - self._viewings.settings.resume_rewind) if point is not None else 0
