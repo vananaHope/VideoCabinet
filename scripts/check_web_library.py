@@ -626,7 +626,8 @@ if args.verify_library and args.mode == 'web':
     metrics['layout'] = layout
     stats = core.video_viewing_statistics()[page.selected_id]
     card = js(f"document.getElementById('video-{page.selected_id}').textContent")
-    assert f'{stats.viewing_count}회' in card and '횟수 · 시간' in card and '마지막 시청' in card
+    last_view_label = '마지막 틀어보기' if stats.viewing_count == 0 and stats.last_viewed_at else '마지막 시청'
+    assert f'{stats.viewing_count}회' in card and '횟수 · 시간' in card and last_view_label in card
     assert layout['visibleGridRows'] >= 1.5, layout
     if args.long_content:
         assert '+3' in card or '+2' in card, card
