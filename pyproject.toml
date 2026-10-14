@@ -20,7 +20,7 @@ my-video-manager = "my_video_manager.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-my_video_manager = ["theme_icons/*.svg", "web/*", "web/assets/*"]
+my_video_manager = ["web_tokens.json", "theme_icons/*.svg", "web/*", "web/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

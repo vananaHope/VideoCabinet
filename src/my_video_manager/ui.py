@@ -49,7 +49,8 @@ class MainWindow(QMainWindow):
         self.fullscreen_settings_shortcut.activated.connect(self.show_fullscreen_settings_menu)
 
         import os
-        if os.environ.get("MVM_WEB_UI") == "1":
+        self.web_ui = os.environ.get("MVM_WEB_UI") == "1"
+        if self.web_ui:
             from .web_library_page import WebLibraryPage
             self.library_page = WebLibraryPage(self)
         else:
@@ -79,10 +80,16 @@ class MainWindow(QMainWindow):
         if not playing:
             self.set_playback_fullscreen(False)
             self.playback_page.close_help()
-        self.sidebar.setVisible(not playing)
+        self.sidebar.setVisible(not playing and not self.web_ui)
+        if self.web_ui:
+            self.web_return_bar.setVisible(not playing and page_is_native(self))
         self.statusBar().setVisible(not playing)
         if page in self.navigation_pages:
-            self.sidebar.select(self.navigation_pages.index(page))
+            index = self.navigation_pages.index(page)
+            self.sidebar.select(index)
+            if self.web_ui and index:
+                from .web_contract import TABS
+                self.library_page.set_tab(TABS[index if index < 4 else index + 1][0])
 
     def set_playback_fullscreen(self, enabled):
         enabled = enabled and self.pages.currentWidget() is self.playback_page
@@ -96,7 +103,9 @@ class MainWindow(QMainWindow):
         self.menuBar().setVisible(not enabled)
         self.playback_page.set_fullscreen(enabled)
         playing = self.pages.currentWidget() is self.playback_page
-        self.sidebar.setVisible(not playing)
+        self.sidebar.setVisible(not playing and not self.web_ui)
+        if self.web_ui:
+            self.web_return_bar.setVisible(not playing and page_is_native(self))
         self.statusBar().setVisible(not playing)
 
     def changeEvent(self, event):
@@ -129,6 +138,26 @@ class MainWindow(QMainWindow):
         # 방향키로 페이지를 훑는 동안에는 사이드바의 키보드 포커스를 유지한다.
         if from_sidebar:
             (self.sidebar.settings if index == 5 else self.sidebar.list).setFocus()
+
+    def navigate_web_tab(self, tab):
+        from .web_contract import TABS
+        names = [name for name, _ in TABS]
+        if tab not in names:
+            return
+        index = names.index(tab)
+        if tab in ('library', 'statistics'):
+            self.end_playback()
+            self.library_page.set_tab(tab)
+            self.pages.setCurrentWidget(self.library_page)
+            if tab == 'library':
+                self.refresh()
+            self.library_page.focus_content()
+        else:
+            self.library_page.set_tab(tab)
+            self.navigate(index if index < 4 else index - 1)
+
+    def return_to_web(self):
+        self.navigate_web_tab(self.library_page.last_web_tab)
 
     @property
     def worker(self):
@@ -233,6 +262,8 @@ class MainWindow(QMainWindow):
 
     def show_library(self):
         self.end_playback()
+        if self.web_ui:
+            self.library_page.set_tab("library")
         self.pages.setCurrentIndex(0)
         self.refresh(focus_gems=self._return_to_gems)
         self._return_to_gems = False
@@ -301,17 +332,29 @@ class MainWindow(QMainWindow):
                 or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):
             return super().eventFilter(watched, event)
         if (event.modifiers() == Qt.KeyboardModifier.ControlModifier
-                and Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_6):
+                and Qt.Key.Key_1 <= event.key() <= (Qt.Key.Key_7 if self.web_ui else Qt.Key.Key_6)):
             if not event.isAutoRepeat():
-                self.navigate(event.key() - Qt.Key.Key_1)
+                if self.web_ui:
+                    from .web_contract import TABS
+                    self.navigate_web_tab(TABS[event.key() - Qt.Key.Key_1][0])
+                else:
+                    self.navigate(event.key() - Qt.Key.Key_1)
             return True
         if event.modifiers() == Qt.KeyboardModifier.AltModifier and event.key() == Qt.Key.Key_S:
             if not event.isAutoRepeat():
                 self.settings_menu.popup(self.menuBar().mapToGlobal(self.menuBar().actionGeometry(
                     self.settings_menu.menuAction()).bottomLeft()))
             return True
+        if (self.web_ui and page_is_native(self) and event.key() == Qt.Key.Key_Escape
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
+            self.return_to_web()
+            return True
         handle_key = getattr(self.pages.currentWidget(), "handle_key", None)
         return handle_key(event) if callable(handle_key) else False
 
     def closeEvent(self, event):
         self.tray.close_window(event)
+
+
+def page_is_native(window):
+    return window.pages.currentWidget() not in (window.library_page, window.playback_page)

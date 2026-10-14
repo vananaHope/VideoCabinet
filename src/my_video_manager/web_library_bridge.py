@@ -2,9 +2,10 @@
 
 import json
 
-from PySide6.QtCore import QObject, Signal, Slot, QTimer
+from PySide6.QtCore import QObject, QTimer
 
 from .web_library_data import details_data
+from .web_contract import ACTIONS, SCAN_LOCKED_ACTIONS, TABS, bridge_slot, bridge_signal
 
 
 def encode(value):
@@ -12,39 +13,39 @@ def encode(value):
 
 
 class LibraryBridge(QObject):
-    changed = Signal(str)
-    detailsChanged = Signal(int)
-    focusRequested = Signal(str)
-    error = Signal(str)
+    libraryChanged = bridge_signal('libraryChanged')
+    libraryDetailsChanged = bridge_signal('libraryDetailsChanged')
+    libraryFocusRequested = bridge_signal('libraryFocusRequested')
+    libraryError = bridge_signal('libraryError')
 
     def __init__(self, page):
         super().__init__(page)
         self.page = page
         self.busy = False
 
-    @Slot(result=str)
+    @bridge_slot('snapshot')
     def snapshot(self):
         return encode(self.page.payload())
 
-    @Slot(result=str)
+    @bridge_slot('ready')
     def ready(self):
         self.page.frontend_ready()
         return encode({'ok': True})
 
-    @Slot(str, int, result=str)
+    @bridge_slot('filter')
     def filter(self, query, tag_id):
         self.page.query, self.page.tag_id = query, tag_id if tag_id > 0 else None
         self.page.apply_filters()
         return encode({'visibleIds': self.page.visible_ids, 'selectedId': self.page.selected_id})
 
-    @Slot(int, result=str)
+    @bridge_slot('select')
     def select(self, video_id):
         if video_id not in self.page.visible_ids:
             return encode({'error': '현재 목록에 없는 영상입니다.'})
         self.page.selected_id = video_id
         return encode({'selectedId': video_id})
 
-    @Slot(int, result=str)
+    @bridge_slot('details')
     def details(self, video_id):
         try:
             if video_id not in self.page.video_ids:
@@ -53,18 +54,31 @@ class LibraryBridge(QObject):
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
 
-    @Slot(str, int, result=str)
+    @bridge_slot('action')
     def action(self, action, video_id):
-        allowed = {'play', 'playGem', 'dismiss', 'tags', 'subtitles', 'review', 'series', 'rename', 'reconnect', 'exclude'}
+        allowed = ACTIONS
         if action not in allowed or video_id not in self.page.video_ids:
             return encode({'error': '지원하지 않는 작업 또는 영상입니다.'})
         if action in {'playGem', 'dismiss'} and video_id not in self.page.gem_ids:
             return encode({'error': '현재 추천에 없는 영상입니다.'})
-        if self.busy or (self.page.worker is not None and action in {'rename', 'reconnect', 'exclude'}):
+        if self.busy or (self.page.worker is not None and action in SCAN_LOCKED_ACTIONS):
             return encode({'error': '진행 중인 작업이 끝난 뒤 다시 시도하세요.'})
         self.busy = True
         # WebChannel 응답을 먼저 돌려주고 Qt 대화상자의 중첩 이벤트 루프를 연다.
         QTimer.singleShot(0, lambda: self.perform(action, video_id))
+        return encode({'ok': True})
+
+    shellChanged = bridge_signal('shellChanged')
+
+    @bridge_slot('shellSnapshot')
+    def shellSnapshot(self):
+        return encode({'tab': self.page.active_tab})
+
+    @bridge_slot('navigate')
+    def navigate(self, tab):
+        if tab not in dict(TABS):
+            return encode({'error': '없는 페이지입니다.'})
+        QTimer.singleShot(0, lambda: self.page.window.navigate_web_tab(tab))
         return encode({'ok': True})
 
     def perform(self, action, video_id):
@@ -91,7 +105,7 @@ class LibraryBridge(QObject):
                 callbacks[action]()
                 page.refresh_details(video_id)
         except (ValueError, OSError, RuntimeError) as error:
-            self.error.emit(str(error))
+            self.libraryError.emit(str(error))
         finally:
             self.busy = False
             if page.isVisible() and action != 'dismiss':

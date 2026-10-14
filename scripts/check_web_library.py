@@ -26,6 +26,9 @@ parser.add_argument('--count', type=int, default=24)
 parser.add_argument('--prepare', action='store_true')
 parser.add_argument('--source', type=Path)
 parser.add_argument('--verify', action='store_true')
+parser.add_argument('--verify-shell', action='store_true')
+parser.add_argument('--long-content', action='store_true')
+parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-46')
 parser.add_argument('--verify-gems', action='store_true', help='보석 0·1·4·5·10개의 배치와 가로 키 이동 검증')
 parser.add_argument('--stay', action='store_true')
 args = parser.parse_args()
@@ -47,7 +50,7 @@ from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.ui import MainWindow
 
 app = QApplication([])
-directory = ROOT / '.local' / 'issue43' / f'demo-{args.count}'
+directory = ROOT / '.local' / 'issue46' / f'demo-{args.count}'
 directory.mkdir(parents=True, exist_ok=True)
 if args.verify_gems:
     directory = Path(tempfile.mkdtemp(prefix='gems-', dir=directory.parent))
@@ -109,8 +112,14 @@ if args.prepare:
     print(json.dumps({'prepared': len(core.videos()), 'added': result.added}, ensure_ascii=False))
     raise SystemExit()
 
+if args.long_content and core.videos():
+    first = core.videos()[0]
+    core.rename_video(first.id, '아주 긴 한글 제목과 공백 없는 영문 제목의 카드 경계 확인 ' + 'LongVideoTitle' * 14)
+    for index in range(4):
+        core.add_video_tag(first.id, f'{index} 긴 태그 이름 ' + '태그' * 20)
+
 window = MainWindow(core)
-window.setWindowTitle(f'이슈 43 검증 · {args.mode} · {args.count}')
+window.setWindowTitle(f'이슈 46 검증 · {args.mode} · {args.count}')
 window.resize(1100, 720)
 window.show()
 window.raise_()
@@ -169,16 +178,72 @@ def run_web_frames(script):
 
 
 if args.mode == 'web':
-    wait_until(lambda: bool(js("!!document.getElementById('library-grid')")))
+    # 시작 측정에도 폴링을 넣지 않는다. React의 첫 렌더 완료 슬롯이 Qt로 알린다.
+    startup_loop = QEventLoop()
+    page.frontend_loaded.connect(startup_loop.quit)
+    startup_timeout = QTimer()
+    startup_timeout.setSingleShot(True)
+    startup_timeout.timeout.connect(startup_loop.quit)
+    startup_timeout.start(20000)
+    if not page._frontend_ready:
+        startup_loop.exec()
+    startup_timeout.stop()
+    page.frontend_loaded.disconnect(startup_loop.quit)
+    assert page._frontend_ready, '첫 React 렌더 완료 시간 초과'
     run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
 else:
-    wait_until(lambda: page.grid.model().rowCount() == args.count)
+    app.processEvents()
+    assert page.grid.model().rowCount() == args.count
 settle()
 startup = (time.perf_counter() - STARTED) * 1000
-screens = ROOT / '.local/screens-43'
-screens.mkdir(exist_ok=True)
+screens = args.output
+screens.mkdir(parents=True, exist_ok=True)
 window.grab().save(str(screens / f'{args.mode}-{args.count}.png'))
 metrics = {'mode': args.mode, 'count': args.count, 'startup_ms': round(startup, 2), 'checks': []}
+
+if args.verify_shell and args.mode == 'qt':
+    for index, tab in enumerate(('library', 'reel', 'search', 'queue', 'folders', 'settings')):
+        window.navigate(index)
+        settle()
+        window.grab().save(str(screens / f'qt-tab-{tab}-{args.count}.png'))
+    window.navigate(0)
+    settle()
+
+if args.verify_shell and args.mode == 'web':
+    from my_video_manager.web_contract import TABS
+    # 탭 클릭은 실제 DOM 버튼을 사용하고, 복귀 키는 Qt WebEngine 포커스 프록시에 전달한다.
+    for index, (tab, _) in enumerate(TABS):
+        window.navigate_web_tab('library')
+        settle()
+        js(f"document.querySelectorAll('nav button')[{index}].click()")
+        settle()
+        assert page.active_tab == tab
+        target = page if index in (0, 4) else window.navigation_pages[index if index < 4 else index - 1]
+        assert window.pages.currentWidget() is target
+        window.grab().save(str(screens / f'tab-{tab}-{args.count}.png'))
+        if target is not page:
+            QTest.keyClick(window.focusWidget(), Qt.Key.Key_Escape)
+            assert window.pages.currentWidget() is page, (tab, window.isActiveWindow(), QApplication.activeModalWidget(), QApplication.activePopupWidget(), window.focusWidget())
+        QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
+        settle()
+        assert page.active_tab == 'library'
+    for index, (tab, _) in enumerate(TABS):
+        window.navigate_web_tab('library')
+        settle()
+        QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
+        settle()
+        assert page.active_tab == tab
+    # Qt 페이지에서 다른 Qt 페이지/웹 페이지로 연속 이동한다.
+    for index in (1, 2, 3, 5, 6, 4, 0):
+        QTest.keyClick(window.focusWidget(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
+        settle()
+        assert page.active_tab == TABS[index][0]
+    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+    assert window.settings_menu.isVisible()
+    window.settings_menu.hide()
+    settle()
+    assert not window.sidebar.isVisible()
+    metrics['checks'].append('일곱 탭 클릭·Ctrl+1~7·Qt Esc 복귀·Alt+S')
 
 
 def gem_layout():
@@ -191,7 +256,8 @@ def gem_layout():
       const visible = el => { const r = el.getBoundingClientRect();
         return r.left >= bounds.left && r.right <= bounds.right && r.top >= bounds.top && r.bottom <= bounds.bottom;
       };
-      return {buttons: buttons.length, visibleButtons: buttons.filter(el => {
+      return {headerHeight: document.querySelector('header').getBoundingClientRect().height,
+      buttons: buttons.length, visibleButtons: buttons.filter(el => {
         const r = el.getBoundingClientRect(); return r.top >= panel.top && r.bottom <= panel.bottom;
       }).length, gems: cards.length, visibleGems: cards.filter(visible).length,
       rowHeight: bounds?.height ?? 0, gridHeight: document.getElementById('library-grid').clientHeight,
@@ -199,6 +265,28 @@ def gem_layout():
       rows: new Set(cards.map(el => el.getBoundingClientRect().top)).size,
       horizontalOverflow: row ? row.scrollWidth > row.clientWidth : false};
     })()""")
+
+
+def verify_detail_access():
+    """#48 전까지 기존 패널 스크롤을 유지한다. 모든 작업에 Tab으로 닿아야 한다."""
+    js("document.querySelector('aside button').focus()")
+    reached = []
+    for index in range(8):
+        settle(40)
+        state = js_json("""(() => {
+          const button = document.activeElement; const panel = document.querySelector('aside');
+          const b = button.getBoundingClientRect(), p = panel.getBoundingClientRect();
+          return {text: button.textContent, inPanel: panel.contains(button), visible: b.top >= p.top && b.bottom <= p.bottom};
+        })()""")
+        assert state['inPanel'] and state['visible'], state
+        reached.append(state['text'])
+        if index < 7:
+            QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
+    assert len(set(reached)) == 8, reached
+    js("document.querySelector('aside').scrollTop = 0")
+    page.focus_content()
+    settle()
+    return reached
 
 
 def contrast(selector):
@@ -236,7 +324,8 @@ if args.verify_gems:
         window.grab().save(str(screens / f'web-gems-{count}.png'))
         print(json.dumps(layout, ensure_ascii=False), flush=True)
         (screens / 'web-gems-check.json').write_text(json.dumps(layouts, ensure_ascii=False, indent=2), encoding='utf-8')
-        assert layout['buttons'] == layout['visibleButtons'] == 8, layout
+        assert layout['buttons'] == 8, layout
+        layout['keyboardAccessibleActions'] = verify_detail_access()
         assert layout['rows'] == (1 if count else 0), layout
         assert layout['visibleGems'] == min(count, 4), layout
         if count:
@@ -291,11 +380,12 @@ if args.verify and args.mode == 'web':
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
     metrics['checks'].append('시작 직후 격자 포커스 (명시적 focus_content 호출 없음)')
     layout = gem_layout()
-    assert layout['buttons'] == layout['visibleButtons'] == 8, layout
+    assert layout['buttons'] == 8, layout
+    layout['keyboardAccessibleActions'] = verify_detail_access()
     assert layout['gems'] == len(page.gem_ids) and layout['rows'] <= 1, layout
     assert layout['visibleGems'] == min(4, len(page.gem_ids)), layout
     metrics['layout'] = layout
-    metrics['checks'].append('1100×720 작업 버튼 8개 노출, 보석 한 줄과 첫 4개 노출')
+    metrics['checks'].append('1100×720 작업 버튼 8개 Tab·스크롤 접근, 보석 한 줄과 첫 4개 노출')
     js("document.getElementById('library-grid').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, isComposing:true}))")
     settle(100)
     assert core.playback.session is None
@@ -377,12 +467,12 @@ if args.verify and args.mode == 'web':
     QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
     metrics['checks'].append('Tab 검색 → 태그 → 숨겨진 보석 → 격자')
-    for index in range(1, 6):
+    for index in range(1, 7):
         page.focus_content()
         window.pages.setCurrentWidget(page)
         QTest.qWait(80)
         QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
-        wait_until(lambda: window.pages.currentWidget() is window.navigation_pages[index])
+        wait_until(lambda: window.pages.currentWidget() is (page if index == 4 else window.navigation_pages[index if index < 4 else index - 1]))
     window.navigate(0)
     page.focus_content()
     QTest.qWait(100)
@@ -391,7 +481,7 @@ if args.verify and args.mode == 'web':
     QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
     wait_until(window.settings_menu.isVisible)
     window.settings_menu.hide()
-    metrics['checks'].append('웹 포커스 Ctrl+1~6, Alt+S')
+    metrics['checks'].append('웹 포커스 Ctrl+1~7, Alt+S')
     # 실제 mpv로 열 수 있는 복사본만 골라 Enter 재생·Esc 복귀를 확인한다.
     playable = next((v for v in reversed(core.videos()) if any(loc.path.stat().st_size > 1000 for loc in v.locations)), None)
     if playable:
@@ -407,6 +497,7 @@ if args.verify and args.mode == 'web':
         QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Return)
         wait_until(lambda: window.pages.currentWidget() is window.playback_page)
         QTest.qWait(500)
+        window.grab().save(str(screens / f'mpv-{args.count}.png'))
         QTest.keyClick(window.surface, Qt.Key.Key_Escape)
         wait_until(lambda: window.pages.currentWidget() is page)
         QTest.qWait(250)
@@ -414,6 +505,14 @@ if args.verify and args.mode == 'web':
         assert before == after, (before, after)
         assert js('document.activeElement.id') == 'library-grid'
         metrics['checks'].append('실제 mpv Enter 재생 / Esc 선택·스크롤·포커스 복귀')
+        for tab in ('statistics', 'search', 'reel', 'queue', 'folders', 'settings'):
+            window.navigate_web_tab(tab)
+            settle()
+            window.navigate_web_tab('library')
+            settle()
+            returned = js_json("({id: document.getElementById('library-grid').getAttribute('aria-activedescendant'), top: document.getElementById('library-grid').scrollTop})")
+            assert returned == {'id': before['id'], 'top': before['top']}, (tab, before, returned)
+        metrics['checks'].append('통계·Qt 모든 탭 왕복 뒤 라이브러리 선택·스크롤 복원')
         # 더블클릭도 브리지를 거쳐 같은 네이티브 플레이어를 연다.
         js(f"document.getElementById('video-{playable.id}').dispatchEvent(new MouseEvent('dblclick', {{bubbles:true}}))")
         wait_until(lambda: window.pages.currentWidget() is window.playback_page)
