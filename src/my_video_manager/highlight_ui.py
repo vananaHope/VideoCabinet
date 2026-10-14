@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 from .tag_ui import TagEditor
+from .theme import PROGRESS_PLAYED, BORDER, TEXT, HIGHLIGHT_POINT, HIGHLIGHT_RANGE, HIGHLIGHT_OPEN
 
 
 def timestamp(seconds: float) -> str:
@@ -34,24 +35,24 @@ class HighlightProgress(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         left, width = 5, max(1, self.width() - 10)
-        painter.fillRect(left, 10, width, 12, QColor("#454b54"))
+        painter.fillRect(left, 10, width, 12, QColor(BORDER))
         if self.duration <= 0:
             return
 
         def x(seconds):
             return left + round(width * max(0, min(1, seconds / self.duration)))
 
-        painter.fillRect(left, 10, x(self.position) - left, 12, QColor("#668ab0"))
+        painter.fillRect(left, 10, x(self.position) - left, 12, QColor(PROGRESS_PLAYED))
         for highlight in self.highlights:
             if highlight.end is None:
-                painter.fillRect(x(highlight.start) - 2, 5, 4, 22, QColor("#ffd166"))
+                painter.fillRect(x(highlight.start) - 2, 5, 4, 22, QColor(HIGHLIGHT_POINT))
             else:
                 painter.fillRect(x(highlight.start), 12,
-                                 max(2, x(highlight.end) - x(highlight.start)), 8, QColor("#70d6a3"))
+                                 max(2, x(highlight.end) - x(highlight.start)), 8, QColor(HIGHLIGHT_RANGE))
         if self.open_start is not None:
             start, end = sorted((x(self.open_start), x(self.position)))
-            painter.fillRect(start, 12, max(2, end - start), 8, QColor("#f69b50"))
-        painter.setPen(QPen(QColor("white"), 2))
+            painter.fillRect(start, 12, max(2, end - start), 8, QColor(HIGHLIGHT_OPEN))
+        painter.setPen(QPen(QColor(TEXT), 2))
         painter.drawLine(x(self.position), 2, x(self.position), 28)
 
 

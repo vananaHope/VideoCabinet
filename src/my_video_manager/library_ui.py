@@ -26,9 +26,8 @@ class LibraryControls(QWidget):
         layout.addStretch()
 
     def selected_video(self):
-        item = self.window.list.currentItem()
-        if item:
-            video_id = item.data(Qt.ItemDataRole.UserRole)
+        video_id = self.window.library_page.selected_video_id()
+        if video_id is not None:
             return next((v for v in self.core.videos() if v.id == video_id), None)
         QMessageBox.information(self.window, "영상 선택", "목록에서 영상을 먼저 선택하세요.")
         return None
@@ -118,4 +117,4 @@ class LibraryControls(QWidget):
         )
         if ok:
             self.apply(lambda: self.core.set_minimum_duration(seconds))
-            self.window.status.setText("최소 길이를 저장했습니다. 다시 검사하면 새 기준을 적용합니다. 기존 영상은 유지합니다.")
+            self.window.library_page.show_status("최소 길이를 저장했습니다. 다시 검사하면 새 기준을 적용합니다. 기존 영상은 유지합니다.")

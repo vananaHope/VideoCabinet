@@ -17,6 +17,8 @@ def main():
     from .single_instance import SingleInstance
 
     app = QApplication(sys.argv[:1])
+    from .theme import apply_theme
+    apply_theme(app)
     app.setQuitOnLastWindowClosed(False)
     try:
         data_directory = args.data_dir or default_data_directory()

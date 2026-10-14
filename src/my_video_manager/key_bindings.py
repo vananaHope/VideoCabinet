@@ -17,7 +17,8 @@ _NAMED_KEYS = ("Enter", "Space", "Tab", "Backspace", "Left", "Right", "Up", "Dow
 _ALIASES = {key.casefold(): key for key in _NAMED_KEYS}
 _ALIASES.update(pageup="PgUp", pagedown="PgDn", pgdown="PgDn", esc="Esc", escape="Esc")
 _ALIASES["return"] = "Enter"
-RESERVED_KEYS = {"Alt+S": "설정 메뉴를 여는 예약 키"}
+RESERVED_KEYS = {"Alt+S": "설정 메뉴를 여는 예약 키",
+                 **{f"Ctrl+{i}": "사이드바 페이지를 여는 예약 키" for i in range(1, 7)}}
 
 
 def normalize_key(key: str) -> str:
