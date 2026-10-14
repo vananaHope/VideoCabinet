@@ -280,6 +280,34 @@ def test_settings_menu_key_is_reserved_without_changing_saved_bindings(tmp_path,
         row.command: row.default_keys for row in core.key_bindings()}
 
 
+@pytest.mark.parametrize("number", range(1, 7))
+def test_sidebar_keys_reject_both_save_apis_and_preserve_custom_keys(tmp_path, number):
+    core = open_core(tmp_path)
+    pause = Command(CommandType.TOGGLE_PAUSE)
+    bindings = draft(core)
+    bindings[pause] = ("Space",)
+    core.save_key_bindings(bindings)
+    invalid = dict(bindings)
+    invalid[pause] = (f"ctrl+{number}",)
+    with pytest.raises(ValueError, match="사이드바.*예약 키"):
+        core.save_key_bindings(invalid)
+    with pytest.raises(ValueError, match="사이드바.*예약 키"):
+        core.set_key_bindings({f"Ctrl+{number}": pause})
+    for app in (core, open_core(tmp_path)):
+        assert draft(app) == bindings
+        assert app.command_for_key(f"Ctrl+{number}") is None
+        assert app.command_for_key("Space") == pause
+
+
+@pytest.mark.parametrize("number", range(1, 7))
+def test_old_saved_sidebar_keys_use_existing_invalid_settings_fallback(tmp_path, number):
+    core = open_core(tmp_path)
+    core.settings.set("keys.bindings", {"toggle_pause:0": [f"Ctrl+{number}"]})
+    reopened = open_core(tmp_path)
+    assert all(row.keys == row.default_keys for row in reopened.key_bindings())
+    assert reopened.command_for_key(f"Ctrl+{number}") is None
+
+
 @pytest.mark.parametrize("stored", [
     "garbage", ["Enter"], {"gone:0": ["F8"]},
     {"toggle_pause:0": ["Invalid"]}, {"toggle_pause:0": ["Esc"]},
