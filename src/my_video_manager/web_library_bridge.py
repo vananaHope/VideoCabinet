@@ -1,51 +1,46 @@
-"""단일 QWebChannel 객체. 웹에는 JSON 값과 제한된 작업 이름만 공개한다."""
-
-import json
+"""라이브러리 전용 QWebChannel 객체. 웹에는 JSON 값과 제한된 작업 이름만 공개한다."""
 
 from PySide6.QtCore import QObject, QTimer
 
 from .web_library_data import details_data, highlights_data
-from .web_contract import MENU_ACTIONS, GEM_ACTIONS, SCAN_LOCKED_ACTIONS, TABS, bridge_slot, bridge_signal
-
-
-def encode(value):
-    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+from .web_contract import MENU_ACTIONS, GEM_ACTIONS, SCAN_LOCKED_ACTIONS, LIBRARY
+from .web_bridge import encode
 
 
 class LibraryBridge(QObject):
-    libraryChanged = bridge_signal('libraryChanged')
-    libraryDetailsChanged = bridge_signal('libraryDetailsChanged')
-    libraryFocusRequested = bridge_signal('libraryFocusRequested')
-    libraryError = bridge_signal('libraryError')
+    libraryChanged = LIBRARY.signal('libraryChanged')
+    libraryDetailsChanged = LIBRARY.signal('libraryDetailsChanged')
+    libraryFocusRequested = LIBRARY.signal('libraryFocusRequested')
+    libraryError = LIBRARY.signal('libraryError')
 
     def __init__(self, page):
         super().__init__(page)
         self.page = page
         self.busy = False
 
-    @bridge_slot('snapshot')
+    @LIBRARY.slot('snapshot')
     def snapshot(self):
         return encode(self.page.payload())
 
-    @bridge_slot('ready')
+    @LIBRARY.slot('ready')
     def ready(self):
         self.page.frontend_ready()
         return encode({'ok': True})
 
-    @bridge_slot('filter')
+    @LIBRARY.slot('filter')
     def filter(self, query, tag_id):
         self.page.query, self.page.tag_id = query, tag_id if tag_id > 0 else None
         self.page.apply_filters()
         return encode({'visibleIds': self.page.visible_ids, 'selectedId': self.page.selected_id})
 
-    @bridge_slot('select')
+    @LIBRARY.slot('select')
     def select(self, video_id):
         if video_id not in self.page.visible_ids:
             return encode({'error': '현재 목록에 없는 영상입니다.'})
         self.page.selected_id = video_id
         return encode({'selectedId': video_id})
 
-    @bridge_slot('details')
+    @LIBRARY.slot('details')
     def details(self, video_id):
         try:
             if video_id not in self.page.video_ids:
@@ -54,7 +49,7 @@ class LibraryBridge(QObject):
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
 
-    @bridge_slot('action')
+    @LIBRARY.slot('action')
     def action(self, action, video_id):
         if (action not in MENU_ACTIONS and action not in GEM_ACTIONS) or video_id not in self.page.video_ids:
             return encode({'error': '지원하지 않는 작업 또는 영상입니다.'})
@@ -67,7 +62,7 @@ class LibraryBridge(QObject):
         QTimer.singleShot(0, lambda: self.perform(action, video_id))
         return encode({'ok': True})
 
-    @bridge_slot('highlights')
+    @LIBRARY.slot('highlights')
     def highlights(self, video_id):
         try:
             if video_id not in self.page.video_ids:
@@ -76,11 +71,11 @@ class LibraryBridge(QObject):
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
 
-    @bridge_slot('playHighlight')
+    @LIBRARY.slot('playHighlight')
     def playHighlight(self, video_id, highlight_id):
         return self.queue_highlight(video_id, highlight_id, edit=False)
 
-    @bridge_slot('editHighlight')
+    @LIBRARY.slot('editHighlight')
     def editHighlight(self, video_id, highlight_id):
         return self.queue_highlight(video_id, highlight_id, edit=True)
 
@@ -121,20 +116,6 @@ class LibraryBridge(QObject):
             self.busy = False
             if not edit and page.isVisible():
                 page.focus_content()
-
-    shellChanged = bridge_signal('shellChanged')
-    shellStatusChanged = bridge_signal('shellStatusChanged')
-
-    @bridge_slot('shellSnapshot')
-    def shellSnapshot(self):
-        return encode({'tab': self.page.active_tab, 'status': self.page.window.statusBar().currentMessage()})
-
-    @bridge_slot('navigate')
-    def navigate(self, tab):
-        if tab not in dict(TABS):
-            return encode({'error': '없는 페이지입니다.'})
-        QTimer.singleShot(0, lambda: self.page.window.navigate_web_tab(tab))
-        return encode({'ok': True})
 
     def perform(self, action, video_id):
         page = self.page

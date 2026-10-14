@@ -82,7 +82,8 @@ Remove-Item Env:MVM_WEB_DEV_URL
 ```
 
 웹 데이터 계약은 `web_library_data.py`, 슬롯·신호·작업·탭 계약은 `web_contract.py`가 원본입니다.
-웹은 생성된 `publicBridge()` 래퍼만 사용하며 QObject 내부 메서드는 공개 API에 포함하지 않습니다.
+웹은 생성된 `publicShellBridge()`·`publicLibraryBridge()` 래퍼만 사용하며 QObject 내부 메서드는 공개 API에 포함하지 않습니다.
+`connectBridge()`가 이 공개 래퍼들의 묶음(`{ shell, library }`)을 돌려줍니다.
 `web_tokens.json`은 웹 CSS와 후속 Qt 재생 화면에서 공유하는 색·간격·글꼴의 단일 원본입니다.
 Python에서는 `web_tokens.web_tokens()`로 읽습니다.
 변경 후 `.venv/Scripts/python scripts/generate_web_types.py`로 TypeScript 계약과 CSS 토큰을 생성합니다.
@@ -647,6 +648,47 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 ```
 
 ## 구조와 테스트
+
+### 새 웹 페이지 추가하는 법
+
+웹 뷰·프로필·채널·요청 차단·썸네일·탭 이동·포커스·설정 메뉴·상태 알림은
+`web_shell.py`의 `WebShellHost`가 소유합니다. 페이지 컨트롤러는 자기 데이터·작업·갱신만 맡고
+`host.register_page(self)`로 등록합니다. `MainWindow.home_page`는 화면에 표시하는 웹 호스트
+또는 기존 Qt 라이브러리이고, `library_page`는 라이브러리 작업 담당입니다.
+웹 컨트롤러의 QWidget 부모는 기존 Qt 대화상자 수명주기를 위한 것이며 자체 화면은 표시하지 않습니다.
+
+예를 들어 기존 `search` 탭을 웹으로 바꿀 때 다음 순서로 작업합니다.
+
+1. `src/my_video_manager/web_contract.py`에 불변 `SEARCH = BridgeContract(name='search',
+   interface='SearchBridge', slots=..., signals=..., aliases=..., constants=..., data_types=...)`를 선언하고
+   `CONTRACTS`에 `SEARCH` 한 줄을 추가합니다. 슬롯 인수는 `Argument`, 문자열 유니온은 `TypeAlias`,
+   페이지 고유 상수는 `Constant`로 선언합니다. 필요하면 새 데이터 모듈에 TypedDict를 정의하고
+   `data_types`에 넣습니다. 공용 TypedDict는 소유 계약에 한 번만 등록합니다.
+2. 새 `src/my_video_manager/web_search_page.py`에 QObject 브리지와 `WebPageController`를 구현합니다
+   (브리지가 커지면 `web_search_bridge.py`로 분리). `@SEARCH.slot('find')`,
+   `SEARCH.signal('resultsChanged')`처럼 계약으로 Qt 표면을 선언합니다.
+   컨트롤러의 `tab = 'search'`, `bridge`, `refresh()`를 구현하고 초기화 마지막에
+   `host.register_page(self)`를 호출합니다. 자체 포커스가 필요하면 `default_focus`와
+   `focus_requested` 신호를 지정하고, 웹 첫 렌더 후 호출하는 `ready` 슬롯에서
+   `self.page.frontend_ready()`를 호출합니다. 포커스 요청은 호스트가 준비될 때까지 보존합니다.
+3. `web_pages.py`에 컨트롤러를 import하고 `WEB_PAGES`에 한 줄 등록합니다.
+   전환한 `search`의 `NATIVE_PAGES` 한 줄은 제거합니다. 나머지 Qt 페이지 번호는 그대로 둡니다.
+4. 새 `frontend/src/pages/SearchPage.tsx`를 작성합니다. `connectBridge()`에서
+   `{ search, shell }`을 받아 생성된 공개 메서드만 사용하고, 효과를 정리할 때 신호 구독을 해제합니다.
+   페이지는 숨겨져도 마운트를 유지하므로 선택·검색어·스크롤을 보존할 수 있습니다.
+   `pages/index.ts`에서 컴포넌트를 import하고 `search: null` 한 줄을 `search: SearchPage`로 바꿉니다.
+5. `.venv/Scripts/python scripts/generate_web_types.py`로 재생성한 뒤 `--check`, 전체 pytest,
+   `frontend/`의 `npm run lint`, `npm run typecheck`, `npm run build`를 실행합니다.
+   `scripts/check_web_library.py`로 1100×720 화면·단축키·Qt/mpv 왕복도 확인합니다.
+
+호스트·생성기·`App.tsx`·`bridge.ts`·`ui.py`는 새 페이지 때문에 고칠 필요가 없습니다.
+채널 이름은 `TABS`의 `library`, `reel`, `search`, `queue`, `statistics`, `folders`, `settings`와 같고,
+공통 객체만 `shell`입니다. 통계의 준비 중 화면도 같은 등록부를 사용합니다.
+`tests/test_web_generator.py`는 예시 계약을 앞·중간·뒤에 추가해도 기존 페이지 출력이 그대로인지,
+`tests/test_web_pages.py`는 새 컨트롤러의 브리지·갱신·포커스 연결과 양쪽 등록부 일치를 확인합니다.
+탭 누락·중복은 Qt 시작 또는 테스트에서 실패하고, 웹 등록부의 누락·오타는 typecheck에서도 실패합니다.
+생성 파일은 직접 수정하지 않습니다. 페이지 객체로 나뉘어 `library` 신호 접두어는 기술적으로
+필수가 아니지만 기존 호출부와 병렬 작업의 호환성을 위해 유지합니다.
 
 - `core.py`: 앱 코어 공개 API인 `AppCore`, 기능별 위임, SQLite 연결, 키 명령·속도 범위 정책.
 - `__init__.py`: Python 패키지 선언.

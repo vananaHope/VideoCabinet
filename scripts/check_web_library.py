@@ -127,6 +127,7 @@ window.show()
 window.raise_()
 window.activateWindow()
 page = window.library_page
+host = window.home_page
 
 
 def wait_until(predicate, timeout=20):
@@ -141,7 +142,7 @@ def wait_until(predicate, timeout=20):
 
 def js(code):
     values = []
-    page.engine_page.runJavaScript(code, values.append)
+    host.engine_page.runJavaScript(code, values.append)
     wait_until(lambda: bool(values))
     return values[0]
 
@@ -167,31 +168,31 @@ def run_web_frames(script):
             completed.append(True)
             loop.quit()
 
-    page.engine_page.titleChanged.connect(finished)
+    host.engine_page.titleChanged.connect(finished)
     timeout = QTimer()
     timeout.setSingleShot(True)
     timeout.timeout.connect(loop.quit)
     timeout.start(15000)
-    page.engine_page.runJavaScript(f'(() => {{ const done = () => document.title = {json.dumps(marker)}; {script} }})()')
+    host.engine_page.runJavaScript(f'(() => {{ const done = () => document.title = {json.dumps(marker)}; {script} }})()')
     loop.exec()
     timeout.stop()
-    page.engine_page.titleChanged.disconnect(finished)
+    host.engine_page.titleChanged.disconnect(finished)
     assert completed, '웹 프레임 완료 알림 시간 초과'
 
 
 if args.mode == 'web':
     # 시작 측정에도 폴링을 넣지 않는다. React의 첫 렌더 완료 슬롯이 Qt로 알린다.
     startup_loop = QEventLoop()
-    page.frontend_loaded.connect(startup_loop.quit)
+    host.frontend_loaded.connect(startup_loop.quit)
     startup_timeout = QTimer()
     startup_timeout.setSingleShot(True)
     startup_timeout.timeout.connect(startup_loop.quit)
     startup_timeout.start(20000)
-    if not page._frontend_ready:
+    if not host._frontend_ready:
         startup_loop.exec()
     startup_timeout.stop()
-    page.frontend_loaded.disconnect(startup_loop.quit)
-    assert page._frontend_ready, '첫 React 렌더 완료 시간 초과'
+    host.frontend_loaded.disconnect(startup_loop.quit)
+    assert host._frontend_ready, '첫 React 렌더 완료 시간 초과'
     run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
 else:
     app.processEvents()
@@ -245,32 +246,32 @@ if args.verify_shell and args.mode == 'web':
         settle()
         js(f"document.querySelectorAll('nav button')[{index}].click()")
         settle()
-        assert page.active_tab == tab
-        target = page if index in (0, 4) else window.navigation_pages[index if index < 4 else index - 1]
+        assert host.active_tab == tab
+        target = host if index in (0, 4) else window.navigation_pages[index if index < 4 else index - 1]
         assert window.pages.currentWidget() is target
         assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
         window.grab().save(str(screens / f'tab-{tab}-{args.count}.png'))
-        if target is not page:
+        if target is not host:
             shell_key(window.focusWidget(), Qt.Key.Key_Escape)
-            assert window.pages.currentWidget() is page, (tab, window.isActiveWindow(), QApplication.activeModalWidget(), QApplication.activePopupWidget(), window.focusWidget())
-        shell_key(page.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
+            assert window.pages.currentWidget() is host, (tab, window.isActiveWindow(), QApplication.activeModalWidget(), QApplication.activePopupWidget(), window.focusWidget())
+        shell_key(host.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
         settle()
-        assert page.active_tab == 'library'
+        assert host.active_tab == 'library'
     for index, (tab, _) in enumerate(TABS):
         window.navigate_web_tab('library')
         settle()
-        shell_key(page.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
+        shell_key(host.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
         settle()
-        assert page.active_tab == tab, (tab, page.active_tab, window.isActiveWindow())
+        assert host.active_tab == tab, (tab, host.active_tab, window.isActiveWindow())
     # Qt 페이지에서 다른 Qt 페이지/웹 페이지로 연속 이동한다.
     for index in (1, 2, 3, 5, 6, 4, 0):
         shell_key(window.focusWidget(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
         settle()
-        assert page.active_tab == TABS[index][0]
-    shell_key(page.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+        assert host.active_tab == TABS[index][0]
+    shell_key(host.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
     wait_until(window.settings_menu.isVisible)
     anchor = js_json("(() => {const r = document.querySelector('nav [data-tab=settings]').getBoundingClientRect(); return [r.right, r.bottom]})()")
-    anchor = page.view.mapToGlobal(QPoint(*[round(v * page.view.zoomFactor()) for v in anchor]))
+    anchor = host.view.mapToGlobal(QPoint(*[round(v * host.view.zoomFactor()) for v in anchor]))
     assert abs(window.settings_menu.y() - anchor.y()) <= 3, (window.settings_menu.pos(), anchor)
     assert abs(window.settings_menu.x() + window.settings_menu.width() - anchor.x()) <= 3
     metrics['settingsMenuAnchor'] = {'tabBottomRight': [anchor.x(), anchor.y()], 'menuPosition': [window.settings_menu.x(), window.settings_menu.y()]}
@@ -329,7 +330,7 @@ def verify_detail_access():
         assert state['inPanel'] and state['visible'], state
         reached.append(state['text'])
         if index < 7:
-            QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
+            QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
     assert len(set(reached)) == 8, reached
     js("document.querySelector('aside').scrollTop = 0")
     page.focus_content()
@@ -383,7 +384,7 @@ if args.verify_gems:
         if count > 4:
             js("document.getElementById('hidden-gems').focus()")
             for index in range(1, count):
-                QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Right)
+                QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Right)
                 wait_until(lambda: js("document.getElementById('hidden-gems').getAttribute('aria-activedescendant')") == f'gem-{page.gem_ids[index]}')
             run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
             end_position = js_json("""(() => {const row = document.getElementById('hidden-gems');
@@ -391,7 +392,7 @@ if args.verify_gems:
               const r = row.getBoundingClientRect(); return {scrollLeft: row.scrollLeft, maxScroll:row.scrollWidth-row.clientWidth, width:row.clientWidth, left:card.left, right:card.right, rowLeft:r.left, rowRight:r.right};})()""")
             assert end_position['scrollLeft'] > 0 and end_position['left'] >= end_position['rowLeft'] and end_position['right'] <= end_position['rowRight'], end_position
             for index in range(count - 2, -1, -1):
-                QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Left)
+                QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Left)
                 wait_until(lambda: js("document.getElementById('hidden-gems').getAttribute('aria-activedescendant')") == f'gem-{page.gem_ids[index]}')
             assert js("""(() => {const row = document.getElementById('hidden-gems');
               const card = document.getElementById(row.getAttribute('aria-activedescendant')).getBoundingClientRect();
@@ -411,12 +412,12 @@ if args.verify_gems:
     button_selector = 'aside button[data-variant="destructive-outline"]'
     contrasts = {'button': contrast(button_selector)}
     point = js_json(f"(() => {{const r = document.querySelector({json.dumps(button_selector)}).getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2];}})()")
-    QTest.mouseMove(page.view.focusProxy(), QPoint(*map(int, point)))
+    QTest.mouseMove(host.view.focusProxy(), QPoint(*map(int, point)))
     settle(250)
     contrasts['buttonHover'] = contrast(button_selector)
     page.focus_content()
     settle(100)
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
     wait_until(lambda: js("!!document.querySelector('[role=menu]')"))
     menu_selector = '[data-slot="context-menu-item"][data-variant="destructive"]'
     contrasts['menu'] = contrast(menu_selector)
@@ -426,7 +427,7 @@ if args.verify_gems:
     assert all(value['ratio'] >= 4.5 for value in contrasts.values()), contrasts
     (screens / 'web-exclude-contrast.json').write_text(json.dumps(contrasts, indent=2), encoding='utf-8')
     print(json.dumps({'contrast': contrasts}, ensure_ascii=False), flush=True)
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Escape)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Escape)
     window.tray.quit()
     window.deleteLater()
     app.processEvents()
@@ -448,19 +449,19 @@ if args.verify and args.mode == 'web':
     assert core.playback.session is None
     metrics['checks'].append('격자 isComposing Enter 가드 (합성 이벤트)')
     initial_id = page.selected_video_id()
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Right)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Right)
     wait_until(lambda: page.selected_video_id() != initial_id)
     metrics['checks'].append('Chromium 방향키 선택')
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
     wait_until(lambda: bool(js("!!document.querySelector('[role=menu]')")))
     metrics['checks'].append('Shift+F10 메뉴')
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Escape)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Escape)
     QTest.qWait(100)
     page.focus_content()
     QTest.qWait(100)
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Menu)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Menu)
     wait_until(lambda: bool(js("!!document.querySelector('[role=menu]')")))
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Escape)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Escape)
     metrics['checks'].append('메뉴 키')
     # 태그 삭제 후 UI 값과 다음 검색이 모두 전체 태그를 사용해야 한다.
     temporary_tag = core.add_video_tag(page.selected_video_id(), '검증용 임시 태그')
@@ -487,7 +488,7 @@ if args.verify and args.mode == 'web':
     QTest.qWait(150)
     assert page.query == '' and page.visible_video_ids() == original_ids
     assert js("document.querySelector('input').value") == 'ㅎ'
-    assert window.pages.currentWidget() is page and core.playback.session is None
+    assert window.pages.currentWidget() is host and core.playback.session is None
     js("""(() => {
       const input = document.querySelector('input');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '한글');
@@ -507,21 +508,21 @@ if args.verify and args.mode == 'web':
     wait_until(lambda: page.query == '')
     metrics['checks'].append('composition 중 입력·목록 보존, 완료 후 한글 필터; 검색 입력에는 재생 경로 없음(구조적)')
     point = js_json("(() => {const r = document.querySelector('input').getBoundingClientRect(); return [r.x + 10, r.y + 10]})()")
-    QTest.mouseClick(page.view.focusProxy(), Qt.MouseButton.LeftButton, pos=QPoint(*map(int, point)))
+    QTest.mouseClick(host.view.focusProxy(), Qt.MouseButton.LeftButton, pos=QPoint(*map(int, point)))
     wait_until(lambda: js('document.activeElement.tagName') == 'INPUT')
     QTest.qWait(100)
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.tagName') == 'SELECT')
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Down)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Down)
     wait_until(lambda: page.tag_id is not None)
     assert len(page.visible_video_ids()) < len(original_ids)
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Home)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Home)
     wait_until(lambda: page.tag_id is None)
     assert page.visible_video_ids() == original_ids
     metrics['checks'].append('NativeSelect 방향키 필터 변경·Home 전체 복원')
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.id') == 'hidden-gems')
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
     metrics['checks'].append('Tab 검색 → 태그 → 숨겨진 보석 → 격자')
     for index in range(1, 7):
@@ -529,16 +530,16 @@ if args.verify and args.mode == 'web':
         window.activateWindow()
         assert QTest.qWaitForWindowActive(window, 5000), '검증 창 활성화 실패'
         page.focus_content()
-        window.pages.setCurrentWidget(page)
+        window.pages.setCurrentWidget(host)
         QTest.qWait(80)
-        QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
-        wait_until(lambda: window.pages.currentWidget() is (page if index == 4 else window.navigation_pages[index if index < 4 else index - 1]))
+        QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
+        wait_until(lambda: window.pages.currentWidget() is (host if index == 4 else window.navigation_pages[index if index < 4 else index - 1]))
     window.navigate(0)
     page.focus_content()
     QTest.qWait(100)
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
-    wait_until(lambda: window.pages.currentWidget() is page)
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
+    wait_until(lambda: window.pages.currentWidget() is host)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
     wait_until(window.settings_menu.isVisible)
     window.settings_menu.hide()
     metrics['checks'].append('웹 포커스 Ctrl+1~7, Alt+S')
@@ -555,7 +556,7 @@ if args.verify and args.mode == 'web':
         page.focus_content()
         QTest.qWait(100)
         before = js_json("({id: document.getElementById('library-grid').getAttribute('aria-activedescendant'), top: document.getElementById('library-grid').scrollTop, cols: document.getElementById('library-grid').getAttribute('aria-colcount'), width: document.getElementById('library-grid').clientWidth, height: document.getElementById('library-grid').scrollHeight})")
-        QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Return)
+        QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
         wait_until(lambda: window.pages.currentWidget() is window.playback_page)
         QTest.qWait(500)
         window.raise_()
@@ -571,7 +572,7 @@ if args.verify and args.mode == 'web':
         assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
         window.grab().save(str(screens / f'mpv-{args.count}.png'))
         QTest.keyClick(window.surface, Qt.Key.Key_Escape)
-        wait_until(lambda: window.pages.currentWidget() is page)
+        wait_until(lambda: window.pages.currentWidget() is host)
         QTest.qWait(250)
         after = js_json("({id: document.getElementById('library-grid').getAttribute('aria-activedescendant'), top: document.getElementById('library-grid').scrollTop, cols: document.getElementById('library-grid').getAttribute('aria-colcount'), width: document.getElementById('library-grid').clientWidth, height: document.getElementById('library-grid').scrollHeight})")
         assert before == after, (before, after)
@@ -589,7 +590,7 @@ if args.verify and args.mode == 'web':
         js(f"document.getElementById('video-{playable.id}').dispatchEvent(new MouseEvent('dblclick', {{bubbles:true}}))")
         wait_until(lambda: window.pages.currentWidget() is window.playback_page)
         QTest.keyClick(window.surface, Qt.Key.Key_Escape)
-        wait_until(lambda: window.pages.currentWidget() is page)
+        wait_until(lambda: window.pages.currentWidget() is host)
         metrics['checks'].append('카드 더블클릭 mpv 전환')
     # 기존 Qt 대화상자를 실제 웹 작업 버튼으로 열고 취소한다.
     for title, expected in (('태그 편집', 'TagEditor'), ('자막 만들기 / 원어 지정', 'QInputDialog'), ('자막 검수 / SRT 내보내기', 'ReviewDialog'), ('시리즈 편집', 'SeriesEditor'), ('제목 변경', 'QInputDialog')):

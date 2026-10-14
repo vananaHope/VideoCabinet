@@ -1,13 +1,36 @@
-// scripts/generate_web_types.py로 생성. Python TypedDict를 수정하세요.
+// scripts/generate_web_types.py로 생성. web_contract.py의 페이지 계약을 수정하세요.
+
+export type Reply = (json: string) => void
+export type Signal<T> = { connect: (handler: (value: T) => void) => void; disconnect: (handler: (value: T) => void) => void }
+export interface ShellData {
+  tab: string
+  status: string
+}
+
+export type Tab = "library" | "reel" | "search" | "queue" | "statistics" | "folders" | "settings"
+export const tabs = [["library", "라이브러리"], ["reel", "모아보기"], ["search", "검색"], ["queue", "자막 대기열"], ["statistics", "통계"], ["folders", "폴더 관리"], ["settings", "설정"]] as const
+export interface ShellBridge {
+  ready: (reply: Reply) => void
+  shellSnapshot: (reply: Reply) => void
+  navigate: (tab: Tab, reply: Reply) => void
+  shellChanged: Signal<string>
+  shellStatusChanged: Signal<string>
+  shellFocusRequested: Signal<string>
+}
+export function publicShellBridge(raw: ShellBridge): ShellBridge {
+  return Object.freeze({
+    ready: raw.ready.bind(raw),
+    shellSnapshot: raw.shellSnapshot.bind(raw),
+    navigate: raw.navigate.bind(raw),
+    shellChanged: Object.freeze({ connect: raw.shellChanged.connect.bind(raw.shellChanged), disconnect: raw.shellChanged.disconnect.bind(raw.shellChanged) }),
+    shellStatusChanged: Object.freeze({ connect: raw.shellStatusChanged.connect.bind(raw.shellStatusChanged), disconnect: raw.shellStatusChanged.disconnect.bind(raw.shellStatusChanged) }),
+    shellFocusRequested: Object.freeze({ connect: raw.shellFocusRequested.connect.bind(raw.shellFocusRequested), disconnect: raw.shellFocusRequested.disconnect.bind(raw.shellFocusRequested) }),
+  })
+}
 
 export interface TagData {
   id: number
   name: string
-}
-
-export interface ShellData {
-  tab: string
-  status: string
 }
 
 export interface VideoData {
@@ -30,14 +53,6 @@ export interface VideoData {
   hasSubtitles: boolean
 }
 
-export interface HighlightData {
-  id: number
-  start: number
-  end: number | null
-  note: string
-  tags: Array<TagData>
-}
-
 export interface GemData {
   videoId: number
   reason: string
@@ -53,6 +68,14 @@ export interface DetailsData {
   highlight_count: number
 }
 
+export interface HighlightData {
+  id: number
+  start: number
+  end: number | null
+  note: string
+  tags: Array<TagData>
+}
+
 export interface LibraryData {
   videos: Array<VideoData>
   tags: Array<TagData>
@@ -64,21 +87,15 @@ export interface LibraryData {
 }
 
 export type Action = "play" | "tags" | "subtitles" | "review" | "series" | "rename" | "reconnect" | "exclude" | "playGem" | "dismiss"
-export type Tab = "library" | "reel" | "search" | "queue" | "statistics" | "folders" | "settings"
-export const tabs = [["library", "라이브러리"], ["reel", "모아보기"], ["search", "검색"], ["queue", "자막 대기열"], ["statistics", "통계"], ["folders", "폴더 관리"], ["settings", "설정"]] as const
 export const actions = [["play", "재생"], ["tags", "태그 편집"], ["subtitles", "자막 만들기 / 원어 지정"], ["review", "자막 검수 / SRT 내보내기"], ["series", "시리즈 편집"], ["rename", "제목 변경"], ["reconnect", "파일 다시 연결"], ["exclude", "제외"]] as const
 export const scanLockedActions: readonly Action[] = ["rename", "reconnect", "exclude"]
-export type Reply = (json: string) => void
-export type Signal<T> = { connect: (handler: (value: T) => void) => void; disconnect: (handler: (value: T) => void) => void }
-export interface Bridge {
+export interface LibraryBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void
   filter: (query: string, tag: number, reply: Reply) => void
   select: (id: number, reply: Reply) => void
   details: (id: number, reply: Reply) => void
   action: (name: Action, id: number, reply: Reply) => void
-  shellSnapshot: (reply: Reply) => void
-  navigate: (tab: Tab, reply: Reply) => void
   highlights: (videoId: number, reply: Reply) => void
   playHighlight: (videoId: number, highlightId: number, reply: Reply) => void
   editHighlight: (videoId: number, highlightId: number, reply: Reply) => void
@@ -86,10 +103,8 @@ export interface Bridge {
   libraryDetailsChanged: Signal<number>
   libraryFocusRequested: Signal<string>
   libraryError: Signal<string>
-  shellChanged: Signal<string>
-  shellStatusChanged: Signal<string>
 }
-export function publicBridge(raw: Bridge): Bridge {
+export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
   return Object.freeze({
     ready: raw.ready.bind(raw),
     snapshot: raw.snapshot.bind(raw),
@@ -97,8 +112,6 @@ export function publicBridge(raw: Bridge): Bridge {
     select: raw.select.bind(raw),
     details: raw.details.bind(raw),
     action: raw.action.bind(raw),
-    shellSnapshot: raw.shellSnapshot.bind(raw),
-    navigate: raw.navigate.bind(raw),
     highlights: raw.highlights.bind(raw),
     playHighlight: raw.playHighlight.bind(raw),
     editHighlight: raw.editHighlight.bind(raw),
@@ -106,7 +119,16 @@ export function publicBridge(raw: Bridge): Bridge {
     libraryDetailsChanged: Object.freeze({ connect: raw.libraryDetailsChanged.connect.bind(raw.libraryDetailsChanged), disconnect: raw.libraryDetailsChanged.disconnect.bind(raw.libraryDetailsChanged) }),
     libraryFocusRequested: Object.freeze({ connect: raw.libraryFocusRequested.connect.bind(raw.libraryFocusRequested), disconnect: raw.libraryFocusRequested.disconnect.bind(raw.libraryFocusRequested) }),
     libraryError: Object.freeze({ connect: raw.libraryError.connect.bind(raw.libraryError), disconnect: raw.libraryError.disconnect.bind(raw.libraryError) }),
-    shellChanged: Object.freeze({ connect: raw.shellChanged.connect.bind(raw.shellChanged), disconnect: raw.shellChanged.disconnect.bind(raw.shellChanged) }),
-    shellStatusChanged: Object.freeze({ connect: raw.shellStatusChanged.connect.bind(raw.shellStatusChanged), disconnect: raw.shellStatusChanged.disconnect.bind(raw.shellStatusChanged) }),
+  })
+}
+
+export interface Bridges {
+  readonly shell: ShellBridge
+  readonly library: LibraryBridge
+}
+export function publicBridges(raw: Bridges): Bridges {
+  return Object.freeze({
+    shell: publicShellBridge(raw.shell),
+    library: publicLibraryBridge(raw.library),
   })
 }

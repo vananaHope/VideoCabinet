@@ -72,6 +72,7 @@ def test_focus_request_survives_until_frontend_ready(window_factory):
     page.focus_content()
     assert targets == []
     assert json.loads(page.bridge.snapshot())['videos']
+    window.web_host.bridge.ready()
     page.bridge.ready()
     assert targets == ['grid']
 

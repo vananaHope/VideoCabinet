@@ -53,12 +53,14 @@ class MainWindow(QMainWindow):
         if self.web_ui:
             self.menuBar().hide()
             self.statusBar().hide()
-            from .web_library_page import WebLibraryPage
-            self.library_page = WebLibraryPage(self)
-            self.statusBar().messageChanged.connect(self.library_page.bridge.shellStatusChanged.emit)
+            from .web_pages import create_web_shell
+            self.web_host = create_web_shell(self)
+            self.library_page = self.web_host.controllers['library']
         else:
             self.library_page = LibraryPage(self)
-        self.pages.addWidget(self.library_page)
+        # home_page는 표시할 셸/Qt 화면, library_page는 라이브러리 작업 담당이다.
+        self.home_page = self.web_host if self.web_ui else self.library_page
+        self.pages.addWidget(self.home_page)
         self.playback_page = PlaybackPage(self)
         self.settings_menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.playback_page.focus_content))
         self.pages.addWidget(self.playback_page)
@@ -67,8 +69,8 @@ class MainWindow(QMainWindow):
         self.progress = self.playback_page.progress
         self.reel = ReelControls(self)
         build_shell(self)
-        self._active_page = self.library_page
-        self._return_page = self.library_page
+        self._active_page = self.home_page
+        self._return_page = self.home_page
         self.pages.currentChanged.connect(self.page_changed)
 
         QApplication.instance().installEventFilter(self)
@@ -91,8 +93,7 @@ class MainWindow(QMainWindow):
             index = self.navigation_pages.index(page)
             self.sidebar.select(index)
             if self.web_ui and index:
-                from .web_contract import TABS
-                self.library_page.set_tab(TABS[index if index < 4 else index + 1][0])
+                self.web_host.native_page_shown(index)
 
     def set_playback_fullscreen(self, enabled):
         enabled = enabled and self.pages.currentWidget() is self.playback_page
@@ -122,7 +123,7 @@ class MainWindow(QMainWindow):
     def show_fullscreen_settings_menu(self):
         self.playback_page.close_help()
         if self.web_ui:
-            self.library_page.popup_settings_menu()
+            self.web_host.popup_settings_menu()
         else:
             self.settings_menu.popup(self.mapToGlobal(QPoint(12, 12)))
 
@@ -146,24 +147,10 @@ class MainWindow(QMainWindow):
             (self.sidebar.settings if index == 5 else self.sidebar.list).setFocus()
 
     def navigate_web_tab(self, tab):
-        from .web_contract import TABS
-        names = [name for name, _ in TABS]
-        if tab not in names:
-            return
-        index = names.index(tab)
-        if tab in ('library', 'statistics'):
-            self.end_playback()
-            self.library_page.set_tab(tab)
-            self.pages.setCurrentWidget(self.library_page)
-            if tab == 'library':
-                self.refresh()
-            self.library_page.focus_content()
-        else:
-            self.library_page.set_tab(tab)
-            self.navigate(index if index < 4 else index - 1)
+        self.web_host.navigate(tab)
 
     def return_to_web(self):
-        self.navigate_web_tab(self.library_page.last_web_tab)
+        self.web_host.navigate(self.web_host.last_web_tab)
 
     @property
     def worker(self):
@@ -271,7 +258,7 @@ class MainWindow(QMainWindow):
     def show_library(self):
         self.end_playback()
         if self.web_ui:
-            self.library_page.set_tab("library")
+            self.web_host.set_tab("library")
         self.pages.setCurrentIndex(0)
         self.refresh(focus_gems=self._return_to_gems)
         self._return_to_gems = False
@@ -279,7 +266,7 @@ class MainWindow(QMainWindow):
     def back_to_list(self):
         if self.reel.shown is not None or self.core.reel_playback is not None:
             self.reel.open()
-        elif self._return_page is self.library_page:
+        elif self._return_page is self.home_page:
             self.show_library()
         else:
             self.end_playback()
@@ -351,7 +338,7 @@ class MainWindow(QMainWindow):
         if event.modifiers() == Qt.KeyboardModifier.AltModifier and event.key() == Qt.Key.Key_S:
             if not event.isAutoRepeat():
                 if self.web_ui:
-                    self.library_page.popup_settings_menu()
+                    self.web_host.popup_settings_menu()
                 else:
                     self.settings_menu.popup(self.menuBar().mapToGlobal(self.menuBar().actionGeometry(
                         self.settings_menu.menuAction()).bottomLeft()))
@@ -368,4 +355,4 @@ class MainWindow(QMainWindow):
 
 
 def page_is_native(window):
-    return window.pages.currentWidget() not in (window.library_page, window.playback_page)
+    return window.pages.currentWidget() not in (window.home_page, window.playback_page)
