@@ -75,6 +75,17 @@ def finish(core):
     return results
 
 
+def test_completed_translation_direct_request_joins_after_waiting_video(setup):
+    core, _, _, _, _ = setup
+    a, b = core.videos()
+    source(core, a.id)
+    core.promote_subtitle(a.id)
+    finish(core)
+    source(core, b.id)
+    core.request_translation(a.id)
+    assert [entry.video_id for entry in core.translation_queue()] == [b.id, a.id]
+
+
 def test_automatic_translation_has_exact_ids_timing_and_atomic_visibility(setup):
     core, _, adapter, _, reopen = setup
     video = core.videos()[0]

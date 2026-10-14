@@ -1,5 +1,7 @@
 """대기열과 자동 자막 규칙 화면. 데이터 접근은 AppCore 공개 API만 사용한다."""
 
+import sqlite3
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
@@ -93,7 +95,14 @@ class SubtitleQueueDialog(QDialog):
     def retry(self):
         def retry_all():
             result = self.core.retry_failed_subtitles()
-            details = "\n".join(f"영상 {item.video_id}: {item.reason}" for item in result.skipped)
+            details = []
+            for item in result.skipped:
+                try:
+                    title = self.core.video(item.video_id).title or str(item.video_id)
+                except (ValueError, OSError, sqlite3.Error):
+                    title = str(item.video_id)
+                details.append(f"영상 {title}: {item.reason}")
+            details = "\n".join(details)
             self.retry_status.setText(f"재시도 {result.retried}개 · 건너뜀 {result.skipped_count}개" +
                                       (f"\n{details}" if details else ""))
         self.act(retry_all)

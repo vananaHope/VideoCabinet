@@ -146,9 +146,10 @@ class AutoSubtitleRules:
         with self.connect() as db:
             db.execute("DELETE FROM auto_subtitle_rules WHERE id = ?", (rule_id,))
 
-    def apply(self, video_id, *, tag_id=None):
+    def apply(self, video_id, *, tag_id=None, rules=None):
         # 등록 계기는 폴더 규칙, 태그 부착 계기는 그 태그 규칙만 적용한다.
-        rules = [r for r in self.list() if (r.folder is not None if tag_id is None else r.tag_id == tag_id)]
+        rules = [r for r in (self.list() if rules is None else rules)
+                 if (r.folder is not None if tag_id is None else r.tag_id == tag_id)]
         if not rules:
             return
         video = self.core.video(video_id)

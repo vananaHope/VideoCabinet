@@ -53,6 +53,7 @@ class Video:
 class ScanIssue:
     path: Path
     message: str
+    failed: bool = True
 
 
 @dataclass(frozen=True)
@@ -180,17 +181,18 @@ class Library:
 
     @staticmethod
     def _not_added(path: Path, message: str) -> ScanResult:
-        return ScanResult(0, (ScanIssue(path, message),))
+        return ScanResult(0, (ScanIssue(path, message, failed=False),))
 
-    def _already_registered(self, path: Path, excluded: bool) -> ScanResult:
+    def _already_registered(self, path: Path, excluded: bool, *, was_missing=False) -> ScanResult:
         return self._not_added(path, "제외 목록에 있는 영상입니다. 제외 목록에서 되돌려 주세요."
-                               if excluded else "이미 등록된 영상입니다.")
+                               if excluded else "파일 없음이던 영상을 다시 찾았습니다." if was_missing
+                               else "이미 등록된 영상입니다.")
 
-    def _register(self, path: Path) -> ScanResult:
+    def _register(self, path: Path, *, on_registered=None) -> ScanResult:
         signature = _signature(path)
         minimum = self.minimum_duration
         with self._connect() as db:
-            old = db.execute("""SELECT l.size, l.mtime_ns, v.excluded FROM locations l
+            old = db.execute("""SELECT l.video_id, l.size, l.mtime_ns, v.excluded FROM locations l
                 JOIN videos v ON v.id=l.video_id WHERE l.path=?""", (str(path),)).fetchone()
             if old and (old["size"], old["mtime_ns"]) == signature:
                 return self._already_registered(path, old["excluded"])
@@ -200,10 +202,11 @@ class Library:
                     return self._not_added(path, "영상이 아닙니다(GIF 포함).")
                 known = db.execute("SELECT id, excluded FROM videos WHERE fingerprint=?", (check["fingerprint"],)).fetchone()
                 if known:
+                    was_missing = not db.execute("SELECT 1 FROM locations WHERE video_id=?", (known[0],)).fetchone()
                     db.execute("INSERT OR REPLACE INTO locations(path, video_id, size, mtime_ns) VALUES (?, ?, ?, ?)",
                                (str(path), known[0], *signature))
                     db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
-                    return self._already_registered(path, known["excluded"])
+                    return self._already_registered(path, known["excluded"], was_missing=was_missing)
                 if check["duration"] < minimum:
                     return self._not_added(path, f"최소 길이({minimum:g}초) 미만입니다.")
             legacy_gifs = {row["fingerprint"]: row for row in db.execute(
@@ -217,10 +220,12 @@ class Library:
         if legacy_gif:
             self._check_unchanged(path, signature)
             with self._connect() as db:
+                was_missing = (not (old and old["video_id"] == legacy_gif["id"])
+                               and not db.execute("SELECT 1 FROM locations WHERE video_id=?", (legacy_gif["id"],)).fetchone())
                 db.execute("INSERT OR REPLACE INTO locations(path, video_id, size, mtime_ns) VALUES (?, ?, ?, ?)",
                            (str(path), legacy_gif["id"], *signature))
                 db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
-            return self._already_registered(path, legacy_gif["excluded"])
+            return self._already_registered(path, legacy_gif["excluded"], was_missing=was_missing)
         info = self._media.read(path)
         if info is not None and "gif" in info.format.lower().split(","):
             info = None
@@ -241,6 +246,8 @@ class Library:
         with self._connect() as db:
             if existing:
                 video_id = existing[0]
+                was_missing = (not (old and old["video_id"] == video_id)
+                               and not db.execute("SELECT 1 FROM locations WHERE video_id=?", (video_id,)).fetchone())
             else:
                 video_id = db.execute(
                     "INSERT INTO videos (fingerprint, title, duration, format, thumbnail, registered_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -250,8 +257,9 @@ class Library:
                        (str(path), video_id, *signature))
             db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
         if not existing:
-            self._on_registered(video_id)
-        return self._already_registered(path, existing["excluded"]) if existing else ScanResult(1, ())
+            (on_registered or self._on_registered)(video_id)
+        return (self._already_registered(path, existing["excluded"], was_missing=was_missing)
+                if existing else ScanResult(1, ()))
 
     def video(self, video_id: int) -> Video:
         with self._connect() as db:
@@ -303,11 +311,11 @@ class Library:
             self._forget_location(path)
         raise ValueError("파일 없음: 영상의 위치가 없습니다. 다시 검사하거나 파일을 다시 연결해 주세요.")
 
-    def scan(self) -> ScanResult:
+    def scan(self, *, on_registered=None) -> ScanResult:
         with self._lock:
-            return self._scan()
+            return self._scan(on_registered=on_registered)
 
-    def _scan(self) -> ScanResult:
+    def _scan(self, *, on_registered=None) -> ScanResult:
         added, issues = 0, []
         processed: set[Path] = set()
         seen: set[Path] = set()
@@ -318,7 +326,7 @@ class Library:
         for path in paths:
             processed.add(path)
             try:
-                added += self._register(path).added
+                added += self._register(path, on_registered=on_registered).added
             except (FileNotFoundError, NotADirectoryError):
                 self._forget_location(path)
             except (OSError, ValueError, RuntimeError) as error:
@@ -340,6 +348,8 @@ class Library:
                             info = entry.stat(follow_symlinks=False)
                             if (stat.S_ISLNK(info.st_mode)
                                     or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                                issues.append(ScanIssue(path, f"건너뜀: 다른 폴더나 파일을 가리키는 연결(정션·심볼릭 링크) — {path}",
+                                                        failed=False))
                                 continue
                             if stat.S_ISDIR(info.st_mode):
                                 pending.append(path)
@@ -348,7 +358,7 @@ class Library:
                                 seen.add(path)
                                 if path not in processed:
                                     processed.add(path)
-                                    added += self._register(path).added
+                                    added += self._register(path, on_registered=on_registered).added
                         except (OSError, ValueError, RuntimeError) as error:
                             inaccessible.add(path)
                             issues.append(ScanIssue(path, str(error)))

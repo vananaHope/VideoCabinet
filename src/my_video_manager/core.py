@@ -576,7 +576,8 @@ class AppCore:
         return self.adjacent_video(self.playback.session.video_id, visible_video_ids, forward=forward)
 
     def scan(self) -> ScanResult:
-        result = self._library.scan()
+        rules = self._auto_subtitle_rules.list()
+        result = self._library.scan(on_registered=lambda video_id: self._auto_subtitle_rules.apply(video_id, rules=rules))
         self._series.regroup(self.videos() + self.excluded_videos())
         return result
 

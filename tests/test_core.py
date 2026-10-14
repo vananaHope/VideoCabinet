@@ -225,7 +225,7 @@ def test_enumeration_error_is_reported_and_other_directories_continue(core, tmp_
             raise PermissionError("접근 거부")
         return real_scandir(path)
 
-    # 실제 임시 파일을 열거하되 OS 권한 오류만 결정적으로 주입한다.
+    # OS 권한 오류는 공개 API로 만들 수 없어 scandir에만 주입하고 결과는 AppCore.scan으로 검증한다.
     monkeypatch.setattr(os, "scandir", scandir)
     result = core.scan()
     assert result.added == (1 if blocked_at_root else 3)
@@ -234,22 +234,31 @@ def test_enumeration_error_is_reported_and_other_directories_continue(core, tmp_
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows 정션 회귀")
-def test_junction_cycle_is_skipped_and_real_videos_are_registered(core, tmp_path):
+@pytest.mark.parametrize("external", [False, True])
+def test_junction_is_reported_and_only_real_videos_are_registered(core, tmp_path, external):
     folder = tmp_path / "videos"
     folder.mkdir()
     (folder / "video.mkv").write_bytes(b"video")
     junction = folder / "loop"
+    target = folder
+    if external:
+        target = tmp_path / "external"
+        target.mkdir()
+        (target / "outside.mkv").write_bytes(b"outside video")
     subprocess.run(
         ["powershell", "-NoProfile", "-Command",
          "New-Item -ItemType Junction -Path $env:MVM_TEST_LINK -Target $env:MVM_TEST_TARGET | Out-Null"],
-        env={**os.environ, "MVM_TEST_LINK": str(junction), "MVM_TEST_TARGET": str(folder)},
+        env={**os.environ, "MVM_TEST_LINK": str(junction), "MVM_TEST_TARGET": str(target)},
         check=True, capture_output=True,
     )
     try:
         core.add_watched_folder(folder)
         result = core.scan()
         assert result.added == 1
-        assert result.issues == ()
+        assert len(result.issues) == 1
+        assert result.issues[0].path == junction
+        assert "건너뜀" in result.issues[0].message
+        assert not result.issues[0].failed
         assert len(core.videos()[0].locations) == 1
     finally:
         junction.rmdir()  # 정션 자체만 해제하며 대상 디렉터리는 삭제하지 않는다.
