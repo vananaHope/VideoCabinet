@@ -1,7 +1,7 @@
 """UI/재생 엔진과 독립된 앱 코어의 공개 경계."""
 
-from dataclasses import dataclass, replace
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import datetime, tzinfo
 from enum import Enum
 import math
 from pathlib import Path
@@ -25,6 +25,7 @@ from .translation import Translator, Translations, Translation, TranslationQueue
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
+from .statistics import StatisticsReader, VideoViewingStatistics, ViewingStatistics
 
 
 class CommandType(str, Enum):
@@ -87,6 +88,7 @@ class LibrarySnapshot:
     statuses: dict[int, ViewingStatus]
     tags: dict[int, tuple[Tag, ...]]
     series: tuple[Series, ...]
+    video_statistics: dict[int, VideoViewingStatistics] = field(default_factory=dict)
 
 
 class AppCore:
@@ -280,7 +282,9 @@ class AppCore:
         visible = {v.id for v in videos}
         series = tuple(replace(s, video_ids=tuple(vid for vid in s.video_ids if vid in visible))
                        for s in self._series.list())
-        return LibrarySnapshot(videos, self.viewing_status_map(), self.video_tags_map(), series)
+        viewing_summary = self._viewings.summary()
+        return LibrarySnapshot(videos, viewing_summary.statuses, self.video_tags_map(), series,
+                               viewing_summary.statistics)
 
     def library_details(self, video_id: int) -> LibraryDetails:
         """선택한 영상 하나의 상세 요약. 파일 없음·제외 여부와 무관하게 기록을 읽는다."""
@@ -631,6 +635,21 @@ class AppCore:
 
     def viewing_status_map(self) -> dict[int, ViewingStatus]:
         return self._viewings.status_map()
+
+    def viewing_statistics(self, days: int, *, tz: tzinfo | None = None) -> ViewingStatistics:
+        """ViewingStatistics 반환. 오늘 포함 7·30·90·365일, 기본은 시스템 로컬 시간대.
+
+        테스트에서는 datetime.tzinfo를 tz로 주입한다. 날짜/시각은 ISO 문자열,
+        시청 시간은 초이며 dataclasses.asdict 결과를 JSON으로 직렬화할 수 있다.
+        """
+        return StatisticsReader(self._connect, self._clock, self._viewings).period(days, tz=tz)
+
+    def video_viewing_statistics(self) -> dict[int, VideoViewingStatistics]:
+        """영상 ID → VideoViewingStatistics. 제외·파일 없음·시청 없는 영상도 포함한다.
+
+        전체 기간을 일괄 조회하며 마지막 시청 시각에는 틀어보기도 포함한다.
+        """
+        return StatisticsReader(self._connect, self._clock, self._viewings).video_map()
 
     def resume_start(self, video_id: int) -> float:
         point = self.viewing_status(video_id).resume_point

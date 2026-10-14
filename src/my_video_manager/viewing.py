@@ -1,10 +1,12 @@
 """시청 구간의 순수 계산과 저장. 재생 엔진/화면에 의존하지 않는다."""
 
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import Enum
 import json
 from math import isfinite
+from typing import Iterable, Iterator, NamedTuple
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,16 @@ class ViewingKind(str, Enum):
     FINISHED = "finished"
     ABANDONED = "abandoned"
     GLANCE = "glance"
+
+
+def classify_viewing(played_seconds: float, duration: float, settings: ViewingSettings) -> ViewingKind:
+    """구간을 이미 센 호출자는 비율과 분류를 한 번만 계산한다."""
+    ratio = played_seconds / duration
+    if ratio >= settings.finished_ratio:
+        return ViewingKind.FINISHED
+    if ratio >= settings.abandoned_ratio:
+        return ViewingKind.ABANDONED
+    return ViewingKind.GLANCE
 
 
 def merge_intervals(intervals, duration: float) -> tuple[tuple[float, float], ...]:
@@ -72,11 +84,7 @@ class Viewing:
         return self.played_seconds / self.duration
 
     def classify(self, settings: ViewingSettings) -> ViewingKind:
-        if self.played_ratio >= settings.finished_ratio:
-            return ViewingKind.FINISHED
-        if self.played_ratio >= settings.abandoned_ratio:
-            return ViewingKind.ABANDONED
-        return ViewingKind.GLANCE
+        return classify_viewing(self.played_seconds, self.duration, settings)
 
 
 def report_position(viewing: Viewing, position: float, *, seeked: bool = False) -> Viewing:
@@ -118,6 +126,97 @@ def viewing_status(viewings: tuple[Viewing, ...], settings: ViewingSettings) -> 
                          finished_count, point,
                          point / last.duration * 100 if point is not None else None,
                          max((v.updated_at for v in viewings), default=None))
+
+
+@dataclass(frozen=True)
+class VideoViewingStatistics:
+    video_id: int
+    viewing_count: int = 0
+    watched_seconds: float = 0.0
+    # ViewingStatus.last_viewed_at과 같은 updated_at 최댓값. 틀어보기도 포함한다.
+    last_viewed_at: str | None = None
+
+
+class ViewingRecord(NamedTuple):
+    """구간 합을 한 번 구한 시청 입력. 날짜 파싱은 필요한 집계에서만 한다."""
+    id: int
+    video_id: int
+    duration: float
+    played_seconds: float
+    started_at: str | datetime
+    updated_at: str | datetime
+    last_position: float | None
+
+
+@dataclass(frozen=True)
+class ViewingSummary:
+    statuses: dict[int, ViewingStatus]
+    statistics: dict[int, VideoViewingStatistics]
+
+
+@dataclass
+class _ViewingTotals:
+    finished_count: int = 0
+    viewing_count: int = 0
+    seconds: float = 0.0
+    last_viewed_at: datetime | None = None
+    last_position_id: int = -1
+    last_position: float | None = None
+    last_duration: float = 1.0
+
+
+def summarize_viewings(records: Iterable[ViewingRecord], video_ids: Iterable[int],
+                       settings: ViewingSettings) -> ViewingSummary:
+    """전체 기간의 상태와 수치를 같은 순회에서 계산한다. DB·Qt와 무관하다."""
+    totals = {vid: _ViewingTotals() for vid in video_ids}
+    for record in records:
+        total = totals.get(record.video_id)
+        if total is None:
+            continue
+        kind = classify_viewing(record.played_seconds, record.duration, settings)
+        if kind != ViewingKind.GLANCE:
+            total.viewing_count += 1
+            total.seconds += record.played_seconds
+            total.finished_count += kind == ViewingKind.FINISHED
+        updated = (datetime.fromisoformat(record.updated_at)
+                   if isinstance(record.updated_at, str) else record.updated_at)
+        if total.last_viewed_at is None or updated > total.last_viewed_at:
+            total.last_viewed_at = updated
+        if record.last_position is not None and record.id > total.last_position_id:
+            total.last_position_id = record.id
+            total.last_position = record.last_position
+            total.last_duration = record.duration
+    statuses, statistics = {}, {}
+    for vid, total in totals.items():
+        finished = total.finished_count > 0
+        abandoned = not finished and total.viewing_count > 0
+        point = total.last_position if abandoned else None
+        statuses[vid] = ViewingStatus(
+            finished, abandoned, total.finished_count >= settings.favorite_count, total.finished_count,
+            point, point / total.last_duration * 100 if point is not None else None, total.last_viewed_at)
+        statistics[vid] = VideoViewingStatistics(
+            vid, total.viewing_count, total.seconds,
+            total.last_viewed_at.isoformat() if total.last_viewed_at is not None else None)
+    return ViewingSummary(statuses, statistics)
+
+
+@dataclass(frozen=True)
+class ViewingRows:
+    """읽기 트랜잭션 안에서 확보한 DB 행과 불변 진행분의 스냅샷."""
+    rows: list
+    active: dict[int, Viewing]
+
+    def records(self) -> Iterator[ViewingRecord]:
+        """잠금을 해제한 뒤 파싱한다. 저장 구간은 report_position에서 이미 병합했다."""
+        for row in self.rows:
+            active = self.active.get(row["id"])
+            if active is not None:
+                yield ViewingRecord(active.id, active.video_id, active.duration, active.played_seconds,
+                                    active.started_at, active.updated_at, active.last_position)
+            else:
+                seconds = sum(end - start for start, end in json.loads(row["intervals"]))
+                yield ViewingRecord(row["id"], row["video_id"], row["duration"], seconds,
+                                    row["started_at"], row["updated_at"], row["last_position"])
 
 
 class ViewingRecorder:
@@ -212,20 +311,49 @@ class ViewingStore:
 
     def list(self, video_id: int) -> tuple[Viewing, ...]:
         with self._connect() as db:
+            db.execute("BEGIN")
             rows = db.execute("SELECT * FROM viewings WHERE video_id=? ORDER BY id", (video_id,)).fetchall()
-        return tuple(self._from_row(row) for row in rows)
+            active = dict(self._active)
+        return tuple(self._from_row(row, active) for row in rows)
+
+    def list_all(self, *, connection=None) -> tuple[Viewing, ...]:
+        """전체 시청을 한 번에 읽으며 저장 전 진행분도 기존 조회와 같이 반영한다."""
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            if not db.in_transaction:
+                db.execute("BEGIN")
+            rows = db.execute("SELECT * FROM viewings ORDER BY id").fetchall()
+            active = dict(self._active)
+        return tuple(self._from_row(row, active) for row in rows)
+
+    def read_rows(self, *, connection=None) -> ViewingRows:
+        """외부 접속을 넘긴 호출자도 records() 파싱 전에 읽기 트랜잭션을 닫는다."""
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            if not db.in_transaction:
+                db.execute("BEGIN")
+            rows = db.execute(
+                "SELECT id, video_id, duration, intervals, started_at, updated_at, last_position "
+                "FROM viewings ORDER BY id").fetchall()
+            active = dict(self._active)
+        return ViewingRows(rows, active)
+
+    def summary(self) -> ViewingSummary:
+        """시청 없는 영상과 저장 전 진행분을 포함한 상태·수치 일괄 조회."""
+        with self._connect() as db:
+            db.execute("BEGIN")
+            ids = [row[0] for row in db.execute("SELECT id FROM videos").fetchall()]
+            snapshot = self.read_rows(connection=db)
+        return summarize_viewings(snapshot.records(), ids, self.settings)
 
     def status_map(self) -> dict[int, ViewingStatus]:
         """시청 없는 영상도 포함하며 저장 전의 진행 중 시청을 즉시 반영한다."""
-        with self._connect() as db:
-            db.execute("BEGIN")
-            grouped = {row[0]: [] for row in db.execute("SELECT id FROM videos")}
-            for row in db.execute("SELECT * FROM viewings ORDER BY id"):
-                grouped[row["video_id"]].append(self._from_row(row))
-        return {vid: viewing_status(tuple(viewings), self.settings) for vid, viewings in grouped.items()}
+        return self.summary().statuses
 
-    def _from_row(self, row) -> Viewing:
-        return self._active[row["id"]] if row["id"] in self._active else Viewing(
+    @staticmethod
+    def _from_row(row, active) -> Viewing:
+        viewing = active.get(row["id"])
+        if viewing is not None:
+            return viewing
+        return Viewing(
             row["id"], row["video_id"], row["duration"], datetime.fromisoformat(row["started_at"]),
             datetime.fromisoformat(row["updated_at"]),
             datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None,
