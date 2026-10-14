@@ -1,0 +1,170 @@
+"""시험판 웹 라이브러리. Qt 셸의 페이지 계약과 기존 대화상자를 유지한다."""
+
+import os
+from pathlib import Path
+
+from PySide6.QtCore import QUrl, Signal, Qt
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineUrlRequestInterceptor
+from PySide6.QtWebEngineWidgets import QWebEngineView
+
+from .hidden_gems_ui import show_dismissed_dialog
+from .library_page import LibraryOperations
+from .library_ui import LibraryControls
+from .web_library_data import snapshot_data, filter_ids, thumbnail_video_id
+from .web_library_bridge import LibraryBridge, encode
+from .web_thumbnail import ThumbnailHandler, register_thumbnail_scheme
+
+
+class LibraryWebEnginePage(QWebEnginePage):
+    def __init__(self, profile, parent, entry):
+        super().__init__(profile, parent)
+        self.entry = entry
+
+    def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
+        # WebChannel을 등록한 페이지가 외부 문서로 이동하지 않게 한다.
+        target = QUrl(url)
+        target.setFragment(None)
+        return is_main_frame and target == self.entry
+
+
+class LibraryRequests(QWebEngineUrlRequestInterceptor):
+    """패키지 자산·썸네일·명시한 개발 서버 외 요청은 차단한다."""
+
+    def __init__(self, root, entry, parent):
+        super().__init__(parent)
+        self.root, self.entry = root.resolve(), entry
+
+    def interceptRequest(self, info):
+        url = info.requestUrl()
+        allowed = url.toString() == 'qrc:///qtwebchannel/qwebchannel.js'
+        if url.scheme() == 'mvm-thumb':
+            allowed = thumbnail_video_id(url.toString()) is not None
+        elif url.isLocalFile():
+            allowed = Path(url.toLocalFile()).resolve().is_relative_to(self.root)
+        elif url.scheme() in ('http', 'https', 'ws', 'wss') and self.entry.scheme() in ('http', 'https'):
+            allowed = (url.scheme() in (self.entry.scheme(), 'ws' if self.entry.scheme() == 'http' else 'wss')
+                       and url.host() == self.entry.host() and url.port() == self.entry.port())
+        info.block(not allowed)
+
+
+class GemDialogs:
+    def __init__(self, page):
+        self.page = page
+
+    def show_dismissed(self):
+        show_dismissed_dialog(self.page, self.page.core, self.page.refresh)
+
+
+class WebLibraryPage(LibraryOperations, QWidget):
+    scan_state_changed = Signal(bool)
+    scan_message = Signal(str)
+    refreshed = Signal()
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window, self.core = window, window.core
+        self.worker = None
+        self.snapshot = None
+        self.cards = []
+        self.video_ids = set()
+        self.visible_ids = []
+        self.gems, self.gem_ids = [], []
+        self.gem_error = ''
+        self.selected_id = None
+        self.query, self.tag_id = '', None
+        self.tags = []
+        self.library_controls = LibraryControls(window)
+        self.hidden_gems = GemDialogs(self)
+        self.bridge = LibraryBridge(self)
+        register_thumbnail_scheme()
+        self.view = QWebEngineView(self)
+        self.view.setAccessibleName('웹 라이브러리')
+        self.setFocusProxy(self.view)
+        self.profile = QWebEngineProfile(self)  # view/page보다 나중에 파괴한다. off-the-record 프로필.
+        self.thumbnails = ThumbnailHandler(self.core, self.profile)
+        self.profile.installUrlSchemeHandler(b'mvm-thumb', self.thumbnails)
+        dev_url = os.environ.get('MVM_WEB_DEV_URL')
+        entry = QUrl(dev_url) if dev_url else QUrl.fromLocalFile(str(Path(__file__).parent / 'web/index.html'))
+        if dev_url and not entry.path():
+            entry.setPath('/')
+        self.requests = LibraryRequests(Path(__file__).parent / 'web', entry, self.profile)
+        self.profile.setUrlRequestInterceptor(self.requests)
+        self.engine_page = LibraryWebEnginePage(self.profile, self.view, entry)
+        self.engine_page.setBackgroundColor(QColor('#181818'))
+        self.view.setPage(self.engine_page)
+        self.channel = QWebChannel(self.engine_page)
+        self.channel.registerObject('library', self.bridge)
+        self.engine_page.setWebChannel(self.channel)
+        # file 페이지에서 비-file 썸네일 스킴 접근에 필요하다. 외부 네트워크는 interceptor가 차단한다.
+        self.engine_page.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        self.engine_page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, False)
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.load_error = QLabel('웹 라이브러리를 불러오지 못했습니다. scripts/setup.ps1로 빌드한 뒤 다시 실행하세요.')
+        self.load_error.setWordWrap(True)
+        self.load_error.hide()
+        layout.addWidget(self.load_error)
+        layout.addWidget(self.view)
+        self.view.loadFinished.connect(lambda ok: self.load_error.setVisible(not ok))
+        self.view.load(entry)
+        window.subtitles.video_changed.connect(self.refresh_details)
+        window.translations.video_changed.connect(self.refresh_details)
+
+    def payload(self):
+        return dict(videos=self.cards, tags=self.tags, gems=self.gems, gemError=self.gem_error,
+                    visibleIds=self.visible_ids, selectedId=self.selected_id, scanning=self.worker is not None)
+
+    def refresh(self, *, focus_gems=None):
+        self.snapshot = self.core.library_snapshot()
+        self.cards = snapshot_data(self.snapshot)
+        self.video_ids = {v['id'] for v in self.cards}
+        self.tags = [dict(id=t.id, name=t.name) for t in self.core.tags()]
+        if self.tag_id not in {t['id'] for t in self.tags}:
+            self.tag_id = None
+        try:
+            self.gems = [dict(videoId=g.video.id, reason=g.reason)
+                         for g in self.core.hidden_gems(snapshot=self.snapshot)]
+            self.gem_error = ''
+        except Exception as error:
+            self.gems, self.gem_error = [], str(error)
+        self.gem_ids = [g['videoId'] for g in self.gems]
+        self.apply_filters()
+        self.bridge.changed.emit(encode(self.payload()))
+        self.refreshed.emit()
+        if focus_gems is not None and self.isVisible():
+            self.view.setFocus()
+            self.bridge.focusRequested.emit('gems' if focus_gems else 'grid')
+
+    def apply_filters(self):
+        self.visible_ids = filter_ids(self.cards, self.query, self.tag_id)
+        if self.selected_id not in self.visible_ids:
+            self.selected_id = next(iter(self.visible_ids), None)
+        self.window.library_count.setText(f'등록 영상 {len(self.cards)}개 · 표시 {len(self.visible_ids)}개')
+
+    def refresh_details(self, changed_video_id=None):
+        if self.selected_id is not None and (changed_video_id is None or changed_video_id == self.selected_id):
+            self.bridge.detailsChanged.emit(self.selected_id)
+
+    def selection_changed(self):
+        self.bridge.changed.emit(encode(self.payload()))
+
+    def selected_video_id(self):
+        return self.selected_id
+
+    def visible_video_ids(self):
+        return tuple(self.visible_ids)
+
+    def handle_key(self, event):
+        return False  # 예약 키는 셸, 나머지는 Chromium/React가 처리한다.
+
+    def focus_content(self):
+        self.view.setFocus()
+        self.bridge.focusRequested.emit('grid')
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_details()

@@ -48,10 +48,15 @@ class MainWindow(QMainWindow):
         self.fullscreen_settings_shortcut.setEnabled(False)
         self.fullscreen_settings_shortcut.activated.connect(self.show_fullscreen_settings_menu)
 
-        self.library_page = LibraryPage(self)
+        import os
+        if os.environ.get("MVM_WEB_UI") == "1":
+            from .web_library_page import WebLibraryPage
+            self.library_page = WebLibraryPage(self)
+        else:
+            self.library_page = LibraryPage(self)
         self.pages.addWidget(self.library_page)
         self.playback_page = PlaybackPage(self)
-        self.settings_menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.playback_page.focus_content))
+        self.settings_menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.pages.currentWidget().focus_content))
         self.pages.addWidget(self.playback_page)
         # 기존 화면 어댑터용 연결점. 위젯 구성과 갱신은 각 페이지 모듈이 소유한다.
         self.surface = self.playback_page.surface
@@ -299,6 +304,11 @@ class MainWindow(QMainWindow):
                 and Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_6):
             if not event.isAutoRepeat():
                 self.navigate(event.key() - Qt.Key.Key_1)
+            return True
+        if event.modifiers() == Qt.KeyboardModifier.AltModifier and event.key() == Qt.Key.Key_S:
+            if not event.isAutoRepeat():
+                self.settings_menu.popup(self.menuBar().mapToGlobal(self.menuBar().actionGeometry(
+                    self.settings_menu.menuAction()).bottomLeft()))
             return True
         handle_key = getattr(self.pages.currentWidget(), "handle_key", None)
         return handle_key(event) if callable(handle_key) else False

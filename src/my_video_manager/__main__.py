@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
+import os
 
 
 def main():
@@ -16,6 +17,9 @@ def main():
     from .ui import MainWindow
     from .single_instance import SingleInstance
 
+    if os.environ.get("MVM_WEB_UI") == "1":
+        from .web_thumbnail import register_thumbnail_scheme
+        register_thumbnail_scheme()
     app = QApplication(sys.argv[:1])
     from .theme import apply_theme
     apply_theme(app)
