@@ -6,3 +6,5 @@
 
 - **Electron/Tauri + 웹 UI + Python 서버**: UI는 만들기 쉽지만 mpv를 창에 넣기 까다롭고 언어가 둘로 나뉜다.
 - **.NET(WPF) + libmpv/LibVLC**: 견고하지만 AI 자막 쪽은 결국 별도 Python 프로세스가 필요하다.
+
+> 화면 계층은 [ADR-0004](0004-web-ui-layer-with-shadcn-inside-qt.md)로 바뀌었다(재생 외 화면은 Qt 안의 웹 UI). 재생(mpv)과 Python 코어 결정은 그대로다.
