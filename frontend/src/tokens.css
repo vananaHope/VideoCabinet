@@ -1,0 +1,43 @@
+/* scripts/generate_web_types.py로 생성. web_tokens.json을 수정하세요. */
+:root {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  --popover: #18181b;
+  --popover-foreground: #fafafa;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #fca5a5;
+  --destructive-foreground: #450a0a;
+  --border: #3f3f46;
+  --input: #71717a;
+  --ring: #818cf8;
+  --highlight: #fde047;
+  --highlight-foreground: #422006;
+  --status-success: #86efac;
+  --status-success-foreground: #052e16;
+  --status-info: #93c5fd;
+  --status-info-foreground: #172554;
+  --primary-text: #a5b4fc;
+  --radius: 0.75rem;
+  --spacing: 0.25rem;
+  --grid-row-height: 16rem;
+  --grid-card-width: 12rem;
+}
+@theme {
+  --font-sans: "Malgun Gothic", sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+}

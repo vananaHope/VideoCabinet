@@ -68,7 +68,7 @@ def test_focus_request_survives_until_frontend_ready(window_factory):
     window = window_factory('1')
     page = window.library_page
     targets = []
-    page.bridge.focusRequested.connect(targets.append)
+    page.bridge.libraryFocusRequested.connect(targets.append)
     page.focus_content()
     assert targets == []
     assert json.loads(page.bridge.snapshot())['videos']

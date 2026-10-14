@@ -1,9 +1,10 @@
-"""시험판 웹 라이브러리. Qt 셸의 페이지 계약과 기존 대화상자를 유지한다."""
+"""단일 웹 셸과 라이브러리 어댑터. 기존 Qt 페이지·대화상자 계약을 유지한다."""
 
 import os
+import json
 from pathlib import Path
 
-from PySide6.QtCore import QUrl, Signal, Qt
+from PySide6.QtCore import QPoint, QUrl, Signal, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtWebChannel import QWebChannel
@@ -15,6 +16,7 @@ from .library_page import LibraryOperations
 from .library_ui import LibraryControls
 from .web_library_data import snapshot_data, filter_ids, thumbnail_video_id
 from .web_library_bridge import LibraryBridge, encode
+from .web_tokens import web_tokens
 from .web_thumbnail import ThumbnailHandler, register_thumbnail_scheme
 
 
@@ -62,6 +64,7 @@ class WebLibraryPage(LibraryOperations, QWidget):
     scan_state_changed = Signal(bool)
     scan_message = Signal(str)
     refreshed = Signal()
+    frontend_loaded = Signal()
 
     def __init__(self, window):
         super().__init__(window)
@@ -80,10 +83,12 @@ class WebLibraryPage(LibraryOperations, QWidget):
         self._pending_focus = 'grid'
         self.library_controls = LibraryControls(window)
         self.hidden_gems = GemDialogs(self)
+        self.active_tab = 'library'
+        self.last_web_tab = 'library'
         self.bridge = LibraryBridge(self)
         register_thumbnail_scheme()
         self.view = QWebEngineView(self)
-        self.view.setAccessibleName('웹 라이브러리')
+        self.view.setAccessibleName('웹 셸')
         self.setFocusProxy(self.view)
         self.profile = QWebEngineProfile(self)  # view/page보다 나중에 파괴한다. off-the-record 프로필.
         self.thumbnails = ThumbnailHandler(self.core, self.profile)
@@ -95,10 +100,10 @@ class WebLibraryPage(LibraryOperations, QWidget):
         self.requests = LibraryRequests(Path(__file__).parent / 'web', entry, self.profile)
         self.profile.setUrlRequestInterceptor(self.requests)
         self.engine_page = LibraryWebEnginePage(self.profile, self.view, entry)
-        self.engine_page.setBackgroundColor(QColor('#181818'))
+        self.engine_page.setBackgroundColor(QColor(web_tokens()['colors']['background']))
         self.view.setPage(self.engine_page)
         self.channel = QWebChannel(self.engine_page)
-        self.channel.registerObject('library', self.bridge)
+        self.channel.registerObject('app', self.bridge)
         self.engine_page.setWebChannel(self.channel)
         # file 페이지에서 비-file 썸네일 스킴 접근에 필요하다. 외부 네트워크는 interceptor가 차단한다.
         self.engine_page.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
@@ -117,6 +122,12 @@ class WebLibraryPage(LibraryOperations, QWidget):
         window.settings_menu.aboutToHide.connect(self.settings_closed)
         window.subtitles.video_changed.connect(self.refresh_details)
         window.translations.video_changed.connect(self.refresh_details)
+
+    def set_tab(self, tab):
+        self.active_tab = tab
+        if tab in ('library', 'statistics'):
+            self.last_web_tab = tab
+        self.bridge.shellChanged.emit(encode({'tab': tab}))
 
     def payload(self):
         return dict(videos=self.cards, tags=self.tags, gems=self.gems, gemError=self.gem_error,
@@ -137,7 +148,7 @@ class WebLibraryPage(LibraryOperations, QWidget):
             self.gems, self.gem_error = [], str(error)
         self.gem_ids = [g['videoId'] for g in self.gems]
         self.apply_filters()
-        self.bridge.changed.emit(encode(self.payload()))
+        self.bridge.libraryChanged.emit(encode(self.payload()))
         self.refreshed.emit()
         if focus_gems is not None and self.isVisible():
             self.request_focus('gems' if focus_gems else 'grid')
@@ -150,10 +161,10 @@ class WebLibraryPage(LibraryOperations, QWidget):
 
     def refresh_details(self, changed_video_id=None):
         if self.selected_id is not None and (changed_video_id is None or changed_video_id == self.selected_id):
-            self.bridge.detailsChanged.emit(self.selected_id)
+            self.bridge.libraryDetailsChanged.emit(self.selected_id)
 
     def selection_changed(self):
-        self.bridge.changed.emit(encode(self.payload()))
+        self.bridge.libraryChanged.emit(encode(self.payload()))
 
     def selected_video_id(self):
         return self.selected_id
@@ -176,7 +187,7 @@ class WebLibraryPage(LibraryOperations, QWidget):
         if self._frontend_ready and self._pending_focus and self.isVisible():
             target, self._pending_focus = self._pending_focus, None
             self.view.setFocus()
-            self.bridge.focusRequested.emit(target)
+            self.bridge.libraryFocusRequested.emit(target if self.active_tab == 'library' else 'shell')
 
     def frontend_loading(self):
         self._frontend_ready = False
@@ -185,11 +196,39 @@ class WebLibraryPage(LibraryOperations, QWidget):
     def frontend_ready(self):
         self._frontend_ready = True
         self.apply_pending_focus()
+        self.frontend_loaded.emit()
 
     def settings_closed(self):
         if self.window.pages.currentWidget() is self:
             from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self.focus_content)
+
+    def popup_settings_menu(self):
+        """웹 설정 탭의 실제 CSS 좌표를 Qt 전역 좌표로 바꾼다. 숨은 웹은 창 우측 위를 쓴다."""
+        window = self.window
+        menu = window.settings_menu
+
+        def popup(rect=None):
+            from shiboken6 import isValid
+            if not isValid(self) or not isValid(window) or not window.isActiveWindow():
+                return
+            rect = json.loads(rect) if rect else None
+            if self.isVisible() and rect:
+                zoom = self.view.zoomFactor()
+                point = self.view.mapToGlobal(QPoint(round(rect[0] * zoom) - menu.sizeHint().width(),
+                                                    round(rect[1] * zoom)))
+            else:
+                point = window.mapToGlobal(QPoint(window.width() - menu.sizeHint().width() - 16, 12))
+            menu.popup(point)
+
+        if self.isVisible() and self._frontend_ready:
+            self.engine_page.runJavaScript("""JSON.stringify((() => {
+              const tab = document.querySelector('nav [data-tab="settings"]');
+              if (!tab) return null;
+              const rect = tab.getBoundingClientRect(); return [rect.right, rect.bottom];
+            })())""", popup)
+        else:
+            popup()
 
     def showEvent(self, event):
         super().showEvent(event)
