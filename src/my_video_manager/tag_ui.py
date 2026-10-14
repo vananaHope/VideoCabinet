@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from .tag_editing import move_tag_candidate, resolve_tag_input
+from .dialog_ui import primary_button, space_layout
 
 
 def _button(text, callback):
@@ -24,14 +25,18 @@ class TagManager(QDialog):
         self.core = core
         self.setWindowTitle("모든 태그 관리")
         self.resize(460, 380)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("이름 변경과 삭제는 모든 영상·하이라이트에 적용됩니다."))
+        layout = space_layout(QVBoxLayout(self))
+        hint = QLabel("이름 변경과 삭제는 모든 영상·하이라이트에 적용됩니다.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         self.list = QListWidget()
         layout.addWidget(self.list)
         buttons = QHBoxLayout()
-        self.rename_button = _button("이름 변경", self.rename)
+        self.rename_button = primary_button(_button("이름 변경", self.rename))
         self.delete_button = _button("태그 삭제", self.delete)
         for button in (self.rename_button, self.delete_button, _button("닫기", self.accept)):
+            if button.text() == "닫기":
+                buttons.addStretch()
             buttons.addWidget(button)
         layout.addLayout(buttons)
         self.refresh()
@@ -88,9 +93,8 @@ class TagEditor(QDialog):
             self.list_tags, self.add_tag, self.remove_tag = core.highlight_tags, core.add_highlight_tag, core.remove_highlight_tag
             self.setWindowTitle("하이라이트 태그")
         self.resize(500, 400)
-        layout = QVBoxLayout(self)
-        help_text = QLabel("Enter로 입력한 이름을 추가합니다. 후보를 쓰려면 ↓/↑로 고른 뒤 Enter를 누르세요.\n"
-                           "Tab으로 이동해 버튼을 Space로 누를 수 있습니다. 변경은 즉시 저장됩니다.")
+        layout = space_layout(QVBoxLayout(self))
+        help_text = QLabel("Enter로 추가 · ↓/↑로 후보 선택 · Tab으로 버튼 이동\n변경은 즉시 저장됩니다.")
         help_text.setWordWrap(True)
         layout.addWidget(help_text)
         entry = QHBoxLayout()
@@ -109,7 +113,7 @@ class TagEditor(QDialog):
         self.name.installEventFilter(self)
         self.completer.popup().installEventFilter(self)
         entry.addWidget(self.name)
-        entry.addWidget(_button("추가", self.add))
+        entry.addWidget(primary_button(_button("추가", self.add)))
         layout.addLayout(entry)
         self.list = QListWidget()
         self.list.setAccessibleName("붙어 있는 태그")
@@ -117,6 +121,8 @@ class TagEditor(QDialog):
         buttons = QHBoxLayout()
         self.remove_button = _button("선택한 태그 떼기", self.remove)
         for button in (self.remove_button, _button("모든 태그 관리", self.manage), _button("닫기", self.accept)):
+            if button.text() == "닫기":
+                buttons.addStretch()
             buttons.addWidget(button)
         layout.addLayout(buttons)
         self.refresh()

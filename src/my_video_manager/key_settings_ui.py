@@ -3,6 +3,7 @@
 import sqlite3
 
 from .key_display import display_keys
+from .dialog_ui import primary_button, space_layout
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
@@ -41,7 +42,7 @@ class KeyCapture(QDialog):
         super().__init__(parent)
         self.key = None
         self.setWindowTitle("새 키 입력")
-        layout = QVBoxLayout(self)
+        layout = space_layout(QVBoxLayout(self))
         layout.addWidget(QLabel(f"{label}\n할당할 키를 누르세요. Esc로 취소합니다."))
         self.hint = QLabel("문자·숫자·방향키·기능키와 Ctrl/Alt/Shift 조합을 사용할 수 있습니다.")
         self.hint.setWordWrap(True)
@@ -71,7 +72,7 @@ class KeySettings(QWidget):
         self.core = core
         self.rows = core.key_bindings()
         self.draft = {row.command: row.keys for row in self.rows}
-        layout = QVBoxLayout(self)
+        layout = space_layout(QVBoxLayout(self))
         hint = QLabel("명령을 방향키로 고른 뒤 Enter 또는 ‘키 바꾸기’를 누르세요.\n"
                       "Tab으로 버튼에 이동하고 Space로 실행합니다. 변경은 ‘적용’ 또는 ‘저장 후 닫기’로 저장합니다.")
         hint.setWordWrap(True)
@@ -147,7 +148,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("설정")
         self.resize(760, 650)
-        layout = QVBoxLayout(self)
+        layout = space_layout(QVBoxLayout(self))
         self.tabs = QTabWidget()
         self.keys = KeySettings(core)
         self.tabs.addTab(self.keys, "키 배치")
@@ -157,6 +158,8 @@ class SettingsDialog(QDialog):
         for label, callback in (("적용", self.keys.save), ("저장 후 닫기", self.save_and_close), ("취소", self.reject)):
             button = QPushButton(label)
             button.setAutoDefault(False)
+            if label == "저장 후 닫기":
+                primary_button(button)
             button.clicked.connect(callback)
             buttons.addWidget(button)
         layout.addLayout(buttons)

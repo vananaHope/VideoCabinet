@@ -3,46 +3,115 @@
 import sqlite3
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QComboBox, QGridLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QMessageBox, QPushButton, QStyle, QStyledItemDelegate, QStyleOptionProgressBar,
+    QStyleOptionViewItem, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from .key_display import display_key, display_keys
+from .dialog_ui import primary_button, space_layout
+from .theme import PROGRESS_PLAYED
 
 
 STATES = {"queued": "대기", "transcribing": "받아쓰는 중", "translating": "번역 중",
           "held": "보류", "completed": "완료", "failed": "실패"}
+PROGRESS_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
-class SubtitleQueueDialog(QDialog):
+class QueueProgressDelegate(QStyledItemDelegate):
+    """행마다 QWidget을 만들지 않고 보이는 진행률만 그린다."""
+
+    def paint(self, painter, option, index):
+        background = QStyleOptionViewItem(option)
+        self.initStyleOption(background, index)
+        background.text = ""
+        style = option.widget.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, background, painter, option.widget)
+        progress = QStyleOptionProgressBar()
+        progress.rect = option.rect.adjusted(2, 2, -2, -2)
+        progress.state = option.state | QStyle.StateFlag.State_Horizontal
+        palette = QPalette(option.palette)
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(PROGRESS_PLAYED))
+        progress.palette = palette
+        progress.minimum, progress.maximum = 0, 100
+        progress.progress = round(index.data(PROGRESS_ROLE) * 100)
+        progress.text = index.data(Qt.ItemDataRole.DisplayRole)
+        progress.textVisible = True
+        progress.textAlignment = Qt.AlignmentFlag.AlignCenter
+        style.drawControl(QStyle.ControlElement.CE_ProgressBar, progress, painter, option.widget)
+
+
+class SubtitleQueuePage(QWidget):
+    def __init__(self, core, parent=None):
+        super().__init__(parent)
+        layout = space_layout(QVBoxLayout(self))
+        title = QLabel("자막 대기열")
+        title.setStyleSheet("font-size: 20px; font-weight: 600")
+        layout.addWidget(title)
+        self.tabs = QTabWidget()
+        self.queue = SubtitleQueueView(core)
+        self.rules = AutoSubtitleRulesPage(core)
+        self.tabs.addTab(self.queue, "처리 상태")
+        self.tabs.addTab(self.rules, "자동 자막 규칙")
+        layout.addWidget(self.tabs)
+
+    def focus_content(self):
+        self.tabs.currentWidget().list.setFocus()
+
+    def handle_key(self, event) -> bool:
+        return False
+
+
+class SubtitleQueueView(QWidget):
     def __init__(self, core, parent=None):
         super().__init__(parent)
         self.core = core
-        self.setWindowTitle("자막 대기열")
-        self.resize(800, 450)
-        layout = QVBoxLayout(self)
+        layout = space_layout(QVBoxLayout(self))
         layout.addWidget(QLabel(f"{display_keys(('Up', 'Down'))} 선택 · {display_key('Tab')} 버튼 이동 · "
-                                f"{display_key('Space')} 실행 · {display_key('Esc')} 닫기"))
+                                f"{display_key('Space')} 실행"))
+        self.state_filter = QComboBox()
+        self.state_filter.setAccessibleName("대기열 상태 필터")
+        self.state_filter.addItem("모든 상태", None)
+        for state, label in STATES.items():
+            self.state_filter.addItem(label, state)
+        layout.addWidget(self.state_filter)
         self.list = QTreeWidget()
         self.list.setHeaderLabels(["영상", "상태", "진행률", "안내"])
         self.list.setRootIsDecorated(False)
         self.list.setAccessibleName("자막 대기열")
         self.list.setColumnWidth(0, 250)
+        self.list.setColumnWidth(1, 110)
+        self.list.setColumnWidth(2, 110)
+        self.list.setWordWrap(True)
+        self.list.setItemDelegateForColumn(2, QueueProgressDelegate(self.list))
+        self.rows = {}
+        self.visible_entries = {}
         layout.addWidget(self.list)
-        buttons = QHBoxLayout()
-        for label, callback in (("앞당기기", self.promote), ("빼기", self.remove),
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        buttons = QGridLayout()
+        for index, (label, callback) in enumerate((("앞당기기", self.promote), ("빼기", self.remove),
                                 ("실패 항목 모두 재시도", self.retry),
-                                ("선택한 번역 보류 재시도", self.retry_held),
-                                ("자동 자막 규칙", self.rules), ("닫기", self.close)):
+                                ("선택한 번역 보류 재시도", self.retry_held))):
             button = QPushButton(label)
             button.clicked.connect(callback)
-            buttons.addWidget(button)
+            if index == 2:
+                primary_button(button)
+            buttons.addWidget(button, index // 2, index % 2)
         layout.addLayout(buttons)
         self.retry_status = QLabel()
         self.retry_status.setWordWrap(True)
         layout.addWidget(self.retry_status)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
+        self.state_filter.currentIndexChanged.connect(self.filter_changed)
+
+    def filter_changed(self):
+        self.snapshot = None
+        if self.isVisible():
+            self.refresh()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -64,15 +133,32 @@ class SubtitleQueueDialog(QDialog):
         if getattr(self, "snapshot", None) == items:
             return
         self.snapshot = items
+        counts = {state: sum(entry.state == state for entry in items) for state in STATES}
+        self.summary.setText(" · ".join(f"{label} {counts[state]}개" for state, label in STATES.items()))
+        visible = tuple(entry for entry in items if self.state_filter.currentData() in (None, entry.state))
+        wanted = {entry.video_id for entry in visible}
         scroll = self.list.verticalScrollBar().value()
-        self.list.clear()
-        for entry in items:
-            item = QTreeWidgetItem([entry.title, STATES[entry.state], f"{entry.progress:.0%}", entry.error or ""])
-            item.setData(0, Qt.ItemDataRole.UserRole, entry.video_id)
-            item.setToolTip(3, entry.error or "")
-            self.list.addTopLevelItem(item)
-            if entry.video_id == selected:
-                self.list.setCurrentItem(item)
+        for video_id in self.rows.keys() - wanted:
+            item = self.rows.pop(video_id)
+            self.list.takeTopLevelItem(self.list.indexOfTopLevelItem(item))
+        for row, entry in enumerate(visible):
+            item = self.rows.get(entry.video_id)
+            if item is None:
+                item = self.rows[entry.video_id] = QTreeWidgetItem()
+                item.setData(0, Qt.ItemDataRole.UserRole, entry.video_id)
+                self.list.insertTopLevelItem(row, item)
+            elif self.list.indexOfTopLevelItem(item) != row:
+                self.list.takeTopLevelItem(self.list.indexOfTopLevelItem(item))
+                self.list.insertTopLevelItem(row, item)
+            if self.visible_entries.get(entry.video_id) != entry:
+                # QTreeWidget의 모델은 실제로 바뀐 값에만 dataChanged를 보낸다.
+                for column, value in enumerate((entry.title, STATES[entry.state], f"{entry.progress:.0%}", entry.error or "")):
+                    item.setText(column, value)
+                item.setData(2, PROGRESS_ROLE, entry.progress)
+                item.setToolTip(3, entry.error or "")
+        self.visible_entries = {entry.video_id: entry for entry in visible}
+        if selected in self.rows:
+            self.list.setCurrentItem(self.rows[selected])
         if self.list.currentItem() is None and self.list.topLevelItemCount():
             self.list.setCurrentItem(self.list.topLevelItem(0))
         self.list.verticalScrollBar().setValue(scroll)
@@ -111,27 +197,24 @@ class SubtitleQueueDialog(QDialog):
         if any(e.video_id == self.selected() and e.state == "held" for e in self.core.translation_queue()):
             self.act(lambda: self.core.request_translation(self.selected()))
 
-    def rules(self):
-        AutoSubtitleRulesDialog(self.core, self).exec()
 
-
-class AutoSubtitleRulesDialog(QDialog):
+class AutoSubtitleRulesPage(QWidget):
     def __init__(self, core, parent=None):
         super().__init__(parent)
         self.core = core
-        self.setWindowTitle("자동 자막 규칙")
-        self.resize(650, 400)
-        layout = QVBoxLayout(self)
+        layout = space_layout(QVBoxLayout(self))
+        hint = QLabel("감시 폴더나 태그에 새로 등록되는 영상의 자막을 자동으로 만듭니다.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         self.list = QListWidget()
+        self.list.setWordWrap(True)
         self.list.setAccessibleName("저장된 자동 자막 규칙")
         layout.addWidget(self.list)
         layout.addWidget(QLabel("감시 폴더 또는 영상 태그"))
         self.target = QComboBox()
+        self.target.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.target.setMinimumContentsLength(24)
         self.target.setAccessibleName("자동 자막 대상")
-        for folder in core.watched_folders():
-            self.target.addItem(f"폴더: {folder.path}", {"folder": folder.path})
-        for tag in core.tags():
-            self.target.addItem(f"태그: {tag.name}", {"tag_id": tag.id})
         layout.addWidget(self.target)
         layout.addWidget(QLabel("원어 (선택하지 않으면 자동 감지)"))
         self.language = QComboBox()
@@ -140,12 +223,26 @@ class AutoSubtitleRulesDialog(QDialog):
         self.language.setAccessibleName("원어")
         layout.addWidget(self.language)
         buttons = QHBoxLayout()
-        for text, callback in (("규칙 저장", self.save), ("선택 규칙 해제", self.remove), ("닫기", self.close)):
+        for text, callback in (("규칙 저장", self.save), ("선택 규칙 해제", self.remove)):
             button = QPushButton(text)
+            if text == "규칙 저장":
+                self.save_button = primary_button(button)
             button.clicked.connect(callback)
             buttons.addWidget(button)
         layout.addLayout(buttons)
         self.list.currentItemChanged.connect(self.select_rule)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        target = self.target.currentData()
+        self.target.clear()
+        for folder in self.core.watched_folders():
+            self.target.addItem(f"폴더: {folder.path}", {"folder": folder.path})
+        for tag in self.core.tags():
+            self.target.addItem(f"태그: {tag.name}", {"tag_id": tag.id})
+        index = next((i for i in range(self.target.count()) if self.target.itemData(i) == target), 0)
+        self.target.setCurrentIndex(index)
+        self.save_button.setEnabled(self.target.count() > 0)
         self.refresh()
 
     def refresh(self):

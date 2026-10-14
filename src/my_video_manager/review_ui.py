@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from .review import ReviewConfirmationRequired
+from .dialog_ui import dialog_buttons, space_layout
 
 
 class ReviewDialog(QDialog):
@@ -19,8 +20,10 @@ class ReviewDialog(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle("자막 검수 · SRT 내보내기")
         self.resize(1050, 620)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("줄 클릭 또는 Enter: 장면 이동 · 방향키: 줄 선택 · Tab: 버튼 이동 · Esc: 닫기"))
+        layout = space_layout(QVBoxLayout(self))
+        hint = QLabel("클릭 또는 Enter로 장면 이동 · 방향키로 줄 선택 · Tab으로 버튼 이동 · Esc로 닫기")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["시각(초)", "원어 자막", "번역 자막", "검수"])
         self.table.setAccessibleName("원어와 번역 자막 줄 목록")
@@ -34,6 +37,7 @@ class ReviewDialog(QDialog):
         self.table.itemActivated.connect(lambda item: self.activate(item.row()))
         layout.addWidget(self.table)
         buttons = QHBoxLayout()
+        exports = QHBoxLayout()
         for label, callback in (
             ("원어 줄 수정", lambda: self.edit(False)),
             ("번역 줄 수정", lambda: self.edit(True)),
@@ -46,8 +50,14 @@ class ReviewDialog(QDialog):
             button = QPushButton(label)
             button.setAutoDefault(False)
             button.clicked.connect(callback)
-            buttons.addWidget(button)
+            if "SRT" in label:
+                exports.addWidget(button, 1)
+            elif label == "닫기":
+                exports.addWidget(button, 1)
+            else:
+                buttons.addWidget(button, 1)
         layout.addLayout(buttons)
+        layout.addLayout(exports)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(500)
@@ -119,7 +129,8 @@ class ReviewDialog(QDialog):
         video = next(v for v in self.core.videos() if v.id == self.video_id)
         dialog = QDialog(self)
         dialog.setWindowTitle("구간 원어 자막 다시 생성")
-        layout = QFormLayout(dialog)
+        layout = space_layout(QFormLayout(dialog))
+        dialog.resize(520, 260)
         row = self.selected()
         start, end = QDoubleSpinBox(), QDoubleSpinBox()
         for widget, value in ((start, row.original.start if row else 0),
@@ -130,10 +141,10 @@ class ReviewDialog(QDialog):
         layout.addRow("시작(초)", start)
         layout.addRow("끝(초)", end)
         note = QLabel()
+        note.setWordWrap(True)
         layout.addRow(note)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
+        buttons = dialog_buttons(dialog.accept, dialog.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("다시 생성")
         layout.addRow(buttons)
         def update_range():
             try:
