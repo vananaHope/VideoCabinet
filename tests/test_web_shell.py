@@ -94,6 +94,20 @@ def test_native_search_playback_returns_to_same_tab_and_state(window_factory, co
     assert page.query.text() == 'Python'
 
 
+@pytest.mark.parametrize('native_tab', NATIVE_PAGES)
+def test_web_mode_qt_playback_returns_to_same_tab(window_factory, core, native_tab):
+    from test_library_return_ui import Player
+    window = window_factory('1')
+    window.player_factory = Player
+    route = window.web_host.routes[native_tab]
+    window.navigate_web_tab(native_tab)
+    window.play_video(core.videos()[0].id)
+    assert window.pages.currentWidget() is window.playback_page
+    window.back_to_list()
+    assert window.pages.currentWidget() is window.navigation_pages[route]
+    assert window.web_host.active_tab == native_tab
+
+
 def test_web_library_playback_restores_filter_and_selection(window_factory, core):
     from test_library_return_ui import Player
     window = window_factory('1')

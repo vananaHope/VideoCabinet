@@ -3,13 +3,8 @@ import type { Tab } from "@/bridge-types"
 import LibraryPage from "./LibraryPage"
 import StatisticsPage from "./StatisticsPage"
 
-// null은 기존 Qt 화면으로 열리는 탭이다. 누락/오타는 typecheck에서 실패한다.
+// 웹 페이지만 추가한다. Python 등록부와의 불일치는 계약 테스트가 검출한다.
 export const pages = {
   library: LibraryPage,
-  reel: null,
-  search: null,
-  queue: null,
   statistics: StatisticsPage,
-  folders: null,
-  settings: null,
-} satisfies Record<Tab, ComponentType | null>
+} satisfies Partial<Record<Tab, ComponentType>>

@@ -671,6 +671,7 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
    `host.register_page(self)`를 호출합니다. 필요하면 기본 빈 함수인 `activated()`와 `deactivated()`를
    구현합니다. 호스트는 탭 이동, Qt 페이지·재생 왕복, 호스트 표시·숨김 때 활성 컨트롤러를 바꾸며,
    이전 컨트롤러의 `deactivated()` 뒤 새 컨트롤러의 `activated()`를 호출합니다.
+   `activated()`는 가볍게 유지하고, 무거운 계산은 지연하거나 취소할 수 있게 합니다(트레이 복원 때 잠깐 다른 탭이 활성화될 수 있습니다).
    재생에서 복귀할 때는 시청 종료 후 `activated()`가 호출되므로 통계 등을 다시 계산할 수 있습니다.
    활성 상태는 `is_active()`로 확인합니다. QWidget의 `isVisible()`은 자체 화면 표시 여부입니다.
    복귀 시 기본 `return_from_playback()`은 `refresh()`와 포커스 복원을 수행하며,
@@ -679,23 +680,29 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
    `focus_requested` 신호를 지정하고, 웹 첫 렌더 후 호출하는 `ready` 슬롯에서
    `self.page.frontend_ready()`를 호출합니다. 포커스 요청은 호스트가 준비될 때까지 보존합니다.
 3. `web_page_registry.py`에 컨트롤러를 import하고 `WEB_PAGES`에 한 줄 등록합니다.
-   전환한 `search`의 `NATIVE_PAGES` 한 줄은 제거합니다. 나머지 Qt 페이지 번호는 그대로 둡니다.
+   고정표 `QT_PAGE_INDEX`는 수정하지 않습니다. `NATIVE_PAGES`는 `WEB_PAGES`에 없는 Qt 탭으로 자동 계산됩니다.
 4. 새 `frontend/src/pages/SearchPage.tsx`를 작성합니다. `connectBridge()`에서
    `{ search, shell }`을 받아 생성된 공개 메서드만 사용하고, 효과를 정리할 때 신호 구독을 해제합니다.
    페이지 사이 브리지 호출은 공통 `shell` 외에는 하지 않습니다.
    페이지는 숨겨져도 마운트를 유지하므로 선택·검색어·스크롤을 보존할 수 있습니다.
-   `pages/index.ts`에서 컴포넌트를 import하고 `search: null` 한 줄을 `search: SearchPage`로 바꿉니다.
+   `pages/index.ts`에 컴포넌트 import와 `search: SearchPage` 한 줄을 추가합니다. 웹 페이지만 등록하고 `null` 항목은 두지 않습니다.
 5. `.venv/Scripts/python scripts/generate_web_types.py`로 재생성한 뒤 `--check`, 전체 pytest,
    `frontend/`의 `npm run lint`, `npm run typecheck`, `npm run build`를 실행합니다.
    `scripts/check_web_library.py`로 1100×720 화면·단축키·Qt/mpv 왕복도 확인합니다.
+   스크린샷은 `--offscreen`으로 찍고, 실창 입력 검사는 `--no-screenshots`로 캡처 없이 실행할 수 있습니다.
 
 호스트·생성기·`App.tsx`·`bridge.ts`·`ui.py`는 새 페이지 때문에 고칠 필요가 없습니다.
 채널 이름은 `TABS`의 `library`, `reel`, `search`, `queue`, `statistics`, `folders`, `settings`와 같고,
 공통 객체만 `shell`입니다. 통계의 준비 중 화면도 같은 등록부를 사용합니다.
 `tests/test_web_generator.py`는 예시 계약을 앞·중간·뒤에 추가해도 기존 페이지 출력이 그대로인지,
 `tests/test_web_pages.py`는 새 컨트롤러의 브리지·갱신·포커스 연결과 양쪽 등록부 일치를 확인합니다.
-탭 누락·중복은 Qt 시작 또는 테스트에서 실패하고, 웹 등록부의 누락·오타는 typecheck에서도 실패합니다.
-등록부 충돌은 양쪽 항목을 모두 남기고 `CONTRACTS`를 하나의 튜플로 합친 뒤, 생성 파일은 생성기로 다시 만듭니다.
+탭 누락·중복은 Qt 시작 또는 테스트에서 실패합니다. 웹 등록부 오타는 typecheck가, Python 등록부와의 누락·불일치는 계약 테스트가 검출합니다.
+추가만 하는 Python·웹 등록부 두 파일에는 `.gitattributes`의 `merge=union`을 적용해 양쪽 추가 항목을 합칩니다.
+`web_contract.py`는 일반 병합을 유지합니다. 새 계약 선언·`CONTRACTS` 항목의 추가 충돌은 양쪽을 보존하고
+`CONTRACTS`는 하나의 튜플로 합칩니다. 충돌 블록 밖의 공통 꼬리 부분까지 확인해 각 계약 선언이 완전한 문장이 되게 합니다.
+기존 계약의 같은 슬롯·신호·상수를 양쪽에서 수정했다면 내용을 검토해 하나로 결정합니다.
+dict의 중복 키가 조용히 덮어써질 수 있으므로 계약 파일에 union 병합을 적용하지 않습니다.
+생성 파일 충돌은 원본 계약을 합친 뒤 생성기로 다시 만듭니다.
 `CONTRACTS`, Python·웹 등록부는 한 줄에 한 항목을 유지합니다.
 공용 JSON 직렬화는 `web_json.py`, 셸 데이터는 `web_shell_data.py`가 소유합니다.
 생성 파일은 직접 수정하지 않습니다. 페이지 객체로 나뉘어 `library` 신호 접두어는 기술적으로

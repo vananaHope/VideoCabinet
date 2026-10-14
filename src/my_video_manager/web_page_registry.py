@@ -9,13 +9,17 @@ WEB_PAGES = (
     WebLibraryPage,
     WebStatisticsPage,
 )
-# Qt 번호는 웹 탭 순서에서 계산하지 않는다. 전환할 때 해당 줄을 제거하고 위에 등록한다.
-NATIVE_PAGES = {
+# 기존 Qt 페이지의 고정 번호표. 웹 페이지를 추가할 때는 이 표를 수정하지 않는다.
+QT_PAGE_INDEX = {
     'reel': 1,
     'search': 2,
     'queue': 3,
     'folders': 4,
     'settings': 5,
+}
+NATIVE_PAGES = {
+    tab: index for tab, index in QT_PAGE_INDEX.items()
+    if tab not in {page.tab for page in WEB_PAGES}
 }
 
 

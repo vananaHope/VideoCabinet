@@ -21,6 +21,8 @@ from statistics import median
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
+parser.add_argument('--offscreen', action='store_true', help='실제 데스크톱 대신 offscreen에서 화면 캡처')
+parser.add_argument('--no-screenshots', action='store_true', help='실창 입력 검사 중 캡처 생략')
 parser.add_argument('--mode', choices=['qt', 'web'], default='web')
 parser.add_argument('--count', type=int, default=24)
 parser.add_argument('--prepare', action='store_true')
@@ -38,7 +40,10 @@ if args.verify_gems:
     if args.mode != 'web' or args.prepare or args.verify:
         parser.error('--verify-gems는 --mode web에서 단독으로 사용하세요')
     args.count = 10
-os.environ['QT_QPA_PLATFORM'] = 'windows'
+os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
+if args.offscreen:
+    # 표시 표면 없는 Windows offscreen 캡처는 GPU 컨텍스트 대신 소프트웨어로 그린다.
+    os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '') + ' --disable-gpu'
 os.environ['MVM_WEB_UI'] = '1' if args.mode == 'web' else '0'
 
 from PySide6.QtCore import Qt, QEventLoop, QTimer, QPoint, QPointF, QObject, QEvent
@@ -209,14 +214,21 @@ if args.long_content and args.mode == 'web':
 startup = (time.perf_counter() - STARTED) * 1000
 screens = args.output
 screens.mkdir(parents=True, exist_ok=True)
-window.grab().save(str(screens / f'{args.mode}-{args.count}.png'))
+
+
+def capture_window(name):
+    if not args.no_screenshots:
+        window.grab().save(str(screens / name))
+
+
+capture_window(f'{args.mode}-{args.count}.png')
 metrics = {'mode': args.mode, 'count': args.count, 'startup_ms': round(startup, 2), 'checks': []}
 
 if args.verify_shell and args.mode == 'qt':
     for index, tab in enumerate(('library', 'reel', 'search', 'queue', 'folders', 'settings')):
         window.navigate(index)
         settle()
-        window.grab().save(str(screens / f'qt-tab-{tab}-{args.count}.png'))
+        capture_window(f'qt-tab-{tab}-{args.count}.png')
     window.navigate(0)
     settle()
 
@@ -237,7 +249,7 @@ if args.verify_shell and args.mode == 'web':
     window.show_status('검사 완료 · 웹 작업 알림 확인')
     wait_until(lambda: js("document.querySelector('[role=status]')?.textContent") == '검사 완료 · 웹 작업 알림 확인')
     settle()  # DOM 커밋 뒤 Chromium paint까지 기다린다.
-    window.grab().save(str(screens / f'web-notice-{args.count}.png'))
+    capture_window(f'web-notice-{args.count}.png')
     window.statusBar().clearMessage()
     wait_until(lambda: not js("!!document.querySelector('[role=status]')"))
     # 탭 클릭은 실제 DOM 버튼을 사용하고, 복귀 키는 Qt WebEngine 포커스 프록시에 전달한다.
@@ -251,7 +263,7 @@ if args.verify_shell and args.mode == 'web':
         target = window.navigation_pages[route] if isinstance(route, int) else host
         assert window.pages.currentWidget() is target
         assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
-        window.grab().save(str(screens / f'tab-{tab}-{args.count}.png'))
+        capture_window(f'tab-{tab}-{args.count}.png')
         if target is not host:
             shell_key(window.focusWidget(), Qt.Key.Key_Escape)
             assert window.pages.currentWidget() is host, (tab, window.isActiveWindow(), QApplication.activeModalWidget(), QApplication.activePopupWidget(), window.focusWidget())
@@ -280,11 +292,12 @@ if args.verify_shell and args.mode == 'web':
     metrics['settingsMenuAnchor'] = {'tabBottomRight': [anchor.x(), anchor.y()], 'menuPosition': [window.settings_menu.x(), window.settings_menu.y()]}
     # 화면 전체 grab에는 동시에 사용하는 다른 앱이 섞일 수 있다.
     # 실제 앱/팝업 픽셀만 각각 잡아 검증한 전역 위치에 합성한다.
-    capture = window.grab()
-    painter = QPainter(capture)
-    painter.drawPixmap(window.mapFromGlobal(window.settings_menu.pos()), window.settings_menu.grab())
-    painter.end()
-    capture.save(str(screens / f'web-settings-menu-{args.count}.png'))
+    if not args.no_screenshots:
+        capture = window.grab()
+        painter = QPainter(capture)
+        painter.drawPixmap(window.mapFromGlobal(window.settings_menu.pos()), window.settings_menu.grab())
+        painter.end()
+        capture.save(str(screens / f'web-settings-menu-{args.count}.png'))
     window.settings_menu.hide()
     settle()
     assert not window.sidebar.isVisible()
@@ -373,7 +386,7 @@ if args.verify_gems:
         run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
         layout = gem_layout()
         layouts.append(layout)
-        window.grab().save(str(screens / f'web-gems-{count}.png'))
+        capture_window(f'web-gems-{count}.png')
         print(json.dumps(layout, ensure_ascii=False), flush=True)
         (screens / 'web-gems-check.json').write_text(json.dumps(layouts, ensure_ascii=False, indent=2), encoding='utf-8')
         assert layout['buttons'] == 8, layout
@@ -433,6 +446,7 @@ if args.verify_gems:
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Escape)
     window.tray.quit()
     window.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
     raise SystemExit()
 
@@ -576,7 +590,7 @@ if args.verify and args.mode == 'web':
         wait_until(lambda: not window.isFullScreen())
         assert window.pages.currentWidget() is window.playback_page
         assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
-        window.grab().save(str(screens / f'mpv-{args.count}.png'))
+        capture_window(f'mpv-{args.count}.png')
         QTest.keyClick(window.surface, Qt.Key.Key_Escape)
         wait_until(lambda: window.pages.currentWidget() is host)
         QTest.qWait(250)
@@ -649,7 +663,7 @@ if args.verify_library and args.mode == 'web':
     js("document.querySelector('aside [data-tab=highlights]').click()")
     wait_until(lambda: js("document.getElementById('detail-scroll')?.textContent.includes('하이라이트 없음')"))
     settle()
-    window.grab().save(str(screens / 'web-highlights-0.png'))
+    capture_window('web-highlights-0.png')
 
     playable = max((v for v in core.videos() if any(loc.path.stat().st_size > 1000 for loc in v.locations)),
                    key=lambda v: max(loc.path.stat().st_size for loc in v.locations))
@@ -670,7 +684,7 @@ if args.verify_library and args.mode == 'web':
     wait_until(lambda: js("document.querySelectorAll('[role=option][id^=highlight-]').length") == 32)
     js("document.getElementById('detail-scroll').focus()")
     settle()
-    window.grab().save(str(screens / 'web-highlights-many.png'))
+    capture_window('web-highlights-many.png')
     metrics['visibleHighlights'] = js("""(() => {
       const bounds = document.getElementById('detail-scroll').getBoundingClientRect();
       return [...document.querySelectorAll('[id^=highlight-]')].filter(el => {
@@ -695,7 +709,7 @@ if args.verify_library and args.mode == 'web':
     assert core.playback.session.video_id == playable.id
     assert abs(core.playback.position - start) < 1.0, (core.playback.position, start)
     settle(250)
-    window.grab().save(str(screens / 'web-highlight-mpv.png'))
+    capture_window('web-highlight-mpv.png')
     QTest.keyClick(window.surface, Qt.Key.Key_Escape)
     wait_until(lambda: window.pages.currentWidget() is host)
     settle(400)
@@ -703,7 +717,7 @@ if args.verify_library and args.mode == 'web':
     assert js("document.getElementById('detail-scroll').getAttribute('aria-activedescendant')") == selection
     assert js("document.getElementById('detail-scroll').scrollTop") == top
     assert js("document.activeElement.id") == 'detail-scroll'
-    window.grab().save(str(screens / 'web-highlight-return.png'))
+    capture_window('web-highlight-return.png')
     metrics['checks'].append('하이라이트 ↑/↓·Enter 실제 mpv 정확한 시각 재생·Esc 탭/선택/스크롤/포커스 복원')
     js(f"document.getElementById('{selection}').querySelector('button').click()")
     wait_until(lambda: window.pages.currentWidget() is window.playback_page)
@@ -849,4 +863,5 @@ if args.stay:
 else:
     window.tray.quit()
     window.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()

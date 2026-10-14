@@ -209,9 +209,13 @@ def test_frontend_registry_matches_all_tabs_and_qt_fallbacks():
     result = subprocess.run(['node', '-e', script], cwd=root / 'frontend', capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     routes = json.loads(result.stdout)
-    assert set(routes) == {tab for tab, _ in TABS}
-    assert {tab for tab, is_web in routes.items() if is_web} == {page.tab for page in web_page_registry.WEB_PAGES}
-    assert {tab for tab, is_web in routes.items() if not is_web} == set(web_page_registry.NATIVE_PAGES)
+    assert all(routes.values())  # null 자리표시를 두지 않는다.
+    assert set(routes) == {page.tab for page in web_page_registry.WEB_PAGES}
+    assert set(routes).isdisjoint(web_page_registry.NATIVE_PAGES)
+    assert set(routes) | set(web_page_registry.NATIVE_PAGES) == {tab for tab, _ in TABS}
+    assert web_page_registry.NATIVE_PAGES == {
+        tab: index for tab, index in web_page_registry.QT_PAGE_INDEX.items() if tab not in routes
+    }
 
 
 def test_connection_returns_only_public_page_wrappers():
