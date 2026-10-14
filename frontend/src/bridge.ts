@@ -3,6 +3,7 @@ import type { DetailsData, LibraryData } from "./bridge-types"
 type Signal<T> = { connect: (handler: (value: T) => void) => void; disconnect: (handler: (value: T) => void) => void }
 type Reply = (json: string) => void
 export interface Bridge {
+  ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void
   filter: (query: string, tag: number, reply: Reply) => void
   select: (id: number, reply: Reply) => void

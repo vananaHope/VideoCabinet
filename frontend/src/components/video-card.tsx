@@ -19,7 +19,7 @@ export function viewing(video: VideoData) {
   return video.missing ? "파일 없음" : video.finished ? "다 봄" : video.abandoned ? `보다 만 ${Math.round(video.stoppedPercent ?? 0)}%` : "아직 안 봄"
 }
 const thumbnailVariants = cva("relative flex w-full shrink-0 items-center justify-center overflow-hidden bg-muted", {
-  variants: { variant: { default: "aspect-video", card: "h-28" } }, defaultVariants: { variant: "default" },
+  variants: { variant: { default: "aspect-video", card: "h-28", gem: "h-20", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
 })
 export function Thumbnail({ video, variant }: { video: VideoData } & VariantProps<typeof thumbnailVariants>) {
   return <div className={thumbnailVariants({ variant })}>

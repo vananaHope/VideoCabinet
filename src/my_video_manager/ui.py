@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
             self.library_page = LibraryPage(self)
         self.pages.addWidget(self.library_page)
         self.playback_page = PlaybackPage(self)
-        self.settings_menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.pages.currentWidget().focus_content))
+        self.settings_menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.playback_page.focus_content))
         self.pages.addWidget(self.playback_page)
         # 기존 화면 어댑터용 연결점. 위젯 구성과 갱신은 각 페이지 모듈이 소유한다.
         self.surface = self.playback_page.surface

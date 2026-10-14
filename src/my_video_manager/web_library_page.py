@@ -76,6 +76,8 @@ class WebLibraryPage(LibraryOperations, QWidget):
         self.selected_id = None
         self.query, self.tag_id = '', None
         self.tags = []
+        self._frontend_ready = False
+        self._pending_focus = 'grid'
         self.library_controls = LibraryControls(window)
         self.hidden_gems = GemDialogs(self)
         self.bridge = LibraryBridge(self)
@@ -110,7 +112,9 @@ class WebLibraryPage(LibraryOperations, QWidget):
         layout.addWidget(self.load_error)
         layout.addWidget(self.view)
         self.view.loadFinished.connect(lambda ok: self.load_error.setVisible(not ok))
+        self.view.loadStarted.connect(self.frontend_loading)
         self.view.load(entry)
+        window.settings_menu.aboutToHide.connect(self.settings_closed)
         window.subtitles.video_changed.connect(self.refresh_details)
         window.translations.video_changed.connect(self.refresh_details)
 
@@ -136,8 +140,7 @@ class WebLibraryPage(LibraryOperations, QWidget):
         self.bridge.changed.emit(encode(self.payload()))
         self.refreshed.emit()
         if focus_gems is not None and self.isVisible():
-            self.view.setFocus()
-            self.bridge.focusRequested.emit('gems' if focus_gems else 'grid')
+            self.request_focus('gems' if focus_gems else 'grid')
 
     def apply_filters(self):
         self.visible_ids = filter_ids(self.cards, self.query, self.tag_id)
@@ -162,9 +165,33 @@ class WebLibraryPage(LibraryOperations, QWidget):
         return False  # 예약 키는 셸, 나머지는 Chromium/React가 처리한다.
 
     def focus_content(self):
-        self.view.setFocus()
-        self.bridge.focusRequested.emit('grid')
+        self.request_focus('grid')
+
+    def request_focus(self, target):
+        # 채널 연결과 React의 첫 스냅숏 렌더보다 먼저 온 요청도 잃지 않는다.
+        self._pending_focus = target
+        self.apply_pending_focus()
+
+    def apply_pending_focus(self):
+        if self._frontend_ready and self._pending_focus and self.isVisible():
+            target, self._pending_focus = self._pending_focus, None
+            self.view.setFocus()
+            self.bridge.focusRequested.emit(target)
+
+    def frontend_loading(self):
+        self._frontend_ready = False
+        self._pending_focus = self._pending_focus or 'grid'
+
+    def frontend_ready(self):
+        self._frontend_ready = True
+        self.apply_pending_focus()
+
+    def settings_closed(self):
+        if self.window.pages.currentWidget() is self:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self.focus_content)
 
     def showEvent(self, event):
         super().showEvent(event)
         self.refresh_details()
+        self.apply_pending_focus()

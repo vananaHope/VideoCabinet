@@ -26,6 +26,11 @@ class LibraryBridge(QObject):
     def snapshot(self):
         return encode(self.page.payload())
 
+    @Slot(result=str)
+    def ready(self):
+        self.page.frontend_ready()
+        return encode({'ok': True})
+
     @Slot(str, int, result=str)
     def filter(self, query, tag_id):
         self.page.query, self.page.tag_id = query, tag_id if tag_id > 0 else None

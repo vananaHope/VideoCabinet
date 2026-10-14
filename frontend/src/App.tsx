@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { Sparkles } from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { NativeSelect } from "@/components/ui/native-select"
 import { Button } from "@/components/ui/button"
 import { GemCard } from "@/components/gem-card"
 import { VideoMenu } from "@/components/video-menu"
@@ -62,6 +63,11 @@ export default function App() {
     return () => { disposed = true; disconnect() }
   }, [showError])
 
+  // effect는 첫 스냅숏의 격자가 DOM에 반영된 뒤 실행된다.
+  useEffect(() => {
+    if (bridge) request(reply => bridge.ready(reply)).catch(showError)
+  }, [bridge, showError])
+
   useEffect(() => {
     let current = true
     setDetails(null)
@@ -73,6 +79,7 @@ export default function App() {
   const visible = useMemo(() => data?.visibleIds.flatMap(id => byId.get(id) ?? []) ?? [], [data?.visibleIds, byId])
   const gems = data?.gems ?? []
   const activeGem = gems.some(g => g.videoId === gemId) ? gemId : gems[0]?.videoId
+  const activeTag = data?.tags.some(t => t.id === tag) ? tag : 0
 
   function filter(text: string, tagId: number) {
     if (!bridge) return
@@ -88,6 +95,8 @@ export default function App() {
   }
   function action(name: Action, id: number) {
     if (name === 'play' || name === 'playGem' || name === 'review') {
+      // mpv 전환 중 숨은 웹 뷰의 폭이 바뀌어도 열 수와 스크롤을 유지한다.
+      // 복귀 focus 신호에서 resize를 재측정하고 두 프레임 뒤 저장한 위치를 복원한다.
       layoutPaused.current = true
       savedScroll.current = {
         grid: document.getElementById('library-grid')?.scrollTop ?? 0,
@@ -118,32 +127,28 @@ export default function App() {
     }
   }
 
-  return <main className="flex h-full flex-col gap-4 p-4">
-    <header className="flex items-center justify-between gap-4">
-      <div><h1 className="text-xl font-semibold tracking-tight">라이브러리</h1><p className="mt-1 text-xs text-muted-foreground">보고 싶은 순간을 다시 찾아보세요.</p></div>
-      <span className="text-xs text-muted-foreground" aria-live="polite">{data ? `${data.videos.length}개 중 ${visible.length}개` : "불러오는 중…"}</span>
-    </header>
+  return <main aria-label="라이브러리" className="flex h-full flex-col gap-2 p-2">
     <div className="flex items-center gap-3">
       <div className="min-w-0 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목으로 빠른 검색" value={query}
-        onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter(event.currentTarget.value, tag) }}
-        onChange={event => { setQuery(event.target.value); if (!composing.current) filter(event.target.value, tag) }} /></div>
+        onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter(event.currentTarget.value, activeTag) }}
+        onChange={event => { setQuery(event.target.value); if (!composing.current) filter(event.target.value, activeTag) }} /></div>
       <label className="flex items-center gap-2 text-xs text-muted-foreground">태그
-        <select aria-label="라이브러리 태그 필터" value={data?.tags.some(t => t.id === tag) ? tag : 0} onChange={event => { const value = Number(event.target.value); setTag(value); filter(query, value) }} className="h-9 max-w-48 rounded-md border border-input bg-background px-3 text-sm text-foreground">
+        <NativeSelect aria-label="라이브러리 태그 필터" value={activeTag} onChange={event => { const value = Number(event.target.value); setTag(value); filter(query, value) }}>
           <option value={0}>모든 태그</option>{data?.tags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
-        </select>
+        </NativeSelect>
       </label>
     </div>
     {error && <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-destructive p-3 text-destructive"><span>{error}</span><Button variant="outline" size="sm" onClick={() => setError("")}>닫기</Button></div>}
-    <section aria-label="숨겨진 보석" className="flex flex-col gap-2">
+    <section aria-label="숨겨진 보석" className="flex flex-col gap-1">
       <div className="flex items-center gap-2"><Sparkles className="size-4 text-primary" aria-hidden="true" /><h2 className="text-sm font-semibold">숨겨진 보석</h2><span className="text-xs text-muted-foreground">{data?.gemError ? `불러오지 못했어요: ${data.gemError}` : gems.length ? "←/→ 선택 · Enter 재생 · Backspace 관심 없음" : "지금은 추천할 영상이 없어요"}</span></div>
-      {gems.length > 0 && <div id="hidden-gems" role="listbox" aria-label="숨겨진 보석 추천 카드" aria-activedescendant={`gem-${activeGem}`} tabIndex={0} onKeyDown={gemKey} className="flex gap-3 overflow-x-auto rounded-lg p-1">
+      {gems.length > 0 && <div id="hidden-gems" role="listbox" aria-label="숨겨진 보석 추천 카드" aria-activedescendant={`gem-${activeGem}`} tabIndex={0} onKeyDown={gemKey} className="grid grid-cols-4 gap-2 rounded-lg p-1">
         {gems.map(gem => { const video = byId.get(gem.videoId); return video && <VideoMenu key={gem.videoId} id={gem.videoId} gem scanning={false} onAction={action}>
           <GemCard id={`gem-${gem.videoId}`} video={video} reason={gem.reason} variant={activeGem === gem.videoId ? "selected" : "default"} role="option" aria-selected={activeGem === gem.videoId} tabIndex={-1}
             onClick={() => { setGemId(gem.videoId); action("playGem", gem.videoId) }} onContextMenu={() => setGemId(gem.videoId)} />
         </VideoMenu> })}
       </div>}
     </section>
-    <div className="flex min-h-0 flex-1 gap-4">
+    <div className="flex min-h-0 flex-1 gap-2">
       <LibraryGrid videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} />
       <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} scanning={data?.scanning ?? false} onAction={action} />
     </div>

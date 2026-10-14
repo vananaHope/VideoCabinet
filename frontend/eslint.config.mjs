@@ -4,6 +4,7 @@ import { defineConfig } from "eslint/config"
 
 export default defineConfig([
   { ignores: ["node_modules/**"] },
+  { linterOptions: { noInlineConfig: true } },
   {
     files: ["**/*.{js,mjs,jsx,ts,tsx}"],
     languageOptions: { parser: tsParser, parserOptions: { ecmaFeatures: { jsx: true } } },
