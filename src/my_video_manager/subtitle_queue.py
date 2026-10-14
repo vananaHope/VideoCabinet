@@ -71,6 +71,13 @@ class QueueOrder:
         if not automatic:
             db.execute("UPDATE subtitle_queue_order SET automatic = 0 WHERE video_id = ?", (video_id,))
 
+    def finish(self, db, video_id):
+        """받아쓰기·번역 항목이 모두 사라진 영상만 순번과 앞당기기를 끝낸다."""
+        db.execute("DELETE FROM subtitle_queue_order WHERE video_id = ? "
+                   "AND NOT EXISTS (SELECT 1 FROM subtitle_queue WHERE video_id = ?) "
+                   "AND NOT EXISTS (SELECT 1 FROM translation_queue WHERE video_id = ?)",
+                   (video_id, video_id, video_id))
+
     def sort(self, entries):
         if not entries:
             return ()

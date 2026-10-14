@@ -802,6 +802,28 @@ def test_range_request_registers_manual_fifo_priority_after_hidden_queue(setup, 
     assert [i.video_id for i in core.subtitle_queue_items()] == [automatic, first, vid, last]
 
 
+@pytest.mark.parametrize("promoted", [False, True])
+def test_range_translation_preserves_request_order_and_promotion(setup, tmp_path, promoted):
+    core, a, _, _, _, _ = setup
+    finish(core)
+    path = tmp_path / "b.mkv"
+    path.write_bytes(b"second movie")
+    core.add_file(path)
+    b = next(v.id for v in core.videos() if v.id != a)
+    if promoted:
+        core.request_subtitles(b)
+        core.process_next_subtitle()
+        core.request_subtitle_range(a, 10, 20)
+        core.promote_subtitle(a)
+        core.process_next_subtitle()
+    else:
+        core.request_subtitle_range(a, 10, 20)
+        core.request_subtitles(b)
+        core.process_next_subtitle()
+        core.process_next_subtitle()
+    assert [entry.video_id for entry in core.translation_queue()] == [a, b]
+
+
 @pytest.mark.parametrize("range_change", [False, True])
 def test_replacing_active_translation_request_discards_old_result_and_queues_new_id(setup, range_change):
     core, vid, transcriber, translator, *_ = setup

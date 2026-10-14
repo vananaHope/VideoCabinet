@@ -183,7 +183,7 @@ class Translations:
                 db.execute("DELETE FROM translation_omissions WHERE transcript_id = ?", (transcript.id,))
             if self._order:
                 self._order.request(db, video_id, automatic=automatic,
-                                    renew=not automatic and (old is None or old["state"] == "failed"))
+                                    renew=not automatic and old is not None and old["state"] == "failed")
             # 명시적인 전체 재시도는 저장한 묶음을 재사용한다.
             if old and line_ids is None:
                 db.execute("DELETE FROM translation_limit_attempts WHERE queue_id = ?", (old["id"],))
@@ -228,6 +228,8 @@ class Translations:
         db.executemany("DELETE FROM translation_lines WHERE line_id = ?", [(id_,) for id_, _ in targets])
         db.executemany("INSERT INTO translation_lines VALUES (?, ?)", targets)
         db.execute("DELETE FROM translation_queue WHERE id = ?", (row[0],))
+        if self._order:
+            self._order.finish(db, video_id)
 
     @staticmethod
     def _entry(db, row):
@@ -362,6 +364,8 @@ class Translations:
                     entry = self._entry(db, db.execute("SELECT * FROM translation_queue WHERE id = ?", (pending.id,)).fetchone())
                     if done:
                         db.execute("DELETE FROM translation_queue WHERE id = ?", (pending.id,))
+                        if self._order:
+                            self._order.finish(db, pending.video_id)
                     return entry
             except TranslationCancelled:
                 with self._connect() as db:
