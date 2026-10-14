@@ -4,11 +4,13 @@ from pathlib import Path
 
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtCore import QEvent, QObject
-from PySide6.QtWidgets import QAbstractItemView, QComboBox, QStyledItemDelegate
+from PySide6.QtWidgets import QAbstractItemView, QComboBox, QLabel, QStyledItemDelegate
 
 BACKGROUND = "#181818"
 SURFACE = "#242424"
 BORDER = "#454b54"
+# 입력·버튼처럼 조작할 수 있는 요소의 경계. 장식용 BORDER보다 밝고 포커스 강조색과는 구분된다.
+CONTROL_BORDER = "#5c636e"
 TEXT = "#eeeeee"
 MUTED_TEXT = "#aaaaaa"
 ACCENT = "#79b8ff"
@@ -35,11 +37,19 @@ QAbstractItemView {{
     border-radius: 3px; selection-background-color: {ACCENT_TINT};
     selection-color: {TEXT};
 }}
+QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox {{ border-color: {CONTROL_BORDER}; }}
 QLineEdit, QAbstractSpinBox, QComboBox {{ padding: 4px; }}
 QPushButton, QToolButton {{
-    background: {SURFACE}; border: 2px solid {BORDER};
-    border-radius: 4px; padding: 5px 8px;
+    background: {SURFACE}; border: 2px solid {CONTROL_BORDER};
+    border-radius: 4px; padding: 5px 10px;
 }}
+QLabel[role="pageTitle"] {{ font-size: 20px; font-weight: 600; }}
+QLabel[role="sectionTitle"] {{ font-size: 15px; font-weight: 600; }}
+QLabel[role="hint"], QLabel[role="emptyBody"] {{ color: {MUTED_TEXT}; }}
+QLabel[role="emptyTitle"] {{ font-size: 16px; font-weight: 600; }}
+QPushButton[role="danger"] {{ color: {WARNING}; }}
+QFrame[role="card"] {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 6px; }}
+QFrame[role="card"] QLabel {{ background: transparent; }}
 QPushButton:hover, QToolButton:hover {{ border-color: {MUTED_TEXT}; }}
 QPushButton:checked {{ background: {ACCENT_TINT}; border-color: {BORDER}; }}
 QPushButton:pressed, QToolButton:pressed {{ background: {BORDER}; }}
@@ -108,6 +118,22 @@ QAbstractSpinBox::up-button:disabled, QAbstractSpinBox::down-button:disabled {{
     background: {DISABLED_BORDER}; border-color: {DISABLED_BORDER};
 }}
 """
+
+
+def with_role(widget, role):
+    """전역 스타일시트의 역할(role) 규칙을 붙인다. 페이지마다 글자 크기를 따로 정하지 않는다."""
+    widget.setProperty("role", role)
+    return widget
+
+
+def page_title(text):
+    return with_role(QLabel(text), "pageTitle")
+
+
+def hint_label(text=""):
+    label = with_role(QLabel(text), "hint")
+    label.setWordWrap(True)
+    return label
 
 
 class _ThemeWidgets(QObject):

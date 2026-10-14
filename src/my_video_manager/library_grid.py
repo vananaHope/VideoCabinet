@@ -70,7 +70,7 @@ class VideoCardDelegate(QStyledItemDelegate):
     def __init__(self, icons, parent=None, *, compact=False):
         super().__init__(parent)
         self.icons, self.compact = icons, compact
-        self.card_size = QSize(192, 204) if compact else QSize(216, 260)
+        self.card_size = QSize(184, 172) if compact else QSize(216, 252)
 
     def sizeHint(self, option, index):
         return self.card_size
@@ -90,7 +90,7 @@ class VideoCardDelegate(QStyledItemDelegate):
         painter.setPen(QPen(QColor(theme.ACCENT if focused else theme.BORDER), 2 if focused else 1))
         painter.drawRoundedRect(rect, 6, 6)
         inner = rect.adjusted(8, 8, -8, -8)
-        thumb_height = 88 if self.compact else 108
+        thumb_height = 72 if self.compact else 108
         thumb = QRect(inner.x(), inner.y(), inner.width(), thumb_height)
         painter.fillRect(thumb, QColor(theme.BACKGROUND))
         if card.video.missing:
@@ -110,7 +110,8 @@ class VideoCardDelegate(QStyledItemDelegate):
         painter.setFont(option.font)
         painter.setPen(QColor(theme.MUTED_TEXT if card.video.missing else theme.TEXT))
         y = thumb.bottom() + 9
-        y = self.draw_title(painter, card.video.title, option.font, inner.x(), y, inner.width())
+        y = self.draw_title(painter, card.video.title, option.font, inner.x(), y, inner.width(),
+                            max_lines=1 if self.compact else 2)
         painter.setPen(QColor(theme.MUTED_TEXT))
         status = "파일 없음" if card.video.missing else viewing_text(card.status)
         text = f"{duration_text(card.video.duration)} · {status}"
@@ -129,8 +130,15 @@ class VideoCardDelegate(QStyledItemDelegate):
         painter.restore()
 
     @staticmethod
-    def draw_title(painter, text, font, x, y, width):
-        layout = QTextLayout(text.replace("\n", " "), font)
+    def draw_title(painter, text, font, x, y, width, *, max_lines=2):
+        """제목을 최대 max_lines줄로 그리고, 실제로 쓴 줄 수만큼 아래로 내린 y를 돌려준다."""
+        text = text.replace("\n", " ")
+        metrics = painter.fontMetrics()
+        height = metrics.height()
+        if max_lines == 1 or metrics.horizontalAdvance(text) <= width:
+            painter.drawText(x, y + metrics.ascent(), metrics.elidedText(text, Qt.TextElideMode.ElideRight, width))
+            return y + height + 2
+        layout = QTextLayout(text, font)
         option = QTextOption()
         option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         layout.setTextOption(option)
@@ -142,12 +150,10 @@ class VideoCardDelegate(QStyledItemDelegate):
             second.setLineWidth(width)
         layout.endLayout()
         first.draw(painter, QPointF(x, y))
-        height = painter.fontMetrics().height()
         if second.isValid():
-            remaining = text.replace("\n", " ")[second.textStart():]
-            painter.drawText(x, y + height + painter.fontMetrics().ascent(),
-                             painter.fontMetrics().elidedText(remaining, Qt.TextElideMode.ElideRight, width))
-        return y + height * 2
+            painter.drawText(x, y + height + metrics.ascent(),
+                             metrics.elidedText(text[second.textStart():], Qt.TextElideMode.ElideRight, width))
+        return y + height * 2 + 2
 
     @staticmethod
     def draw_tags(painter, tags, x, y, width):

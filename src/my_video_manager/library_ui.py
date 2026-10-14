@@ -2,9 +2,13 @@
 
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import (
-    QDialog, QInputDialog, QLabel, QListWidget, QListWidgetItem,
+    QDialog, QHBoxLayout, QInputDialog, QListWidget, QListWidgetItem,
     QMessageBox, QPushButton, QVBoxLayout, QFileDialog,
 )
+
+from .dialog_ui import primary_button, space_layout
+from .empty_state import EmptyState
+from .theme import hint_label
 
 
 class LibraryControls(QObject):
@@ -78,10 +82,20 @@ class LibraryControls(QObject):
         dialog = QDialog(self.window)
         dialog.setWindowTitle("제외 목록")
         dialog.resize(520, 360)
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel("제외한 영상의 파일과 기록은 그대로 남아 있습니다."))
+        layout = space_layout(QVBoxLayout(dialog))
+        layout.addWidget(hint_label("제외한 영상의 파일과 기록은 그대로 남아 있습니다. 되돌리면 라이브러리에 다시 보입니다."))
         items = QListWidget()
-        layout.addWidget(items)
+        items.setAccessibleName("제외한 영상 목록")
+        empty = EmptyState(items)
+        layout.addWidget(items, 1)
+        button = primary_button(QPushButton("선택 영상 되돌리기"))
+        close = QPushButton("닫기")
+        close.clicked.connect(dialog.accept)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(button)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
         def refresh():
             items.clear()
             for video in self.core.excluded_videos():
@@ -90,14 +104,16 @@ class LibraryControls(QObject):
                 items.addItem(item)
             if items.count():
                 items.setCurrentRow(0)
+                empty.clear()
+            else:
+                empty.show_message("제외한 영상이 없습니다")
+            button.setEnabled(items.count() > 0)
         def restore():
             item = items.currentItem()
             if item:
                 self.apply(lambda: self.core.restore_video(item.data(Qt.ItemDataRole.UserRole)))
                 refresh()
-        button = QPushButton("선택 영상 되돌리기")
         button.clicked.connect(restore)
-        layout.addWidget(button)
         refresh()
         dialog.exec()
 

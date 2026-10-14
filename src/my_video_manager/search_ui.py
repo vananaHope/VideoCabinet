@@ -15,7 +15,10 @@ from .highlight_ui import timestamp
 from .key_display import display_key
 from .search import search_key
 from .dialog_ui import space_layout
-from .theme import ACCENT, BORDER, MUTED_TEXT, TEXT
+from .empty_state import EmptyState
+from .theme import ACCENT, BORDER, MUTED_TEXT, TEXT, hint_label, page_title
+
+EMPTY_QUERY_HINT = "제목, 파일 이름, 태그, 메모, 원어·번역 자막을 한 번에 찾습니다."
 
 
 SOURCE_LABELS = {"title": "제목", "filename": "파일 이름", "tag": "태그", "note": "메모",
@@ -157,9 +160,7 @@ class SearchPage(QWidget):
         self.preparation = preparation or SearchPreparation(core, self)
         self.video_ids = ()
         layout = space_layout(QVBoxLayout(self))
-        title = QLabel("검색")
-        title.setStyleSheet("font-size: 20px; font-weight: 600")
-        layout.addWidget(title)
+        layout.addWidget(page_title("검색"))
         self.query = QLineEdit()
         self.query.setPlaceholderText("제목 · 파일 이름 · 태그 · 메모 · 자막 내용")
         self.query.setAccessibleName("검색어")
@@ -167,10 +168,8 @@ class SearchPage(QWidget):
         self.query.setStyleSheet("font-size: 16px; padding: 8px")
         layout.addWidget(self.query)
         # 입력·목록 탐색은 재생 명령의 키 배치와 독립된 Qt 기본 조작이다.
-        hint = QLabel("띄어쓰기와 대소문자를 구분하지 않습니다. "
-                      f"{display_key('Down')} 결과 선택 · {display_key('Enter')} 또는 클릭으로 재생")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        layout.addWidget(hint_label("띄어쓰기와 대소문자를 구분하지 않습니다. "
+                                    f"{display_key('Down')} 결과 선택 · {display_key('Enter')} 또는 클릭으로 재생"))
         self.results = QListWidget()
         self.results.setAccessibleName("검색 결과")
         self.results.setWordWrap(True)
@@ -179,9 +178,11 @@ class SearchPage(QWidget):
         self.results.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.results.setStyleSheet(f"QListWidget::item {{ border-bottom: 1px solid {BORDER}; }}")
         self.results.setItemDelegate(SearchResultDelegate(self))
+        self.empty = EmptyState(self.results)
         layout.addWidget(self.results)
-        self.status = QLabel("검색어를 입력하세요.")
+        self.status = hint_label("검색어를 입력하세요.")
         layout.addWidget(self.status)
+        self.show_empty("찾을 내용을 입력하세요", EMPTY_QUERY_HINT)
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.setInterval(200)
@@ -226,8 +227,12 @@ class SearchPage(QWidget):
         self.video_ids = ()
         self.dirty = True
         self.status.setText("검색 중…")
+        self.empty.clear()  # 입력 중에 빈 상태 안내가 깜빡이지 않게 한다.
         if self.isVisible():
             self.timer.start()
+
+    def show_empty(self, title, body=""):
+        self.empty.show_message(title, body)
 
     def refresh(self):
         self.timer.stop()
@@ -236,6 +241,8 @@ class SearchPage(QWidget):
         try:
             if not self.preparation.ready():
                 self.status.setText("검색 색인 준비 중…")
+                self.show_empty("검색 색인을 준비하고 있습니다",
+                                "처음 한 번만 걸립니다. 준비가 끝나면 입력한 검색어로 바로 찾습니다.")
                 if self.isVisible():
                     self.timer.start()
                 return
@@ -243,6 +250,7 @@ class SearchPage(QWidget):
             results = response.results
         except Exception as error:
             self.status.setText(f"검색 실패: {error}")
+            self.show_empty("검색하지 못했습니다", str(error))
             return
         self.video_ids = tuple(dict.fromkeys(result.video_id for result in results))
         self.dirty = False
@@ -254,6 +262,11 @@ class SearchPage(QWidget):
             self.results.addItem(item)
         if results:
             self.results.setCurrentRow(0)
+            self.empty.clear()
+        elif self.query.text().strip():
+            self.show_empty("검색 결과가 없습니다", "다른 낱말로 찾거나 더 짧게 입력해 보세요.")
+        else:
+            self.show_empty("찾을 내용을 입력하세요", EMPTY_QUERY_HINT)
         self.status.setText(f"검색 결과 {len(results)}개" if self.query.text().strip() else "검색어를 입력하세요.")
         if response.truncated:
             self.status.setText(f"검색 결과 {len(results)}개 · 결과가 많습니다. 더 길게 입력하세요.")

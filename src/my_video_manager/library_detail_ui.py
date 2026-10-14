@@ -1,9 +1,14 @@
 """선택 영상 상세. 데이터는 LibraryPage의 일괄 스냅숏으로 받는다."""
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtWidgets import QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
+from .dialog_ui import primary_button
 from .library_grid import duration_text, viewing_text
+from .theme import with_role
+
+# 두 칸을 차지하는 작업. 나머지 짧은 작업은 두 개씩 한 줄에 놓는다.
+WIDE_ACTIONS = {"재생", "자막 만들기 / 원어 지정", "자막 검수 / SRT 내보내기"}
 
 QUEUE_LABELS = {"queued": "대기", "transcribing": "받아쓰는 중", "translating": "번역 중",
                 "completed": "완료", "failed": "실패", "held": "보류"}
@@ -19,30 +24,49 @@ class LibraryDetailPanel(QScrollArea):
         content = QWidget()
         self.setWidget(content)
         layout = QVBoxLayout(content)
-        self.empty = QLabel("영상을 선택하면\n상세 정보와 작업이 여기에 표시됩니다.")
+        layout.setContentsMargins(10, 10, 10, 10)
+        self.empty = with_role(QLabel("영상을 선택하면\n상세 정보와 작업이 여기에 표시됩니다."), "emptyBody")
         self.empty.setWordWrap(True)
-        layout.addWidget(self.empty)
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.empty, 1)
         self.info = QWidget()
         info_layout = QVBoxLayout(self.info)
         info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(8)
         self.thumbnail = QLabel()
         self.thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info_layout.addWidget(self.thumbnail)
-        self.title = QLabel()
+        self.title = with_role(QLabel(), "sectionTitle")
         self.metadata = QLabel()
         for label in (self.title, self.metadata):
             label.setWordWrap(True)
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            info_layout.addWidget(label)
-        self.buttons = []
+        info_layout.addWidget(self.title)
+        # 작업 버튼을 정보보다 먼저 두어 기본 창 크기에서도 스크롤 없이 닿게 한다.
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        self.buttons = []  # 우클릭 메뉴와 같은 순서
         for action in actions:
             button = QPushButton(action.text())
+            button.setToolTip(action.text())
             button.clicked.connect(action.trigger)
             action.changed.connect(lambda a=action, b=button: b.setEnabled(a.isEnabled()))
             button.setEnabled(action.isEnabled())
-            info_layout.addWidget(button)
             self.buttons.append(button)
+        wide = [b for b in self.buttons if b.text() in WIDE_ACTIONS]
+        short = [b for b in self.buttons if b.text() not in WIDE_ACTIONS]
+        for row, button in enumerate(wide):
+            grid.addWidget(button, row, 0, 1, 2)
+        for index, button in enumerate(short):
+            grid.addWidget(button, len(wide) + index // 2, index % 2)
+        visual = wide + short
+        for first, second in zip(visual, visual[1:]):
+            QWidget.setTabOrder(first, second)
+        if wide:
+            primary_button(wide[0])
+        info_layout.addLayout(grid)
+        info_layout.addWidget(self.metadata)
         layout.addWidget(self.info)
         layout.addStretch()
         self.show_card(None, None)
@@ -53,7 +77,7 @@ class LibraryDetailPanel(QScrollArea):
         if card is None:
             return
         video, status = card.video, card.status
-        self.thumbnail.setPixmap(self.icons.get(video.thumbnail).pixmap(QSize(256, 144)))
+        self.thumbnail.setPixmap(self.icons.get(video.thumbnail).pixmap(QSize(224, 126)))
         self.title.setText(video.title)
         lines = [f"길이 {duration_text(video.duration)} · {viewing_text(status)}"]
         if video.missing:
