@@ -330,7 +330,7 @@ def test_corrupt_saved_key_bindings_fall_back_to_defaults(tmp_path, stored):
     ("Left", "←"), ("Right", "→"), ("Up", "↑"), ("Down", "↓"),
     ("Ctrl+Shift+Left", "Ctrl+Shift+←"), ("PgUp", "Page Up"), ("PgDn", "Page Down"),
     ("Enter", "Enter"), ("Space", "Space"), ("F8", "F8"), ("Ctrl++", "Ctrl++"),
-    (".", "."), ("Meta+T", "Win+T"),
+    (".", ". (마침표)"), ("'", "' (작은따옴표)"), ("Ctrl+/", "Ctrl+/ (빗금)"), ("Meta+T", "Win+T"),
 ])
 def test_display_key_names(key, expected):
     assert display_key(key) == expected

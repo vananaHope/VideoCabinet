@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMenu,
     QMessageBox, QSplitter, QVBoxLayout, QWidget,
 )
+from .empty_state import EmptyState
 from .hidden_gems_ui import HiddenGemControls
 from .library_ui import LibraryControls
 from .library_grid import LibraryGrid, VideoCard, CARD_ROLE
@@ -60,18 +61,12 @@ class LibraryPage(QWidget):
         self.hidden_gems = HiddenGemControls(window)
         layout.addWidget(self.hidden_gems)
         splitter = QSplitter()
-        listing = QWidget()
-        listing_layout = QVBoxLayout(listing)
-        listing_layout.setContentsMargins(0, 0, 0, 0)
-        self.empty = QLabel()
-        self.empty.setWordWrap(True)
-        listing_layout.addWidget(self.empty)
         self.grid = LibraryGrid(self.thumbnail_icons)
         self.grid.activated.connect(self.play_index)
         self.grid.menu_requested.connect(self.show_context_menu)
         self.grid.selectionModel().currentChanged.connect(self.selection_changed)
-        listing_layout.addWidget(self.grid)
-        splitter.addWidget(listing)
+        self.empty = EmptyState(self.grid)
+        splitter.addWidget(self.grid)
         self.actions = []
         for title, callback in (
             ("재생", self.play_selected), ("태그 편집", self.edit_video_tags),
@@ -134,9 +129,13 @@ class LibraryPage(QWidget):
         self.grid.setCurrentIndex(self.grid.model().index(row, 0))
         if not cards:
             self.selection_changed()  # 모델 reset은 빈 현재 항목의 변경 신호를 내지 않을 수 있다.
-        self.empty.setVisible(not cards)
-        self.empty.setText("라이브러리가 비어 있습니다. 폴더 관리에서 감시 폴더나 영상 파일을 추가하세요."
-                           if not self.cards else "조건에 맞는 영상이 없습니다. 제목 검색이나 태그 필터를 바꿔 보세요.")
+        if cards:
+            self.empty.clear()
+        elif not self.cards:
+            self.empty.show_message("라이브러리가 비어 있습니다",
+                                    "폴더 관리(Ctrl+5)에서 감시 폴더나 영상 파일을 추가하세요.")
+        else:
+            self.empty.show_message("조건에 맞는 영상이 없습니다", "제목 검색이나 태그 필터를 바꿔 보세요.")
         self.window.library_count.setText(f"등록 영상 {len(self.cards)}개 · 표시 {len(cards)}개")
 
     def selection_changed(self, *_):

@@ -6,9 +6,12 @@ from PySide6.QtWidgets import (
     QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
+from .core import CommandType
 from .highlight_ui import timestamp
 from .key_display import display_keys
 from .dialog_ui import primary_button, space_layout
+from .empty_state import EmptyState
+from .theme import hint_label, page_title
 from .thumbnail_ui import ThumbnailIcons
 
 
@@ -37,10 +40,8 @@ class ReelControls:
         self.page = ReelPage(self)
         self.icons = ThumbnailIcons()
         layout = space_layout(QVBoxLayout(self.page))
-        title = QLabel("하이라이트 모아보기")
-        title.setStyleSheet("font-size: 20px; font-weight: 600")
-        layout.addWidget(title)
-        layout.addWidget(QLabel("시청 기록과 별도로 복습을 기록합니다."))
+        layout.addWidget(page_title("하이라이트 모아보기"))
+        layout.addWidget(hint_label("모든 영상의 하이라이트를 이어서 봅니다. 시청 기록과 별도로 복습을 기록합니다."))
         controls = QHBoxLayout()
         controls.addWidget(QLabel("하이라이트 태그"))
         self.filter = QComboBox()
@@ -57,6 +58,7 @@ class ReelControls:
         self.list.setWordWrap(True)
         self.list.setAccessibleName("모든 영상의 하이라이트")
         self.list.itemActivated.connect(self.play_selected)
+        self.empty = EmptyState(self.list)
         layout.addWidget(self.list, 1)
         buttons = QHBoxLayout()
         self.play_all = primary_button(QPushButton("처음부터 차례 재생"))
@@ -66,8 +68,7 @@ class ReelControls:
         self.play_button.clicked.connect(lambda: self.play_selected(self.list.currentItem()))
         buttons.addWidget(self.play_button)
         layout.addLayout(buttons)
-        self.status = QLabel()
-        self.status.setWordWrap(True)
+        self.status = hint_label()
         layout.addWidget(self.status)
         self.list.currentItemChanged.connect(self.selection_changed)
         self.page_index = window.pages.addWidget(self.page)
@@ -125,6 +126,7 @@ class ReelControls:
                 row = index
         if entries:
             self.list.setCurrentRow(row)
+        self.refresh_guidance()
         self.play_all.setEnabled(any(e.playable and e.highlight.start < e.duration for e in entries))
         self.selection_changed()
         self.status.setText(f"하이라이트 {len(entries)}개 · 영상 제목 → 영상 안 시각 순\n"
@@ -188,6 +190,19 @@ class ReelControls:
         except Exception:
             self.open()
             raise
+
+    def refresh_guidance(self):
+        """빈 목록 안내를 현재 키 배치로 다시 쓴다. 키 배치를 저장한 뒤에도 불린다."""
+        if self.list.count():
+            self.empty.clear()
+        elif self.filter.currentData() is not None:
+            self.empty.show_message("이 태그가 붙은 하이라이트가 없습니다", "다른 하이라이트 태그를 골라 보세요.")
+        else:
+            keys = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
+            point = keys.get(CommandType.POINT_HIGHLIGHT, "키 미할당")
+            span = keys.get(CommandType.RANGE_HIGHLIGHT, "키 미할당")
+            self.empty.show_message("아직 하이라이트가 없습니다",
+                                    f"영상을 보다가 {point}로 지점, {span}로 구간을 표시하면 여기에 모입니다.")
 
     def update_label(self):
         keys = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}

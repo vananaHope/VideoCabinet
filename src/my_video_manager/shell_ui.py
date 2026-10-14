@@ -3,10 +3,15 @@
 페이지는 handle_key(event) -> bool을 둘 수 있으며, 처리한 키에는 True를 돌려준다.
 """
 
-from PySide6.QtCore import QSize, Signal
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QListWidget, QPushButton, QVBoxLayout, QWidget,
+    QApplication, QFrame, QHBoxLayout, QLabel, QListWidget, QPushButton, QStyle,
+    QStyledItemDelegate, QStyleOptionViewItem, QVBoxLayout, QWidget,
 )
+
+from .dialog_ui import space_layout
+from .theme import MUTED_TEXT, TEXT, hint_label, page_title, with_role
 
 PAGE_NAMES = ("라이브러리", "하이라이트 모아보기", "검색", "자막 대기열", "폴더 관리", "설정")
 SEARCH_PAGE_INDEX = PAGE_NAMES.index("검색")
@@ -24,6 +29,7 @@ class Sidebar(QWidget):
         self.list.setObjectName("navigation")
         self.list.setAccessibleName("페이지 이동 · Ctrl+1부터 Ctrl+5")
         self.list.setSpacing(4)
+        self.list.setItemDelegate(NavigationDelegate(self.list))
         self._current_index = 0
         for index, title in enumerate(PAGE_NAMES[:-1], 1):
             self.list.addItem(f"{title}\nCtrl+{index}")
@@ -54,18 +60,48 @@ class Sidebar(QWidget):
         self.settings.setChecked(index == 5)
 
 
+class NavigationDelegate(QStyledItemDelegate):
+    """페이지 이름은 본문 색, 단축키는 흐린 색으로 그린다. 선택·포커스 표시는 스타일시트가 그린다."""
+
+    def paint(self, painter, option, index):
+        title, _, shortcut = index.data().partition("\n")
+        option = QStyleOptionViewItem(option)
+        self.initStyleOption(option, index)
+        option.text = ""
+        style = option.widget.style() if option.widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, option, painter, option.widget)
+        rect = option.rect.adjusted(16, 10, -8, -10)
+        painter.save()
+        painter.setPen(QColor(TEXT))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, title)
+        painter.setPen(QColor(MUTED_TEXT))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, shortcut)
+        painter.restore()
+
+
 class ActionPage(QWidget):
-    """기존 대화상자·작업을 호출한다. 실제 검색·대기열·폴더 UI는 후속 이슈에서 교체한다."""
+    """제목·설명과 버튼 하나로 된 작업 줄을 모은 페이지. role="danger"는 되돌릴 수 없는 작업이다."""
 
     def __init__(self, title, actions, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(title))
+        layout = space_layout(QVBoxLayout(self))
+        layout.addWidget(page_title(title))
         self.buttons = []
-        for label, callback in actions:
+        for name, description, label, callback, *role in actions:
+            card = with_role(QFrame(), "card")
+            row = QHBoxLayout(card)
+            row.setContentsMargins(14, 10, 14, 10)
+            text = QVBoxLayout()
+            text.addWidget(with_role(QLabel(name), "sectionTitle"))
+            text.addWidget(hint_label(description))
+            row.addLayout(text, 1)
             button = QPushButton(label)
+            button.setMinimumWidth(120)
             button.clicked.connect(callback)
-            layout.addWidget(button)
+            if role:
+                with_role(button, role[0])
+            row.addWidget(button)
+            layout.addWidget(card)
             self.buttons.append(button)
         layout.addStretch()
 
@@ -102,9 +138,12 @@ def folder_page(window):
 
 def settings_page(window):
     return ActionPage("설정", (
-        ("키 배치…", window.show_settings),
-        ("번역 CLI / 재시도", window.translations.settings),
-        ("완전 종료", window.tray.quit),
+        ("키 배치", "재생 명령마다 쓸 키를 바꿉니다. 설정 메뉴는 어디서든 Alt+S로도 열 수 있습니다.",
+         "키 배치…", window.show_settings),
+        ("번역 CLI", "번역에 쓸 구독 CLI를 고르고, 보류된 번역을 다시 시도합니다.",
+         "번역 CLI / 재시도", window.translations.settings),
+        ("완전 종료", "창을 닫으면 트레이로 숨습니다. 자막 처리를 멈추고 앱을 끝내려면 여기서 종료합니다.",
+         "완전 종료", window.tray.quit, "danger"),
     ))
 
 

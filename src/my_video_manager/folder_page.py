@@ -6,6 +6,10 @@ from PySide6.QtWidgets import (
     QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
+from .dialog_ui import space_layout
+from .empty_state import EmptyState
+from .theme import hint_label, page_title, with_role
+
 
 class FolderPage(QWidget):
     def __init__(self, window):
@@ -13,11 +17,13 @@ class FolderPage(QWidget):
         self.window, self.core = window, window.core
         library = window.library_page
         controls = library.library_controls
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("폴더 관리"))
-        layout.addWidget(QLabel("감시 폴더의 하위 폴더까지 검사합니다. 해제해도 실제 파일과 영상 기록은 남습니다."))
+        layout = space_layout(QVBoxLayout(self))
+        layout.addWidget(page_title("폴더 관리"))
+        layout.addWidget(with_role(QLabel("감시 폴더"), "sectionTitle"))
+        layout.addWidget(hint_label("감시 폴더의 하위 폴더까지 검사합니다. 해제해도 실제 파일과 영상 기록은 남습니다."))
         self.folders = QListWidget()
         self.folders.setAccessibleName("감시 폴더 목록")
+        self.folders_empty = EmptyState(self.folders)
         layout.addWidget(self.folders, 1)
         operations = QHBoxLayout()
         self.scan_buttons = []
@@ -28,7 +34,9 @@ class FolderPage(QWidget):
             operations.addWidget(button)
             self.scan_buttons.append(button)
         layout.addLayout(operations)
-        self.minimum = QLabel()
+        layout.addSpacing(8)
+        layout.addWidget(with_role(QLabel("라이브러리 관리"), "sectionTitle"))
+        self.minimum = hint_label()
         layout.addWidget(self.minimum)
         other = QHBoxLayout()
         self.other_buttons = []
@@ -43,6 +51,8 @@ class FolderPage(QWidget):
                 # 복원과 최소 길이 변경도 Library의 검사 잠금을 사용한다.
                 self.scan_buttons.append(button)
         layout.addLayout(other)
+        layout.addSpacing(8)
+        layout.addWidget(with_role(QLabel("검사 안내"), "sectionTitle"))
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setAccessibleName("영상 검사 중")
@@ -52,7 +62,9 @@ class FolderPage(QWidget):
         self.report.setReadOnly(True)
         self.report.setAccessibleName("검사 진행 상태와 안내")
         self.report.setPlainText("폴더를 추가하면 자동으로 검사합니다. 파일을 옮긴 뒤에는 다시 검사를 누르세요.")
-        layout.addWidget(self.report, 1)
+        # 안내가 길면 스크롤한다. 빈 공간은 감시 폴더 목록이 쓴다.
+        self.report.setMaximumHeight(140)
+        layout.addWidget(self.report)
         library.scan_state_changed.connect(self.scan_state_changed)
         library.scan_message.connect(self.report.setPlainText)
         library.refreshed.connect(self.refresh)
@@ -71,6 +83,11 @@ class FolderPage(QWidget):
                 self.folders.setCurrentItem(item)
         if self.folders.currentRow() < 0:
             self.folders.setCurrentRow(0)
+        if self.folders.count():
+            self.folders_empty.clear()
+        else:
+            self.folders_empty.show_message("감시 폴더가 없습니다",
+                                            "'감시 폴더 추가'로 영상이 있는 폴더를 고르면 자동으로 검사합니다.")
         self.minimum.setText(f"새 영상의 최소 길이: {self.core.minimum_duration:g}초 · 기존 영상은 유지합니다.")
         self.update_remove_button()
 

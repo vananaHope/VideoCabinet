@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
 )
 from .key_display import display_key, display_keys
 from .dialog_ui import primary_button, space_layout
-from .theme import PROGRESS_PLAYED
+from .empty_state import EmptyState
+from .theme import PROGRESS_PLAYED, hint_label, page_title
 
 
 STATES = {"queued": "대기", "transcribing": "받아쓰는 중", "translating": "번역 중",
@@ -46,9 +47,7 @@ class SubtitleQueuePage(QWidget):
     def __init__(self, core, parent=None):
         super().__init__(parent)
         layout = space_layout(QVBoxLayout(self))
-        title = QLabel("자막 대기열")
-        title.setStyleSheet("font-size: 20px; font-weight: 600")
-        layout.addWidget(title)
+        layout.addWidget(page_title("자막 대기열"))
         self.tabs = QTabWidget()
         self.queue = SubtitleQueueView(core)
         self.rules = AutoSubtitleRulesPage(core)
@@ -68,8 +67,8 @@ class SubtitleQueueView(QWidget):
         super().__init__(parent)
         self.core = core
         layout = space_layout(QVBoxLayout(self))
-        layout.addWidget(QLabel(f"{display_keys(('Up', 'Down'))} 선택 · {display_key('Tab')} 버튼 이동 · "
-                                f"{display_key('Space')} 실행"))
+        layout.addWidget(hint_label(f"{display_keys(('Up', 'Down'))} 선택 · {display_key('Tab')} 버튼 이동 · "
+                                    f"{display_key('Space')} 실행"))
         self.state_filter = QComboBox()
         self.state_filter.setAccessibleName("대기열 상태 필터")
         self.state_filter.addItem("모든 상태", None)
@@ -87,6 +86,7 @@ class SubtitleQueueView(QWidget):
         self.list.setItemDelegateForColumn(2, QueueProgressDelegate(self.list))
         self.rows = {}
         self.visible_entries = {}
+        self.empty = EmptyState(self.list)
         layout.addWidget(self.list)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
@@ -157,6 +157,13 @@ class SubtitleQueueView(QWidget):
                 item.setData(2, PROGRESS_ROLE, entry.progress)
                 item.setToolTip(3, entry.error or "")
         self.visible_entries = {entry.video_id: entry for entry in visible}
+        if visible:
+            self.empty.clear()
+        elif items:
+            self.empty.show_message("이 상태의 항목이 없습니다", "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다.")
+        else:
+            self.empty.show_message("자막 대기열이 비어 있습니다",
+                                    "라이브러리 상세 패널의 '자막 만들기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요.")
         if selected in self.rows:
             self.list.setCurrentItem(self.rows[selected])
         if self.list.currentItem() is None and self.list.topLevelItemCount():
@@ -203,12 +210,11 @@ class AutoSubtitleRulesPage(QWidget):
         super().__init__(parent)
         self.core = core
         layout = space_layout(QVBoxLayout(self))
-        hint = QLabel("감시 폴더나 태그에 새로 등록되는 영상의 자막을 자동으로 만듭니다.")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        layout.addWidget(hint_label("감시 폴더나 태그에 새로 등록되는 영상의 자막을 자동으로 만듭니다."))
         self.list = QListWidget()
         self.list.setWordWrap(True)
         self.list.setAccessibleName("저장된 자동 자막 규칙")
+        self.empty = EmptyState(self.list)
         layout.addWidget(self.list)
         layout.addWidget(QLabel("감시 폴더 또는 영상 태그"))
         self.target = QComboBox()
@@ -253,6 +259,10 @@ class AutoSubtitleRulesPage(QWidget):
             item = QListWidgetItem(f"{target} · {rule.spoken_language or '자동 감지'}")
             item.setData(Qt.ItemDataRole.UserRole, rule)
             self.list.addItem(item)
+        if self.list.count():
+            self.empty.clear()
+        else:
+            self.empty.show_message("자동 자막 규칙이 없습니다", "아래에서 감시 폴더나 태그를 고르고 '규칙 저장'을 누르세요.")
 
     def select_rule(self, item):
         if item is None:
