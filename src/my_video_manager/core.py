@@ -299,6 +299,12 @@ class AppCore:
                                   translated.translated_lines, original.queue_state, translated.queue_state,
                                   self._highlights.count(video_id, connection=db))
 
+    def subtitled_video_ids(self) -> frozenset[int]:
+        return self._subtitles.subtitled_video_ids()
+
+    def highlight_tags_map(self, video_id: int) -> dict[int, tuple[Tag, ...]]:
+        return self._tags.highlight_tags_map(video_id)
+
     def hidden_gems(self, *, snapshot: LibrarySnapshot | None = None) -> tuple[HiddenGem, ...]:
         snapshot = self.library_snapshot() if snapshot is None else snapshot
         return select_hidden_gems(

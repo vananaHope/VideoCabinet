@@ -135,7 +135,7 @@ class WebLibraryPage(LibraryOperations, QWidget):
 
     def refresh(self, *, focus_gems=None):
         self.snapshot = self.core.library_snapshot()
-        self.cards = snapshot_data(self.snapshot)
+        self.cards = snapshot_data(self.snapshot, self.core.subtitled_video_ids())
         self.video_ids = {v['id'] for v in self.cards}
         self.tags = [dict(id=t.id, name=t.name) for t in self.core.tags()]
         if self.tag_id not in {t['id'] for t in self.tags}:
@@ -160,6 +160,13 @@ class WebLibraryPage(LibraryOperations, QWidget):
         self.window.library_count.setText(f'등록 영상 {len(self.cards)}개 · 표시 {len(self.visible_ids)}개')
 
     def refresh_details(self, changed_video_id=None):
+        if changed_video_id is not None:
+            card = next((card for card in self.cards if card['id'] == changed_video_id), None)
+            if card is not None:
+                has_subtitles = self.core.has_transcript(changed_video_id)
+                if card['hasSubtitles'] != has_subtitles:
+                    card['hasSubtitles'] = has_subtitles
+                    self.bridge.libraryChanged.emit(encode(self.payload()))
         if self.selected_id is not None and (changed_video_id is None or changed_video_id == self.selected_id):
             self.bridge.libraryDetailsChanged.emit(self.selected_id)
 

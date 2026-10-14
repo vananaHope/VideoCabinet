@@ -91,3 +91,28 @@ def test_qt_settings_menu_keeps_native_focus_return(window_factory):
     QTest.qWait(30)
     # offscreen은 네이티브 활성 창을 잃기도 하므로 창이 기억하는 포커스를 확인한다.
     assert window.focusWidget() is window.menuBar()
+
+
+def test_completed_subtitles_refresh_unselected_card_badge(window_factory, core):
+    from my_video_manager.subtitles import TranscriberResult
+    from test_web_library_data import Media
+    from my_video_manager.core import AppCore
+    from datetime import datetime, timezone
+
+    class Transcriber:
+        def transcribe(self, *args, **kwargs):
+            return TranscriberResult('ko', ())
+
+    writer = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+                     database=core.database, transcriber=Transcriber())
+    window = window_factory('1')
+    page = window.library_page
+    video_id = next(vid for vid in page.video_ids if vid != page.selected_id)
+    changes = []
+    page.bridge.libraryChanged.connect(lambda value: changes.append(json.loads(value)))
+    writer.request_subtitles(video_id)
+    writer.process_next_subtitle()
+    window.subtitles.video_changed.emit(video_id)
+    assert len(changes) == 1
+    assert next(v for v in changes[0]['videos'] if v['id'] == video_id)['hasSubtitles']
+    assert changes[0]['selectedId'] == page.selected_id

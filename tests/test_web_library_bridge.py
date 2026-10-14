@@ -34,6 +34,12 @@ class Page(QWidget):
         if self.selected_id not in self.visible_ids:
             self.selected_id = next(iter(self.visible_ids), None)
 
+    def visible_video_ids(self):
+        return tuple(self.visible_ids)
+
+    def refresh_details(self, video_id):
+        pass
+
 
 @pytest.fixture
 def bridge(core):
@@ -80,3 +86,72 @@ def test_scanning_rejects_library_mutation(bridge):
     page.worker = object()
     for action in ('rename', 'reconnect', 'exclude'):
         assert 'error' in json.loads(bridge.action(action, page.selected_id))
+
+
+def add_highlight(core, video_id):
+    core.playback.start(video_id, 12.125)
+    core.execute_highlight_command(core.command_for_key('Insert'))
+    core.playback.end()
+    highlight, = core.highlights(video_id)
+    core.update_highlight(highlight.id, start=12.125, end=20.5, note='다시 볼 장면')
+    core.add_highlight_tag(highlight.id, '중요')
+    return highlight.id
+
+
+def test_highlight_list_serializes_times_note_and_tags_and_validates_owner(bridge):
+    bridge, page, app = bridge
+    video_id = page.selected_id
+    assert json.loads(bridge.highlights(video_id)) == []
+    hid = add_highlight(page.core, video_id)
+    entry, = json.loads(bridge.highlights(video_id))
+    assert (entry['id'], entry['start'], entry['end'], entry['note']) == (hid, 12.125, 20.5, '다시 볼 장면')
+    assert entry['tags'][0]['name'] == '중요'
+    other = next(vid for vid in page.video_ids if vid != video_id)
+    for method in (bridge.playHighlight, bridge.editHighlight):
+        assert 'error' in json.loads(method(other, hid))
+        assert 'error' in json.loads(method(video_id, 999999))
+    assert 'error' in json.loads(bridge.highlights(999999))
+
+
+def test_highlight_play_uses_existing_entry_at_exact_time_and_preserves_playlist(bridge):
+    bridge, page, app = bridge
+    video_id = page.selected_id
+    hid = add_highlight(page.core, video_id)
+    page.window.play_video = lambda vid, **kwargs: page.played.append((vid, kwargs))
+    assert json.loads(bridge.playHighlight(video_id, hid)) == {'ok': True}
+    assert not page.played
+    assert 'error' in json.loads(bridge.playHighlight(video_id, hid))
+    app.processEvents()
+    assert page.played == [(video_id, {'start': 12.125})]
+    assert page.window.playback_list == tuple(page.visible_ids)
+    assert not bridge.busy
+
+
+def test_deleted_highlight_is_revalidated_before_queued_play(bridge):
+    bridge, page, app = bridge
+    hid = add_highlight(page.core, page.selected_id)
+    errors = []
+    bridge.libraryError.connect(errors.append)
+    bridge.playHighlight(page.selected_id, hid)
+    page.core.delete_highlight(hid)
+    app.processEvents()
+    assert errors and page.played == [] and not bridge.busy
+
+
+def test_highlight_edit_opens_existing_editor_and_refreshes_details(bridge, monkeypatch):
+    from my_video_manager.highlight_ui import HighlightEditor
+    bridge, page, app = bridge
+    hid = add_highlight(page.core, page.selected_id)
+    refreshed = []
+    page.refresh_details = refreshed.append
+
+    def save(dialog):
+        assert dialog.highlight.id == hid
+        dialog.note.setPlainText('수정한 메모')
+        dialog.save()
+
+    monkeypatch.setattr(HighlightEditor, 'exec', save)
+    assert json.loads(bridge.editHighlight(page.selected_id, hid)) == {'ok': True}
+    app.processEvents()
+    assert json.loads(bridge.highlights(page.selected_id))[0]['note'] == '수정한 메모'
+    assert refreshed == [page.selected_id] and not bridge.busy

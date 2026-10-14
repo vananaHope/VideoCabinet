@@ -4,7 +4,7 @@ import type { VideoData } from "@/bridge-types"
 import { Thumbnail, duration, viewing } from "@/components/video-card"
 
 const gemVariants = cva("flex min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring", {
-  variants: { variant: { default: "border-border bg-card hover:border-ring", selected: "border-ring bg-accent" } },
+  variants: { variant: { default: "border-border bg-card hover:border-input", selected: "border-ring bg-card ring-1 ring-ring" } },
   defaultVariants: { variant: "default" },
 })
 type Props = Omit<ComponentProps<"button">, "className"> & VariantProps<typeof gemVariants> & { video: VideoData; reason: string }

@@ -250,6 +250,11 @@ class Subtitles:
             return TranscriptSummary(row is not None, _transcript_language(row, count) if row else None,
                                      count, queue[0] if queue else None)
 
+    def subtitled_video_ids(self) -> frozenset[int]:
+        """빈 자막도 포함해 transcripts가 있는 모든 영상 ID를 조회한다."""
+        with self._connect() as db:
+            return frozenset(row[0] for row in db.execute("SELECT video_id FROM transcripts"))
+
     def has_transcript(self, video_id: int) -> bool:
         with self._connect() as db:
             return db.execute("SELECT 1 FROM transcripts WHERE video_id = ?", (video_id,)).fetchone() is not None
