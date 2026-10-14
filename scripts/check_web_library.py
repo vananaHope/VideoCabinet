@@ -247,7 +247,8 @@ if args.verify_shell and args.mode == 'web':
         js(f"document.querySelectorAll('nav button')[{index}].click()")
         settle()
         assert host.active_tab == tab
-        target = host if index in (0, 4) else window.navigation_pages[index if index < 4 else index - 1]
+        route = host.routes[tab]
+        target = window.navigation_pages[route] if isinstance(route, int) else host
         assert window.pages.currentWidget() is target
         assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
         window.grab().save(str(screens / f'tab-{tab}-{args.count}.png'))
@@ -264,10 +265,12 @@ if args.verify_shell and args.mode == 'web':
         settle()
         assert host.active_tab == tab, (tab, host.active_tab, window.isActiveWindow())
     # Qt 페이지에서 다른 Qt 페이지/웹 페이지로 연속 이동한다.
-    for index in (1, 2, 3, 5, 6, 4, 0):
+    for index in sorted(range(len(TABS)), key=lambda i: TABS[i][0] in host.controllers):
         shell_key(window.focusWidget(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
         settle()
         assert host.active_tab == TABS[index][0]
+    window.navigate_web_tab('library')
+    settle()
     shell_key(host.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
     wait_until(window.settings_menu.isVisible)
     anchor = js_json("(() => {const r = document.querySelector('nav [data-tab=settings]').getBoundingClientRect(); return [r.right, r.bottom]})()")
@@ -401,10 +404,10 @@ if args.verify_gems:
             js("document.getElementById('hidden-gems').scrollLeft = 0")
             point = js_json("(() => {const r = document.getElementById('hidden-gems').getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()")
             local = QPoint(*map(int, point))
-            wheel = QWheelEvent(QPointF(local), QPointF(page.view.mapToGlobal(local)), QPoint(), QPoint(0, -120),
+            wheel = QWheelEvent(QPointF(local), QPointF(host.view.mapToGlobal(local)), QPoint(), QPoint(0, -120),
                                 Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
                                 Qt.ScrollPhase.NoScrollPhase, False)
-            QApplication.sendEvent(page.view.focusProxy(), wheel)
+            QApplication.sendEvent(host.view.focusProxy(), wheel)
             wait_until(lambda: js("document.getElementById('hidden-gems').scrollLeft") > 0)
             layout['verticalWheelScrolledHorizontally'] = True
             js("document.getElementById('hidden-gems').scrollLeft = 0")
@@ -525,7 +528,8 @@ if args.verify and args.mode == 'web':
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
     metrics['checks'].append('Tab 검색 → 태그 → 숨겨진 보석 → 격자')
-    for index in range(1, 7):
+    from my_video_manager.web_contract import TABS
+    for index, (tab, _) in enumerate(TABS):
         window.raise_()
         window.activateWindow()
         assert QTest.qWaitForWindowActive(window, 5000), '검증 창 활성화 실패'
@@ -533,7 +537,9 @@ if args.verify and args.mode == 'web':
         window.pages.setCurrentWidget(host)
         QTest.qWait(80)
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
-        wait_until(lambda: window.pages.currentWidget() is (host if index == 4 else window.navigation_pages[index if index < 4 else index - 1]))
+        route = host.routes[tab]
+        target = window.navigation_pages[route] if isinstance(route, int) else host
+        wait_until(lambda: window.pages.currentWidget() is target)
     window.navigate(0)
     page.focus_content()
     QTest.qWait(100)
@@ -578,7 +584,9 @@ if args.verify and args.mode == 'web':
         assert before == after, (before, after)
         assert js('document.activeElement.id') == 'library-grid'
         metrics['checks'].append('실제 mpv Enter 재생 / Esc 선택·스크롤·포커스 복귀')
-        for tab in ('statistics', 'search', 'reel', 'queue', 'folders', 'settings'):
+        for tab, _ in TABS:
+            if tab == 'library':
+                continue
             window.navigate_web_tab(tab)
             settle()
             window.navigate_web_tab('library')
@@ -671,25 +679,25 @@ if args.verify_library and args.mode == 'web':
     })()""")
     assert metrics['visibleHighlights'] >= 6, metrics
     assert js("[...document.querySelectorAll('[id^=highlight-] button')].every(el => el.tabIndex === -1)")
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
     settle()
     assert js("!document.getElementById('detail-scroll').contains(document.activeElement)")
     js("document.getElementById('detail-scroll').focus()")
     for _ in range(16):
-        QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Down)
+        QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Down)
     settle()
     selection = js("document.getElementById('detail-scroll').getAttribute('aria-activedescendant')")
     top = js("document.getElementById('detail-scroll').scrollTop")
     hid = int(selection.removeprefix('highlight-'))
     start = next(h.start for h in core.highlights(playable.id) if h.id == hid)
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Return)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
     wait_until(lambda: window.pages.currentWidget() is window.playback_page)
     assert core.playback.session.video_id == playable.id
     assert abs(core.playback.position - start) < 1.0, (core.playback.position, start)
     settle(250)
     window.grab().save(str(screens / 'web-highlight-mpv.png'))
     QTest.keyClick(window.surface, Qt.Key.Key_Escape)
-    wait_until(lambda: window.pages.currentWidget() is page)
+    wait_until(lambda: window.pages.currentWidget() is host)
     settle(400)
     assert js("document.querySelector('aside [data-tab=highlights]').getAttribute('aria-current')") == 'page'
     assert js("document.getElementById('detail-scroll').getAttribute('aria-activedescendant')") == selection
@@ -700,7 +708,7 @@ if args.verify_library and args.mode == 'web':
     js(f"document.getElementById('{selection}').querySelector('button').click()")
     wait_until(lambda: window.pages.currentWidget() is window.playback_page)
     QTest.keyClick(window.surface, Qt.Key.Key_Escape)
-    wait_until(lambda: window.pages.currentWidget() is page)
+    wait_until(lambda: window.pages.currentWidget() is host)
     settle(300)
     observed = []
 
@@ -716,7 +724,7 @@ if args.verify_library and args.mode == 'web':
     closer.timeout.connect(edit_note)
     closer.start()
     js("document.getElementById('detail-scroll').focus()")
-    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_F2)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_F2)
     wait_until(lambda: bool(observed) and not page.bridge.busy)
     closer.stop()
     wait_until(lambda: js(f"document.getElementById('{selection}').textContent.includes('웹에서 연 기존 편집기로 저장한 메모')"))

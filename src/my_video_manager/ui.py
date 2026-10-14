@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         if self.web_ui:
             self.menuBar().hide()
             self.statusBar().hide()
-            from .web_pages import create_web_shell
+            from .web_page_registry import create_web_shell
             self.web_host = create_web_shell(self)
             self.library_page = self.web_host.controllers['library']
         else:
@@ -188,6 +188,8 @@ class MainWindow(QMainWindow):
 
     def load_player(self, video_id, start):
         location = self.core.playback_location(video_id)
+        if self.web_ui and self.pages.currentWidget() is self.web_host:
+            self.web_host.remember_playback_tab()
         self.pages.setCurrentIndex(1)
         if self.player is None:
             self.player = self.player_factory(int(self.surface.winId()))
@@ -267,7 +269,11 @@ class MainWindow(QMainWindow):
         if self.reel.shown is not None or self.core.reel_playback is not None:
             self.reel.open()
         elif self._return_page is self.home_page:
-            self.show_library()
+            if self.web_ui:
+                self.web_host.return_from_playback(focus_gems=self._return_to_gems)
+                self._return_to_gems = False
+            else:
+                self.show_library()
         else:
             self.end_playback()
             self.pages.setCurrentWidget(self._return_page)

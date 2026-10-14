@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject, QTimer
 
 from .web_library_data import details_data, highlights_data
 from .web_contract import MENU_ACTIONS, GEM_ACTIONS, SCAN_LOCKED_ACTIONS, LIBRARY
-from .web_bridge import encode
+from .web_json import encode
 
 
 class LibraryBridge(QObject):
@@ -114,7 +114,7 @@ class LibraryBridge(QObject):
             self.libraryError.emit(str(error))
         finally:
             self.busy = False
-            if not edit and page.isVisible():
+            if not edit and page.is_active():
                 page.focus_content()
 
     def perform(self, action, video_id):
@@ -144,5 +144,5 @@ class LibraryBridge(QObject):
             self.libraryError.emit(str(error))
         finally:
             self.busy = False
-            if page.isVisible() and action != 'dismiss':
+            if page.is_active() and action != 'dismiss':
                 page.focus_content()

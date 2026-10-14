@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 
-from . import web_library_data
+from . import web_library_data, web_shell_data
 
 TABS = (
     ('library', '라이브러리'), ('reel', '모아보기'), ('search', '검색'),
@@ -70,7 +70,7 @@ SHELL = BridgeContract(
     signals={'shellChanged': str, 'shellStatusChanged': str, 'shellFocusRequested': str},
     aliases=(TypeAlias('Tab', tuple(name for name, _ in TABS)),),
     constants=(Constant('tabs', TABS),),
-    data_types=(web_library_data.ShellData,),
+    data_types=(web_shell_data.ShellData,),
 )
 
 LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
@@ -91,4 +91,7 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
                web_library_data.DetailsData, web_library_data.HighlightData, web_library_data.LibraryData))
 
 # 새 페이지는 독립 묶음을 선언한 뒤 여기에 한 줄 등록한다.
-CONTRACTS = (SHELL, LIBRARY)
+CONTRACTS = (
+    SHELL,
+    LIBRARY,
+)

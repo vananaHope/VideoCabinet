@@ -39,12 +39,12 @@ def test_slot_types_come_from_argument_contract_without_method_name_assumptions(
     assert 'runLibraryOperation: (operation: Action, reply: Reply) => void' in generated
 
 
-@pytest.mark.parametrize('position', [0, 1, 2])
+@pytest.mark.parametrize('position', [0, len(CONTRACTS) // 2, len(CONTRACTS)])
 def test_new_page_bundle_adds_interface_wrapper_and_constants_without_changing_existing_pages(position):
-    example = BridgeContract('search', 'SearchBridge',
-        slots={'find': (Argument('scope', str, 'SearchScope'),)}, signals={'resultsChanged': str},
-        aliases=(TypeAlias('SearchScope', ('title', 'subtitle')),),
-        constants=(Constant('searchScopes', ('title', 'subtitle')),))
+    example = BridgeContract('example', 'ExampleBridge',
+        slots={'find': (Argument('scope', str, 'ExampleScope'),)}, signals={'resultsChanged': str},
+        aliases=(TypeAlias('ExampleScope', ('title', 'subtitle')),),
+        constants=(Constant('exampleScopes', ('title', 'subtitle')),))
     api = generator()
     contracts = list(reversed(CONTRACTS))
     contracts.insert(position, example)
@@ -53,11 +53,11 @@ def test_new_page_bundle_adds_interface_wrapper_and_constants_without_changing_e
     for existing in CONTRACTS:
         block = api['render_contract'](existing)
         assert block in before and block in after
-    assert 'export interface SearchBridge' in after
-    assert 'find: (scope: SearchScope, reply: Reply) => void' in after
-    assert 'export function publicSearchBridge(raw: SearchBridge): SearchBridge' in after
-    assert 'search: publicSearchBridge(raw.search)' in after
-    assert 'export const searchScopes = ["title", "subtitle"] as const' in after
+    assert 'export interface ExampleBridge' in after
+    assert 'find: (scope: ExampleScope, reply: Reply) => void' in after
+    assert 'export function publicExampleBridge(raw: ExampleBridge): ExampleBridge' in after
+    assert 'example: publicExampleBridge(raw.example)' in after
+    assert 'export const exampleScopes = ["title", "subtitle"] as const' in after
 
 
 def test_contract_copies_mutable_inputs_and_prevents_later_mutation():

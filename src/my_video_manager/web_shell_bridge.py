@@ -3,7 +3,7 @@
 from PySide6.QtCore import QObject, QTimer
 
 from .web_contract import SHELL
-from .web_bridge import encode
+from .web_json import encode
 
 
 class ShellBridge(QObject):

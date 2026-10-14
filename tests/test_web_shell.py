@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 from test_web_library_page import window_factory
 from test_web_library_data import core
 from my_video_manager.web_contract import CONTRACTS, TABS
+from my_video_manager.web_page_registry import NATIVE_PAGES
 
 
 def test_tab_routes_keep_one_web_view_and_native_numbering(window_factory):
@@ -17,7 +18,8 @@ def test_tab_routes_keep_one_web_view_and_native_numbering(window_factory):
     page = window.web_host
     for index, (tab, _) in enumerate(TABS):
         window.navigate_web_tab(tab)
-        target = page if index in (0, 4) else window.navigation_pages[index if index < 4 else index - 1]
+        route = page.routes[tab]
+        target = window.navigation_pages[route] if isinstance(route, int) else page
         assert window.pages.currentWidget() is target
         assert json.loads(page.bridge.shellSnapshot()) == {'tab': tab, 'status': ''}
         assert not window.sidebar.isVisible()
@@ -25,7 +27,7 @@ def test_tab_routes_keep_one_web_view_and_native_numbering(window_factory):
         assert not window.statusBar().isVisible()
         assert len(window.findChildren(QWebEngineView)) == 1
     window.return_to_web()
-    assert page.active_tab == 'statistics'
+    assert page.active_tab == next(tab for tab, _ in reversed(TABS) if tab in page.controllers)
     assert window.pages.currentWidget() is page
 
 
@@ -39,7 +41,7 @@ def test_global_web_keys_and_native_escape_return(window_factory):
         assert window.web_host.active_tab == tab
     QTest.keyClick(window.focusWidget(), Qt.Key.Key_Escape)
     assert window.pages.currentWidget() is window.web_host
-    assert window.web_host.active_tab == 'statistics'
+    assert window.web_host.active_tab == next(tab for tab, _ in reversed(TABS) if tab in window.web_host.controllers)
 
 
 def test_qt_switch_keeps_six_original_destinations(window_factory):
@@ -80,9 +82,9 @@ def test_navigation_rejects_unknown_names_without_transition(window_factory):
 
 def test_native_search_playback_returns_to_same_tab_and_state(window_factory, core):
     from test_library_return_ui import Player
-    window = window_factory('1')
+    window = window_factory('0')
     window.player_factory = Player
-    window.navigate_web_tab('search')
+    window.navigate(2)
     page = window.navigation_pages[2]
     page.query.setText('Python')
     window.play_video(core.videos()[0].id)
@@ -90,7 +92,12 @@ def test_native_search_playback_returns_to_same_tab_and_state(window_factory, co
     window.back_to_list()
     assert window.pages.currentWidget() is page
     assert page.query.text() == 'Python'
-    assert window.web_host.active_tab == 'search'
+
+
+def test_web_library_playback_restores_filter_and_selection(window_factory, core):
+    from test_library_return_ui import Player
+    window = window_factory('1')
+    window.player_factory = Player
     window.navigate_web_tab('library')
     library = window.library_page
     library.bridge.filter('Python', 0)
@@ -152,14 +159,15 @@ def test_chrome_visibility_survives_fullscreen_exit_and_native_window_restore(wi
     assert window.statusBar().isVisible() == (mode == '0')
 
 
-def test_hidden_status_bar_delivers_notices_to_web_and_native_fallback(window_factory):
+@pytest.mark.parametrize('native_tab', NATIVE_PAGES)
+def test_hidden_status_bar_delivers_notices_to_web_and_native_fallback(window_factory, native_tab):
     window = window_factory('1')
     changes = []
     window.web_host.bridge.shellStatusChanged.connect(changes.append)
     window.show_status('등록 작업 완료')
     assert changes == ['등록 작업 완료']
     assert json.loads(window.web_host.bridge.shellSnapshot())['status'] == '등록 작업 완료'
-    window.navigate_web_tab('folders')
+    window.navigate_web_tab(native_tab)
     assert window.web_notice.isVisible() and window.web_notice.text() == '등록 작업 완료'
     assert not window.statusBar().isVisible()
     window.statusBar().clearMessage()

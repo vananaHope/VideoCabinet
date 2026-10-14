@@ -12,7 +12,7 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from .web_library_data import thumbnail_video_id
-from .web_bridge import encode
+from .web_json import encode
 from .web_shell_bridge import ShellBridge
 from .web_contract import CONTRACTS, TABS
 from .web_tokens import web_tokens
@@ -60,7 +60,10 @@ class WebShellHost(QWidget):
         self.controllers = {}
         self.routes = {}
         self.active_tab = self.last_web_tab = initial_tab
+        self._playback_return_tab = initial_tab
+        self._active_controller = None
         self._frontend_ready = False
+        self._loaded_notified = False
         self._ready_pages = set()
         self._pending_focus = None
         self.bridge = ShellBridge(self)
@@ -130,7 +133,27 @@ class WebShellHost(QWidget):
         self.active_tab = tab
         if tab in self.controllers:
             self.last_web_tab = tab
+        self.sync_activation()
         self.bridge.shellChanged.emit(encode({'tab': tab}))
+
+    def sync_activation(self):
+        controller = self.controllers.get(self.active_tab) if self.isVisible() else None
+        if controller is self._active_controller:
+            return
+        previous, self._active_controller = self._active_controller, controller
+        if previous is not None:
+            previous.deactivated()
+        if controller is not None:
+            controller.activated()
+
+    def remember_playback_tab(self):
+        self._playback_return_tab = self.active_tab
+
+    def return_from_playback(self, *, focus_gems=False):
+        self.window.end_playback()
+        self.set_tab(self._playback_return_tab)
+        self.window.pages.setCurrentWidget(self)
+        self.controllers[self.active_tab].return_from_playback(focus_gems=focus_gems)
 
     def native_page_shown(self, index):
         for tab, route in self.routes.items():
@@ -174,6 +197,7 @@ class WebShellHost(QWidget):
 
     def frontend_loading(self):
         self._frontend_ready = False
+        self._loaded_notified = False
         self._ready_pages.clear()
         controller = self.controllers.get(self.active_tab)
         self._pending_focus = self._pending_focus or (controller.default_focus if controller else 'shell')
@@ -190,15 +214,23 @@ class WebShellHost(QWidget):
 
     def notify_loaded(self):
         controller = self.controllers.get(self.active_tab)
-        if self._frontend_ready and (controller is None or controller.bridge is None or self.active_tab in self._ready_pages):
+        if (not self._loaded_notified and self._frontend_ready
+                and (controller is None or controller.bridge is None or self.active_tab in self._ready_pages)):
+            self._loaded_notified = True
             self.frontend_loaded.emit()
 
     def showEvent(self, event):
         super().showEvent(event)
+        self.sync_activation()
         controller = self.controllers.get(self.active_tab)
         if controller:
             controller.refresh_details()
         self.apply_pending_focus()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.sync_activation()
+
     def settings_closed(self):
         if self.window.pages.currentWidget() is self:
             from PySide6.QtCore import QTimer

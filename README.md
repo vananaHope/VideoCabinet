@@ -668,13 +668,21 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
    (브리지가 커지면 `web_search_bridge.py`로 분리). `@SEARCH.slot('find')`,
    `SEARCH.signal('resultsChanged')`처럼 계약으로 Qt 표면을 선언합니다.
    컨트롤러의 `tab = 'search'`, `bridge`, `refresh()`를 구현하고 초기화 마지막에
-   `host.register_page(self)`를 호출합니다. 자체 포커스가 필요하면 `default_focus`와
+   `host.register_page(self)`를 호출합니다. 필요하면 기본 빈 함수인 `activated()`와 `deactivated()`를
+   구현합니다. 호스트는 탭 이동, Qt 페이지·재생 왕복, 호스트 표시·숨김 때 활성 컨트롤러를 바꾸며,
+   이전 컨트롤러의 `deactivated()` 뒤 새 컨트롤러의 `activated()`를 호출합니다.
+   재생에서 복귀할 때는 시청 종료 후 `activated()`가 호출되므로 통계 등을 다시 계산할 수 있습니다.
+   활성 상태는 `is_active()`로 확인합니다. QWidget의 `isVisible()`은 자체 화면 표시 여부입니다.
+   복귀 시 기본 `return_from_playback()`은 `refresh()`와 포커스 복원을 수행하며,
+   라이브러리는 이를 재정의해 기존 `refresh(focus_gems=...)` 경로를 유지합니다.
+   자체 포커스가 필요하면 `default_focus`와
    `focus_requested` 신호를 지정하고, 웹 첫 렌더 후 호출하는 `ready` 슬롯에서
    `self.page.frontend_ready()`를 호출합니다. 포커스 요청은 호스트가 준비될 때까지 보존합니다.
-3. `web_pages.py`에 컨트롤러를 import하고 `WEB_PAGES`에 한 줄 등록합니다.
+3. `web_page_registry.py`에 컨트롤러를 import하고 `WEB_PAGES`에 한 줄 등록합니다.
    전환한 `search`의 `NATIVE_PAGES` 한 줄은 제거합니다. 나머지 Qt 페이지 번호는 그대로 둡니다.
 4. 새 `frontend/src/pages/SearchPage.tsx`를 작성합니다. `connectBridge()`에서
    `{ search, shell }`을 받아 생성된 공개 메서드만 사용하고, 효과를 정리할 때 신호 구독을 해제합니다.
+   페이지 사이 브리지 호출은 공통 `shell` 외에는 하지 않습니다.
    페이지는 숨겨져도 마운트를 유지하므로 선택·검색어·스크롤을 보존할 수 있습니다.
    `pages/index.ts`에서 컴포넌트를 import하고 `search: null` 한 줄을 `search: SearchPage`로 바꿉니다.
 5. `.venv/Scripts/python scripts/generate_web_types.py`로 재생성한 뒤 `--check`, 전체 pytest,
@@ -687,6 +695,9 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 `tests/test_web_generator.py`는 예시 계약을 앞·중간·뒤에 추가해도 기존 페이지 출력이 그대로인지,
 `tests/test_web_pages.py`는 새 컨트롤러의 브리지·갱신·포커스 연결과 양쪽 등록부 일치를 확인합니다.
 탭 누락·중복은 Qt 시작 또는 테스트에서 실패하고, 웹 등록부의 누락·오타는 typecheck에서도 실패합니다.
+등록부 충돌은 양쪽 항목을 모두 남기고 `CONTRACTS`를 하나의 튜플로 합친 뒤, 생성 파일은 생성기로 다시 만듭니다.
+`CONTRACTS`, Python·웹 등록부는 한 줄에 한 항목을 유지합니다.
+공용 JSON 직렬화는 `web_json.py`, 셸 데이터는 `web_shell_data.py`가 소유합니다.
 생성 파일은 직접 수정하지 않습니다. 페이지 객체로 나뉘어 `library` 신호 접두어는 기술적으로
 필수가 아니지만 기존 호출부와 병렬 작업의 호환성을 위해 유지합니다.
 

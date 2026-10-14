@@ -6,7 +6,7 @@ from .library_page import LibraryOperations
 from .library_ui import LibraryControls
 from .web_library_data import snapshot_data, filter_ids
 from .web_library_bridge import LibraryBridge
-from .web_bridge import encode
+from .web_json import encode
 from .web_page import WebPageController
 
 
@@ -67,7 +67,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.apply_filters()
         self.bridge.libraryChanged.emit(encode(self.payload()))
         self.refreshed.emit()
-        if focus_gems is not None and self.isVisible():
+        if focus_gems is not None and self.is_active():
             self.request_focus('gems' if focus_gems else 'grid')
 
     def apply_filters(self):
@@ -75,6 +75,9 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         if self.selected_id not in self.visible_ids:
             self.selected_id = next(iter(self.visible_ids), None)
         self.window.library_count.setText(f'등록 영상 {len(self.cards)}개 · 표시 {len(self.visible_ids)}개')
+
+    def return_from_playback(self, *, focus_gems=False):
+        self.refresh(focus_gems=focus_gems)
 
     def refresh_details(self, changed_video_id=None):
         if changed_video_id is not None:

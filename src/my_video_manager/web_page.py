@@ -15,8 +15,18 @@ class WebPageController(QWidget):
         self.window, self.core = host.window, host.core
         self.hide()
 
-    def isVisible(self):
+    def is_active(self):
         return self.host.isVisible() and self.host.active_tab == self.tab
+
+    def activated(self):
+        pass
+
+    def deactivated(self):
+        pass
+
+    def return_from_playback(self, *, focus_gems=False):
+        self.refresh()
+        self.focus_content()
 
     def focus_content(self):
         self.request_focus(self.default_focus)
