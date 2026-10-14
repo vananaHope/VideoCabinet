@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from .review import ReviewConfirmationRequired
-from .dialog_ui import dialog_buttons, primary_button, space_layout
+from .dialog_ui import dialog_buttons, space_layout
 
 
 class ReviewDialog(QDialog):
@@ -51,13 +51,11 @@ class ReviewDialog(QDialog):
             button.setAutoDefault(False)
             button.clicked.connect(callback)
             if "SRT" in label:
-                primary_button(button)
-                exports.addWidget(button)
+                exports.addWidget(button, 1)
             elif label == "닫기":
-                exports.addStretch()
-                exports.addWidget(button)
+                exports.addWidget(button, 1)
             else:
-                buttons.addWidget(button)
+                buttons.addWidget(button, 1)
         layout.addLayout(buttons)
         layout.addLayout(exports)
         self.timer = QTimer(self)

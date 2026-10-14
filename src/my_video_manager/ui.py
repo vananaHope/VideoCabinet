@@ -15,7 +15,7 @@ from .tray import TrayControls
 from .review_ui import ReviewDialog
 from .library_page import LibraryPage
 from .playback_page import PlaybackPage
-from .shell_ui import build_shell
+from .shell_ui import SEARCH_PAGE_INDEX, build_shell
 from .theme import apply_theme
 
 
@@ -102,7 +102,7 @@ class MainWindow(QMainWindow):
         self.play_video(video_id)
 
     def show_search(self):
-        self.navigate(2)
+        self.navigate(SEARCH_PAGE_INDEX)
 
     def play_video(self, video_id, *, start=None, from_gems=False):
         if self.pages.currentWidget() is not self.playback_page:

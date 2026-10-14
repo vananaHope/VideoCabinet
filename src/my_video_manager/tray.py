@@ -3,13 +3,13 @@
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon
 
+from .shell_ui import QUEUE_PAGE_INDEX
 
 class TrayControls(QObject):
     def __init__(self, window):
         super().__init__(window)
         self.window, self.core = window, window.core
         self.quitting = False
-        self.dialog = None
         self.icon = QSystemTrayIcon(window.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay), self)
         self.icon.setToolTip("영상 라이브러리 · 자막 대기열")
         menu = QMenu(window)
@@ -45,7 +45,7 @@ class TrayControls(QObject):
 
     def show_queue(self):
         self.open()
-        self.window.navigate(3)
+        self.window.navigate(QUEUE_PAGE_INDEX)
 
     def notify_completion(self):
         counts = self.core.take_subtitle_queue_completion()
@@ -92,8 +92,6 @@ class TrayControls(QObject):
         else:
             window.pages.setCurrentIndex(0)
             window.hide()
-            if self.dialog:
-                self.dialog.hide()
             event.ignore()
             if self.core.acknowledge_tray_notice():
                 self.icon.showMessage("영상 라이브러리", "트레이에서 계속 처리합니다. 트레이 메뉴에서 열거나 완전 종료할 수 있습니다.")

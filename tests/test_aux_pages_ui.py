@@ -1,13 +1,15 @@
 """페이지 이동 뒤 상태 보존과 숨긴 대기열의 갱신 경계를 검증한다."""
 
 from types import SimpleNamespace
+from dataclasses import replace
 
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDialog, QProgressBar
 
-from my_video_manager.queue_ui import SubtitleQueuePage
+from my_video_manager.queue_ui import PROGRESS_ROLE, SubtitleQueuePage, SubtitleQueueView
+from my_video_manager.subtitle_queue import SubtitleQueueItem
 from my_video_manager.search import SearchResponse, SearchResult
 from my_video_manager.search_ui import SearchPage, highlighted_text
 from my_video_manager.theme import ACCENT
@@ -108,7 +110,8 @@ def test_queue_filters_actions_and_unchanged_snapshot_preserve_selection(setup, 
     assert queue.list.topLevelItemCount() == 1
     item = queue.list.topLevelItem(0)
     assert item.text(0) == b.title
-    assert isinstance(queue.list.itemWidget(item, 2), QProgressBar)
+    assert queue.list.itemWidget(item, 2) is None
+    assert item.data(2, PROGRESS_ROLE) == 0
     queue.refresh()
     assert queue.list.currentItem() is item
     queue.promote()
@@ -171,3 +174,114 @@ def test_tray_queue_opens_page_and_stops_polling_when_leaving(library_window, ap
     assert page.queue.timer.isActive()
     window.navigate(0)
     assert not page.queue.timer.isActive()
+
+
+def test_queue_progress_updates_only_changed_row_without_losing_selection_or_scroll(app):
+    entries = tuple(SubtitleQueueItem(i, f"영상 {i}", "transcribing" if i == 0 else "queued", 0)
+                    for i in range(300))
+    view = SubtitleQueueView(SimpleNamespace(subtitle_queue_items=lambda: entries))
+    view.resize(800, 450)
+    view.show()
+    view.timer.stop()
+    app.processEvents()
+    first = view.list.topLevelItem(0)
+    selected = view.list.topLevelItem(120)
+    view.list.setCurrentItem(selected)
+    view.list.scrollToItem(selected)
+    app.processEvents()
+    scroll = view.list.verticalScrollBar().value()
+    changes = []
+    view.list.model().dataChanged.connect(lambda start, end, roles: changes.append((start.row(), end.row())))
+    for progress in (.25, .5, .75):
+        entries = (replace(entries[0], progress=progress),) + entries[1:]
+        view.refresh()
+        app.processEvents()
+        assert view.list.topLevelItem(0) is first
+        assert view.list.currentItem() is selected
+        assert view.list.verticalScrollBar().value() == scroll
+        assert first.data(2, PROGRESS_ROLE) == progress
+        assert first.text(2) == f"{progress:.0%}"
+    assert changes and set(changes) == {(0, 0)}
+    assert view.findChildren(QProgressBar) == []
+    view.close()
+    view.deleteLater()
+    app.processEvents()
+
+
+def test_queue_reorders_and_removes_rows_while_retaining_surviving_items(app):
+    entries = tuple(SubtitleQueueItem(i, f"영상 {i}", "queued", 0) for i in range(3))
+    view = SubtitleQueueView(SimpleNamespace(subtitle_queue_items=lambda: entries))
+    view.show()
+    view.timer.stop()
+    app.processEvents()
+    selected = view.list.topLevelItem(1)
+    view.list.setCurrentItem(selected)
+    entries = (entries[1], entries[2], SubtitleQueueItem(4, "새 영상", "queued", 0))
+    view.refresh()
+    assert view.list.topLevelItemCount() == 3
+    assert view.list.topLevelItem(0) is selected
+    assert view.list.currentItem() is selected
+    assert [view.list.topLevelItem(i).text(0) for i in range(3)] == ["영상 1", "영상 2", "새 영상"]
+    view.close()
+    view.deleteLater()
+    app.processEvents()
+
+
+def test_search_repaint_and_resize_reuse_highlights_but_new_query_and_content_refresh(app, monkeypatch):
+    import my_video_manager.search_ui as search_ui
+
+    response = SearchResponse((SearchResult(1, "장면 영상", "note", "중요한 장면"),))
+    core = SimpleNamespace(search=lambda query: response)
+    calls = []
+    original = search_ui.highlighted_text
+    monkeypatch.setattr(search_ui, "highlighted_text", lambda text, query: (calls.append((text, query)), original(text, query))[1])
+    documents = []
+    document_class = search_ui.QTextDocument
+
+    def new_document():
+        document = document_class()
+        documents.append(document)
+        return document
+
+    monkeypatch.setattr(search_ui, "QTextDocument", new_document)
+    page = SearchPage(core, preparation=SimpleNamespace(ready=lambda: True))
+    page.resize(800, 600)
+    page.query.setText("장면")
+    page.show()
+    app.processEvents()
+    previous_calls = len(calls)
+    assert previous_calls > 0
+    previous_documents = len(documents)
+    page.results.viewport().repaint()
+    app.processEvents()
+    assert len(documents) == previous_documents
+    for width in (800, 900, 800):
+        page.resize(width, 600)
+        page.results.viewport().repaint()
+        app.processEvents()
+    assert len(calls) == previous_calls
+    previous_documents = len(documents)
+    page.results.viewport().repaint()
+    app.processEvents()
+    assert len(documents) == previous_documents
+    page.query.setText("중요")
+    page.refresh()
+    app.processEvents()
+    assert calls[-1] == ("중요한 장면", "중요")
+    response = SearchResponse((SearchResult(1, "장면 영상", "note", "내용 수정"),))
+    page.refresh()
+    app.processEvents()
+    assert calls[-1] == ("내용 수정", "중요")
+    assert page.results.item(0).data(Qt.ItemDataRole.UserRole).text == "내용 수정"
+    page.close()
+    page.deleteLater()
+    app.processEvents()
+
+
+def test_tray_queue_during_playback_finishes_viewing_like_sidebar_navigation(library_window, app):
+    window, core, video = library_window
+    window.play_video(video.id)
+    window.tray.show_queue()
+    app.processEvents()
+    assert core.playback.session is None
+    assert window.pages.currentWidget() is window.navigation_pages[3]

@@ -3,16 +3,43 @@
 import sqlite3
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QComboBox, QGridLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QMessageBox, QProgressBar, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QStyle, QStyledItemDelegate, QStyleOptionProgressBar,
+    QStyleOptionViewItem, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from .key_display import display_key, display_keys
 from .dialog_ui import primary_button, space_layout
+from .theme import PROGRESS_PLAYED
 
 
 STATES = {"queued": "대기", "transcribing": "받아쓰는 중", "translating": "번역 중",
           "held": "보류", "completed": "완료", "failed": "실패"}
+PROGRESS_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
+class QueueProgressDelegate(QStyledItemDelegate):
+    """행마다 QWidget을 만들지 않고 보이는 진행률만 그린다."""
+
+    def paint(self, painter, option, index):
+        background = QStyleOptionViewItem(option)
+        self.initStyleOption(background, index)
+        background.text = ""
+        style = option.widget.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, background, painter, option.widget)
+        progress = QStyleOptionProgressBar()
+        progress.rect = option.rect.adjusted(2, 2, -2, -2)
+        progress.state = option.state | QStyle.StateFlag.State_Horizontal
+        palette = QPalette(option.palette)
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(PROGRESS_PLAYED))
+        progress.palette = palette
+        progress.minimum, progress.maximum = 0, 100
+        progress.progress = round(index.data(PROGRESS_ROLE) * 100)
+        progress.text = index.data(Qt.ItemDataRole.DisplayRole)
+        progress.textVisible = True
+        progress.textAlignment = Qt.AlignmentFlag.AlignCenter
+        style.drawControl(QStyle.ControlElement.CE_ProgressBar, progress, painter, option.widget)
 
 
 class SubtitleQueuePage(QWidget):
@@ -57,6 +84,9 @@ class SubtitleQueueView(QWidget):
         self.list.setColumnWidth(1, 110)
         self.list.setColumnWidth(2, 110)
         self.list.setWordWrap(True)
+        self.list.setItemDelegateForColumn(2, QueueProgressDelegate(self.list))
+        self.rows = {}
+        self.visible_entries = {}
         layout.addWidget(self.list)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
@@ -105,22 +135,30 @@ class SubtitleQueueView(QWidget):
         self.snapshot = items
         counts = {state: sum(entry.state == state for entry in items) for state in STATES}
         self.summary.setText(" · ".join(f"{label} {counts[state]}개" for state, label in STATES.items()))
+        visible = tuple(entry for entry in items if self.state_filter.currentData() in (None, entry.state))
+        wanted = {entry.video_id for entry in visible}
         scroll = self.list.verticalScrollBar().value()
-        self.list.clear()
-        for entry in items:
-            if self.state_filter.currentData() not in (None, entry.state):
-                continue
-            item = QTreeWidgetItem([entry.title, STATES[entry.state], f"{entry.progress:.0%}", entry.error or ""])
-            item.setData(0, Qt.ItemDataRole.UserRole, entry.video_id)
-            item.setToolTip(3, entry.error or "")
-            self.list.addTopLevelItem(item)
-            progress = QProgressBar()
-            progress.setRange(0, 100)
-            progress.setValue(round(entry.progress * 100))
-            progress.setAccessibleName(f"{entry.title} 진행률")
-            self.list.setItemWidget(item, 2, progress)
-            if entry.video_id == selected:
-                self.list.setCurrentItem(item)
+        for video_id in self.rows.keys() - wanted:
+            item = self.rows.pop(video_id)
+            self.list.takeTopLevelItem(self.list.indexOfTopLevelItem(item))
+        for row, entry in enumerate(visible):
+            item = self.rows.get(entry.video_id)
+            if item is None:
+                item = self.rows[entry.video_id] = QTreeWidgetItem()
+                item.setData(0, Qt.ItemDataRole.UserRole, entry.video_id)
+                self.list.insertTopLevelItem(row, item)
+            elif self.list.indexOfTopLevelItem(item) != row:
+                self.list.takeTopLevelItem(self.list.indexOfTopLevelItem(item))
+                self.list.insertTopLevelItem(row, item)
+            if self.visible_entries.get(entry.video_id) != entry:
+                # QTreeWidget의 모델은 실제로 바뀐 값에만 dataChanged를 보낸다.
+                for column, value in enumerate((entry.title, STATES[entry.state], f"{entry.progress:.0%}", entry.error or "")):
+                    item.setText(column, value)
+                item.setData(2, PROGRESS_ROLE, entry.progress)
+                item.setToolTip(3, entry.error or "")
+        self.visible_entries = {entry.video_id: entry for entry in visible}
+        if selected in self.rows:
+            self.list.setCurrentItem(self.rows[selected])
         if self.list.currentItem() is None and self.list.topLevelItemCount():
             self.list.setCurrentItem(self.list.topLevelItem(0))
         self.list.verticalScrollBar().setValue(scroll)

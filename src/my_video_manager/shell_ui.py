@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
 )
 
 PAGE_NAMES = ("라이브러리", "하이라이트 모아보기", "검색", "자막 대기열", "폴더 관리", "설정")
+SEARCH_PAGE_INDEX = PAGE_NAMES.index("검색")
+QUEUE_PAGE_INDEX = PAGE_NAMES.index("자막 대기열")
 
 
 class Sidebar(QWidget):

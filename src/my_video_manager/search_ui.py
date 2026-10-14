@@ -1,9 +1,10 @@
 """검색 입력과 결과 선택. 조회와 재생 규칙은 AppCore가 담당한다."""
 
 from concurrent.futures import ThreadPoolExecutor
+from collections import OrderedDict
 from html import escape
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal, QTextBoundaryFinder
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal, QTextBoundaryFinder
 from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -57,24 +58,52 @@ class SearchResultDelegate(QStyledItemDelegate):
     def __init__(self, page):
         super().__init__(page.results)
         self.page = page
+        self.documents = OrderedDict()
+        self.markup = OrderedDict()
+
+    def clear_cache(self):
+        self.documents.clear()
+        self.markup.clear()
+
+    @staticmethod
+    def remember(cache, key, value, limit):
+        cache[key] = value
+        cache.move_to_end(key)
+        if len(cache) > limit:
+            cache.popitem(last=False)
+        return value
 
     def document(self, index, width):
         result = index.data(Qt.ItemDataRole.UserRole)
+        query = self.page.query.text()
+        key = (result, width, query, self.page.font().key())
+        if key in self.documents:
+            self.documents.move_to_end(key)
+            return self.documents[key]
         document = QTextDocument()
         document.setDefaultFont(self.page.font())
         document.setDocumentMargin(0)
+        markup_key = (result, query)
+        if markup_key not in self.markup:
+            self.remember(self.markup, markup_key, self.result_html(result, query), 512)
+        document.setHtml(self.markup[markup_key])
+        document.setTextWidth(max(1, width - 28))
+        return self.remember(self.documents, key, document, 1024)
+
+    def result_html(self, result, query):
         time = f" · {timestamp(result.start)}" if result.start is not None else ""
         missing = " · 파일 없음" if result.missing else ""
-        document.setHtml(
+        return (
             f'<div style="color:{TEXT}; font-size:11pt; font-weight:600">'
-            f'{highlighted_text(result.title, self.page.query.text())}</div>'
+            f'{highlighted_text(result.title, query)}</div>'
             f'<div style="color:{MUTED_TEXT}; margin-top:5px">'
             f'<span style="background-color:{BORDER}; color:{TEXT}">'
             f'&nbsp;{SOURCE_LABELS[result.source]}&nbsp;</span>{time}{missing}</div>'
             f'<div style="color:{TEXT}; margin-top:7px">'
-            f'{highlighted_text(result.text, self.page.query.text())}</div>')
-        document.setTextWidth(max(1, width - 28))
-        return document
+            f'{highlighted_text(result.text, query)}</div>')
+
+    def item_width(self):
+        return max(1, self.page.results.viewport().width() - 12)
 
     def paint(self, painter, option, index):
         option = QStyleOptionViewItem(option)
@@ -85,12 +114,12 @@ class SearchResultDelegate(QStyledItemDelegate):
         painter.save()
         painter.setClipRect(option.rect)
         painter.translate(option.rect.left() + 14, option.rect.top() + 12)
-        self.document(index, option.rect.width()).drawContents(painter)
+        self.document(index, self.item_width()).drawContents(painter)
         painter.restore()
 
     def sizeHint(self, option, index):
-        width = self.page.results.viewport().width()
-        return QSize(max(1, width - 12), int(self.document(index, width - 12).size().height()) + 24)
+        width = self.item_width()
+        return QSize(width, int(self.document(index, width).size().height()) + 24)
 
 
 class SearchPreparation(QObject):
@@ -160,8 +189,7 @@ class SearchPage(QWidget):
         self.query.textChanged.connect(self.schedule_search)
         # 같은 Enter가 부모로 전파되며 결과 재생까지 실행되지 않도록 포커스 이동을 미룬다.
         self.query.returnPressed.connect(lambda: QTimer.singleShot(0, self.focus_results))
-        self.query.installEventFilter(self)
-        self.results.installEventFilter(self)
+        # 입력 Enter는 Qt, 결과 선택 키는 셸이 전달하는 handle_key에서만 처리한다.
         self.results.itemClicked.connect(self.choose)
         self.results.itemActivated.connect(self.choose)
         self.query.setFocus()
@@ -194,6 +222,7 @@ class SearchPage(QWidget):
     def schedule_search(self):
         # 새 입력에 이전 결과가 잠깐 남아 잘못 재생되는 일을 막는다.
         self.results.clear()
+        self.results.itemDelegate().clear_cache()
         self.video_ids = ()
         self.dirty = True
         self.status.setText("검색 중…")
@@ -203,6 +232,7 @@ class SearchPage(QWidget):
     def refresh(self):
         self.timer.stop()
         self.results.clear()
+        self.results.itemDelegate().clear_cache()
         try:
             if not self.preparation.ready():
                 self.status.setText("검색 색인 준비 중…")
@@ -240,14 +270,3 @@ class SearchPage(QWidget):
             self.status.setText("파일 없음: 영상의 위치를 다시 연결한 뒤 재생하세요.")
             return
         self.result_chosen.emit(result)
-
-    def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.NoModifier:
-            if watched is self.query and event.key() == Qt.Key.Key_Down:
-                self.focus_results()
-                return True
-            if watched is self.results and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                if item := self.results.currentItem():
-                    self.choose(item)
-                return True
-        return super().eventFilter(watched, event)
