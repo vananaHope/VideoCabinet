@@ -1,6 +1,6 @@
 """라이브러리 스냅숏 필터·선택·공유 작업과 검사 수명주기."""
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMenu,
@@ -89,10 +89,9 @@ class LibraryPage(QWidget):
         splitter.setStretchFactor(1, 0)
         splitter.setSizes([650, 300])
         layout.addWidget(splitter, 1)
-        self.detail_timer = QTimer(self)
-        self.detail_timer.setInterval(2000)
-        self.detail_timer.timeout.connect(self.refresh_details)
-        self.detail_timer.start()
+        window.subtitles.video_changed.connect(self.refresh_details)
+        window.translations.video_changed.connect(self.refresh_details)
+        self.selection_changed()
 
     def refresh(self, *, focus_gems=None):
         focus = QApplication.focusWidget()
@@ -133,26 +132,33 @@ class LibraryPage(QWidget):
         self.grid.model().replace(cards)
         row = next((i for i, c in enumerate(cards) if c.video.id == selected), 0)
         self.grid.setCurrentIndex(self.grid.model().index(row, 0))
+        if not cards:
+            self.selection_changed()  # 모델 reset은 빈 현재 항목의 변경 신호를 내지 않을 수 있다.
         self.empty.setVisible(not cards)
         self.empty.setText("라이브러리가 비어 있습니다. 폴더 관리에서 감시 폴더나 영상 파일을 추가하세요."
                            if not self.cards else "조건에 맞는 영상이 없습니다. 제목 검색이나 태그 필터를 바꿔 보세요.")
-        self.selection_changed()
-        self.window.show_status(f"등록 영상 {len(self.cards)}개 · 표시 {len(cards)}개")
+        self.window.library_count.setText(f"등록 영상 {len(self.cards)}개 · 표시 {len(cards)}개")
 
     def selection_changed(self, *_):
         card = self.grid.currentIndex().data(CARD_ROLE)
-        details = self.snapshot.details.get(card.video.id) if card and self.snapshot else None
         for action in self.actions:
             action.setEnabled(card is not None)
         # Library의 검사 잠금을 쓰는 제목·위치·제외 변경은 UI 스레드를 기다리게 하지 않는다.
         for action in self.actions[5:]:
             action.setEnabled(card is not None and self.worker is None)
-        self.detail.show_card(card, details)
+        self.detail.show_card(card, None)
+        self.refresh_details()
 
-    def refresh_details(self):
-        if self.isVisible() and self.snapshot is not None:
-            self.snapshot.details.update(self.core.library_details_map())
-            self.selection_changed()
+    def refresh_details(self, changed_video_id=None):
+        if not self.isVisible() or self.window.isMinimized():
+            return
+        card = self.grid.currentIndex().data(CARD_ROLE)
+        if card and (changed_video_id is None or changed_video_id == card.video.id):
+            self.detail.show_card(card, self.core.library_details(card.video.id))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_details()
 
     def create_context_menu(self):
         menu = QMenu(self)
@@ -176,7 +182,6 @@ class LibraryPage(QWidget):
 
     def request_subtitles(self):
         self.window.subtitles.request()
-        self.refresh_details()
 
     def show_review(self):
         self.window.show_review()

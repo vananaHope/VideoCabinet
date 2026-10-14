@@ -114,8 +114,7 @@ def test_reel_return_does_not_reuse_previous_gem_focus(library_window, app, retu
     assert window.library_page.grid.hasFocus()
 
 
-def test_small_gem_icon_does_not_shrink_library_thumbnail(library_window):
+def test_gem_rendering_does_not_shrink_library_thumbnail(library_window):
     window, core, video = library_window
-    card = window.library_page.hidden_gems.list.item(0).icon()
-    assert card.actualSize(QSize(96, 54)) == QSize(96, 54)
+    window.library_page.hidden_gems.list.viewport().grab()
     assert window.library_page.grid.model().index(0, 0).data(Qt.ItemDataRole.DecorationRole).actualSize(QSize(192, 108)) == QSize(192, 108)

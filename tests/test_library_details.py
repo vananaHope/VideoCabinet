@@ -1,4 +1,4 @@
-"""공개 AppCore 스냅숏으로 자막·번역·하이라이트 요약과 기록 보존을 검증한다."""
+"""공개 AppCore 선택 영상 조회로 자막·번역·하이라이트 요약과 기록 보존을 검증한다."""
 
 from datetime import datetime, timezone
 import pytest
@@ -33,31 +33,33 @@ def test_summary_tracks_queue_original_translation_highlights_missing_and_exclud
     path.write_bytes(b"video")
     core.add_file(path)
     video, = core.videos()
-    initial = core.library_details_map()[video.id]
+    initial = core.library_details(video.id)
+    with pytest.raises(ValueError):
+        core.library_details(video.id + 999)
     assert not initial.has_transcript and initial.highlight_count == 0
     assert initial.subtitle_state is None and initial.translation_state is None
     core.playback.start(video.id, 0)
     core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
     core.playback.end()
     core.request_subtitles(video.id, "en")
-    queued = core.library_snapshot().details[video.id]
+    queued = core.library_details(video.id)
     assert queued.subtitle_state == "queued" and queued.highlight_count == 1
     core.process_next_subtitle()
-    original = core.library_details_map()[video.id]
+    original = core.library_details(video.id)
     assert original.has_transcript and original.spoken_language == "en"
     assert original.original_lines == 2 and original.translated_lines == 0
     assert original.subtitle_state is None and original.translation_state == "queued"
     core.process_next_translation()
-    translated = core.library_snapshot().details[video.id]
+    translated = core.library_details(video.id)
     assert translated.translated_lines == 2 and translated.translation_state is None
     path.unlink()
     core.scan()
     assert core.video(video.id).missing
-    assert core.library_details_map()[video.id] == translated
+    assert core.library_details(video.id) == translated
     core.exclude_video(video.id)
-    assert video.id not in core.library_details_map()
+    assert core.library_details(video.id) == translated
     core.restore_video(video.id)
-    assert core.library_snapshot().details[video.id] == translated
+    assert core.library_details(video.id) == translated
 
 
 def test_summary_includes_saved_partial_translation_while_held(tmp_path):
@@ -81,7 +83,7 @@ def test_summary_includes_saved_partial_translation_while_held(tmp_path):
     core.process_next_subtitle()
     assert core.process_next_translation().state == "queued"
     assert core.process_next_translation().state == "held"
-    summary = core.library_snapshot().details[video.id]
+    summary = core.library_details(video.id)
     assert summary.original_lines == 2 and summary.translated_lines == 1
     assert summary.translation_state == "held"
     assert summary.translated_lines == sum(line.translation is not None for line in core.review_lines(video.id))
@@ -100,7 +102,25 @@ def test_empty_transcript_summary_matches_public_language_semantics(tmp_path, la
     video, = core.videos()
     core.request_subtitles(video.id, language)
     core.process_next_subtitle()
-    summary = core.library_details_map()[video.id]
+    summary = core.library_details(video.id)
     assert summary.has_transcript
     assert summary.original_lines == 0
     assert summary.spoken_language == core.transcript(video.id).spoken_language
+
+
+def test_snapshot_and_gems_do_not_read_details_and_selected_summaries_are_isolated(tmp_path, monkeypatch):
+    core = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+                   database=tmp_path / "data/library.sqlite3", transcriber=Transcriber())
+    for name in ("a", "b"):
+        path = tmp_path / f"{name}.mkv"
+        path.write_bytes(name.encode())
+        core.add_file(path)
+    a, b = core.videos()
+    core.request_subtitles(a.id)
+    core.process_next_subtitle()
+    assert core.library_details(a.id).original_lines == 2
+    assert not core.library_details(b.id).has_transcript
+    assert core.library_details(b.id).translated_lines == 0
+    monkeypatch.setattr(core, "library_details", lambda *_: pytest.fail("목록에서 상세 조회"))
+    assert core.library_snapshot().videos == core.videos()
+    core.hidden_gems()

@@ -1,7 +1,7 @@
 """화면은 입력을 코어에 전달하고 결과를 표시한다."""
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
+from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QStackedWidget
 
 from .adapters import MpvPlayer
 from .core import AppCore, CommandType
@@ -37,6 +37,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("영상 라이브러리")
         self.resize(1100, 720)
         self.pages = QStackedWidget()
+        self.library_count = QLabel()
+        self.library_count.setAccessibleName("라이브러리 등록·표시 개수")
+        self.statusBar().addPermanentWidget(self.library_count)
         self.settings_menu = self.menuBar().addMenu("설정(&S)")
         self.settings_menu.addAction("키 배치…", self.show_settings)
 
@@ -63,6 +66,7 @@ class MainWindow(QMainWindow):
             self._return_page = self._active_page
         self._active_page = page
         self.sidebar.setVisible(not playing)
+        self.statusBar().setVisible(not playing)
         if page in self.navigation_pages:
             self.sidebar.select(self.navigation_pages.index(page))
 

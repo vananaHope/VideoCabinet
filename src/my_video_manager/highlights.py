@@ -1,6 +1,7 @@
 """하이라이트의 저장, 편집, 재생 중 열린 구간 규칙."""
 
 from dataclasses import dataclass
+from contextlib import nullcontext
 import math
 
 from .playback import PlaybackSession
@@ -45,6 +46,10 @@ class Highlights:
         with self._connect() as db:
             return tuple(self._highlight(row) for row in db.execute(
                 "SELECT * FROM highlights WHERE video_id = ? ORDER BY start, id", (video_id,)))
+
+    def count(self, video_id: int, *, connection=None) -> int:
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            return db.execute("SELECT COUNT(*) FROM highlights WHERE video_id = ?", (video_id,)).fetchone()[0]
 
     def list_by_ids(self, highlight_ids: set[int]) -> tuple[Highlight, ...]:
         ids = tuple(highlight_ids)

@@ -20,6 +20,8 @@ class SubtitleWorker(QThread):
 
 
 class SubtitleControls(QObject):
+    video_changed = Signal(int)
+
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -65,6 +67,7 @@ class SubtitleControls(QObject):
         try:
             self.core.request_subtitles(video_id, None if language == "자동 감지" else language)
             self.window.statusBar().showMessage("자막 대기열에 추가했습니다. 재생 중에도 계속 처리합니다.")
+            self.video_changed.emit(video_id)
         except Exception as error:
             QMessageBox.warning(self.window, "자막 요청 실패", str(error))
 
@@ -97,6 +100,7 @@ class SubtitleControls(QObject):
                     self.window.player.set_subtitle(self.core.playback_subtitle(result.video_id))
                 except Exception as error:
                     self.window.statusBar().showMessage(f"자막은 저장됐지만 표시에 실패했습니다: {error}")
+        self.video_changed.emit(result.video_id)
 
     def finished(self):
         self.worker.deleteLater()

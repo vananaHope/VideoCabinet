@@ -23,6 +23,8 @@ class TranslationWorker(QThread):
 
 
 class TranslationControls(QObject):
+    video_changed = Signal(int)
+
     def __init__(self, window):
         super().__init__(window)
         self.window, self.core = window, window.core
@@ -84,6 +86,7 @@ class TranslationControls(QObject):
                     self.window.player.set_subtitle(self.core.playback_subtitle(result.video_id))
                 except Exception as error:
                     bar.showMessage(f"번역은 저장됐지만 표시에 실패했습니다: {error}")
+        self.video_changed.emit(result.video_id)
 
     def toggle(self):
         changed, message = self.core.toggle_subtitle_language()

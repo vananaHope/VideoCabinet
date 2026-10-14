@@ -545,7 +545,7 @@ DB에는 썸네일을 데이터 폴더 기준 상대 이름으로 저장하므�
 - `library_page.py`: 제목·태그 복합 필터, 격자·상세 선택과 검사 작업자 스레드. `handle_key`가 Enter·메뉴 키를 처리하고 `visible_video_ids`·`selected_video_id`가 위젯과 무관한 선택 정보를 제공한다.
 - `library_grid.py`: 일괄 스냅숏 기반 모델, 썸네일 격자와 숨겨진 보석의 공유 카드 그리기.
 - `library_detail_ui.py`: 선택 영상 정보와 상세 패널·우클릭 메뉴가 공유하는 작업 버튼.
-- `library_details.py`: 원어·번역·대기열 상태와 하이라이트 수의 일괄 요약 조회.
+- `library_details.py`: 선택 영상의 상세 요약 결과. `AppCore.library_details`는 자막·번역·하이라이트 소유 모듈에서 한 영상만 조회한다.
 - `folder_page.py`: 감시 폴더 목록, 추가·해제·검사, 제외·관심 없음 복원과 검사 안내.
 - `playback_page.py`: 기존 재생 배치·키 명령 처리와 `show_position`·`show_reel` 표시 API. 셸은 키를 현재 페이지의 `handle_key`로 전달한다.
 - `settings.py`: JSON 값을 저장하는 공용 `Settings` 저장소. 라이브러리·번역·키 배치 설정이 함께 사용하며 키 배치는 `keys.bindings`에 저장.

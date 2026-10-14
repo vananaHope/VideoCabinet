@@ -96,7 +96,7 @@ def test_context_menu_targets_clicked_card_and_keyboard_opens_same_actions(libra
     menu.deleteLater()
 
 
-def test_selection_refresh_preserves_video_and_updates_details_without_per_video_reads(library_window, app, monkeypatch):
+def test_selection_refresh_preserves_video_and_reads_only_selected_details(library_window, app, monkeypatch):
     window, core, first = library_window
     add_videos(core, 2)
     window.refresh()
@@ -107,11 +107,17 @@ def test_selection_refresh_preserves_video_and_updates_details_without_per_video
     window.refresh()
     assert page.selected_video_id() == selected
     assert page.detail.title.text() == "바뀐 제목"
-    for method in ("transcript", "translation", "highlights", "viewing_status", "video_tags"):
-        monkeypatch.setattr(core, method, lambda *_: (_ for _ in ()).throw(AssertionError("영상별 조회")))
-    page.grid.setCurrentIndex(page.grid.model().index(0, 0))
-    assert page.detail.title.text() == page.grid.model().cards[0].video.title
+    calls = []
+    read = core.library_details
+    def details(video_id):
+        calls.append(video_id)
+        return read(video_id)
+    monkeypatch.setattr(core, "library_details", details)
+    row = (page.grid.currentIndex().row() + 1) % page.grid.model().rowCount()
+    page.grid.setCurrentIndex(page.grid.model().index(row, 0))
+    assert page.detail.title.text() == page.grid.model().cards[row].video.title
     assert "하이라이트 0개" in page.detail.metadata.text()
+    assert calls == [page.selected_video_id()]
 
 
 def test_folder_scan_keeps_unrelated_actions_enabled_and_reports_globally(library_window, app):
@@ -131,6 +137,12 @@ def test_folder_scan_keeps_unrelated_actions_enabled_and_reports_globally(librar
         assert all(action.isEnabled() for action in window.library_page.actions[:5])
         assert folder.progress.isVisible()
         assert "검사하고" in window.statusBar().currentMessage()
+        message = window.statusBar().currentMessage()
+        window.library_page.quick_search.setText("없는 제목")
+        assert "표시 0개" in window.library_count.text()
+        assert window.statusBar().currentMessage() == message
+        window.refresh()
+        assert window.statusBar().currentMessage() == message
     finally:
         worker = window.worker
         release.set()
@@ -139,6 +151,9 @@ def test_folder_scan_keeps_unrelated_actions_enabled_and_reports_globally(librar
     assert window.worker is None
     assert "안내 1개" in window.statusBar().currentMessage()
     assert "검사 안내" in folder.report.toPlainText()
+    message = window.statusBar().currentMessage()
+    window.library_page.quick_search.clear()
+    assert window.statusBar().currentMessage() == message
     assert "제목 변경" not in [b.text() for b in folder.findChildren(type(folder.scan_buttons[0]))]
 
 
@@ -174,3 +189,57 @@ def test_double_click_plays_and_gem_backspace_only_dismisses_recommendation(libr
     QTest.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=point)
     QTest.mouseDClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=point)
     assert core.playback.session.video_id == video.id
+
+
+def test_playback_hides_status_bar_even_when_new_message_arrives(library_window, app):
+    window, core, video = library_window
+    assert window.statusBar().isVisible()
+    window.play(video.id)
+    app.processEvents()
+    assert not window.statusBar().isVisible()
+    window.show_status("자막 처리 완료")
+    assert not window.statusBar().isVisible()
+    window.back_to_list()
+    app.processEvents()
+    assert window.statusBar().isVisible()
+    assert window.statusBar().currentMessage() == "자막 처리 완료"
+    assert window.library_count.isVisible()
+
+
+def test_detail_refresh_is_event_driven_and_skips_hidden_or_minimized_window(library_window, app, monkeypatch):
+    from types import SimpleNamespace
+    window, core, video = library_window
+    page = window.library_page
+    calls = []
+    read = core.library_details
+    def details(video_id):
+        calls.append(video_id)
+        return read(video_id)
+    monkeypatch.setattr(core, "library_details", details)
+    QTest.qWait(2100)
+    assert calls == []
+    core.request_subtitles(video.id)
+    result = core.process_next_subtitle()  # 가짜 창에는 받아쓰기 어댑터가 없어 실패로 정리된다.
+    window.subtitles.completed(result)
+    assert calls == [video.id]
+    assert "원어 실패" in page.detail.metadata.text()
+    window.translations.completed(SimpleNamespace(video_id=video.id, error_detail=None,
+                                  error="테스트 실패", state="failed"))
+    assert calls == [video.id, video.id]
+    window.subtitles.video_changed.emit(video.id + 999)
+    assert len(calls) == 2
+    window.navigate(4)
+    calls.clear()
+    window.subtitles.video_changed.emit(video.id)
+    assert calls == []
+    window.navigate(0)
+    assert calls and all(v == video.id for v in calls)
+    window.showMinimized()
+    app.processEvents()
+    calls.clear()
+    window.translations.video_changed.emit(video.id)
+    QTest.qWait(2100)
+    assert calls == []
+    window.showNormal()
+    app.processEvents()
+    assert calls == [video.id]

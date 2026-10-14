@@ -75,6 +75,19 @@ class Transcript:
 
 
 @dataclass(frozen=True)
+class TranscriptSummary:
+    has_transcript: bool
+    spoken_language: str | None
+    line_count: int
+    queue_state: str | None
+
+
+def _transcript_language(row, line_count):
+    language = row["spoken_language"]
+    return None if language == "und" or (not line_count and not row["language_specified"]) else language
+
+
+@dataclass(frozen=True)
 class SubtitleQueueEntry:
     id: int
     video_id: int
@@ -222,11 +235,20 @@ class Subtitles:
             lines = tuple(TranscriptLine(line["id"], line["start"], line["end"], line["text"])
                           for line in db.execute("SELECT * FROM transcript_lines WHERE transcript_id = ? ORDER BY ordinal",
                                                  (row["id"],)))
-            language = row["spoken_language"]
-            if language == "und" or (not lines and not row["language_specified"]):
-                language = None
-            return Transcript(video_id, row["id"], language, bool(row["language_specified"]),
+            return Transcript(video_id, row["id"], _transcript_language(row, len(lines)), bool(row["language_specified"]),
                               datetime.fromisoformat(row["created_at"]), lines)
+
+    def summary(self, video_id: int, *, connection=None) -> TranscriptSummary:
+        """선택 영상의 줄 개수만 인덱스로 센다. 본문과 다른 영상의 줄은 읽지 않는다."""
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            if not db.in_transaction:
+                db.execute("BEGIN")
+            row = db.execute("SELECT * FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
+            queue = db.execute("SELECT state FROM subtitle_queue WHERE video_id = ?", (video_id,)).fetchone()
+            count = db.execute("SELECT COUNT(*) FROM transcript_lines WHERE transcript_id = ?",
+                               (row["id"],)).fetchone()[0] if row else 0
+            return TranscriptSummary(row is not None, _transcript_language(row, count) if row else None,
+                                     count, queue[0] if queue else None)
 
     def has_transcript(self, video_id: int) -> bool:
         with self._connect() as db:
