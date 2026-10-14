@@ -57,8 +57,8 @@ def test_add_file_distinguishes_missing_return_from_unchanged_registration(core,
     moved = path.with_name("moved.mkv")
     path.rename(moved)
     result = core.scan()
-    assert [(issue.path, issue.message) for issue in result.issues] == [
-        (moved, "옮겨진 영상의 새 위치를 찾았습니다.")]
+    assert result.issues == ()
+    assert core.video(video.id).locations[0].path == moved
     moved.unlink()
     core.scan()
     moved.write_bytes(b"original video")

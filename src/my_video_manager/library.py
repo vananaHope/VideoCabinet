@@ -189,7 +189,8 @@ class Library:
             return self._not_added(path, "제외 목록에 있는 영상입니다. 제외 목록에서 되돌려 주세요.")
         if was_missing:
             message = "옮겨진 영상의 새 위치를 찾았습니다." if moved else "파일 없음이던 영상을 다시 찾았습니다."
-            return ScanResult(0, (ScanIssue(path, message, failed=False),), reconnected=True)
+            # 검사 중 정상 이동은 알리지 않고, 검사 전부터 파일 없음이던 영상만 안내한다.
+            return ScanResult(0, (ScanIssue(path, message, failed=False),), reconnected=not moved)
         return self._not_added(path, "이미 등록된 영상입니다.")
 
     def _register(self, path: Path, *, on_registered=None, missing_at_start=None) -> ScanResult:
