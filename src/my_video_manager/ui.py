@@ -253,6 +253,7 @@ class MainWindow(QMainWindow):
         SettingsDialog(self.core, self).exec()
         self.refresh_key_help()
         self.reel.update_label()
+        self.reel.refresh_guidance()
         if self.pages.currentIndex() == 1:
             self.surface.setFocus()
 

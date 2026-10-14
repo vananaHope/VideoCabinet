@@ -11,6 +11,8 @@ SURFACE = "#242424"
 BORDER = "#454b54"
 # 입력·버튼처럼 조작할 수 있는 요소의 경계. 장식용 BORDER보다 밝고 포커스 강조색과는 구분된다.
 CONTROL_BORDER = "#5c636e"
+# 빈 입력 칸은 경계로만 구분되므로 배경·표면 모두와 3:1 이상이 되게 한다(포커스는 ACCENT 2px로 따로 표시).
+INPUT_BORDER = "#6b7280"
 TEXT = "#eeeeee"
 MUTED_TEXT = "#aaaaaa"
 ACCENT = "#79b8ff"
@@ -37,7 +39,7 @@ QAbstractItemView {{
     border-radius: 3px; selection-background-color: {ACCENT_TINT};
     selection-color: {TEXT};
 }}
-QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox {{ border-color: {CONTROL_BORDER}; }}
+QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox {{ border-color: {INPUT_BORDER}; }}
 QLineEdit, QAbstractSpinBox, QComboBox {{ padding: 4px; }}
 QPushButton, QToolButton {{
     background: {SURFACE}; border: 2px solid {CONTROL_BORDER};

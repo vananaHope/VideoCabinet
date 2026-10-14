@@ -24,7 +24,7 @@ class LibraryDetailPanel(QScrollArea):
         content = QWidget()
         self.setWidget(content)
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(8, 6, 8, 8)
         self.empty = with_role(QLabel("영상을 선택하면\n상세 정보와 작업이 여기에 표시됩니다."), "emptyBody")
         self.empty.setWordWrap(True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -32,7 +32,7 @@ class LibraryDetailPanel(QScrollArea):
         self.info = QWidget()
         info_layout = QVBoxLayout(self.info)
         info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(8)
+        info_layout.setSpacing(6)
         self.thumbnail = QLabel()
         self.thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info_layout.addWidget(self.thumbnail)
@@ -77,7 +77,7 @@ class LibraryDetailPanel(QScrollArea):
         if card is None:
             return
         video, status = card.video, card.status
-        self.thumbnail.setPixmap(self.icons.get(video.thumbnail).pixmap(QSize(224, 126)))
+        self.thumbnail.setPixmap(self.icons.get(video.thumbnail).pixmap(QSize(192, 108)))
         self.title.setText(video.title)
         lines = [f"길이 {duration_text(video.duration)} · {viewing_text(status)}"]
         if video.missing:

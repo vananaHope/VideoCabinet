@@ -46,3 +46,25 @@ def test_library_reel_and_queue_explain_what_to_do_when_empty(library_window, ap
     assert page.empty.isVisible() and "폴더 관리" in page.empty.text()
     # 추천이 사라진 뒤에는 숨겨진 보석 줄이 격자 공간을 차지하지 않는다.
     assert page.hidden_gems.height() <= page.hidden_gems.sizeHint().height()
+
+
+def test_empty_reel_guidance_follows_saved_key_bindings(library_window, app, monkeypatch):
+    import my_video_manager.ui as ui
+    from my_video_manager.core import Command, CommandType
+
+    window, core, _ = library_window
+    window.navigate(1)
+    assert "Insert" in window.reel.empty.text()
+
+    class SavingDialog:
+        def __init__(self, core, parent):
+            self.core = core
+
+        def exec(self):
+            bindings = {row.command: row.keys for row in self.core.key_bindings()}
+            bindings[Command(CommandType.POINT_HIGHLIGHT)] = ("F8",)
+            self.core.save_key_bindings(bindings)
+
+    monkeypatch.setattr(ui, "SettingsDialog", SavingDialog)
+    window.show_settings()
+    assert "F8로 지점" in window.reel.empty.text()

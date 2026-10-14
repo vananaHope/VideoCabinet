@@ -126,15 +126,7 @@ class ReelControls:
                 row = index
         if entries:
             self.list.setCurrentRow(row)
-            self.empty.clear()
-        elif self.filter.currentData() is not None:
-            self.empty.show_message("이 태그가 붙은 하이라이트가 없습니다", "다른 하이라이트 태그를 골라 보세요.")
-        else:
-            keys = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
-            point = keys.get(CommandType.POINT_HIGHLIGHT, "키 미할당")
-            span = keys.get(CommandType.RANGE_HIGHLIGHT, "키 미할당")
-            self.empty.show_message("아직 하이라이트가 없습니다",
-                                    f"영상을 보다가 {point}로 지점, {span}로 구간을 표시하면 여기에 모입니다.")
+        self.refresh_guidance()
         self.play_all.setEnabled(any(e.playable and e.highlight.start < e.duration for e in entries))
         self.selection_changed()
         self.status.setText(f"하이라이트 {len(entries)}개 · 영상 제목 → 영상 안 시각 순\n"
@@ -198,6 +190,19 @@ class ReelControls:
         except Exception:
             self.open()
             raise
+
+    def refresh_guidance(self):
+        """빈 목록 안내를 현재 키 배치로 다시 쓴다. 키 배치를 저장한 뒤에도 불린다."""
+        if self.list.count():
+            self.empty.clear()
+        elif self.filter.currentData() is not None:
+            self.empty.show_message("이 태그가 붙은 하이라이트가 없습니다", "다른 하이라이트 태그를 골라 보세요.")
+        else:
+            keys = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
+            point = keys.get(CommandType.POINT_HIGHLIGHT, "키 미할당")
+            span = keys.get(CommandType.RANGE_HIGHLIGHT, "키 미할당")
+            self.empty.show_message("아직 하이라이트가 없습니다",
+                                    f"영상을 보다가 {point}로 지점, {span}로 구간을 표시하면 여기에 모입니다.")
 
     def update_label(self):
         keys = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
