@@ -1,10 +1,11 @@
 """시청 통계의 순수 계산과 일괄 조회 어댑터. 결과는 asdict 후 JSON으로 보낼 수 있다."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Iterable
 
-from .viewing import Viewing, ViewingKind, ViewingSettings, merge_intervals
+from .viewing import (VideoViewingStatistics, Viewing, ViewingKind, ViewingRecord, ViewingSettings,
+                      classify_viewing, merge_intervals, summarize_viewings)
 
 
 @dataclass(frozen=True)
@@ -17,15 +18,6 @@ class StatisticsVideo:
     missing: bool = False
     has_subtitles: bool = False
     highlight_count: int = 0
-
-
-@dataclass(frozen=True)
-class VideoViewingStatistics:
-    video_id: int
-    viewing_count: int = 0
-    watched_seconds: float = 0.0
-    # ViewingStatus.last_viewed_at과 같은 updated_at 최댓값. 틀어보기도 포함한다.
-    last_viewed_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -76,18 +68,37 @@ class ViewingStatistics:
     library: LibraryStatistics
 
 
-def _normalized(viewing: Viewing) -> Viewing:
-    return replace(viewing, intervals=merge_intervals(viewing.intervals, viewing.duration))
+def _records(viewings: Iterable[Viewing]) -> Iterable[ViewingRecord]:
+    """임의 구간도 받는 순수 API의 입력 어댑터. 저장소 조회 경로에서는 쓰지 않는다."""
+    for viewing in viewings:
+        seconds = sum(end - start for start, end in merge_intervals(viewing.intervals, viewing.duration))
+        yield ViewingRecord(viewing.id, viewing.video_id, viewing.duration, seconds,
+                            viewing.started_at, viewing.updated_at, viewing.last_position)
 
 
-def _local_date(value: datetime, tz: tzinfo | None) -> date:
-    # None은 이미 각 시각의 로컬 시간대로 변환한 입력이라는 뜻이다.
-    # OS 시간대나 실제 시계를 읽지 않아 순수 함수에서 DST까지 재현할 수 있다.
-    if tz is None:
-        return value.date()
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=tz)
-    return value.astimezone(tz).date()
+class _LocalDates:
+    """한 집계 안에서만 분 단위 변환을 공유한다. offset과 fold를 구분한다."""
+
+    def __init__(self, tz: tzinfo | None, *, system_local: bool = False):
+        self.tz, self.system_local = tz, system_local
+        self._minutes: dict[tuple, date] = {}
+
+    def __call__(self, value: str | datetime) -> date:
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value)
+        if self.tz is None and not self.system_local:
+            return value.date()
+        if value.tzinfo is None and self.tz is not None:
+            value = value.replace(tzinfo=self.tz)
+        key = (value.year, value.month, value.day, value.hour, value.minute, value.utcoffset(), value.fold)
+        day = self._minutes.get(key)
+        if day is None:
+            converted = value.astimezone(self.tz)
+            day = converted.date()
+            # 초 단위 offset은 한 입력 분 안에서 로컬 자정이 바뀔 수 있다.
+            if converted.second == value.second and converted.microsecond == value.microsecond:
+                self._minutes[key] = day
+        return day
 
 
 def video_viewing_statistics(
@@ -95,22 +106,7 @@ def video_viewing_statistics(
     settings: ViewingSettings = ViewingSettings(),
 ) -> dict[int, VideoViewingStatistics]:
     """기간 제한 없는 수치. 시청 없는 영상도 0/None으로 반환한다."""
-    counts = dict.fromkeys(video_ids, 0)
-    seconds = dict.fromkeys(counts, 0.0)
-    last: dict[int, datetime] = {}
-    for viewing in viewings:
-        vid = viewing.video_id
-        if vid not in counts:
-            continue
-        if vid not in last or viewing.updated_at > last[vid]:
-            last[vid] = viewing.updated_at
-        viewing = _normalized(viewing)
-        if viewing.classify(settings) != ViewingKind.GLANCE:
-            counts[vid] += 1
-            seconds[vid] += viewing.played_seconds
-    return {vid: VideoViewingStatistics(vid, count, seconds[vid],
-                                       last[vid].isoformat() if vid in last else None)
-            for vid, count in counts.items()}
+    return summarize_viewings(_records(viewings), video_ids, settings).statistics
 
 
 def viewing_statistics(
@@ -125,6 +121,10 @@ def viewing_statistics(
     한다. 출력 날짜/시각은 ISO 문자열이고 시간은 영상 기준 초다.
     라이브러리 현황은 전체 기간이며 제외 영상만 뺀다.
     """
+    return _period_statistics(_records(viewings), videos, days, today, _LocalDates(tz), settings)
+
+
+def _period_statistics(records, videos, days, today, local_date, settings) -> ViewingStatistics:
     if type(days) is not int or days not in (7, 30, 90, 365):
         raise ValueError("통계 기간은 7·30·90·365일 중 하나여야 합니다.")
     start = today - timedelta(days=days - 1)
@@ -136,15 +136,14 @@ def viewing_statistics(
     video_counts: dict[int, int] = {}
     finished, abandoned = set(), set()
     previous_seconds, previous_count = 0.0, 0
-    for viewing in viewings:
+    for viewing in records:
         if viewing.video_id not in videos:
             continue
-        viewing = _normalized(viewing)
-        kind = viewing.classify(settings)
+        kind = classify_viewing(viewing.played_seconds, viewing.duration, settings)
         if kind == ViewingKind.GLANCE:
             continue
         (finished if kind == ViewingKind.FINISHED else abandoned).add(viewing.video_id)
-        day = _local_date(viewing.started_at, tz)
+        day = local_date(viewing.started_at)
         if start <= day <= today:
             offset = (day - start).days
             seconds = viewing.played_seconds
@@ -173,7 +172,7 @@ def viewing_statistics(
         (watched_seconds - previous_seconds) / previous_seconds * 100 if previous_seconds else None,
         (count - previous_count) / previous_count * 100 if previous_count else None,
         len(video_counts), sum(value > 0 for value in daily_counts), longest,
-        sum(start <= _local_date(video.registered_at, tz) <= today for video in visible),
+        sum(start <= local_date(video.registered_at) <= today for video in visible),
         watched_seconds / count if count else 0.0,
         tuple(DailyViewingStatistics((start + timedelta(days=i)).isoformat(), seconds, daily_counts[i])
               for i, seconds in enumerate(daily_seconds)),
@@ -192,11 +191,7 @@ class StatisticsReader:
         self._connect, self._clock, self._viewings = connect, clock, viewings
 
     def video_map(self) -> dict[int, VideoViewingStatistics]:
-        with self._connect() as db:
-            db.execute("BEGIN")
-            ids = [row[0] for row in db.execute("SELECT id FROM videos")]
-            viewings = self._viewings.list_all(connection=db)
-        return video_viewing_statistics(viewings, ids, self._viewings.settings)
+        return self._viewings.summary().statistics
 
     def period(self, days: int, *, tz: tzinfo | None = None) -> ViewingStatistics:
         now = self._clock()
@@ -205,18 +200,18 @@ class StatisticsReader:
         now = now.astimezone(tz)
         with self._connect() as db:
             db.execute("BEGIN")
-            located = {row[0] for row in db.execute("SELECT DISTINCT video_id FROM locations")}
-            subtitled = {row[0] for row in db.execute("SELECT video_id FROM transcripts")}
-            highlights = dict(db.execute("SELECT video_id, COUNT(*) FROM highlights GROUP BY video_id"))
-            videos = tuple(StatisticsVideo(
-                row["id"], row["title"], datetime.fromisoformat(row["registered_at"]),
-                bool(row["excluded"]), row["id"] not in located, row["id"] in subtitled,
-                highlights.get(row["id"], 0),
-            ) for row in db.execute("SELECT id, title, registered_at, excluded FROM videos"))
-            viewings = self._viewings.list_all(connection=db)
-        if tz is None:
-            # astimezone()를 각 날짜에 적용한다. 현재 UTC offset을 과거 날짜에도
-            # 적용하면 시스템 시간대의 DST 경계에서 잘못된 날로 셀 수 있다.
-            videos = tuple(replace(v, registered_at=v.registered_at.astimezone()) for v in videos)
-            viewings = tuple(replace(v, started_at=v.started_at.astimezone()) for v in viewings)
-        return viewing_statistics(viewings, videos, days, now.date(), tz, self._viewings.settings)
+            locations = db.execute("SELECT DISTINCT video_id FROM locations").fetchall()
+            transcripts = db.execute("SELECT video_id FROM transcripts").fetchall()
+            highlight_rows = db.execute("SELECT video_id, COUNT(*) FROM highlights GROUP BY video_id").fetchall()
+            video_rows = db.execute("SELECT id, title, registered_at, excluded FROM videos").fetchall()
+            snapshot = self._viewings.read_rows(connection=db)
+        located = {row[0] for row in locations}
+        subtitled = {row[0] for row in transcripts}
+        highlights = dict(highlight_rows)
+        videos = tuple(StatisticsVideo(
+            row["id"], row["title"], datetime.fromisoformat(row["registered_at"]),
+            bool(row["excluded"]), row["id"] not in located, row["id"] in subtitled,
+            highlights.get(row["id"], 0),
+        ) for row in video_rows)
+        return _period_statistics(snapshot.records(), videos, days, now.date(),
+                                  _LocalDates(tz, system_local=tz is None), self._viewings.settings)

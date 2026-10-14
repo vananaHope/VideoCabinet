@@ -1,16 +1,19 @@
 """순수 통계와 AppCore 공개 시나리오: 기간 경계, 분류, 복습, 일괄 조회."""
 
 from dataclasses import asdict, replace
-from datetime import date, datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta, timezone, tzinfo
 import json
 import sqlite3
+from threading import Event, get_ident
 
 import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.statistics import StatisticsVideo, video_viewing_statistics, viewing_statistics
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
-from my_video_manager.viewing import Viewing, ViewingSettings
+from my_video_manager.viewing import (Viewing, ViewingKind, ViewingRecord, ViewingSettings,
+                                     summarize_viewings, viewing_status)
 
 
 UTC = timezone.utc
@@ -282,3 +285,145 @@ def test_query_count_is_constant_as_videos_increase(library, tmp_path, monkeypat
         path.write_bytes(str(i).encode())
         core.add_file(path)
     assert counts() == small == [2, 5]
+
+
+def test_library_snapshot_includes_statistics_with_one_viewing_query(library, monkeypatch):
+    core, _, (a, b, _) = library
+    watch(core, a.id, 90)
+    watch(core, a.id, 90)
+    watch(core, b.id, 20)
+    expected_statuses = {v.id: core.viewing_status(v.id) for v in core.videos()}
+    expected_statistics = core.video_viewing_statistics()
+    statements = []
+    original_connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        db = original_connect(*args, **kwargs)
+        db.set_trace_callback(statements.append)
+        return db
+
+    monkeypatch.setattr(sqlite3, "connect", traced_connect)
+    snapshot = core.library_snapshot()
+    assert snapshot.viewing_statistics == expected_statistics
+    assert snapshot.statuses == expected_statuses
+    assert sum("FROM viewings" in sql for sql in statements) == 1
+
+
+@pytest.mark.parametrize("settings", [ViewingSettings(), ViewingSettings(
+    finished_ratio=0.8, abandoned_ratio=0.1, favorite_count=3)])
+def test_combined_summary_matches_original_status_and_statistics_for_every_video(settings):
+    # 분류 경계·같은 시작 시각·ID와 역순인 updated_at·마지막 위치 없는 시청을 섞는다.
+    # 기간 없는 기존 viewing_status와 독립적으로 센 수치를 대조한다.
+    grouped = {vid: [] for vid in range(1, 51)}
+    seconds = [0, 4.999, 5, 9.999, 10, 79.999, 80, 89.999, 90, 100]
+    records = []
+    for vid in grouped:
+        for i in range(vid % 13):
+            row = replace(viewing(vid, seconds=seconds[(vid + i) % len(seconds)], ident=vid * 20 + i),
+                          updated_at=NOW - timedelta(seconds=i),
+                          last_position=None if i % 4 == 0 else float(i * 3))
+            grouped[vid].append(row)
+            records.append(ViewingRecord(row.id, vid, row.duration, row.played_seconds,
+                                         row.started_at, row.updated_at, row.last_position))
+    # 순서를 바꿔도 마지막 정지 위치는 가장 큰 ID에서 가져와야 한다.
+    summary = summarize_viewings(reversed(records), grouped, settings)
+    for vid, rows in grouped.items():
+        expected = viewing_status(tuple(rows), settings)
+        assert summary.statuses[vid] == expected
+        counted = [row for row in rows if row.classify(settings) != ViewingKind.GLANCE]
+        stats = summary.statistics[vid]
+        assert stats.viewing_count == len(counted)
+        assert stats.watched_seconds == pytest.approx(sum(row.played_seconds for row in counted))
+        assert stats.last_viewed_at == (expected.last_viewed_at.isoformat() if expected.last_viewed_at else None)
+
+
+@pytest.mark.parametrize("days", [7, 365])
+@pytest.mark.parametrize("tz", [None, UTC, KST, timezone(timedelta(hours=-5)),
+                                timezone(timedelta(seconds=30))])
+def test_period_reader_matches_pure_api_with_local_dates_and_active_viewing(library, days, tz):
+    core, clock, videos = library
+    a, b, c = videos
+    for offset, seconds in ((-730, 95), (-365, 90), (-14, 25), (-7, 10), (-6, 5), (0, 1)):
+        clock.now = NOW + timedelta(days=offset)
+        watch(core, a.id, seconds)
+    # 같은 입력 분이 로컬 자정을 가르는 초 단위 offset도 확인한다.
+    for second in (20, 40):
+        clock.now = datetime(2026, 10, 13, 23, 59, second, tzinfo=UTC)
+        watch(core, b.id, 20)
+    clock.now = NOW
+    core.exclude_video(a.id)
+    c.locations[0].path.unlink()
+    core.scan()
+    core.playback.start(b.id, 0)
+    core.playback.report(30)
+    inputs = [StatisticsVideo(v.id, v.title,
+                              v.registered_at.astimezone() if tz is None else v.registered_at,
+                              v.excluded, v.missing) for v in (*core.videos(), *core.excluded_videos())]
+    rows = [row for v in videos for row in core.viewings(v.id)]
+    if tz is None:
+        rows = [replace(row, started_at=row.started_at.astimezone()) for row in rows]
+    expected = viewing_statistics(rows, inputs, days, clock.now.astimezone(tz).date(), tz)
+    assert core.viewing_statistics(days, tz=tz) == expected
+
+
+def test_minute_memo_preserves_offset_and_second_boundaries():
+    rows = [viewing(when=datetime(2026, 10, 13, 23, 59, second, tzinfo=UTC)) for second in (20, 40)]
+    result = calculate(rows, tz=timezone(timedelta(seconds=30)))
+    assert result.daily[-2].viewing_count == result.daily[-1].viewing_count == 1
+    rows = [viewing(when=datetime(2026, 10, 14, 0, 30, tzinfo=KST)),
+            viewing(when=datetime(2026, 10, 14, 0, 30, tzinfo=UTC))]
+    result = calculate(rows, tz=UTC)
+    assert result.daily[-2].viewing_count == result.daily[-1].viewing_count == 1
+
+
+def test_minute_memo_distinguishes_repeated_local_minute_fold():
+    class RepeatedMidnight(tzinfo):
+        def utcoffset(self, dt):
+            return timedelta(hours=1 - dt.fold)
+
+        def dst(self, dt):
+            return timedelta(0)
+
+    repeated = RepeatedMidnight()
+    rows = [viewing(when=datetime(2026, 10, 14, 0, 30, tzinfo=repeated, fold=fold)) for fold in (0, 1)]
+    result = calculate(rows, tz=UTC)
+    assert result.daily[-2].viewing_count == result.daily[-1].viewing_count == 1
+
+
+@pytest.mark.parametrize("operation", ["snapshot", "video", "period"])
+def test_background_parsing_releases_lock_and_keeps_active_snapshot(library, monkeypatch, operation):
+    core, clock, (a, b, _) = library
+    watch(core, a.id, 90)
+    core.playback.start(b.id, 0)
+    core.playback.report(20)  # 아직 저장되지 않은 진행분
+    query = {"snapshot": core.library_snapshot, "video": core.video_viewing_statistics,
+             "period": lambda: core.viewing_statistics(7, tz=KST)}[operation]
+    expected = query()
+    parsing, resume = Event(), Event()
+    main_thread = get_ident()
+    original_loads, original_connect = json.loads, sqlite3.connect
+
+    def parked_loads(*args, **kwargs):
+        if get_ident() != main_thread and not parsing.is_set():
+            parsing.set()
+            assert resume.wait(10)
+        return original_loads(*args, **kwargs)
+
+    def short_timeout_connect(*args, **kwargs):
+        kwargs["timeout"] = 0.05
+        return original_connect(*args, **kwargs)
+
+    monkeypatch.setattr(json, "loads", parked_loads)
+    monkeypatch.setattr(sqlite3, "connect", short_timeout_connect)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = executor.submit(query)
+        try:
+            assert parsing.wait(10)
+            clock.now += timedelta(seconds=1)
+            core.playback.report(40)
+            core.playback.end()  # 파싱을 멈춰 둔 동안에도 쓰기 커밋이 완료되어야 한다.
+        finally:
+            resume.set()
+        assert result.result(timeout=10) == expected
+    # 읽던 순간의 진행분은 20초, 종료 후 새 조회는 40초다.
+    assert core.video_viewing_statistics()[b.id].watched_seconds == 40

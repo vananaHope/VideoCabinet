@@ -360,7 +360,11 @@ Enter를 누르거나 카드를 한 번 클릭하면 바로 재생합니다. 보
 `AppCore.video_viewing_statistics()`는 영상 ID별 `VideoViewingStatistics`를 일괄 조회합니다.
 시청 횟수·시간은 전체 기간이고, 마지막 시청은 틀어보기를 포함한 `updated_at` 최댓값입니다.
 제외·파일 없음·시청 없는 영상도 반환하며, 영상 수와 무관하게 SELECT 2회로 조회합니다.
-기간 통계는 SELECT 5회입니다. 반환 dataclass의 시간 단위는 초, 날짜·시각은 ISO 문자열이며
+`library_snapshot().viewing_statistics`에도 같은 ID별 수치가 들어 있습니다. 스냅샷은
+시청 상태와 수치를 한 번의 시청 조회·순회로 함께 계산하므로 카드에서 별도 API를 다시 부를 필요가 없습니다.
+저장 시 이미 병합한 구간은 그대로 합산하고, 행과 진행 중 시청을 확보한 뒤 읽기 트랜잭션을
+닫고 파싱합니다. 기간 통계는 SELECT 5회이며 한 집계 안에서 로컬 날짜 변환을 분 단위로 공유합니다.
+반환 dataclass의 시간 단위는 초, 날짜·시각은 ISO 문자열이며
 `dataclasses.asdict()` 후 JSON으로 직렬화할 수 있습니다. 순수 계산은 `statistics.py`의
 `viewing_statistics(viewings, videos, days, today, tz, settings)`와
 `video_viewing_statistics(viewings, video_ids, settings)`에 있습니다. 화면은 후속 이슈 범위입니다.
