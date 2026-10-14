@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from threading import Event
+import sqlite3
 
 import pytest
 
@@ -83,6 +84,41 @@ def test_completed_translation_direct_request_joins_after_waiting_video(setup):
     finish(core)
     source(core, b.id)
     core.request_translation(a.id)
+    assert [entry.video_id for entry in core.translation_queue()] == [b.id, a.id]
+
+
+@pytest.mark.parametrize("source_edit", [False, True])
+def test_legacy_completed_order_does_not_leak_into_new_direct_request(setup, source_edit):
+    core, _, _, _, reopen = setup
+    a, b = core.videos()
+    transcript = source(core, a.id)
+    core.promote_subtitle(a.id)
+    finish(core)
+    # 공개 API가 정리하는 옛 완료 순번 행만 복원해 업그레이드 전 DB를 재현한다.
+    with sqlite3.connect(core.database) as db:
+        db.execute("INSERT INTO subtitle_queue_order(video_id, automatic, promoted) VALUES (?, 0, 1)", (a.id,))
+    db.close()
+    core = reopen()
+    source(core, b.id)
+    if source_edit:
+        core.edit_transcript_line(a.id, transcript.lines[0].id, "edited source")
+    else:
+        core.request_translation(a.id)
+    assert [entry.video_id for entry in core.translation_queue()] == [b.id, a.id]
+
+
+@pytest.mark.parametrize("source_edit", [False, True])
+def test_removed_translation_new_direct_request_joins_after_waiting_video(setup, source_edit):
+    core, _, _, _, _ = setup
+    a, b = core.videos()
+    transcript = source(core, a.id)
+    source(core, b.id)
+    core.promote_subtitle(a.id)
+    core.remove_from_subtitle_queue(a.id)
+    if source_edit:
+        core.edit_transcript_line(a.id, transcript.lines[0].id, "edited source")
+    else:
+        core.request_translation(a.id)
     assert [entry.video_id for entry in core.translation_queue()] == [b.id, a.id]
 
 

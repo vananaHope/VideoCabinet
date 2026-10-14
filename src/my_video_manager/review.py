@@ -200,7 +200,8 @@ class Review:
                         for id_, s in new])
         language = db.execute("SELECT spoken_language FROM transcripts WHERE id = ?", (transcript_id,)).fetchone()[0]
         if new and language not in ("ko", "und"):
-            self.translations.request(pending.video_id, [id_ for id_, _ in new], connection=db, preserve_state=True)
+            self.translations.request(pending.video_id, [id_ for id_, _ in new], connection=db,
+                                      preserve_state=True, continue_order=True)
         self.translations.finish_ready(db, pending.video_id)
 
     def export(self, video_id, *, translated=False):
