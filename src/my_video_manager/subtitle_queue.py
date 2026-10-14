@@ -71,6 +71,13 @@ class QueueOrder:
         if not automatic:
             db.execute("UPDATE subtitle_queue_order SET automatic = 0 WHERE video_id = ?", (video_id,))
 
+    def finish(self, db, video_id):
+        """받아쓰기·번역 항목이 모두 사라진 영상만 순번과 앞당기기를 끝낸다."""
+        db.execute("DELETE FROM subtitle_queue_order WHERE video_id = ? "
+                   "AND NOT EXISTS (SELECT 1 FROM subtitle_queue WHERE video_id = ?) "
+                   "AND NOT EXISTS (SELECT 1 FROM translation_queue WHERE video_id = ?)",
+                   (video_id, video_id, video_id))
+
     def sort(self, entries):
         if not entries:
             return ()
@@ -146,9 +153,10 @@ class AutoSubtitleRules:
         with self.connect() as db:
             db.execute("DELETE FROM auto_subtitle_rules WHERE id = ?", (rule_id,))
 
-    def apply(self, video_id, *, tag_id=None):
+    def apply(self, video_id, *, tag_id=None, rules=None):
         # 등록 계기는 폴더 규칙, 태그 부착 계기는 그 태그 규칙만 적용한다.
-        rules = [r for r in self.list() if (r.folder is not None if tag_id is None else r.tag_id == tag_id)]
+        rules = [r for r in (self.list() if rules is None else rules)
+                 if (r.folder is not None if tag_id is None else r.tag_id == tag_id)]
         if not rules:
             return
         video = self.core.video(video_id)

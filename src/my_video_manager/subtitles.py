@@ -193,7 +193,8 @@ class Subtitles:
                                   self._retry_guidance(row["id"]) if message else None)
 
     def _retry_guidance(self, queue_id):
-        return ("검수 창의 구간 다시 생성으로 재시도하세요"
+        return ("검수 창의 구간 다시 생성으로 재시도하세요. "
+                "대기열 화면의 실패 항목 모두 재시도로 같은 구간을 다시 시도할 수도 있습니다"
                 if self.review and self.review.range_for(queue_id) else "다시 요청하면 재시도합니다")
 
     def queue(self) -> tuple[SubtitleQueueEntry, ...]:

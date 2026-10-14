@@ -359,6 +359,9 @@ class AppCore:
             result = self._subtitles.process_next()
             if result and result.state == "completed":
                 self._translations.enqueue_eligible()
+                # 후속 번역 등록 뒤에 정리해야 받아쓰기에서 받은 순서가 이어진다.
+                with self._connect() as db:
+                    self._queue_order.finish(db, result.video_id)
             self._subtitle_queue.record(result)
             return result
 
@@ -576,7 +579,8 @@ class AppCore:
         return self.adjacent_video(self.playback.session.video_id, visible_video_ids, forward=forward)
 
     def scan(self) -> ScanResult:
-        result = self._library.scan()
+        rules = self._auto_subtitle_rules.list()
+        result = self._library.scan(on_registered=lambda video_id: self._auto_subtitle_rules.apply(video_id, rules=rules))
         self._series.regroup(self.videos() + self.excluded_videos())
         return result
 

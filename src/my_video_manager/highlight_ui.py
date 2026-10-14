@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from .highlight_editing import resolve_time_input, time_input_maximum
+from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 from .tag_ui import TagEditor
 
 
@@ -69,8 +69,8 @@ class HighlightEditor(QDialog):
             field.setDecimals(3)
             field.setRange(0, time_input_maximum(duration))
             field.setSuffix(" 초")
-        self.start.setValue(highlight.start)
-        self.end.setValue(highlight.end if highlight.end is not None else highlight.start)
+        self.start.setValue(initial_time_input(highlight.start, duration))
+        self.end.setValue(initial_time_input(highlight.end if highlight.end is not None else highlight.start, duration))
         self.initial_start = self.start.value()
         self.initial_end = self.end.value()
         self.range = QCheckBox("구간 하이라이트")

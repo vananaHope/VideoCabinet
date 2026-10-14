@@ -71,6 +71,33 @@ def finish(core):
     pytest.fail("번역이 끝나지 않음")
 
 
+def test_stale_limit_response_keeps_new_request_unchanged_and_holds_account(setup):
+    core, vid, _, translator, time, _ = setup
+    translator.error = TranslationError("usage_limit", "limit")
+    for _ in range(2):
+        assert core.process_next_translation().state == "held"
+        time[0] += timedelta(minutes=16)
+    translator.error = None
+    replacements = []
+
+    def edit_then_limit():
+        line = core.transcript(vid).lines[0]
+        core.edit_transcript_line(vid, line.id, "new source")
+        replacements.append(core.translation_queue()[0])
+        raise TranslationError("usage_limit", "옛 요청 응답")
+
+    translator.respond = edit_then_limit
+    assert core.process_next_translation() is None
+    assert core.translation_queue() == tuple(replacements)
+    assert not core.translation_ready()
+    translator.respond = None
+    translator.error = TranslationError("usage_limit", "새 요청 응답")
+    time[0] += timedelta(minutes=16)
+    failed = core.process_next_translation()
+    assert failed.state == "failed"
+    assert "3회" in failed.error
+
+
 def test_source_edit_keeps_id_and_only_retranslates_changed_line(setup):
     core, vid, _, translator, _, reopen = setup
     finish(core)
@@ -613,7 +640,8 @@ def test_failed_range_retains_specific_retry_guidance_after_restart(setup):
     transcriber.error = RuntimeError("failed")
     core.request_subtitle_range(vid, 5, 15)
     failed = core.process_next_subtitle()
-    assert failed.retry_guidance == "검수 창의 구간 다시 생성으로 재시도하세요"
+    assert "검수 창의 구간 다시 생성" in failed.retry_guidance
+    assert "대기열 화면의 실패 항목 모두 재시도로 같은 구간" in failed.retry_guidance
     assert reopen().subtitle_queue()[0].retry_guidance == failed.retry_guidance
     core.request_subtitles(vid)
     assert core.process_next_subtitle().retry_guidance == "다시 요청하면 재시도합니다"
@@ -772,6 +800,28 @@ def test_range_request_registers_manual_fifo_priority_after_hidden_queue(setup, 
     assert [i.video_id for i in core.subtitle_queue_items()] == [first, vid, last, automatic]
     core.promote_subtitle(automatic)
     assert [i.video_id for i in core.subtitle_queue_items()] == [automatic, first, vid, last]
+
+
+@pytest.mark.parametrize("promoted", [False, True])
+def test_range_translation_preserves_request_order_and_promotion(setup, tmp_path, promoted):
+    core, a, _, _, _, _ = setup
+    finish(core)
+    path = tmp_path / "b.mkv"
+    path.write_bytes(b"second movie")
+    core.add_file(path)
+    b = next(v.id for v in core.videos() if v.id != a)
+    if promoted:
+        core.request_subtitles(b)
+        core.process_next_subtitle()
+        core.request_subtitle_range(a, 10, 20)
+        core.promote_subtitle(a)
+        core.process_next_subtitle()
+    else:
+        core.request_subtitle_range(a, 10, 20)
+        core.request_subtitles(b)
+        core.process_next_subtitle()
+        core.process_next_subtitle()
+    assert [entry.video_id for entry in core.translation_queue()] == [a, b]
 
 
 @pytest.mark.parametrize("range_change", [False, True])

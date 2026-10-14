@@ -53,12 +53,14 @@ class Video:
 class ScanIssue:
     path: Path
     message: str
+    failed: bool = True
 
 
 @dataclass(frozen=True)
 class ScanResult:
     added: int
     issues: tuple[ScanIssue, ...]
+    reconnected: bool = False
 
 
 def _fingerprint(path: Path) -> str:
@@ -180,17 +182,21 @@ class Library:
 
     @staticmethod
     def _not_added(path: Path, message: str) -> ScanResult:
-        return ScanResult(0, (ScanIssue(path, message),))
+        return ScanResult(0, (ScanIssue(path, message, failed=False),))
 
-    def _already_registered(self, path: Path, excluded: bool) -> ScanResult:
-        return self._not_added(path, "제외 목록에 있는 영상입니다. 제외 목록에서 되돌려 주세요."
-                               if excluded else "이미 등록된 영상입니다.")
+    def _already_registered(self, path: Path, excluded: bool, *, reconnected=False) -> ScanResult:
+        if excluded:
+            return self._not_added(path, "제외 목록에 있는 영상입니다. 제외 목록에서 되돌려 주세요.")
+        if reconnected:
+            return ScanResult(0, (ScanIssue(path, "파일 없음이던 영상을 다시 찾았습니다.", failed=False),),
+                              reconnected=True)
+        return self._not_added(path, "이미 등록된 영상입니다.")
 
-    def _register(self, path: Path) -> ScanResult:
+    def _register(self, path: Path, *, on_registered=None, missing_at_start=None) -> ScanResult:
         signature = _signature(path)
         minimum = self.minimum_duration
         with self._connect() as db:
-            old = db.execute("""SELECT l.size, l.mtime_ns, v.excluded FROM locations l
+            old = db.execute("""SELECT l.video_id, l.size, l.mtime_ns, v.excluded FROM locations l
                 JOIN videos v ON v.id=l.video_id WHERE l.path=?""", (str(path),)).fetchone()
             if old and (old["size"], old["mtime_ns"]) == signature:
                 return self._already_registered(path, old["excluded"])
@@ -200,10 +206,12 @@ class Library:
                     return self._not_added(path, "영상이 아닙니다(GIF 포함).")
                 known = db.execute("SELECT id, excluded FROM videos WHERE fingerprint=?", (check["fingerprint"],)).fetchone()
                 if known:
+                    was_missing = not db.execute("SELECT 1 FROM locations WHERE video_id=?", (known[0],)).fetchone()
                     db.execute("INSERT OR REPLACE INTO locations(path, video_id, size, mtime_ns) VALUES (?, ?, ?, ?)",
                                (str(path), known[0], *signature))
                     db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
-                    return self._already_registered(path, known["excluded"])
+                    return self._already_registered(path, known["excluded"], reconnected=was_missing
+                                                    and (missing_at_start is None or known[0] in missing_at_start))
                 if check["duration"] < minimum:
                     return self._not_added(path, f"최소 길이({minimum:g}초) 미만입니다.")
             legacy_gifs = {row["fingerprint"]: row for row in db.execute(
@@ -217,10 +225,13 @@ class Library:
         if legacy_gif:
             self._check_unchanged(path, signature)
             with self._connect() as db:
+                was_missing = (not (old and old["video_id"] == legacy_gif["id"])
+                               and not db.execute("SELECT 1 FROM locations WHERE video_id=?", (legacy_gif["id"],)).fetchone())
                 db.execute("INSERT OR REPLACE INTO locations(path, video_id, size, mtime_ns) VALUES (?, ?, ?, ?)",
                            (str(path), legacy_gif["id"], *signature))
                 db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
-            return self._already_registered(path, legacy_gif["excluded"])
+            return self._already_registered(path, legacy_gif["excluded"], reconnected=was_missing
+                                            and (missing_at_start is None or legacy_gif["id"] in missing_at_start))
         info = self._media.read(path)
         if info is not None and "gif" in info.format.lower().split(","):
             info = None
@@ -241,6 +252,8 @@ class Library:
         with self._connect() as db:
             if existing:
                 video_id = existing[0]
+                was_missing = (not (old and old["video_id"] == video_id)
+                               and not db.execute("SELECT 1 FROM locations WHERE video_id=?", (video_id,)).fetchone())
             else:
                 video_id = db.execute(
                     "INSERT INTO videos (fingerprint, title, duration, format, thumbnail, registered_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -250,8 +263,10 @@ class Library:
                        (str(path), video_id, *signature))
             db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
         if not existing:
-            self._on_registered(video_id)
-        return self._already_registered(path, existing["excluded"]) if existing else ScanResult(1, ())
+            (on_registered or self._on_registered)(video_id)
+        return (self._already_registered(path, existing["excluded"], reconnected=was_missing
+                                         and (missing_at_start is None or existing[0] in missing_at_start))
+                if existing else ScanResult(1, ()))
 
     def video(self, video_id: int) -> Video:
         with self._connect() as db:
@@ -303,22 +318,34 @@ class Library:
             self._forget_location(path)
         raise ValueError("파일 없음: 영상의 위치가 없습니다. 다시 검사하거나 파일을 다시 연결해 주세요.")
 
-    def scan(self) -> ScanResult:
+    def scan(self, *, on_registered=None) -> ScanResult:
         with self._lock:
-            return self._scan()
+            return self._scan(on_registered=on_registered)
 
-    def _scan(self) -> ScanResult:
+    def _scan(self, *, on_registered=None) -> ScanResult:
         added, issues = 0, []
+        reconnected = False
         processed: set[Path] = set()
         seen: set[Path] = set()
         inaccessible: set[Path] = set()
         # 직접 추가한 파일도 변경/사라짐을 확인한다. 읽기 권한 오류는 위치 삭제로 해석하지 않는다.
         with self._connect() as db:
             paths = [Path(row[0]) for row in db.execute("SELECT path FROM locations")]
+            missing_at_start = {row[0] for row in db.execute(
+                "SELECT id FROM videos WHERE NOT EXISTS (SELECT 1 FROM locations WHERE video_id = videos.id)")}
+
+        def register(path):
+            nonlocal reconnected
+            result = self._register(path, on_registered=on_registered, missing_at_start=missing_at_start)
+            if result.reconnected:
+                reconnected = True
+                issues.extend(result.issues)
+            return result.added
+
         for path in paths:
             processed.add(path)
             try:
-                added += self._register(path).added
+                added += register(path)
             except (FileNotFoundError, NotADirectoryError):
                 self._forget_location(path)
             except (OSError, ValueError, RuntimeError) as error:
@@ -340,6 +367,8 @@ class Library:
                             info = entry.stat(follow_symlinks=False)
                             if (stat.S_ISLNK(info.st_mode)
                                     or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                                issues.append(ScanIssue(path, "건너뜀: 다른 폴더나 파일을 가리키는 연결(정션·심볼릭 링크)",
+                                                        failed=False))
                                 continue
                             if stat.S_ISDIR(info.st_mode):
                                 pending.append(path)
@@ -348,7 +377,7 @@ class Library:
                                 seen.add(path)
                                 if path not in processed:
                                     processed.add(path)
-                                    added += self._register(path).added
+                                    added += register(path)
                         except (OSError, ValueError, RuntimeError) as error:
                             inaccessible.add(path)
                             issues.append(ScanIssue(path, str(error)))
@@ -362,4 +391,4 @@ class Library:
                      and any(Path(row[0]).is_relative_to(root) for root in roots)
                      and not any(Path(row[0]).is_relative_to(path) for path in inaccessible)]
             db.executemany("DELETE FROM library_file_checks WHERE path=?", ((path,) for path in stale))
-        return ScanResult(added, tuple(issues))
+        return ScanResult(added, tuple(issues), reconnected=reconnected)

@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from PySide6.QtCore import QEvent, QStringListModel, Qt
+from PySide6.QtCore import QEvent, QModelIndex, QStringListModel, Qt, QTimer
 from PySide6.QtWidgets import (
     QCompleter, QDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout,
@@ -125,6 +125,14 @@ class TagEditor(QDialog):
     def complete(self, text):
         self.selected_candidate = None
         self.suggestions.setStringList([tag.name for tag in self.core.tags(text)])
+        # QCompleter가 키 이벤트 처리를 마치며 첫 행을 자동 선택한 뒤 해제한다.
+        QTimer.singleShot(0, self.clear_automatic_selection)
+
+    def clear_automatic_selection(self):
+        if self.selected_candidate is None:
+            popup = self.completer.popup()
+            popup.setCurrentIndex(QModelIndex())
+            popup.clearSelection()
 
     def refresh(self):
         row = self.list.currentRow()
@@ -157,6 +165,8 @@ class TagEditor(QDialog):
             key = event.key()
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if not self.name.text().strip():
+                    popup.hide()
+                    self.selected_candidate = None
                     return True
                 name = resolve_tag_input(self.name.text(), self.selected_candidate if popup.isVisible() else None)
                 popup.hide()

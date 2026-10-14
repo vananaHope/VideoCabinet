@@ -43,6 +43,42 @@ def core(tmp_path):
     return open_core(tmp_path / "data/library.sqlite3")
 
 
+def test_add_file_distinguishes_missing_return_from_unchanged_registration(core, tmp_path):
+    path = video_file(tmp_path / "videos")
+    core.add_file(path)
+    video, = core.videos()
+    unchanged = core.add_file(path)
+    assert unchanged.issues[0].message == "이미 등록된 영상입니다."
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    assert core.add_file(path).issues[0].message == "이미 등록된 영상입니다."
+
+    core.add_watched_folder(path.parent)
+    moved = path.with_name("moved.mkv")
+    path.rename(moved)
+    result = core.scan()
+    assert result.issues == ()
+    assert core.video(video.id).locations[0].path == moved
+    moved.unlink()
+    core.scan()
+    moved.write_bytes(b"original video")
+    result = core.scan()
+    assert [(issue.path, issue.message) for issue in result.issues] == [
+        (moved, "파일 없음이던 영상을 다시 찾았습니다.")]
+    path = moved
+    contents = path.read_bytes()
+    path.unlink()
+    core.scan()
+    assert core.video(video.id).missing
+    path.write_bytes(contents)
+    returned = core.add_file(path)
+    assert returned.added == 0
+    assert returned.issues[0].message == "파일 없음이던 영상을 다시 찾았습니다."
+    assert not returned.issues[0].failed
+    assert not core.video(video.id).missing
+    assert core.add_file(path).issues[0].message == "이미 등록된 영상입니다."
+
+
 def video_file(folder, name="video.mkv", content=b"original video"):
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / name

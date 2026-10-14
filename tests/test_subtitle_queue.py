@@ -26,6 +26,26 @@ def test_folder_rule_registration_language_and_no_rescan_requeue(setup):
     assert reopen(core, adapter).auto_subtitle_rules() == (rule,)
 
 
+def test_scan_uses_starting_rules_and_next_scan_picks_up_changes(setup, tmp_path):
+    core, adapter, (a, _) = setup
+    folder = a.locations[0].path.parent
+    core.set_auto_subtitle_rule(folder=folder, spoken_language="en")
+
+    class ChangingMedia(FakeMedia):
+        def read(self, path):
+            core.set_auto_subtitle_rule(folder=folder, spoken_language="ja")
+            return super().read(path)
+
+    core = AppCore(media=ChangingMedia(), clock=lambda: NOW, database=core.database, transcriber=adapter)
+    for name in ("c", "d"):
+        (folder / f"{name}.mkv").write_bytes(name.encode())
+    assert core.scan().added == 2
+    assert [entry.spoken_language for entry in core.subtitle_queue()] == ["en", "en"]
+    (folder / "e.mkv").write_bytes(b"e")
+    assert core.scan().added == 1
+    assert [entry.spoken_language for entry in core.subtitle_queue()] == ["en", "en", "ja"]
+
+
 def test_existing_confirmation_tag_attachment_and_transcript_skip(setup):
     core, adapter, (a, b) = setup
     tag = core.add_video_tag(a.id, "영어")

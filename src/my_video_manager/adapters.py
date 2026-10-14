@@ -172,9 +172,6 @@ class MpvPlayer:
         elif command.kind == CommandType.TOGGLE_SUBTITLES:
             self._player.cycle("sub-visibility")
 
-    def position(self) -> float | None:
-        return self._player.time_pos
-
     def take_eof(self) -> bool:
         reached = False
         while True:

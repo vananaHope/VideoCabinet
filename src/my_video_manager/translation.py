@@ -84,6 +84,8 @@ class Translations:
         self._order = order
         self._active_video = None
         self._active_cancellation = None
+        self._cached_request = None
+        self._cached_transcript = None
         self._activity = Lock()
         self._protected_lines = protected_lines or (lambda db: set())
         with connect() as db:
@@ -136,11 +138,20 @@ class Translations:
 
     def enqueue_eligible(self):
         with self._connect() as db:
-            ids = [row[0] for row in db.execute("SELECT video_id FROM transcripts")]
+            # 대기 중이거나 번역이 끝난 영상의 원어 전체를 묶음마다 다시 읽지 않는다.
+            ids = [row[0] for row in db.execute("""
+                SELECT video_id FROM transcripts t
+                WHERE t.spoken_language NOT IN ('ko', 'und')
+                  AND NOT EXISTS (SELECT 1 FROM translation_queue q WHERE q.video_id = t.video_id)
+                  AND NOT EXISTS (SELECT 1 FROM translation_omissions o WHERE o.transcript_id = t.id)
+                  AND EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id = t.id
+                              AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id = l.id))
+            """)]
         for video_id in ids:
             self.request(video_id, automatic=True)
 
-    def request(self, video_id: int, line_ids=None, *, automatic=False, connection=None, preserve_state=False):
+    def request(self, video_id: int, line_ids=None, *, automatic=False, connection=None,
+                preserve_state=False, continue_order=False):
         transcript = self._subtitles.transcript(video_id, connection=connection)
         if transcript is None or not transcript.translation_eligible:
             if automatic:
@@ -172,8 +183,10 @@ class Translations:
             else:
                 db.execute("DELETE FROM translation_omissions WHERE transcript_id = ?", (transcript.id,))
             if self._order:
+                # 새 직접 요청은 남은 순번 행과 무관하게 뒤에 서고, 후속 단계는 받은 순번을 잇는다.
                 self._order.request(db, video_id, automatic=automatic,
-                                    renew=not automatic and old is not None and old["state"] == "failed")
+                                    renew=not automatic and not continue_order
+                                    and (old is None or old["state"] == "failed"))
             # 명시적인 전체 재시도는 저장한 묶음을 재사용한다.
             if old and line_ids is None:
                 db.execute("DELETE FROM translation_limit_attempts WHERE queue_id = ?", (old["id"],))
@@ -218,6 +231,8 @@ class Translations:
         db.executemany("DELETE FROM translation_lines WHERE line_id = ?", [(id_,) for id_, _ in targets])
         db.executemany("INSERT INTO translation_lines VALUES (?, ?)", targets)
         db.execute("DELETE FROM translation_queue WHERE id = ?", (row[0],))
+        if self._order:
+            self._order.finish(db, video_id)
 
     @staticmethod
     def _entry(db, row):
@@ -289,7 +304,12 @@ class Translations:
             pending = self.ready(cli=cli)
             if pending is None:
                 return None
-            transcript = self._subtitles.transcript(pending.video_id)
+            # 줄 수정·구간 교체는 요청 ID를 바꾸므로 다음 묶음은 새 원어를 읽는다.
+            # 캐시는 현재 요청 하나만 보관하며 다른 영상으로 넘어가면 교체한다.
+            if self._cached_request != pending.id:
+                self._cached_transcript = self._subtitles.transcript(pending.video_id)
+                self._cached_request = pending.id
+            transcript = self._cached_transcript
             if transcript is None:
                 return None
             with self._connect() as db:
@@ -347,6 +367,8 @@ class Translations:
                     entry = self._entry(db, db.execute("SELECT * FROM translation_queue WHERE id = ?", (pending.id,)).fetchone())
                     if done:
                         db.execute("DELETE FROM translation_queue WHERE id = ?", (pending.id,))
+                        if self._order:
+                            self._order.finish(db, pending.video_id)
                     return entry
             except TranslationCancelled:
                 with self._connect() as db:
@@ -361,6 +383,7 @@ class Translations:
                     db.execute("BEGIN IMMEDIATE")
                     if held:
                         # 원어 세대/요청이 교체됐어도 실제로 받은 계정 한도는 유지한다.
+                        # 옛 요청의 응답은 새 요청 상태·횟수를 바꾸지 않는다. ID가 같은 요청만 센다.
                         db.execute("INSERT INTO translation_cli_backoff VALUES (?, ?) "
                                    "ON CONFLICT(cli) DO UPDATE SET retry_at = excluded.retry_at",
                                    (cli, retry_at.isoformat()))

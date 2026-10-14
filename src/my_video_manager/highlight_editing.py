@@ -8,6 +8,11 @@ def time_input_maximum(duration: float) -> float:
     return math.floor(duration * 1000) / 1000
 
 
+def initial_time_input(value: float, duration: float) -> float:
+    """편집 시작 시 표시할 밀리초 시각을 영상 범위 안으로 제한한다."""
+    return min(round(value, 3), time_input_maximum(duration))
+
+
 def resolve_time_input(original: float | None, initial: float, current: float) -> float:
     """표시값을 수정하지 않았다면 반올림·범위 제한 전의 원래 시각을 보존한다."""
     return original if original is not None and current == initial else current
