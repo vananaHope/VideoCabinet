@@ -1,16 +1,18 @@
-"""라이브러리 페이지 구성·목록 갱신·검사 입력. 재생 시작과 공통 작업은 셸에 연결한다."""
+"""라이브러리 스냅숏 필터·선택·공유 작업과 검사 수명주기."""
 
-from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QMessageBox, QSplitter, QVBoxLayout, QWidget,
 )
 from .hidden_gems_ui import HiddenGemControls
 from .library_ui import LibraryControls
+from .library_grid import LibraryGrid, VideoCard, CARD_ROLE
+from .library_detail_ui import LibraryDetailPanel
 from .thumbnail_ui import ThumbnailIcons
 from .tag_ui import TagEditor, TagManager
 from .series_ui import SeriesEditor
-from .review_ui import review_button
 
 
 class ScanWorker(QThread):
@@ -19,7 +21,6 @@ class ScanWorker(QThread):
 
     def __init__(self, core, parent, operation=None):
         super().__init__(parent)
-        self.core = core
         self.operation = operation or core.scan
 
     def run(self):
@@ -31,197 +32,238 @@ class ScanWorker(QThread):
 
 class LibraryPage(QWidget):
     scan_state_changed = Signal(bool)
-    play_requested = Signal(object)
+    scan_message = Signal(str)
+    refreshed = Signal()
 
     def __init__(self, window):
         super().__init__(window)
-        self.core = window.core
+        self.window, self.core = window, window.core
         self.worker = None
+        self.snapshot = None
+        self.cards = ()
         self.thumbnail_icons = ThumbnailIcons()
-        layout = QVBoxLayout(self)
-        self.hidden_gems = HiddenGemControls(window)
-        layout.addWidget(self.hidden_gems)
-        buttons = QHBoxLayout()
-        self.add_button = QPushButton("감시 폴더 추가")
-        self.scan_button = QPushButton("다시 검사")
-        buttons.addWidget(self.add_button)
-        buttons.addWidget(self.scan_button)
-        buttons.addWidget(window.subtitles.button())
-        self.series_button = QPushButton("시리즈 편집")
-        self.series_button.clicked.connect(self.show_series)
-        buttons.addWidget(self.series_button)
-        buttons.addWidget(window.translations.button())
-        self.search_button = QPushButton("검색")
-        self.search_button.clicked.connect(window.show_search)
-        buttons.addWidget(self.search_button)
-        buttons.addStretch()
-        reel_button = QPushButton("하이라이트 모아보기")
-        reel_button.clicked.connect(lambda: window.navigate(1))
-        buttons.addWidget(reel_button)
-        layout.addLayout(buttons)
-        layout.addWidget(review_button(window))
         self.library_controls = LibraryControls(window)
-        layout.addWidget(self.library_controls)
-        self.folders = QLabel()
-        self.folders.setWordWrap(True)
-        layout.addWidget(self.folders)
-        tag_controls = QHBoxLayout()
-        tag_controls.addWidget(QLabel("태그 필터"))
+        layout = QVBoxLayout(self)
+        filters = QHBoxLayout()
+        self.quick_search = QLineEdit()
+        self.quick_search.setPlaceholderText("제목으로 빠른 검색")
+        self.quick_search.setAccessibleName("영상 제목 빠른 검색")
+        self.quick_search.setClearButtonEnabled(True)
+        self.quick_search.textChanged.connect(self.apply_filters)
+        filters.addWidget(self.quick_search, 1)
+        filters.addWidget(QLabel("태그"))
         self.tag_filter = QComboBox()
         self.tag_filter.setAccessibleName("라이브러리 태그 필터")
-        self.tag_filter.currentIndexChanged.connect(self.filter_changed)
-        tag_controls.addWidget(self.tag_filter, 1)
-        self.tags_button = QPushButton("선택한 영상 태그")
-        self.tags_button.clicked.connect(self.edit_video_tags)
-        tag_controls.addWidget(self.tags_button)
-        manage_tags = QPushButton("모든 태그 관리")
-        manage_tags.clicked.connect(self.manage_tags)
-        tag_controls.addWidget(manage_tags)
-        layout.addLayout(tag_controls)
-        layout.addWidget(QLabel("영상을 더블클릭하거나 방향키로 고른 뒤 Enter를 누르세요."))
-        self.list = QListWidget()
-        self.list.setIconSize(QSize(192, 108))
-        self.list.setSpacing(6)
-        layout.addWidget(self.list)
-        self.status = QLabel("감시 폴더를 추가하면 자동으로 검사합니다.")
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
-
-        self.add_button.clicked.connect(self.add_folder)
-        self.scan_button.clicked.connect(self.scan)
-        self.list.itemActivated.connect(self.play_item)
-        self.play_requested.connect(window.play)
+        self.tag_filter.currentIndexChanged.connect(self.apply_filters)
+        filters.addWidget(self.tag_filter)
+        layout.addLayout(filters)
+        self.hidden_gems = HiddenGemControls(window)
+        layout.addWidget(self.hidden_gems)
+        splitter = QSplitter()
+        listing = QWidget()
+        listing_layout = QVBoxLayout(listing)
+        listing_layout.setContentsMargins(0, 0, 0, 0)
+        self.empty = QLabel()
+        self.empty.setWordWrap(True)
+        listing_layout.addWidget(self.empty)
+        self.grid = LibraryGrid(self.thumbnail_icons)
+        self.grid.activated.connect(self.play_index)
+        self.grid.menu_requested.connect(self.show_context_menu)
+        self.grid.selectionModel().currentChanged.connect(self.selection_changed)
+        listing_layout.addWidget(self.grid)
+        splitter.addWidget(listing)
+        self.actions = []
+        for title, callback in (
+            ("재생", self.play_selected), ("태그 편집", self.edit_video_tags),
+            ("자막 만들기 / 원어 지정", self.request_subtitles),
+            ("자막 검수 / SRT 내보내기", self.show_review), ("시리즈 편집", self.show_series),
+            ("제목 변경", self.library_controls.rename),
+            ("파일 다시 연결", self.library_controls.reconnect), ("제외", self.library_controls.exclude),
+        ):
+            action = QAction(title, self)
+            action.triggered.connect(callback)
+            self.actions.append(action)
+        self.detail = LibraryDetailPanel(self.thumbnail_icons, self.actions)
+        splitter.addWidget(self.detail)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setSizes([650, 300])
+        layout.addWidget(splitter, 1)
+        window.subtitles.video_changed.connect(self.refresh_details)
+        window.translations.video_changed.connect(self.refresh_details)
+        self.selection_changed()
 
     def refresh(self, *, focus_gems=None):
+        focus = QApplication.focusWidget()
+        preserve_focus = (focus_gems is None and focus is not None and self.isAncestorOf(focus)
+                          and focus not in (self.grid, self.hidden_gems.list))
         if focus_gems is None:
             focus_gems = self.hidden_gems.list.hasFocus()
-        snapshot = self.core.library_snapshot()
-        self.thumbnail_icons.retain(video.thumbnail for video in snapshot.videos)
-        self.hidden_gems.refresh(snapshot=snapshot)
+        self.snapshot = self.core.library_snapshot()
+        self.thumbnail_icons.retain(v.thumbnail for v in self.snapshot.videos)
+        self.hidden_gems.refresh(snapshot=self.snapshot)
         tag_id = self.tag_filter.currentData()
         self.tag_filter.blockSignals(True)
         self.tag_filter.clear()
-        self.tag_filter.addItem("모든 영상", None)
+        self.tag_filter.addItem("모든 태그", None)
         for tag in self.core.tags():
             self.tag_filter.addItem(tag.name, tag.id)
         self.tag_filter.setCurrentIndex(max(0, self.tag_filter.findData(tag_id)))
         self.tag_filter.blockSignals(False)
-        selected = self.list.currentItem()
-        selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None
-        selected_row = 0
-        self.folders.setText("감시 폴더: " + (", ".join(str(f.path) for f in self.core.watched_folders()) or "없음"))
-        self.list.clear()
-        series_labels = {vid: f"{s.name} · {index + 1}/{len(s.video_ids)}"
-                         for s in snapshot.series for index, vid in enumerate(s.video_ids)}
-        tag_id = self.tag_filter.currentData()
-        videos = snapshot.videos
-        statuses, tags_by_video = snapshot.statuses, snapshot.tags
-        if tag_id is not None:
-            videos = tuple(v for v in videos if any(t.id == tag_id for t in tags_by_video.get(v.id, ())))
-        for row, video in enumerate(videos):
-            status = statuses[video.id]
-            label = "다 봄" if status.finished else f"보다 만 ({status.stopped_percent:.0f}%)" if status.abandoned else ""
-            if status.favorite:
-                label += " · 즐겨 보는 영상"
-            if video.missing:
-                label = "파일 없음" + (f" · {label}" if label else "")
-            elif len(video.locations) > 1:
-                label += (" · " if label else "") + f"위치 {len(video.locations)}개"
-            if video.id in series_labels:
-                label += ("\n" if label else "") + "시리즈: " + series_labels[video.id]
-            item = QListWidgetItem(self.thumbnail_icons.get(video.thumbnail), video.title + (f"\n{label}" if label else ""))
-            tags = tags_by_video.get(video.id, ())
-            if tags:
-                item.setText(item.text() + "\n태그: " + ", ".join(tag.name for tag in tags))
-            item.setData(Qt.ItemDataRole.UserRole, video.id)
-            item.setSizeHint(QSize(300, 120))
-            self.list.addItem(item)
-            if video.id == selected_id:
-                selected_row = row
-        if self.list.count():
-            self.list.setCurrentRow(selected_row)
-        target = self.hidden_gems.list if focus_gems and self.hidden_gems.list.count() else self.list
-        if not self.isHidden():
-            target.setFocus()
-        self.tags_button.setEnabled(self.list.count() > 0)
+        series = {vid: f"{s.name} · {i + 1}/{len(s.video_ids)}"
+                  for s in self.snapshot.series for i, vid in enumerate(s.video_ids)}
+        self.cards = tuple(VideoCard(v, self.snapshot.statuses[v.id], self.snapshot.tags.get(v.id, ()),
+                                    series.get(v.id, "")) for v in self.snapshot.videos)
+        self.apply_filters()
+        if preserve_focus:
+            focus.setFocus()
+        elif not self.isHidden():
+            (self.hidden_gems.list if focus_gems and self.hidden_gems.list.count() else self.grid).setFocus()
+        self.refreshed.emit()
 
-    def filter_changed(self):
-        self.refresh()
-        self.tag_filter.setFocus()
+    def apply_filters(self, *_):
+        if self.snapshot is None:
+            return
+        selected = self.selected_video_id()
+        query = self.quick_search.text().strip().casefold()
+        tag_id = self.tag_filter.currentData()
+        cards = tuple(c for c in self.cards if query in c.video.title.casefold()
+                      and (tag_id is None or any(t.id == tag_id for t in c.tags)))
+        self.grid.model().replace(cards)
+        row = next((i for i, c in enumerate(cards) if c.video.id == selected), 0)
+        self.grid.setCurrentIndex(self.grid.model().index(row, 0))
+        if not cards:
+            self.selection_changed()  # 모델 reset은 빈 현재 항목의 변경 신호를 내지 않을 수 있다.
+        self.empty.setVisible(not cards)
+        self.empty.setText("라이브러리가 비어 있습니다. 폴더 관리에서 감시 폴더나 영상 파일을 추가하세요."
+                           if not self.cards else "조건에 맞는 영상이 없습니다. 제목 검색이나 태그 필터를 바꿔 보세요.")
+        self.window.library_count.setText(f"등록 영상 {len(self.cards)}개 · 표시 {len(cards)}개")
+
+    def selection_changed(self, *_):
+        card = self.grid.currentIndex().data(CARD_ROLE)
+        for action in self.actions:
+            action.setEnabled(card is not None)
+        # Library의 검사 잠금을 쓰는 제목·위치·제외 변경은 UI 스레드를 기다리게 하지 않는다.
+        for action in self.actions[5:]:
+            action.setEnabled(card is not None and self.worker is None)
+        self.detail.show_card(card, None)
+        self.refresh_details()
+
+    def refresh_details(self, changed_video_id=None):
+        if not self.isVisible() or self.window.isMinimized():
+            return
+        card = self.grid.currentIndex().data(CARD_ROLE)
+        if card and (changed_video_id is None or changed_video_id == card.video.id):
+            self.detail.show_card(card, self.core.library_details(card.video.id))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_details()
+
+    def create_context_menu(self):
+        menu = QMenu(self)
+        menu.addActions(self.actions)
+        return menu
+
+    def show_context_menu(self, position):
+        if self.selected_video_id() is not None:
+            menu = self.create_context_menu()
+            menu.exec(position)
+            menu.deleteLater()
 
     def edit_video_tags(self):
-        if item := self.list.currentItem():
-            TagEditor(self.core, video_id=item.data(Qt.ItemDataRole.UserRole), parent=self).exec()
+        if (video_id := self.selected_video_id()) is not None:
+            TagEditor(self.core, video_id=video_id, parent=self).exec()
             self.refresh()
 
     def manage_tags(self):
         TagManager(self.core, self).exec()
         self.refresh()
 
+    def request_subtitles(self):
+        self.window.subtitles.request()
+
+    def show_review(self):
+        self.window.show_review()
+        self.refresh_details()
+
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "감시 폴더 선택")
         if folder:
             try:
                 self.core.add_watched_folder(folder)
+                self.refreshed.emit()
                 self.scan()
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "감시 폴더", str(error))
 
     def scan(self, checked=False, *, operation=None):
-        if self.worker and self.worker.isRunning():
+        if self.worker is not None:
             return
-        self.add_button.setEnabled(False)
-        self.scan_button.setEnabled(False)
-        self.library_controls.setEnabled(False)
-        self.scan_state_changed.emit(True)
-        self.status.setText("영상을 검사하고 썸네일을 만드는 중입니다…")
         self.worker = ScanWorker(self.core, self, operation)
         self.worker.completed.connect(self.scan_completed)
-        self.worker.failed.connect(lambda error: self.status.setText(f"검사 실패: {error}"))
+        self.worker.failed.connect(lambda error: self.report_scan(f"검사 실패: {error}"))
         self.worker.finished.connect(self.scan_finished)
+        self.scan_state_changed.emit(True)
+        self.selection_changed()
+        self.report_scan("영상을 검사하고 썸네일을 만드는 중입니다…")
         self.worker.start()
+
+    def report_scan(self, text):
+        self.window.show_status(text)
+        self.scan_message.emit(text)
 
     def scan_completed(self, result):
         self.refresh()
-        self.status.setText(f"영상 {result.added}개 등록 · 전체 {self.list.count()}개 · 안내 {len(result.issues)}개")
-        if result.issues:
-            icon = QMessageBox.Icon.Warning if any(issue.failed for issue in result.issues) else QMessageBox.Icon.Information
-            dialog = QMessageBox(icon, "검사·추가 안내",
-                                 "\n".join(f"{issue.path}: {issue.message}" for issue in result.issues[:3]), parent=self)
-            dialog.setDetailedText("\n".join(f"{i.path}: {i.message}" for i in result.issues))
-            dialog.exec()
+        summary = f"영상 {result.added}개 등록 · 전체 {len(self.cards)}개 · 안내 {len(result.issues)}개"
+        self.scan_message.emit(summary + "\n" + "\n".join(f"{i.path}: {i.message}" for i in result.issues))
+        self.window.show_status(summary)
 
     def scan_finished(self):
-        self.add_button.setEnabled(True)
-        self.scan_button.setEnabled(True)
-        self.library_controls.setEnabled(True)
         self.worker.deleteLater()
         self.worker = None
         self.scan_state_changed.emit(False)
+        self.selection_changed()
 
     def show_series(self):
-        SeriesEditor(self.core, self).exec()
+        editor = SeriesEditor(self.core, self)
+        video_id = self.selected_video_id()
+        series = next((s for s in self.snapshot.series if video_id in s.video_ids), None)
+        if series:
+            editor.selector.setCurrentIndex(editor.selector.findData(series.id))
+        editor.exec()
         self.refresh()
 
     def visible_video_ids(self) -> tuple[int, ...]:
-        return tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
+        return tuple(c.video.id for c in self.grid.model().cards)
 
     def selected_video_id(self) -> int | None:
-        item = self.list.currentItem()
-        return item.data(Qt.ItemDataRole.UserRole) if item else None
+        return self.grid.currentIndex().data(Qt.ItemDataRole.UserRole)
 
-    def play_item(self, item):
-        if item is not None:
-            self.play_requested.emit(item.data(Qt.ItemDataRole.UserRole))
+    def play_index(self, index):
+        if index.isValid():
+            self.window.play(index.data(Qt.ItemDataRole.UserRole))
+
+    def play_selected(self):
+        self.play_index(self.grid.currentIndex())
 
     def handle_key(self, event) -> bool:
-        if event.modifiers() not in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier):
+        if not self.grid.hasFocus():
             return False
-        if self.list.hasFocus() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.play_item(self.list.currentItem())
-            # 시작한 Enter가 재생 페이지의 일시정지로 전파되지 않게 소비한다.
+        if (event.key() == Qt.Key.Key_Menu or
+                (event.key() == Qt.Key.Key_F10 and event.modifiers() == Qt.KeyboardModifier.ShiftModifier)):
+            if not event.isAutoRepeat():
+                self.show_context_menu(self.grid.viewport().mapToGlobal(
+                    self.grid.visualRect(self.grid.currentIndex()).center()))
+            return True
+        if (event.modifiers() in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier)
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)):
+            self.play_selected()
             return True
         return False
 
+    def focus_content(self):
+        self.grid.setFocus()
+
     def show_status(self, text):
-        self.status.setText(text)
+        self.window.show_status(text)

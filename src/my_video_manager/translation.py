@@ -61,6 +61,12 @@ class Translation:
 
 
 @dataclass(frozen=True)
+class TranslationSummary:
+    translated_lines: int
+    queue_state: str | None
+
+
+@dataclass(frozen=True)
 class TranslationQueueEntry:
     id: str
     video_id: int
@@ -274,6 +280,23 @@ class Translations:
                 return None
             return Translation(video_id, transcript[0], tuple(
                 TranscriptLine(r["id"], r["start"], r["end"], r["translated"]) for r in rows))
+
+    def summary(self, video_id: int, *, connection=None) -> TranslationSummary:
+        """확정 번역과 현재 요청의 저장된 부분 번역을 선택 영상 범위에서 센다."""
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            if not db.in_transaction:
+                db.execute("BEGIN")
+            transcript = db.execute("SELECT id FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
+            queue = db.execute("SELECT id, state FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
+            count = 0
+            if transcript:
+                count = db.execute("""
+                    SELECT COUNT(*) FROM transcript_lines l
+                    LEFT JOIN translation_lines tr ON tr.line_id = l.id
+                    LEFT JOIN translation_targets target ON target.queue_id = ? AND target.line_id = l.id
+                    WHERE l.transcript_id = ? AND COALESCE(tr.text, target.text) IS NOT NULL
+                """, (queue["id"] if queue else None, transcript[0])).fetchone()[0]
+            return TranslationSummary(count, queue["state"] if queue else None)
 
     def stop_processing(self):
         self._cancellation.set()

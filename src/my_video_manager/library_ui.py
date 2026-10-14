@@ -1,34 +1,22 @@
 """라이브러리 관리 입력을 AppCore 공개 API에 전달한다."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QInputDialog, QLabel, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QVBoxLayout, QWidget, QFileDialog,
+    QDialog, QInputDialog, QLabel, QListWidget, QListWidgetItem,
+    QMessageBox, QPushButton, QVBoxLayout, QFileDialog,
 )
 
 
-class LibraryControls(QWidget):
+class LibraryControls(QObject):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.core = window.core
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        for title, action in (
-            ("감시 폴더 해제", self.remove_folder), ("파일 직접 추가", self.add_file),
-            ("제목 변경", self.rename), ("파일 다시 연결", self.reconnect),
-            ("제외", self.exclude), ("제외 목록", self.show_excluded),
-            ("최소 길이 설정", self.settings),
-        ):
-            button = QPushButton(title)
-            button.clicked.connect(action)
-            layout.addWidget(button)
-        layout.addStretch()
 
     def selected_video(self):
         video_id = self.window.library_page.selected_video_id()
         if video_id is not None:
-            return next((v for v in self.core.videos() if v.id == video_id), None)
+            return self.core.video(video_id)
         QMessageBox.information(self.window, "영상 선택", "목록에서 영상을 먼저 선택하세요.")
         return None
 
@@ -39,12 +27,15 @@ class LibraryControls(QWidget):
         except (OSError, ValueError, RuntimeError) as error:
             QMessageBox.warning(self.window, "라이브러리", str(error))
 
-    def remove_folder(self):
+    def remove_folder(self, folder=None):
         folders = [str(folder.path) for folder in self.core.watched_folders()]
         if not folders:
             QMessageBox.information(self.window, "감시 폴더", "해제할 감시 폴더가 없습니다.")
             return
-        folder, ok = QInputDialog.getItem(self.window, "감시 폴더 해제", "해제할 폴더", folders, editable=False)
+        if folder is None:
+            folder, ok = QInputDialog.getItem(self.window, "감시 폴더 해제", "해제할 폴더", folders, editable=False)
+        else:
+            ok = folder in folders
         if ok and QMessageBox.question(
             self.window, "감시 폴더 해제",
             "이 폴더 아래의 모든 위치를 해제합니다. 다른 위치가 없는 영상은 파일 없음으로 남습니다.\n"
