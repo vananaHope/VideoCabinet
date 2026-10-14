@@ -1,8 +1,9 @@
 """하이라이트 표시와 편집. 도메인 변경은 AppCore 공개 API에 맡긴다."""
 
 import sqlite3
+from time import monotonic
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QItemSelectionModel, QSignalBlocker, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDoubleSpinBox, QFormLayout,
@@ -11,9 +12,13 @@ from PySide6.QtWidgets import (
 )
 
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
+from .highlights import nearest_highlight
 from .dialog_ui import dialog_buttons, primary_button, space_layout
 from .tag_ui import TagEditor
 from .theme import PLAYBACK_COLORS, playback_font, playback_pixels
+
+
+HIGHLIGHT_FOLLOW_IDLE_SECONDS = 3.0
 
 
 def timestamp(seconds: float) -> str:
@@ -95,12 +100,15 @@ class PlaybackHighlights(QWidget):
 
     activated = Signal(object)
 
-    def __init__(self):
+    def __init__(self, *, clock=monotonic):
         super().__init__()
         self.setObjectName('playbackHighlights')
         self.setFixedWidth(280)
         self._highlights = ()
         self._nearest_id = None
+        self._video_id = None
+        self._clock = clock
+        self._last_interaction = float('-inf')
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 12, 8, 8)
         self.heading = QLabel('하이라이트 · 0')
@@ -118,6 +126,14 @@ class PlaybackHighlights(QWidget):
         self.list.setUniformItemSizes(True)
         self.list.setItemDelegate(_PlaybackHighlightDelegate(self.list))
         self.list.itemClicked.connect(self.activate)
+        self.list.itemSelectionChanged.connect(self.record_interaction)
+        scrollbar = self.list.verticalScrollBar()
+        scrollbar.sliderMoved.connect(self.record_interaction)
+        scrollbar.sliderPressed.connect(self.record_interaction)
+        scrollbar.sliderReleased.connect(self.record_interaction)
+        scrollbar.actionTriggered.connect(self.record_interaction)
+        for widget in (self.list, self.list.viewport(), scrollbar):
+            widget.installEventFilter(self)
         layout.addWidget(self.list, 1)
         self.hint = QLabel('클릭 / Enter로 이동 · 노랑은 가까운 항목')
         self.hint.setWordWrap(True)
@@ -128,35 +144,53 @@ class PlaybackHighlights(QWidget):
         if item is not None:
             self.activated.emit(item.data(Qt.ItemDataRole.UserRole))
 
-    def show_highlights(self, highlights, position):
+    def record_interaction(self, *_):
+        self._last_interaction = self._clock()
+
+    def eventFilter(self, watched, event):
+        if event.type() in (QEvent.Type.Wheel, QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress):
+            self.record_interaction()
+        return super().eventFilter(watched, event)
+
+    def show_highlights(self, highlights, position, *, video_id):
         highlights = tuple(highlights)
-        if highlights != self._highlights:
+        video_changed = video_id != self._video_id
+        content_changed = video_changed or highlights != self._highlights
+        if content_changed:
             selected = self.list.currentItem()
-            selected_id = selected.data(Qt.ItemDataRole.UserRole).id if selected else None
-            scroll = self.list.verticalScrollBar().value()
+            selected_id = selected.data(Qt.ItemDataRole.UserRole).id if selected and not video_changed else None
+            was_selected = selected is not None and selected.isSelected()
+            scroll = self.list.verticalScrollBar().value() if not video_changed else 0
+            self._video_id = video_id
             self._highlights = highlights
-            self._nearest_id = None
-            self.list.clear()
-            for highlight in highlights:
-                times = timestamp(highlight.start).split('.')[0]
-                times += (' – ' + timestamp(highlight.end).split('.')[0]
-                          if highlight.end is not None else ' · 지점')
-                note = highlight.note.text if highlight.note else '메모 없음'
-                item = QListWidgetItem(times + '\n' + note)
-                item.setToolTip(timestamp(highlight.start) + '\n' + note)
-                item.setData(Qt.ItemDataRole.UserRole, highlight)
-                self.list.addItem(item)
-                if highlight.id == selected_id:
-                    self.list.setCurrentItem(item)
+            if video_changed:
+                self._last_interaction = float('-inf')
+            # 데이터 갱신으로 선택을 복원하는 것은 사용자 조작이 아니다.
+            with QSignalBlocker(self.list):
+                self.list.clear()
+                for highlight in highlights:
+                    times = timestamp(highlight.start).split('.')[0]
+                    times += (' – ' + timestamp(highlight.end).split('.')[0]
+                              if highlight.end is not None else ' · 지점')
+                    note = highlight.note.text if highlight.note else '메모 없음'
+                    item = QListWidgetItem(times + '\n' + note)
+                    item.setToolTip(timestamp(highlight.start) + '\n' + note)
+                    item.setData(Qt.ItemDataRole.UserRole, highlight)
+                    self.list.addItem(item)
+                    if highlight.id == selected_id:
+                        self.list.setCurrentItem(item, QItemSelectionModel.SelectionFlag.ClearAndSelect
+                                                 if was_selected else QItemSelectionModel.SelectionFlag.NoUpdate)
+            # 선택 복원 중 계산된 임시 스크롤 범위에 복원값이 잘리지 않게 한다.
+            self.list.doItemsLayout()
             self.list.verticalScrollBar().setValue(scroll)
         self.heading.setText(f'하이라이트 · {len(highlights)}')
         self.empty.setVisible(not highlights)
         self.list.setVisible(bool(highlights))
         self.hint.setVisible(bool(highlights))
-        nearest = min(highlights, key=lambda h: max(h.start - position, 0,
-                      position - (h.end if h.end is not None else h.start)), default=None)
+        nearest = nearest_highlight(highlights, position)
         nearest_id = nearest.id if nearest else None
-        if nearest_id != self._nearest_id:
+        nearest_changed = nearest_id != self._nearest_id
+        if content_changed or nearest_changed:
             self._nearest_id = nearest_id
             for row in range(self.list.count()):
                 item = self.list.item(row)
@@ -164,6 +198,10 @@ class PlaybackHighlights(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole + 1, active)
                 item.setData(Qt.ItemDataRole.AccessibleTextRole,
                              ('현재 위치와 가까움 · ' if active else '') + item.text())
+                if (active and nearest_changed and not content_changed and self.isVisible()
+                        and not self.list.verticalScrollBar().isSliderDown()
+                        and self._clock() - self._last_interaction >= HIGHLIGHT_FOLLOW_IDLE_SECONDS):
+                    self.list.scrollToItem(item, QListWidget.ScrollHint.EnsureVisible)
             self.list.viewport().update()
 
 

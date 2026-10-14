@@ -151,11 +151,14 @@ class PlaybackPage(QWidget):
     def refresh_key_help(self):
         self.help_panel.refresh(self.core)
         bindings = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
-        self.highlights_button.setText('하이라이트 ' + ('접기' if self.highlights_expanded else '펴기'))
-        self.highlights_button.setToolTip('하이라이트 목록 접기 / 펴기 · '
+        self.highlights_button.setText('하이라이트 패널 ' + ('접기' if self.highlights_expanded else '펴기'))
+        self.highlights_button.setToolTip('하이라이트 패널 접기 / 펴기 · '
                                          + bindings[CommandType.TOGGLE_HIGHLIGHT_LIST])
-        self.highlights_panel.empty.setText('아직 하이라이트가 없습니다.\n'
-                                           + bindings[CommandType.POINT_HIGHLIGHT] + '로 지금 순간을 남겨 보세요.')
+        point_keys = next(row.keys for row in self.core.key_bindings()
+                          if row.command.kind == CommandType.POINT_HIGHLIGHT)
+        guidance = (f'지점 하이라이트 키({display_keys(point_keys)})로 지금 순간을 남겨 보세요.'
+                    if point_keys else '키 설정에서 지점 하이라이트 키를 정하면 지금 순간을 남길 수 있습니다.')
+        self.highlights_panel.empty.setText('아직 하이라이트가 없습니다.\n' + guidance)
         if self._help_requested:
             self.help_panel.place_over(self.surface)
 
@@ -174,7 +177,7 @@ class PlaybackPage(QWidget):
         if session:
             highlights = self.core.highlights(session.video_id)
             self.progress.highlights = highlights
-            self.highlights_panel.show_highlights(highlights, self.core.playback.position)
+            self.highlights_panel.show_highlights(highlights, self.core.playback.position, video_id=session.video_id)
             self.progress.update()
 
     def jump_highlight(self, highlight):
@@ -324,7 +327,8 @@ class PlaybackPage(QWidget):
         self.progress.position = position
         self.progress.open_start = open_start
         self.progress.update()
-        self.highlights_panel.show_highlights(self.progress.highlights, position)
+        if session:
+            self.highlights_panel.show_highlights(self.progress.highlights, position, video_id=session.video_id)
         self.position_label.setText(f"{timestamp(position)} / {timestamp(duration)}")
         self.open_range_label.setText(f"구간 시작 {timestamp(open_start).split('.')[0]}"
                                       if open_start is not None else "")

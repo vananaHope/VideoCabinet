@@ -3,8 +3,20 @@ from datetime import datetime, timezone
 import pytest
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
-from my_video_manager.highlights import Note
+from my_video_manager.highlights import Highlight, Note, nearest_highlight
 from my_video_manager.highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
+
+
+@pytest.mark.parametrize(('highlights', 'position', 'expected_id'), [
+    ((Highlight(1, 1, 10, 30, None), Highlight(2, 1, 24, None, None)), 25, 1),
+    ((Highlight(1, 1, 10, 30, None), Highlight(2, 1, 40, None, None)), 32, 1),
+    ((Highlight(2, 1, 20, None, None), Highlight(1, 1, 10, None, None)), 15, 1),
+    ((Highlight(2, 1, 10, None, None), Highlight(1, 1, 10, None, None)), 10, 1),
+    ((), 10, None),
+])
+def test_nearest_highlight_uses_interval_distance_and_time_order(highlights, position, expected_id):
+    nearest = nearest_highlight(highlights, position)
+    assert (nearest.id if nearest else None) == expected_id
 
 
 class FakeMedia:

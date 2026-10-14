@@ -324,17 +324,14 @@ def test_highlight_click_seeks_engine_without_inventing_position_reports(window)
     assert window.surface.hasFocus()
 
 
-def test_highlight_nearest_range_tie_and_selection_are_independent(window):
+def test_playback_position_changes_preserve_highlight_selection(window):
     add_highlight(window, 10)
     add_highlight(window, 20, end=30, note='구간')
     panel = window.playback_page.highlights_panel
     panel.list.setCurrentRow(0)
-    for position, expected in ((15, 0), (25, 1), (100, 1)):
+    for position in (15, 25, 100):
         window.core.playback.report(position, seeked=True)
         window.sync_position()
-        current = [row for row in range(panel.list.count())
-                   if '현재 위치와 가까움' in panel.list.item(row).data(Qt.ItemDataRole.AccessibleTextRole)]
-        assert current == [expected]
         assert panel.list.currentRow() == 0
 
 
@@ -407,3 +404,52 @@ def test_highlight_click_exits_reel_preserves_revisit_and_starts_viewing(window)
     assert core.last_highlight_revisited_at(first) == revisit
     assert not window.playback_page.reel_label.isVisible()
     assert window.reel.shown is None
+
+
+@pytest.mark.parametrize('transition', ['series', 'reel'])
+def test_video_transition_resets_highlight_scroll_and_selection(window, transition):
+    core = window.core
+    first, second = core.videos()
+    # 공개 도메인 API로 두 영상에 충분히 긴 목록을 만든다.
+    for video in (first, second):
+        core.switch_to(video.id)
+        for position in range(1, 61):
+            core.playback.report(position, seeked=True)
+            core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
+    if transition == 'reel':
+        # 첫 영상 마지막 항목을 마치면 다음 영상으로 자동 전환한다.
+        window.reel.open()
+        window.reel.start(core.highlights(first.id)[-1].id)
+    else:
+        assert core.series_for_video(first.id).video_ids == (first.id, second.id)
+        window.play(first.id)
+    window.sync_position()
+    QApplication.processEvents()
+    panel = window.playback_page.highlights_panel
+    panel.list.setCurrentRow(55)
+    panel.list.scrollToBottom()
+    assert panel.list.verticalScrollBar().value() > 0
+    if transition == 'reel':
+        window.player.positions = [(core.reel_playback.end, False)]
+        window.poll_position()
+    else:
+        key(window, Qt.Key.Key_PageDown)
+    window.sync_position()
+    QApplication.processEvents()
+    assert core.playback.session.video_id == second.id
+    assert panel.list.count() == 60
+    assert panel.list.verticalScrollBar().value() == 0
+    assert panel.list.currentItem() is None
+    assert panel.list.selectedItems() == []
+
+
+def test_unassigned_point_key_guidance_and_panel_command_name(window):
+    bindings = {row.command: row.keys for row in window.core.key_bindings()}
+    bindings[Command(CommandType.POINT_HIGHLIGHT)] = ()
+    window.core.save_key_bindings(bindings)
+    window.refresh_key_help()
+    page = window.playback_page
+    assert '키 설정에서 지점 하이라이트 키를 정하면' in page.highlights_panel.empty.text()
+    assert '하이라이트 패널 접기 / 펴기' in page.highlights_button.toolTip()
+    key(window, Qt.Key.Key_F1)
+    assert '하이라이트 패널 접기 / 펴기' in page.help_panel.text.text()

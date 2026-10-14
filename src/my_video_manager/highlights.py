@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from contextlib import nullcontext
+from collections.abc import Iterable
 import math
 
 from .playback import PlaybackSession
@@ -19,6 +20,14 @@ class Highlight:
     start: float
     end: float | None
     note: Note | None
+
+
+def nearest_highlight(highlights: Iterable[Highlight], position: float) -> Highlight | None:
+    """구간 안은 거리 0, 밖은 가장 가까운 경계까지 거리. 동률은 시작 시각·ID 순."""
+    return min(highlights, key=lambda h: (
+        max(h.start - position, 0, position - (h.end if h.end is not None else h.start)),
+        h.start, h.id,
+    ), default=None)
 
 
 class Highlights:

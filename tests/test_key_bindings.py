@@ -403,7 +403,7 @@ def test_highlight_list_key_registers_saves_and_respects_existing_customization(
     core = open_core(tmp_path)
     command = Command(CommandType.TOGGLE_HIGHLIGHT_LIST)
     row = next(row for row in core.key_bindings() if row.command == command)
-    assert row.label == '하이라이트 목록 접기 / 펴기'
+    assert row.label == '하이라이트 패널 접기 / 펴기'
     assert row.keys == row.default_keys == (';',)
     assert core.command_for_key(';') == command
     bindings = draft(core)
@@ -415,5 +415,5 @@ def test_highlight_list_key_registers_saves_and_respects_existing_customization(
     reopened = open_core(tmp_path)
     assert reopened.command_for_key(';') == Command(CommandType.TOGGLE_PAUSE)
     assert draft(reopened)[command] == ()
-    with pytest.raises(ValueError, match='하이라이트 목록'):
+    with pytest.raises(ValueError, match='하이라이트 패널'):
         reopened.reset_key_bindings(command)
