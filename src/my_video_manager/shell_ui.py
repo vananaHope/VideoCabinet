@@ -75,11 +75,22 @@ class ActionPage(QWidget):
 
 
 def search_page(window):
-    return ActionPage("검색", (("검색 열기", window.show_search),))
+    from .search_ui import SearchPage
+
+    page = SearchPage(window.core)
+
+    def play_result(result):
+        window.playback_list = page.video_ids
+        window.play_video(result.video_id, start=result.start)
+
+    page.result_chosen.connect(play_result)
+    return page
 
 
 def queue_page(window):
-    return ActionPage("자막 대기열", (("자막 대기열 / 자동 규칙", window.tray.show_queue),))
+    from .queue_ui import SubtitleQueuePage
+
+    return SubtitleQueuePage(window.core)
 
 
 def folder_page(window):

@@ -2,9 +2,10 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
+    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout,
 )
+from .dialog_ui import dialog_buttons, space_layout
 
 
 class SeriesEditor(QDialog):
@@ -13,7 +14,7 @@ class SeriesEditor(QDialog):
         self.core = core
         self.setWindowTitle("시리즈 편집")
         self.resize(800, 550)
-        layout = QVBoxLayout(self)
+        layout = space_layout(QVBoxLayout(self))
         self.selector = QComboBox()
         self.selector.addItem("새 시리즈", None)
         for series in core.series():
@@ -22,7 +23,9 @@ class SeriesEditor(QDialog):
         self.name = QLineEdit()
         self.name.setPlaceholderText("시리즈 이름")
         layout.addWidget(self.name)
-        layout.addWidget(QLabel("왼쪽은 시리즈 순서입니다. 다른 시리즈의 영상은 그 시리즈에서 먼저 빼 주세요."))
+        hint = QLabel("왼쪽: 시리즈 순서 · 오른쪽: 넣을 영상\n다른 시리즈의 영상은 먼저 그 시리즈에서 빼 주세요.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         lists = QHBoxLayout()
         self.members, self.available = QListWidget(), QListWidget()
         self.members.setAccessibleName("시리즈 영상 순서")
@@ -38,10 +41,10 @@ class SeriesEditor(QDialog):
         lists.addLayout(controls)
         lists.addWidget(self.available)
         layout.addLayout(lists)
-        layout.addWidget(QLabel("변경은 저장할 때 적용됩니다. 시리즈 선택을 바꾸면 저장 전 편집은 취소됩니다."))
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.save)
-        buttons.rejected.connect(self.reject)
+        note = QLabel("저장 전에 시리즈를 바꾸면 편집이 취소됩니다.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        buttons = dialog_buttons(self.save, self.reject, save=True)
         layout.addWidget(buttons)
         self.selector.currentIndexChanged.connect(self.load)
         self.load()

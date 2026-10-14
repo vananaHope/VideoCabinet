@@ -5,12 +5,13 @@ import sqlite3
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
+    QCheckBox, QDialog, QDoubleSpinBox, QFormLayout,
     QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
     QPushButton, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
+from .dialog_ui import dialog_buttons, primary_button, space_layout
 from .tag_ui import TagEditor
 from .theme import PROGRESS_PLAYED, BORDER, TEXT, HIGHLIGHT_POINT, HIGHLIGHT_RANGE, HIGHLIGHT_OPEN
 
@@ -62,7 +63,7 @@ class HighlightEditor(QDialog):
         self.core, self.highlight = core, highlight
         self.setWindowTitle("하이라이트 시각·메모 편집")
         self.resize(470, 320)
-        layout = QVBoxLayout(self)
+        layout = space_layout(QVBoxLayout(self))
         form = QFormLayout()
         self.start = QDoubleSpinBox()
         self.end = QDoubleSpinBox()
@@ -85,11 +86,7 @@ class HighlightEditor(QDialog):
         self.note.setPlainText(highlight.note.text if highlight.note else "")
         form.addRow("메모", self.note)
         layout.addLayout(form)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText("저장")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("취소")
-        buttons.accepted.connect(self.save)
-        buttons.rejected.connect(self.reject)
+        buttons = dialog_buttons(self.save, self.reject, save=True)
         layout.addWidget(buttons)
 
     def save(self):
@@ -111,13 +108,13 @@ class HighlightList(QDialog):
         self.core, self.video_id, self.duration = core, video_id, duration
         self.setWindowTitle("현재 영상의 하이라이트")
         self.resize(660, 420)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("항목을 더블클릭하거나 Enter를 누르면 시각과 메모를 편집합니다."))
+        layout = space_layout(QVBoxLayout(self))
+        layout.addWidget(QLabel("더블클릭 또는 Enter로 시각·메모 편집"))
         self.list = QListWidget()
         self.list.itemActivated.connect(self.edit)
         layout.addWidget(self.list)
         buttons = QHBoxLayout()
-        self.edit_button = QPushButton("시각·메모 편집")
+        self.edit_button = primary_button(QPushButton("시각·메모 편집"))
         self.delete_button = QPushButton("하이라이트 삭제")
         self.tags_button = QPushButton("태그 편집")
         close = QPushButton("닫기")
@@ -126,6 +123,8 @@ class HighlightList(QDialog):
         self.tags_button.clicked.connect(self.edit_tags)
         close.clicked.connect(self.accept)
         for button in (self.edit_button, self.tags_button, self.delete_button, close):
+            if button is close:
+                buttons.addStretch()
             button.setAutoDefault(False)
             buttons.addWidget(button)
         layout.addLayout(buttons)

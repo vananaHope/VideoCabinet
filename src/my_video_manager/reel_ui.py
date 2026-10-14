@@ -1,6 +1,6 @@
 """모아보기 목록과 코어가 정한 재생 대상의 화면 연결."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMessageBox, QPushButton, QVBoxLayout, QWidget,
@@ -8,12 +8,17 @@ from PySide6.QtWidgets import (
 
 from .highlight_ui import timestamp
 from .key_display import display_keys
+from .dialog_ui import primary_button, space_layout
+from .thumbnail_ui import ThumbnailIcons
 
 
 class ReelPage(QWidget):
     def __init__(self, controls):
         super().__init__()
         self.controls = controls
+
+    def focus_content(self):
+        self.controls.list.setFocus()
 
     def handle_key(self, event) -> bool:
         if event.key() == Qt.Key.Key_Escape:
@@ -30,11 +35,12 @@ class ReelControls:
         self.window, self.core = window, window.core
         self.shown = None
         self.page = ReelPage(self)
-        layout = QVBoxLayout(self.page)
-        back = QPushButton("라이브러리로 (Esc)")
-        back.clicked.connect(window.show_library)
-        layout.addWidget(back)
-        layout.addWidget(QLabel("하이라이트 모아보기 · 시청 기록과 별도로 복습을 기록합니다."))
+        self.icons = ThumbnailIcons()
+        layout = space_layout(QVBoxLayout(self.page))
+        title = QLabel("하이라이트 모아보기")
+        title.setStyleSheet("font-size: 20px; font-weight: 600")
+        layout.addWidget(title)
+        layout.addWidget(QLabel("시청 기록과 별도로 복습을 기록합니다."))
         controls = QHBoxLayout()
         controls.addWidget(QLabel("하이라이트 태그"))
         self.filter = QComboBox()
@@ -46,11 +52,14 @@ class ReelControls:
         controls.addWidget(refresh)
         layout.addLayout(controls)
         self.list = QListWidget()
+        self.list.setIconSize(QSize(128, 72))
+        self.list.setSpacing(6)
+        self.list.setWordWrap(True)
         self.list.setAccessibleName("모든 영상의 하이라이트")
         self.list.itemActivated.connect(self.play_selected)
         layout.addWidget(self.list, 1)
         buttons = QHBoxLayout()
-        self.play_all = QPushButton("처음부터 차례 재생")
+        self.play_all = primary_button(QPushButton("처음부터 차례 재생"))
         self.play_all.clicked.connect(lambda: self.start())
         buttons.addWidget(self.play_all)
         self.play_button = QPushButton("선택한 하이라이트부터 재생")
@@ -92,6 +101,8 @@ class ReelControls:
         selected_id = selected.data(Qt.ItemDataRole.UserRole).highlight.id if selected else None
         self.list.clear()
         entries = self.core.reel_entries(self.filter.currentData())
+        thumbnails = {video.id: video.thumbnail for video in self.core.videos()}
+        self.icons.retain(thumbnails.values())
         row = 0
         for index, entry in enumerate(entries):
             h = entry.highlight
@@ -106,6 +117,8 @@ class ReelControls:
             if tags:
                 text += "\n태그: " + ", ".join(t.name for t in tags)
             item = QListWidgetItem(text)
+            if path := thumbnails.get(h.video_id):
+                item.setIcon(self.icons.get(path))
             item.setData(Qt.ItemDataRole.UserRole, entry)
             self.list.addItem(item)
             if h.id == selected_id:
@@ -115,7 +128,7 @@ class ReelControls:
         self.play_all.setEnabled(any(e.playable and e.highlight.start < e.duration for e in entries))
         self.selection_changed()
         self.status.setText(f"하이라이트 {len(entries)}개 · 영상 제목 → 영상 안 시각 순\n"
-                            "파일 없음과 영상 끝의 길이 0인 지점은 건너뜁니다. 새 하이라이트는 목록 갱신 때 반영됩니다.")
+                            "파일 없음·길이 0인 지점은 건너뜁니다. 새 항목은 ‘목록 갱신’으로 불러옵니다.")
 
     def selection_changed(self, *_):
         item = self.list.currentItem()

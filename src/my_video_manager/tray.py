@@ -3,8 +3,6 @@
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon
 
-from .queue_ui import SubtitleQueueDialog
-
 
 class TrayControls(QObject):
     def __init__(self, window):
@@ -47,12 +45,7 @@ class TrayControls(QObject):
 
     def show_queue(self):
         self.open()
-        if self.dialog is None:
-            self.dialog = SubtitleQueueDialog(self.core, self.window)
-        self.dialog.refresh()
-        self.dialog.show()
-        self.dialog.raise_()
-        self.dialog.activateWindow()
+        self.window.navigate(3)
 
     def notify_completion(self):
         counts = self.core.take_subtitle_queue_completion()

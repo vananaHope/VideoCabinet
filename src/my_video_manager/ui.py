@@ -8,7 +8,6 @@ from .core import AppCore, CommandType
 from .subtitle_ui import SubtitleControls
 from .translation_ui import TranslationControls
 from .highlight_ui import HighlightList
-from .search_ui import SearchDialog, SearchPreparation
 from .reel_ui import ReelControls
 from .key_settings_ui import SettingsDialog
 from .key_display import display_keys
@@ -58,7 +57,6 @@ class MainWindow(QMainWindow):
 
         QApplication.instance().installEventFilter(self)
         self.refresh()
-        self.search_preparation = SearchPreparation(self.core, self)
 
     def page_changed(self, _index):
         page = self.pages.currentWidget()
@@ -104,11 +102,7 @@ class MainWindow(QMainWindow):
         self.play_video(video_id)
 
     def show_search(self):
-        dialog = SearchDialog(self.core, self, preparation=self.search_preparation)
-        if dialog.exec() and dialog.selected_result is not None:
-            self.playback_list = dialog.video_ids
-            result = dialog.selected_result
-            self.play_video(result.video_id, start=result.start)
+        self.navigate(2)
 
     def play_video(self, video_id, *, start=None, from_gems=False):
         if self.pages.currentWidget() is not self.playback_page:
