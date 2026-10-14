@@ -42,6 +42,7 @@ class CommandType(str, Enum):
     TOGGLE_SUBTITLE_LANGUAGE = "toggle_subtitle_language"
     TOGGLE_REEL_REPEAT = "toggle_reel_repeat"
     TOGGLE_FULLSCREEN = "toggle_fullscreen"
+    TOGGLE_HIGHLIGHT_LIST = "toggle_highlight_list"
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,7 @@ DEFAULT_KEY_BINDINGS = {
     "PgDn": Command(CommandType.NEXT_VIDEO),
     ".": Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE),
     "\\": Command(CommandType.TOGGLE_REEL_REPEAT),
+    ";": Command(CommandType.TOGGLE_HIGHLIGHT_LIST),
     "'": Command(CommandType.TOGGLE_FULLSCREEN),
 }
 

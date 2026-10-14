@@ -397,3 +397,23 @@ def test_help_f1_is_reserved_and_legacy_binding_uses_existing_fallback(tmp_path)
     assert reopened.command_for_key("F1") is None
     assert reopened.command_for_key("Enter") == Command(CommandType.TOGGLE_PAUSE)
     assert reopened.command_for_key("H") == Command(CommandType.POINT_HIGHLIGHT)
+
+
+def test_highlight_list_key_registers_saves_and_respects_existing_customization(tmp_path):
+    core = open_core(tmp_path)
+    command = Command(CommandType.TOGGLE_HIGHLIGHT_LIST)
+    row = next(row for row in core.key_bindings() if row.command == command)
+    assert row.label == '하이라이트 목록 접기 / 펴기'
+    assert row.keys == row.default_keys == (';',)
+    assert core.command_for_key(';') == command
+    bindings = draft(core)
+    bindings[command] = ('L',)
+    core.save_key_bindings(bindings)
+    assert open_core(tmp_path).command_for_key('L') == command
+    assert open_core(tmp_path).command_for_key(';') is None
+    core.settings.set('keys.bindings', {'toggle_pause:0': [';']})
+    reopened = open_core(tmp_path)
+    assert reopened.command_for_key(';') == Command(CommandType.TOGGLE_PAUSE)
+    assert draft(reopened)[command] == ()
+    with pytest.raises(ValueError, match='하이라이트 목록'):
+        reopened.reset_key_bindings(command)

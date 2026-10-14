@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from .core import CommandType
 from .key_display import display_keys
-from .theme import SURFACE, BORDER, HIGHLIGHT_POINT, HIGHLIGHT_RANGE, HIGHLIGHT_OPEN
+from .theme import PLAYBACK_COLORS, playback_stylesheet, playback_font
 
 
 class PlaybackHelp(QWidget):
@@ -18,7 +18,8 @@ class PlaybackHelp(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setWindowOpacity(0.94)
         self.setObjectName("playbackHelp")
-        self.setStyleSheet(f"#playbackHelp {{ background: {SURFACE}; border: 1px solid {BORDER}; }}")
+        self.setStyleSheet(playback_stylesheet())
+        self.setFont(playback_font())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 14, 20, 14)
         self.text = QLabel()
@@ -39,18 +40,22 @@ class PlaybackHelp(QWidget):
             label = meanings.get(binding.command.kind, binding.label)
             if binding.command.kind == CommandType.TOGGLE_REEL_REPEAT and not reel:
                 label += " (모아보기)"
-            rows.append(f"<tr><td style='padding:3px 18px 3px 0'><b>{escape(display_keys(binding.keys))}</b></td>"
-                        f"<td>{escape(label)}</td></tr>")
+            rows.append(f"<td style='padding:4px 12px 4px 0'><b>{escape(display_keys(binding.keys))}</b></td>"
+                        f"<td style='padding-right:16px'>{escape(label)}</td>")
+        split = (len(rows) + 1) // 2
+        table = ''.join('<tr>' + rows[i] + (rows[i + split] if i + split < len(rows) else '') + '</tr>'
+                        for i in range(split))
+        c = PLAYBACK_COLORS
         legend = " &nbsp; ".join(f"<span style='color:{color}'>■ {label}</span>" for color, label in (
-            (HIGHLIGHT_POINT, "지점"), (HIGHLIGHT_RANGE, "구간"), (HIGHLIGHT_OPEN, "열린 구간")))
+            (c['highlight'], "지점"), (c['status-success'], "구간"), (c['highlight-open'], "열린 구간")))
         self.text.setText("<b>키 안내 · " + ("하이라이트 모아보기" if reel else "일반 재생")
                           + "</b><br>F1 켜기 / 끄기 · Esc 안내 닫기"
-                          + "<table>" + "".join(rows) + "</table><br>" + legend
-                          + "<br>Tab 메뉴 이동 · Space 메뉴 열기"
+                          + "<table>" + table + "</table><br>" + legend
+                          + "<br>Tab 메뉴·목록 이동 · 목록에서 ↑↓ 선택, Enter 이동"
                           + "<br>Esc: 안내 닫기 → 전체 화면 끄기 → 목록 복귀")
 
     def place_over(self, surface):
-        width = min(680, max(360, surface.width() - 32))
+        width = min(900, max(360, surface.width() - 32))
         self.setFixedWidth(width)
         self.adjustSize()
         origin = surface.mapToGlobal(QPoint(0, 0))
