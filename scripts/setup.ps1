@@ -8,8 +8,13 @@ function Confirm-Exit([string]$Step) {
 
 python -c "import struct, sys; assert sys.version_info >= (3, 10) and struct.calcsize('P') == 8, '64-bit Python 3.10+ is required'"
 Confirm-Exit 'Python check'
-node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 12)) throw Error('Node 22.12+ is required')"
-Confirm-Exit 'Node check'
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    throw 'Node.js 22.12 이상이 필요합니다. https://nodejs.org/en/download 에서 설치하고 새 터미널에서 다시 실행하세요 (README 환경 준비 참고).'
+}
+node -e "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major < 22 || (major === 22 && minor < 12) ? 1 : 0)"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Node.js 22.12 이상이 필요합니다. https://nodejs.org/en/download 에서 업데이트하고 새 터미널에서 다시 실행하세요 (README 환경 준비 참고).'
+}
 if (-not (Test-Path '.venv/Scripts/python.exe')) {
     python -m venv .venv
     Confirm-Exit 'venv'

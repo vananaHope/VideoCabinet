@@ -59,6 +59,7 @@ def snapshot_data(snapshot) -> list[VideoData]:
         status = snapshot.statuses[video.id]
         result.append(VideoData(
             id=video.id, title=video.title, duration=video.duration,
+            # 숫자 host는 Chromium이 IP로 정규화하므로 고정 host 아래에 ID를 둔다.
             thumbnail=f"mvm-thumb://video/{video.id}" if video.thumbnail else None,
             missing=video.missing, locationCount=len(video.locations),
             finished=status.finished, abandoned=status.abandoned, favorite=status.favorite,

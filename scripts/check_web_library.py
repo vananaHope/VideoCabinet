@@ -29,7 +29,7 @@ args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'windows'
 os.environ['MVM_WEB_UI'] = '1' if args.mode == 'web' else '0'
 
-from PySide6.QtCore import Qt, QEventLoop, QTimer, QPoint
+from PySide6.QtCore import Qt, QEventLoop, QTimer, QPoint, QObject, QEvent
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -128,10 +128,32 @@ def settle(milliseconds=250):
     loop.exec()
 
 
+def run_web_frames(script):
+    """측정 동안 Qt 이벤트 루프만 돌린다. JS 종료 알림 뒤에만 결과를 읽는다."""
+    loop = QEventLoop()
+    completed = []
+    marker = f'mvm-frame-done-{time.perf_counter_ns()}'
+
+    def finished(title):
+        if title == marker:
+            completed.append(True)
+            loop.quit()
+
+    page.engine_page.titleChanged.connect(finished)
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    timeout.start(15000)
+    page.engine_page.runJavaScript(f'(() => {{ const done = () => document.title = {json.dumps(marker)}; {script} }})()')
+    loop.exec()
+    timeout.stop()
+    page.engine_page.titleChanged.disconnect(finished)
+    assert completed, '웹 프레임 완료 알림 시간 초과'
+
+
 if args.mode == 'web':
-    wait_until(lambda: bool(js("document.querySelector('[role=gridcell]')?.textContent")))
-    js("window.__firstFrame = false; requestAnimationFrame(() => requestAnimationFrame(() => window.__firstFrame = true)); true")
-    wait_until(lambda: js('window.__firstFrame'))
+    wait_until(lambda: bool(js("!!document.getElementById('library-grid')")))
+    run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
 else:
     wait_until(lambda: page.grid.model().rowCount() == args.count)
 settle()
@@ -143,8 +165,27 @@ metrics = {'mode': args.mode, 'count': args.count, 'startup_ms': round(startup, 
 
 if args.verify and args.mode == 'web':
     assert js("document.querySelector('img')?.naturalWidth") > 0, '썸네일 스킴'
-    page.focus_content()
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
+    metrics['checks'].append('시작 직후 격자 포커스 (명시적 focus_content 호출 없음)')
+    layout = js_json("""(() => {
+      const panel = document.querySelector('aside').getBoundingClientRect();
+      const buttons = [...document.querySelectorAll('aside button')];
+      const row = document.getElementById('hidden-gems');
+      const bounds = row.getBoundingClientRect();
+      const cards = [...row.querySelectorAll('[role=option]')];
+      return {buttons: buttons.length, buttonsVisible: buttons.every(el => {
+        const r = el.getBoundingClientRect(); return r.top >= panel.top && r.bottom <= panel.bottom;
+      }), gems: cards.length, gemsVisible: cards.every(el => {
+        const r = el.getBoundingClientRect(); return r.left >= bounds.left && r.right <= bounds.right;
+      }), horizontalOverflow: row.scrollWidth > row.clientWidth};
+    })()""")
+    assert layout == dict(buttons=8, buttonsVisible=True, gems=4, gemsVisible=True, horizontalOverflow=False), layout
+    metrics['layout'] = layout
+    metrics['checks'].append('1100×720 작업 버튼 8개·보석 4개 노출, 보석 가로 넘침 없음')
+    js("document.getElementById('library-grid').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, isComposing:true}))")
+    settle(100)
+    assert core.playback.session is None
+    metrics['checks'].append('격자 isComposing Enter 가드 (합성 이벤트)')
     initial_id = page.selected_video_id()
     QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Right)
     wait_until(lambda: page.selected_video_id() != initial_id)
@@ -160,6 +201,17 @@ if args.verify and args.mode == 'web':
     wait_until(lambda: bool(js("!!document.querySelector('[role=menu]')")))
     QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Escape)
     metrics['checks'].append('메뉴 키')
+    # 태그 삭제 후 UI 값과 다음 검색이 모두 전체 태그를 사용해야 한다.
+    temporary_tag = core.add_video_tag(page.selected_video_id(), '검증용 임시 태그')
+    page.refresh()
+    wait_until(lambda: js(f"!!document.querySelector('select option[value=\"{temporary_tag.id}\"]')"))
+    js(f"document.querySelector('select').value = '{temporary_tag.id}'; document.querySelector('select').dispatchEvent(new Event('change', {{bubbles:true}})); true")
+    wait_until(lambda: page.tag_id == temporary_tag.id)
+    core.delete_tag(temporary_tag.id)
+    page.refresh()
+    wait_until(lambda: js("document.querySelector('select').value") == '0')
+    assert page.tag_id is None and len(page.visible_video_ids()) == args.count
+    metrics['checks'].append('선택 태그 삭제 뒤 필터 해제·다음 검색 전체 태그 적용')
     # 실제 DOM의 composition 이벤트를 사용한다. Windows IME 자체 검증과 구분한다.
     original_ids = page.visible_video_ids()
     js("""(() => {
@@ -192,13 +244,20 @@ if args.verify and args.mode == 'web':
       return true;
     })()""")
     wait_until(lambda: page.query == '')
-    metrics['checks'].append('composition 중 미완성 입력·목록 보존, Enter 재생 방지, 완료 후 한글 필터')
+    metrics['checks'].append('composition 중 입력·목록 보존, 완료 후 한글 필터; 검색 입력에는 재생 경로 없음(구조적)')
     point = js_json("(() => {const r = document.querySelector('input').getBoundingClientRect(); return [r.x + 10, r.y + 10]})()")
     QTest.mouseClick(page.view.focusProxy(), Qt.MouseButton.LeftButton, pos=QPoint(*map(int, point)))
     wait_until(lambda: js('document.activeElement.tagName') == 'INPUT')
     QTest.qWait(100)
     QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.tagName') == 'SELECT')
+    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Down)
+    wait_until(lambda: page.tag_id is not None)
+    assert len(page.visible_video_ids()) < len(original_ids)
+    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Home)
+    wait_until(lambda: page.tag_id is None)
+    assert page.visible_video_ids() == original_ids
+    metrics['checks'].append('NativeSelect 방향키 필터 변경·Home 전체 복원')
     QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.id') == 'hidden-gems')
     QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Tab)
@@ -248,7 +307,7 @@ if args.verify and args.mode == 'web':
         wait_until(lambda: window.pages.currentWidget() is page)
         metrics['checks'].append('카드 더블클릭 mpv 전환')
     # 기존 Qt 대화상자를 실제 웹 작업 버튼으로 열고 취소한다.
-    for index, expected in ((1, 'TagEditor'), (2, 'QInputDialog'), (3, 'ReviewDialog'), (4, 'SeriesEditor'), (5, 'QInputDialog')):
+    for title, expected in (('태그 편집', 'TagEditor'), ('자막 만들기 / 원어 지정', 'QInputDialog'), ('자막 검수 / SRT 내보내기', 'ReviewDialog'), ('시리즈 편집', 'SeriesEditor'), ('제목 변경', 'QInputDialog')):
         observed = []
         def close_dialog():
             modal = QApplication.activeModalWidget()
@@ -259,7 +318,7 @@ if args.verify and args.mode == 'web':
         closer.setInterval(20)
         closer.timeout.connect(close_dialog)
         closer.start()
-        js(f"document.querySelector('aside').querySelectorAll('button')[{index}].click()")
+        js(f"[...document.querySelectorAll('aside button')].find(button => button.textContent === {json.dumps(title)}).click()")
         wait_until(lambda: bool(observed) and not page.bridge.busy)
         closer.stop()
         assert expected in observed, (expected, observed)
@@ -281,59 +340,65 @@ for _ in range(5):
     start = time.perf_counter()
     window.refresh()
     if args.mode == 'web':
-        js("window.__painted = false; requestAnimationFrame(() => requestAnimationFrame(() => window.__painted = true)); true")
-        wait_until(lambda: js('window.__painted'))
+        run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
     else:
         app.processEvents()
         page.grid.repaint()
     refresh.append(round((time.perf_counter() - start) * 1000, 2))
 metrics['refresh_ms'] = refresh
 
-scroll_times = []
-for index in range(60):
-    start = time.perf_counter()
-    if args.mode == 'web':
-        js(f"document.getElementById('library-grid').scrollTop = {index * 180}; window.__scrolled = false; requestAnimationFrame(() => window.__scrolled = true); true")
-        wait_until(lambda: js('window.__scrolled'))
-    else:
-        page.grid.verticalScrollBar().setValue(index * 180)
-        app.processEvents()
-        page.grid.repaint()
-    scroll_times.append(round((time.perf_counter() - start) * 1000, 2))
-metrics['scroll_step_ms'] = scroll_times
 if args.mode == 'web':
-    metrics['rendered_cards'] = js("document.querySelectorAll('[role=gridcell]').length")
-    js("""(() => {
-      window.__scrollFrames = []; window.__scrollDone = false;
+    run_web_frames("""
+      window.__scrollFrames = [];
       const grid = document.getElementById('library-grid'); let previous; let index = 0;
       function step(now) {
         if (previous !== undefined) window.__scrollFrames.push(now - previous);
         previous = now; grid.scrollTop = (index * 180) % Math.max(1, grid.scrollHeight - grid.clientHeight);
-        if (++index < 121) requestAnimationFrame(step); else window.__scrollDone = true;
+        if (++index < 121) requestAnimationFrame(step); else done();
       }
-      requestAnimationFrame(step); return true;
-    })()""")
-    wait_until(lambda: js('window.__scrollDone'))
+      requestAnimationFrame(step);
+    """)
     metrics['scroll_frame_ms'] = js_json('window.__scrollFrames')
+    metrics['rendered_cards'] = js("document.querySelectorAll('[role=gridcell]').length")
+    metrics['scroll_clock'] = 'Chromium requestAnimationFrame, 120 intervals, no polling'
 else:
-    frames = []
     frame_loop = QEventLoop()
-    last_frame = [time.perf_counter()]
-    def frame():
-        now = time.perf_counter()
-        frames.append((now - last_frame[0]) * 1000)
-        last_frame[0] = now
-        page.grid.verticalScrollBar().setValue((len(frames) * 180) % max(1, page.grid.verticalScrollBar().maximum()))
-        page.grid.repaint()
-        if len(frames) >= 120:
-            frame_loop.quit()
+    paints = []
+
+    class PaintFrames(QObject):
+        def eventFilter(self, watched, event):
+            if event.type() == QEvent.Type.Paint:
+                paints.append(time.perf_counter())
+                if len(paints) >= 121:
+                    frame_loop.quit()
+            return False
+
+    observer = PaintFrames()
+    page.grid.viewport().installEventFilter(observer)
+    # QWidget에는 rAF가 없다. 비교 대상 Chromium과 같은 60Hz로 update를 요청하되 타이머 간격이
+    # 아닌 실제 viewport paint 간격을 기록한다. 두 값 모두 화면 표시 완료 시각은 아니다.
+    refresh_hz = 60
+    metrics['screen_refresh_hz'] = window.screen().refreshRate()
+    tick = 0
+    started = time.perf_counter()
     timer = QTimer()
-    timer.setInterval(16)
+    timer.setSingleShot(True)
+    timer.setTimerType(Qt.TimerType.PreciseTimer)
+
+    def frame():
+        global tick
+        page.grid.verticalScrollBar().setValue((tick * 180) % max(1, page.grid.verticalScrollBar().maximum()))
+        page.grid.viewport().update()
+        tick += 1
+        timer.start(max(1, round((started + tick / refresh_hz - time.perf_counter()) * 1000)))
+
     timer.timeout.connect(frame)
-    timer.start()
+    timer.start(0)
     frame_loop.exec()
     timer.stop()
-    metrics['scroll_frame_ms'] = frames[:120]
+    page.grid.viewport().removeEventFilter(observer)
+    metrics['scroll_frame_ms'] = [(b - a) * 1000 for a, b in zip(paints, paints[1:])][:120]
+    metrics['scroll_clock'] = f'QWidget viewport Paint, 120 intervals, update at {refresh_hz} Hz'
 
 # 작업 관리자 세부 정보의 작업 집합(메모리)와 같은 WorkingSet64를 프로세스 트리에서 합산한다.
 memory_script = f"$all = Get-CimInstance Win32_Process; $ids = @({os.getpid()}); do {{ $next = @($all | Where-Object {{ $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids }} | ForEach-Object {{ $_.ProcessId }}); $ids += $next }} while ($next.Count); Get-Process -Id $ids -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,WorkingSet64,PrivateMemorySize64 | ConvertTo-Json -Compress"

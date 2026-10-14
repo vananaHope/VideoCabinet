@@ -84,6 +84,9 @@ Remove-Item Env:MVM_WEB_DEV_URL
 썸네일 주소는 `mvm-thumb://video/<id>`이며 코어가 아는 해당 영상의 썸네일만 읽습니다.
 외부 페이지로의 이동과 패키지 자산·썸네일·설정한 개발 서버 외 요청은 차단합니다.
 
+ESLint 9는 공식 flat config와 TypeScript parser로 shadcn 6규칙을 함께 검사하기 쉬워 선택했습니다.
+TanStack Virtual은 행 단위 가상화·overscan·scrollToIndex를 제공하면서 카드의 DOM과 디자인을 강제하지 않아 선택했습니다.
+
 격자에서는 방향키로 선택하고 Enter·더블클릭으로 재생합니다. 메뉴 키·Shift+F10·우클릭은 같은 작업 메뉴를 엽니다.
 Tab/Shift+Tab은 검색·태그·추천·격자·상세 작업을 이동합니다. 숨겨진 보석은 클릭·Enter로 재생하고
 Backspace·우클릭 메뉴로 관심 없음을 처리합니다. Ctrl+1~6과 Alt+S는 Qt 셸이 먼저 처리합니다.
