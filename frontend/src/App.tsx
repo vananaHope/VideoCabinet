@@ -120,7 +120,16 @@ export default function App() {
       const index = gems.findIndex(gem => gem.videoId === activeGem)
       const next = gems[Math.max(0, Math.min(gems.length - 1, index + (event.key === "ArrowLeft" ? -1 : 1)))].videoId
       setGemId(next)
-      document.getElementById(`gem-${next}`)?.scrollIntoView({ block: "nearest", inline: "nearest" })
+      const card = document.getElementById(`gem-${next}`)?.getBoundingClientRect()
+      const row = event.currentTarget
+      if (card) {
+        const bounds = row.getBoundingClientRect()
+        const padding = parseFloat(getComputedStyle(row).paddingInlineStart)
+        const left = card.left - bounds.left - padding
+        const right = card.right - bounds.right + padding
+        // 이 추천 줄만 움직여 조상 요소의 스크롤이나 반올림으로 카드 끝이 잘리지 않게 한다.
+        row.scrollLeft += left < 0 ? left : right > 0 ? right : 0
+      }
     } else if (event.key === "Enter" || event.key === "Backspace") {
       event.preventDefault()
       if (!event.repeat) action(event.key === "Enter" ? "playGem" : "dismiss", activeGem)
@@ -139,9 +148,9 @@ export default function App() {
       </label>
     </div>
     {error && <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-destructive p-3 text-destructive"><span>{error}</span><Button variant="outline" size="sm" onClick={() => setError("")}>닫기</Button></div>}
-    <section aria-label="숨겨진 보석" className="flex flex-col gap-1">
+    <section aria-label="숨겨진 보석" className="flex shrink-0 flex-col gap-1">
       <div className="flex items-center gap-2"><Sparkles className="size-4 text-primary" aria-hidden="true" /><h2 className="text-sm font-semibold">숨겨진 보석</h2><span className="text-xs text-muted-foreground">{data?.gemError ? `불러오지 못했어요: ${data.gemError}` : gems.length ? "←/→ 선택 · Enter 재생 · Backspace 관심 없음" : "지금은 추천할 영상이 없어요"}</span></div>
-      {gems.length > 0 && <div id="hidden-gems" role="listbox" aria-label="숨겨진 보석 추천 카드" aria-activedescendant={`gem-${activeGem}`} tabIndex={0} onKeyDown={gemKey} className="grid grid-cols-4 gap-2 rounded-lg p-1">
+      {gems.length > 0 && <div id="hidden-gems" role="listbox" aria-label="숨겨진 보석 추천 카드" aria-activedescendant={`gem-${activeGem}`} tabIndex={0} onKeyDown={gemKey} className="gem-row rounded-lg p-1">
         {gems.map(gem => { const video = byId.get(gem.videoId); return video && <VideoMenu key={gem.videoId} id={gem.videoId} gem scanning={false} onAction={action}>
           <GemCard id={`gem-${gem.videoId}`} video={video} reason={gem.reason} variant={activeGem === gem.videoId ? "selected" : "default"} role="option" aria-selected={activeGem === gem.videoId} tabIndex={-1}
             onClick={() => { setGemId(gem.videoId); action("playGem", gem.videoId) }} onContextMenu={() => setGemId(gem.videoId)} />

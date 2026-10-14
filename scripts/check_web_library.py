@@ -2,6 +2,7 @@
 
 python scripts/check_web_library.py --prepare --count 24 --source <읽기 전용 폴더>
 python scripts/check_web_library.py --mode web --count 24 --verify --stay
+python scripts/check_web_library.py --mode web --verify-gems
 python scripts/check_web_library.py --prepare --count 5000
 python scripts/check_web_library.py --mode qt --count 5000
 """
@@ -15,6 +16,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 from statistics import median
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,8 +26,13 @@ parser.add_argument('--count', type=int, default=24)
 parser.add_argument('--prepare', action='store_true')
 parser.add_argument('--source', type=Path)
 parser.add_argument('--verify', action='store_true')
+parser.add_argument('--verify-gems', action='store_true', help='보석 0·1·4·5·10개의 배치와 가로 키 이동 검증')
 parser.add_argument('--stay', action='store_true')
 args = parser.parse_args()
+if args.verify_gems:
+    if args.mode != 'web' or args.prepare or args.verify:
+        parser.error('--verify-gems는 --mode web에서 단독으로 사용하세요')
+    args.count = 10
 os.environ['QT_QPA_PLATFORM'] = 'windows'
 os.environ['MVM_WEB_UI'] = '1' if args.mode == 'web' else '0'
 
@@ -42,6 +49,8 @@ from my_video_manager.ui import MainWindow
 app = QApplication([])
 directory = ROOT / '.local' / 'issue43' / f'demo-{args.count}'
 directory.mkdir(parents=True, exist_ok=True)
+if args.verify_gems:
+    directory = Path(tempfile.mkdtemp(prefix='gems-', dir=directory.parent))
 media_dir = directory / 'videos'
 media_dir.mkdir(exist_ok=True)
 
@@ -66,6 +75,14 @@ class DemoMedia:
 
 
 core = AppCore(media=DemoMedia(), clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc), database=directory / 'library.sqlite3')
+if args.verify_gems:
+    # 기존 데모 DB나 실제 영상을 바꾸지 않고 공개 API로 추천 경계 데이터를 만든다.
+    titles = ('바다', '숲', '음악', '도시', '과학', '역사', '여행', '요리', '그림', '언어')
+    for index, title in enumerate(titles):
+        # 같은 접두사 + 회차 번호는 시리즈로 묶여 첫 미완료 영상만 추천된다.
+        path = media_dir / f'{title}.mkv'
+        path.write_bytes(f'gem scenario {index}'.encode())
+        core.add_file(path)
 if args.prepare:
     if args.source:
         for path in args.source.rglob('*'):
@@ -163,25 +180,122 @@ screens.mkdir(exist_ok=True)
 window.grab().save(str(screens / f'{args.mode}-{args.count}.png'))
 metrics = {'mode': args.mode, 'count': args.count, 'startup_ms': round(startup, 2), 'checks': []}
 
+
+def gem_layout():
+    return js_json("""(() => {
+      const panel = document.querySelector('aside').getBoundingClientRect();
+      const buttons = [...document.querySelectorAll('aside button')];
+      const row = document.getElementById('hidden-gems');
+      const bounds = row?.getBoundingClientRect();
+      const cards = [...document.querySelectorAll('#hidden-gems [role=option]')];
+      const visible = el => { const r = el.getBoundingClientRect();
+        return r.left >= bounds.left && r.right <= bounds.right && r.top >= bounds.top && r.bottom <= bounds.bottom;
+      };
+      return {buttons: buttons.length, visibleButtons: buttons.filter(el => {
+        const r = el.getBoundingClientRect(); return r.top >= panel.top && r.bottom <= panel.bottom;
+      }).length, gems: cards.length, visibleGems: cards.filter(visible).length,
+      rowHeight: bounds?.height ?? 0, gridHeight: document.getElementById('library-grid').clientHeight,
+      cardWidth: cards[0]?.getBoundingClientRect().width ?? 0,
+      rows: new Set(cards.map(el => el.getBoundingClientRect().top)).size,
+      horizontalOverflow: row ? row.scrollWidth > row.clientWidth : false};
+    })()""")
+
+
+def contrast(selector):
+    # 실제 Chromium 계산색을 canvas의 sRGB로 변환해 투명 배경을 부모 색과 합성한다.
+    return js_json("""(() => {
+      const el = document.querySelector(SELECTOR);
+      const ctx = document.createElement('canvas').getContext('2d', {willReadFrequently:true});
+      const rgba = color => {ctx.clearRect(0,0,1,1); ctx.fillStyle=color; ctx.fillRect(0,0,1,1); return [...ctx.getImageData(0,0,1,1).data];};
+      const over = (a,b) => a.slice(0,3).map((v,i) => v*a[3]/255 + b[i]*(1-a[3]/255));
+      const ancestors = []; for(let p=el;p;p=p.parentElement) ancestors.unshift(p);
+      const background = ancestors.reduce((bg,p) => over(rgba(getComputedStyle(p).backgroundColor),bg),[255,255,255]);
+      const foreground = over(rgba(getComputedStyle(el).color),background);
+      const luminance = rgb => rgb.map(v => {v/=255; return v<=0.04045 ? v/12.92 : ((v+0.055)/1.055)**2.4;}).reduce((sum,v,i) => sum+v*[0.2126,0.7152,0.0722][i],0);
+      const [a,b] = [luminance(foreground),luminance(background)].sort((a,b)=>b-a);
+      return {foreground,background,ratio:(a+0.05)/(b+0.05),hovered:el.matches(':hover'),hoverCapable:matchMedia('(hover:hover)').matches};
+    })()""".replace('SELECTOR', json.dumps(selector)))
+
+
+if args.verify_gems:
+    layouts = []
+    previous_count = 0
+    videos = core.videos()
+    for count in (0, 1, 4, 5, 10):
+        for video in videos[previous_count:count]:
+            core.playback.start(video.id, 0)
+            core.playback.report(35)
+            core.playback.end()
+        previous_count = count
+        assert len(core.hidden_gems()) == count
+        page.refresh()
+        wait_until(lambda: js("document.querySelectorAll('#hidden-gems [role=option]').length") == count)
+        run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
+        layout = gem_layout()
+        layouts.append(layout)
+        window.grab().save(str(screens / f'web-gems-{count}.png'))
+        print(json.dumps(layout, ensure_ascii=False), flush=True)
+        (screens / 'web-gems-check.json').write_text(json.dumps(layouts, ensure_ascii=False, indent=2), encoding='utf-8')
+        assert layout['buttons'] == layout['visibleButtons'] == 8, layout
+        assert layout['rows'] == (1 if count else 0), layout
+        assert layout['visibleGems'] == min(count, 4), layout
+        if count:
+            assert layout['rowHeight'] == layouts[1]['rowHeight'], layouts
+            assert layout['gridHeight'] == layouts[1]['gridHeight'], layouts
+            assert layout['cardWidth'] == layouts[1]['cardWidth'], layouts
+        if count > 4:
+            js("document.getElementById('hidden-gems').focus()")
+            for index in range(1, count):
+                QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Right)
+                wait_until(lambda: js("document.getElementById('hidden-gems').getAttribute('aria-activedescendant')") == f'gem-{page.gem_ids[index]}')
+            run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
+            end_position = js_json("""(() => {const row = document.getElementById('hidden-gems');
+              const card = document.getElementById(row.getAttribute('aria-activedescendant')).getBoundingClientRect();
+              const r = row.getBoundingClientRect(); return {scrollLeft: row.scrollLeft, maxScroll:row.scrollWidth-row.clientWidth, width:row.clientWidth, left:card.left, right:card.right, rowLeft:r.left, rowRight:r.right};})()""")
+            assert end_position['scrollLeft'] > 0 and end_position['left'] >= end_position['rowLeft'] and end_position['right'] <= end_position['rowRight'], end_position
+            for index in range(count - 2, -1, -1):
+                QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Left)
+                wait_until(lambda: js("document.getElementById('hidden-gems').getAttribute('aria-activedescendant')") == f'gem-{page.gem_ids[index]}')
+            assert js("""(() => {const row = document.getElementById('hidden-gems');
+              const card = document.getElementById(row.getAttribute('aria-activedescendant')).getBoundingClientRect();
+              const r = row.getBoundingClientRect(); return card.left >= r.left && card.right <= r.right;})()"""), '왼쪽 첫 추천 카드가 보여야 한다'
+            layout['keyboardScrolledToEndAndBack'] = True
+            js("document.getElementById('hidden-gems').scrollLeft = 0")
+    (screens / 'web-gems-check.json').write_text(json.dumps(layouts, ensure_ascii=False, indent=2), encoding='utf-8')
+    button_selector = 'aside button[data-variant="destructive-outline"]'
+    contrasts = {'button': contrast(button_selector)}
+    point = js_json(f"(() => {{const r = document.querySelector({json.dumps(button_selector)}).getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2];}})()")
+    QTest.mouseMove(page.view.focusProxy(), QPoint(*map(int, point)))
+    settle(250)
+    contrasts['buttonHover'] = contrast(button_selector)
+    page.focus_content()
+    settle(100)
+    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
+    wait_until(lambda: js("!!document.querySelector('[role=menu]')"))
+    menu_selector = '[data-slot="context-menu-item"][data-variant="destructive"]'
+    contrasts['menu'] = contrast(menu_selector)
+    js(f'document.querySelector({json.dumps(menu_selector)}).focus()')
+    settle(100)
+    contrasts['menuFocus'] = contrast(menu_selector)
+    assert all(value['ratio'] >= 4.5 for value in contrasts.values()), contrasts
+    (screens / 'web-exclude-contrast.json').write_text(json.dumps(contrasts, indent=2), encoding='utf-8')
+    print(json.dumps({'contrast': contrasts}, ensure_ascii=False), flush=True)
+    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Escape)
+    window.tray.quit()
+    window.deleteLater()
+    app.processEvents()
+    raise SystemExit()
+
 if args.verify and args.mode == 'web':
     assert js("document.querySelector('img')?.naturalWidth") > 0, '썸네일 스킴'
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
     metrics['checks'].append('시작 직후 격자 포커스 (명시적 focus_content 호출 없음)')
-    layout = js_json("""(() => {
-      const panel = document.querySelector('aside').getBoundingClientRect();
-      const buttons = [...document.querySelectorAll('aside button')];
-      const row = document.getElementById('hidden-gems');
-      const bounds = row.getBoundingClientRect();
-      const cards = [...row.querySelectorAll('[role=option]')];
-      return {buttons: buttons.length, buttonsVisible: buttons.every(el => {
-        const r = el.getBoundingClientRect(); return r.top >= panel.top && r.bottom <= panel.bottom;
-      }), gems: cards.length, gemsVisible: cards.every(el => {
-        const r = el.getBoundingClientRect(); return r.left >= bounds.left && r.right <= bounds.right;
-      }), horizontalOverflow: row.scrollWidth > row.clientWidth};
-    })()""")
-    assert layout == dict(buttons=8, buttonsVisible=True, gems=4, gemsVisible=True, horizontalOverflow=False), layout
+    layout = gem_layout()
+    assert layout['buttons'] == layout['visibleButtons'] == 8, layout
+    assert layout['gems'] == len(page.gem_ids) and layout['rows'] <= 1, layout
+    assert layout['visibleGems'] == min(4, len(page.gem_ids)), layout
     metrics['layout'] = layout
-    metrics['checks'].append('1100×720 작업 버튼 8개·보석 4개 노출, 보석 가로 넘침 없음')
+    metrics['checks'].append('1100×720 작업 버튼 8개 노출, 보석 한 줄과 첫 4개 노출')
     js("document.getElementById('library-grid').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, isComposing:true}))")
     settle(100)
     assert core.playback.session is None

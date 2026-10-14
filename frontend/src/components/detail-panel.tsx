@@ -13,7 +13,7 @@ const actionVariants = cva("min-w-0", {
 })
 function DetailAction({ name, title, videoId, scanning, onAction, variant }: VariantProps<typeof actionVariants> & { name: Action; title: string; videoId: number; scanning: boolean; onAction: Props['onAction'] }) {
   return <div className={actionVariants({ variant })}>
-    <Button className="w-full" variant={name === "play" ? "default" : name === "exclude" ? "destructive" : "outline"} size="sm" disabled={scanning && lockedDuringScan(name)} onClick={() => onAction(name, videoId)}>{title}</Button>
+    <Button className="w-full" variant={name === "play" ? "default" : name === "exclude" ? "destructive-outline" : "outline"} size="sm" disabled={scanning && lockedDuringScan(name)} onClick={() => onAction(name, videoId)}>{title}</Button>
   </div>
 }
 function DetailActions({ videoId, scanning, onAction }: { videoId: number; scanning: boolean; onAction: Props['onAction'] }) {

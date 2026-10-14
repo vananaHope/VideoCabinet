@@ -7,7 +7,7 @@ export function VideoMenu({ id, gem = false, scanning, onAction, children }: { i
     <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
     <ContextMenuContent>
       {gem ? <ContextMenuItem onSelect={() => onAction("dismiss", id)}>관심 없음</ContextMenuItem> : actions.map(([name, title]) =>
-        <ContextMenuItem key={name} disabled={scanning && lockedDuringScan(name)} onSelect={() => onAction(name, id)}>{title}</ContextMenuItem>)}
+        <ContextMenuItem key={name} variant={name === "exclude" ? "destructive" : "default"} disabled={scanning && lockedDuringScan(name)} onSelect={() => onAction(name, id)}>{title}</ContextMenuItem>)}
     </ContextMenuContent>
   </ContextMenu>
 }
