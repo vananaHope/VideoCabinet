@@ -8,6 +8,8 @@ function Confirm-Exit([string]$Step) {
 
 python -c "import struct, sys; assert sys.version_info >= (3, 10) and struct.calcsize('P') == 8, '64-bit Python 3.10+ is required'"
 Confirm-Exit 'Python check'
+node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 12)) throw Error('Node 22.12+ is required')"
+Confirm-Exit 'Node check'
 if (-not (Test-Path '.venv/Scripts/python.exe')) {
     python -m venv .venv
     Confirm-Exit 'venv'
@@ -16,6 +18,21 @@ if (-not (Test-Path '.venv/Scripts/python.exe')) {
 Confirm-Exit 'pip upgrade'
 & .venv/Scripts/python.exe -m pip install -e '.[dev,cuda]'
 Confirm-Exit 'Python dependencies'
+& .venv/Scripts/python.exe -c "from PySide6 import QtWebEngineWidgets, QtWebChannel"
+Confirm-Exit 'Qt WebEngine / WebChannel'
+& .venv/Scripts/python.exe scripts/generate_web_types.py --check
+Confirm-Exit 'Web bridge types'
+Push-Location frontend
+try {
+    npm ci
+    Confirm-Exit 'Frontend dependencies'
+    npm run lint
+    Confirm-Exit 'Frontend lint'
+    npm run typecheck
+    Confirm-Exit 'Frontend typecheck'
+    npm run build
+    Confirm-Exit 'Frontend build'
+} finally { Pop-Location }
 
 if (-not $SkipFFmpeg -and -not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
     winget install --id Gyan.FFmpeg --version 9.0.2 --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
