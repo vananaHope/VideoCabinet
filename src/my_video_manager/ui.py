@@ -263,7 +263,8 @@ class MainWindow(QMainWindow):
             if not event.isAutoRepeat():
                 self.navigate(event.key() - Qt.Key.Key_1)
             return True
-        return self.pages.currentWidget().handle_key(event)
+        handle_key = getattr(self.pages.currentWidget(), "handle_key", None)
+        return handle_key(event) if callable(handle_key) else False
 
     def closeEvent(self, event):
         self.tray.close_window(event)

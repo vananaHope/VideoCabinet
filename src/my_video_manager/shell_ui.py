@@ -1,4 +1,7 @@
-"""사이드바 탐색과 후속 페이지로 교체할 임시 작업 진입 화면."""
+"""사이드바 탐색과 후속 페이지로 교체할 임시 작업 진입 화면.
+
+페이지는 handle_key(event) -> bool을 둘 수 있으며, 처리한 키에는 True를 돌려준다.
+"""
 
 from PySide6.QtCore import QSize, Signal
 from PySide6.QtWidgets import (

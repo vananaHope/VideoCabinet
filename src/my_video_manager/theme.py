@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtCore import QEvent, QObject
-from PySide6.QtWidgets import QAbstractItemView
+from PySide6.QtWidgets import QAbstractItemView, QComboBox, QStyledItemDelegate
 
 BACKGROUND = "#181818"
 SURFACE = "#242424"
@@ -53,14 +53,17 @@ QAbstractItemView::item {{ border: 1px solid transparent; }}
 QAbstractItemView::item:selected {{ background: {INACTIVE_SELECTION}; color: {TEXT}; }}
 QAbstractItemView[keyboardFocus="true"]::item:selected {{ background: {ACCENT_TINT}; }}
 QAbstractItemView::item:focus {{ border-color: {ACCENT}; }}
+QComboBox QAbstractItemView::item {{ border-left: 3px solid transparent; }}
+QComboBox QAbstractItemView::item:selected {{ border-left-color: {ACCENT}; }}
 QHeaderView::section, QTableCornerButton::section {{
     background: {SURFACE}; color: {TEXT}; border: 1px solid {BORDER}; padding: 4px;
 }}
 QTableView {{ gridline-color: {BORDER}; }}
 QMenuBar, QMenu {{ background: {SURFACE}; }}
 QMenu {{ border: 1px solid {BORDER}; }}
-QMenu::item {{ padding: 5px 20px; }}
+QMenu::item {{ padding: 5px 20px; border-left: 3px solid transparent; }}
 QMenu::item:selected, QMenuBar::item:selected {{ background: {ACCENT_TINT}; color: {TEXT}; }}
+QMenu::item:selected {{ border-left-color: {ACCENT}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px; }}
 QToolTip {{ background: {SURFACE}; color: {TEXT}; border: 1px solid {ACCENT}; padding: 4px; }}
 QScrollBar {{ background: {BACKGROUND}; }}
@@ -107,10 +110,15 @@ QAbstractSpinBox::up-button:disabled, QAbstractSpinBox::down-button:disabled {{
 """
 
 
-class _SelectionFocus(QObject):
-    """Qt의 item :active는 창 활성 상태이므로 실제 목록 포커스는 별도로 표시한다."""
+class _ThemeWidgets(QObject):
+    """목록의 실제 포커스를 표시하고 콤보 항목에도 스타일시트 테두리를 적용한다."""
 
     def eventFilter(self, watched, event):
+        if isinstance(watched, QComboBox) and event.type() == QEvent.Type.Polish:
+            # 기본 메뉴 delegate는 항목 테두리를 그리지 않는다. 사용자 delegate는 보존한다.
+            if watched.itemDelegate().metaObject().className() in ("QComboMenuDelegate", "QComboBoxDelegate"):
+                watched.setItemDelegate(QStyledItemDelegate(watched))
+        # Qt의 item :active는 목록 포커스가 아닌 창 활성 상태다.
         if isinstance(watched, QAbstractItemView) and event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
             watched.setProperty("keyboardFocus", event.type() == QEvent.Type.FocusIn)
             watched.style().unpolish(watched)
@@ -154,6 +162,6 @@ def apply_theme(app):
     app.setPalette(palette)
     app.setFont(QFont("Malgun Gothic", 10))
     app.setStyleSheet(STYLE_SHEET)
-    app._selection_focus = _SelectionFocus(app)
-    app.installEventFilter(app._selection_focus)
+    app._theme_widgets = _ThemeWidgets(app)
+    app.installEventFilter(app._theme_widgets)
     app.setProperty("darkThemeApplied", True)
