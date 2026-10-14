@@ -7,17 +7,21 @@ from PySide6.QtWidgets import (
     QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 from .core import CommandType
-from .highlight_ui import HighlightProgress, timestamp
+from .highlight_ui import HighlightProgress, PlaybackHighlights, timestamp
+from .key_display import display_keys
 from .key_settings_ui import key_name
 from .playback_help import PlaybackHelp
-from .theme import BORDER, SURFACE, WARNING
+from .theme import playback_stylesheet, playback_font
 
 
 class PlaybackPage(QWidget):
     def __init__(self, window):
         super().__init__(window)
         self.core, self.shell = window.core, window
+        self.setStyleSheet(playback_stylesheet())
+        self.setFont(playback_font())
         self.fullscreen = False
+        self.highlights_expanded = True
         self._shown_session = None
         self._help_requested = False
         self._error = ""
@@ -26,6 +30,7 @@ class PlaybackPage(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
         self.header = QWidget()
+        self.header.setObjectName('playbackHeader')
         top = QHBoxLayout(self.header)
         top.setContentsMargins(8, 4, 8, 4)
         self.back_button = QPushButton("목록으로 · Esc")
@@ -33,21 +38,34 @@ class PlaybackPage(QWidget):
         top.addWidget(self.back_button)
         self.title_label = QLabel()
         self.title_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.title_label.setProperty('playbackRole', 'title')
         self.title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         top.addWidget(self.title_label, 1)
         self.reel_label = QLabel()
+        self.reel_label.setProperty('playbackRole', 'muted')
         top.addWidget(self.reel_label)
+        self.highlights_button = QPushButton()
+        self.highlights_button.setCheckable(True)
+        self.highlights_button.setChecked(True)
+        self.highlights_button.clicked.connect(self.toggle_highlights)
+        top.addWidget(self.highlights_button)
         self._layout.addWidget(self.header)
+        content = QHBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(0)
         self.surface = QWidget()
         self.surface.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         self.surface.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
         self.surface.setObjectName("videoSurface")
         self.surface.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.surface.setMouseTracking(True)
-        self._layout.addWidget(self.surface, 1)
+        content.addWidget(self.surface, 1)
+        self.highlights_panel = PlaybackHighlights()
+        self.highlights_panel.activated.connect(self.jump_highlight)
+        content.addWidget(self.highlights_panel)
+        self._layout.addLayout(content, 1)
         self.bottom_bar = QWidget()
         self.bottom_bar.setObjectName("playbackBar")
-        self.bottom_bar.setStyleSheet(f"#playbackBar {{ background: {SURFACE}; border-top: 1px solid {BORDER}; }}")
         bottom = QVBoxLayout(self.bottom_bar)
         bottom.setContentsMargins(8, 0, 8, 4)
         bottom.setSpacing(0)
@@ -61,6 +79,7 @@ class PlaybackPage(QWidget):
         self.open_range_label.hide()
         self.speed_label = QLabel("1×")
         self.subtitle_label = QLabel("자막 없음")
+        self.subtitle_label.setProperty('playbackRole', 'muted')
         self.subtitle_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row.addWidget(self.position_label)
         row.addWidget(self.open_range_label)
@@ -87,7 +106,7 @@ class PlaybackPage(QWidget):
         self.message_label = QLabel()
         self.message_label.setWordWrap(True)
         self.message_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.message_label.setStyleSheet(f"color: {WARNING};")
+        self.message_label.setProperty('playbackRole', 'warning')
         self.message_label.hide()
         self.notice_timer = QTimer(self)
         self.notice_timer.setSingleShot(True)
@@ -112,6 +131,10 @@ class PlaybackPage(QWidget):
         QApplication.instance().installEventFilter(self)
         QWidget.setTabOrder(self.surface, self.menu_button)
         QWidget.setTabOrder(self.menu_button, self.back_button)
+        QWidget.setTabOrder(self.back_button, self.highlights_button)
+        QWidget.setTabOrder(self.highlights_button, self.highlights_panel.list)
+        QWidget.setTabOrder(self.highlights_panel.list, self.surface)
+        self.refresh_key_help()
 
     def focus_content(self):
         if self.isVisible() and QApplication.activeModalWidget() is None:
@@ -127,8 +150,56 @@ class PlaybackPage(QWidget):
 
     def refresh_key_help(self):
         self.help_panel.refresh(self.core)
+        bindings = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
+        self.highlights_button.setText('하이라이트 패널 ' + ('접기' if self.highlights_expanded else '펴기'))
+        self.highlights_button.setToolTip('하이라이트 패널 접기 / 펴기 · '
+                                         + bindings[CommandType.TOGGLE_HIGHLIGHT_LIST])
+        point_keys = next(row.keys for row in self.core.key_bindings()
+                          if row.command.kind == CommandType.POINT_HIGHLIGHT)
+        guidance = (f'지점 하이라이트 키({display_keys(point_keys)})로 지금 순간을 남겨 보세요.'
+                    if point_keys else '키 설정에서 지점 하이라이트 키를 정하면 지금 순간을 남길 수 있습니다.')
+        self.highlights_panel.empty.setText('아직 하이라이트가 없습니다.\n' + guidance)
         if self._help_requested:
             self.help_panel.place_over(self.surface)
+
+    def toggle_highlights(self):
+        # 전체 화면에서는 항상 숨기고, 창 모드의 선택은 보존한다.
+        if self.fullscreen:
+            return
+        self.highlights_expanded = not self.highlights_expanded
+        self.highlights_panel.setVisible(self.highlights_expanded)
+        self.highlights_button.setChecked(self.highlights_expanded)
+        self.refresh_key_help()
+        self.focus_content()
+
+    def refresh_highlights(self):
+        session = self.core.playback.session
+        if session:
+            highlights = self.core.highlights(session.video_id)
+            self.progress.highlights = highlights
+            self.highlights_panel.show_highlights(highlights, self.core.playback.position, video_id=session.video_id)
+            self.progress.update()
+
+    def jump_highlight(self, highlight):
+        window = self.shell
+        try:
+            window.sync_position()
+            session = self.core.playback.session
+            if session is None or session.video_id != highlight.video_id:
+                return  # 위치 보고 중 자동 전환된 이전 영상의 클릭은 버린다.
+            if not any(h.id == highlight.id for h in self.core.highlights(session.video_id)):
+                self.refresh_highlights()
+                return
+            if self.core.reel_playback is not None:
+                # 검수 이동과 같이 기존 복습을 닫고 새 일반 시청으로 전환한다.
+                window.end_playback()
+                window.playback_list = window.library_page.visible_video_ids()
+                window.play_video(highlight.video_id, start=highlight.start)
+            elif window.player:
+                window.player.seek_to(highlight.start, resume=True)
+            self.focus_content()
+        except Exception as error:
+            QMessageBox.warning(window, '하이라이트 이동 실패', str(error))
 
     def toggle_help(self):
         if self._help_requested:
@@ -147,6 +218,7 @@ class PlaybackPage(QWidget):
     def set_fullscreen(self, enabled):
         self.fullscreen = enabled
         self.header.setVisible(not enabled)
+        self.highlights_panel.setVisible(not enabled and self.highlights_expanded)
         self.bar_timer.stop()
         self.bottom_bar.setVisible(not enabled)
         self.message_label.setVisible(bool(self._error or (not enabled and self.message_label.text())))
@@ -182,6 +254,8 @@ class PlaybackPage(QWidget):
 
     def eventFilter(self, watched, event):
         kind = event.type()
+        if watched is self.surface and kind == QEvent.Type.Resize and self._help_requested:
+            QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))
         if watched is self.shell:
             if kind in (QEvent.Type.Move, QEvent.Type.Resize) and self._help_requested:
                 QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))
@@ -207,6 +281,7 @@ class PlaybackPage(QWidget):
             return
         video_id = self.core.playback.session.video_id
         self._details = self.core.library_details(video_id)
+        self.refresh_highlights()
         self.update_subtitle_label()
 
     def update_subtitle_label(self):
@@ -252,6 +327,8 @@ class PlaybackPage(QWidget):
         self.progress.position = position
         self.progress.open_start = open_start
         self.progress.update()
+        if session:
+            self.highlights_panel.show_highlights(self.progress.highlights, position, video_id=session.video_id)
         self.position_label.setText(f"{timestamp(position)} / {timestamp(duration)}")
         self.open_range_label.setText(f"구간 시작 {timestamp(open_start).split('.')[0]}"
                                       if open_start is not None else "")
@@ -290,9 +367,17 @@ class PlaybackPage(QWidget):
                     window.back_to_list()
             return True
         focus = QApplication.focusWidget()
-        if focus in (self.menu_button, self.back_button) and event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+        if focus is self.highlights_panel.list:
+            if event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab, Qt.Key.Key_Up, Qt.Key.Key_Down,
+                               Qt.Key.Key_Home, Qt.Key.Key_End, Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
+                return False
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+                if not event.isAutoRepeat():
+                    self.highlights_panel.activate(self.highlights_panel.list.currentItem())
+                return True
+        if focus in (self.menu_button, self.back_button, self.highlights_button) and event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
             return False
-        if (focus is self.back_button and event.key() == Qt.Key.Key_Space
+        if (focus in (self.back_button, self.highlights_button) and event.key() == Qt.Key.Key_Space
                 and event.modifiers() == Qt.KeyboardModifier.NoModifier):
             return False
         if (focus is self.menu_button
@@ -302,6 +387,10 @@ class PlaybackPage(QWidget):
                 self.menu.popup(self.menu_button.mapToGlobal(self.menu_button.rect().topRight()))
             return True
         command = window.core.command_for_key(key_name(event) or "")
+        if command and command.kind == CommandType.TOGGLE_HIGHLIGHT_LIST:
+            if not event.isAutoRepeat():
+                self.toggle_highlights()
+            return True
         if command and command.kind == CommandType.TOGGLE_FULLSCREEN:
             if not event.isAutoRepeat():
                 window.set_playback_fullscreen(not window.isFullScreen())

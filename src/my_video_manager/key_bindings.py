@@ -63,6 +63,7 @@ def command_label(command: Command) -> str:
         "toggle_subtitle_language": "원어 / 번역 자막 전환",
         "toggle_reel_repeat": "구간 반복 켜기 / 끄기",
         "toggle_fullscreen": "전체 화면 켜기 / 끄기",
+        "toggle_highlight_list": "하이라이트 패널 접기 / 펴기",
     }.get(kind, kind)
 
 

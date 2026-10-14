@@ -6,6 +6,58 @@ from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QAbstractItemView, QComboBox, QLabel, QStyledItemDelegate
 
+from .web_tokens import web_tokens
+
+# 웹과 네이티브 재생의 단일 원본. 기존 Qt 페이지의 테마는 전환 때까지 유지한다.
+_WEB = web_tokens()
+PLAYBACK_COLORS = _WEB["colors"]
+
+
+def playback_pixels(group, name):
+    """웹의 rem 값을 Qt 논리 픽셀로 변환한다(CSS 기본 1rem = 16px)."""
+    return round(float(_WEB[group][name].removesuffix("rem")) * 16)
+
+
+def playback_font(size="text-sm"):
+    font = QFont(_WEB["typography"]["font-sans"].split(",")[0].strip('"'))
+    font.setPixelSize(playback_pixels("typography", size))
+    return font
+
+
+def playback_stylesheet():
+    c = PLAYBACK_COLORS
+    radius = playback_pixels("layout", "radius") // 2
+    spacing = playback_pixels("layout", "spacing")
+    return f"""
+    QWidget {{ color: {c['foreground']}; background: {c['background']};
+        font-family: {_WEB['typography']['font-sans'].split(',')[0]};
+        font-size: {playback_pixels('typography', 'text-sm')}px; }}
+    QLabel {{ background: transparent; }}
+    QWidget#playbackHeader, QWidget#playbackBar, QWidget#playbackHighlights,
+    QWidget#playbackHelp {{ background: {c['card']}; }}
+    QWidget#playbackHeader {{ border-bottom: 1px solid {c['border']}; }}
+    QWidget#playbackBar {{ border-top: 1px solid {c['border']}; }}
+    QWidget#playbackHighlights {{ border-left: 1px solid {c['border']}; }}
+    QWidget#playbackHelp {{ border: 1px solid {c['border']}; border-radius: {radius}px; }}
+    QLabel[playbackRole="muted"] {{ color: {c['muted-foreground']}; }}
+    QLabel[playbackRole="warning"] {{ color: {c['highlight-open']}; }}
+    QLabel[playbackRole="title"] {{ font-weight: 600; }}
+    QPushButton, QToolButton {{ background: {c['secondary']}; color: {c['foreground']};
+        border: 1px solid {c['border']}; border-radius: {radius}px;
+        padding: {spacing}px {spacing * 2}px; }}
+    QPushButton:hover, QToolButton:hover {{ border-color: {c['muted-foreground']}; }}
+    QPushButton:checked {{ background: {c['secondary']}; color: {c['primary-text']}; }}
+    QPushButton:focus, QToolButton:focus, QAbstractItemView:focus {{ border: 2px solid {c['ring']}; }}
+    QListWidget {{ background: {c['card']}; border: 2px solid transparent; outline: none; }}
+    QMenu {{ background: {c['popover']}; color: {c['popover-foreground']}; border: 1px solid {c['border']}; }}
+    QMenu::item:selected {{ background: {c['secondary']}; border-left-color: {c['ring']}; }}
+    QScrollBar {{ background: {c['card']}; }}
+    QScrollBar::handle {{ background: {c['border']}; }}
+    QScrollBar::handle:hover {{ background: {c['muted-foreground']}; }}
+    QScrollBar::add-page, QScrollBar::sub-page {{ background: {c['card']}; }}
+    QWidget#videoSurface {{ background: {VIDEO_BACKGROUND}; border: 0; }}
+    """
+
 BACKGROUND = "#181818"
 SURFACE = "#242424"
 BORDER = "#454b54"
@@ -22,9 +74,6 @@ DISABLED_TEXT = "#777777"
 DISABLED_BORDER = "#333333"
 PROGRESS_PLAYED = "#355d87"
 WARNING = "#f69b50"
-HIGHLIGHT_POINT = "#ffd166"
-HIGHLIGHT_RANGE = "#70d6a3"
-HIGHLIGHT_OPEN = WARNING
 VIDEO_BACKGROUND = "#000000"
 
 _ICONS = (Path(__file__).parent / "theme_icons").as_posix()

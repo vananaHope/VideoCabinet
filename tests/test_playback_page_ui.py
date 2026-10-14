@@ -28,6 +28,8 @@ class Player:
         self.options = (1, True)
         self.commands = []
         self.closed = False
+        self.seeks = []
+        self.positions = []
 
     def play(self, path, start, *, subtitle):
         pass
@@ -36,7 +38,8 @@ class Player:
         self.closed = True
 
     def take_positions(self):
-        return ()
+        positions, self.positions = self.positions, []
+        return positions
 
     def take_eof(self):
         return False
@@ -50,7 +53,7 @@ class Player:
         self.options = options
 
     def seek_to(self, position, *, resume=False):
-        pass
+        self.seeks.append((position, resume))
 
     def execute(self, command):
         self.commands.append(command)
@@ -292,3 +295,161 @@ def test_space_activates_focused_back_button(window):
     key(window, Qt.Key.Key_Space)
     assert window.core.playback.session is None
     assert window.pages.currentWidget() is window.library_page
+
+
+def add_highlight(window, start, end=None, note=''):
+    core = window.core
+    core.playback.report(start, seeked=True)
+    core.execute_highlight_command(core.command_for_key('Insert'))
+    highlight = next(h for h in core.highlights(core.playback.session.video_id) if h.start == start)
+    core.update_highlight(highlight.id, start=start, end=end, note=note)
+    window.refresh_highlights()
+    return highlight.id
+
+
+def test_highlight_click_seeks_engine_without_inventing_position_reports(window):
+    add_highlight(window, 20, note='다시 볼 장면')
+    window.core.playback.report(1, seeked=True)
+    window.sync_position()
+    panel = window.playback_page.highlights_panel
+    session = window.core.playback.session
+    QTest.mouseClick(panel.list.viewport(), Qt.MouseButton.LeftButton,
+                     pos=panel.list.visualItemRect(panel.list.item(0)).center())
+    assert window.player.seeks == [(20, True)]
+    assert window.core.playback.position == 1
+    assert window.core.playback.session is session
+    window.player.positions = [(20, True)]
+    window.sync_position()
+    assert window.core.playback.position == 20
+    assert window.surface.hasFocus()
+
+
+def test_playback_position_changes_preserve_highlight_selection(window):
+    add_highlight(window, 10)
+    add_highlight(window, 20, end=30, note='구간')
+    panel = window.playback_page.highlights_panel
+    panel.list.setCurrentRow(0)
+    for position in (15, 25, 100):
+        window.core.playback.report(position, seeked=True)
+        window.sync_position()
+        assert panel.list.currentRow() == 0
+
+
+def test_highlight_toggle_custom_key_fullscreen_restore_and_next_video(window):
+    page = window.playback_page
+    panel = page.highlights_panel
+    assert panel.empty.isVisible()
+    add_highlight(window, 10)
+    assert not panel.empty.isVisible()
+    bindings = {row.command: row.keys for row in window.core.key_bindings()}
+    bindings[Command(CommandType.TOGGLE_HIGHLIGHT_LIST)] = ('L',)
+    window.core.save_key_bindings(bindings)
+    window.refresh_key_help()
+    assert 'L' in page.highlights_button.toolTip()
+    key(window, Qt.Key.Key_L)
+    assert not panel.isVisible()
+    key(window, Qt.Key.Key_Apostrophe)
+    key(window, Qt.Key.Key_L)
+    assert not panel.isVisible()
+    key(window, Qt.Key.Key_Escape)
+    assert not panel.isVisible()
+    key(window, Qt.Key.Key_L)
+    assert panel.isVisible()
+    key(window, Qt.Key.Key_Apostrophe)
+    key(window, Qt.Key.Key_Escape)
+    assert panel.isVisible()
+    key(window, Qt.Key.Key_PageDown)
+    window.sync_position()
+    assert panel.list.count() == 0
+    assert panel.empty.isVisible()
+
+
+def test_highlight_list_keyboard_and_long_memo_do_not_cover_surface(window):
+    for start in range(1, 60):
+        add_highlight(window, start, note='<b>긴 메모</b>\n' * 100 if start == 2 else '')
+    page = window.playback_page
+    panel = page.highlights_panel
+    QApplication.processEvents()
+    panel.list.setFocus()
+    panel.list.setCurrentRow(0)
+    key(window, Qt.Key.Key_Down)
+    assert panel.list.currentRow() == 1
+    assert not window.player.commands
+    assert '<b>긴 메모</b>' in panel.list.currentItem().toolTip()
+    assert window.width() == 1100
+    assert page.surface.geometry().right() < panel.geometry().left()
+    assert panel.list.verticalScrollBar().maximum() > 0
+    key(window, Qt.Key.Key_Return)
+    assert window.player.seeks == [(2, True)]
+    assert window.surface.hasFocus()
+
+
+def test_highlight_click_exits_reel_preserves_revisit_and_starts_viewing(window):
+    first = add_highlight(window, 10, end=40)
+    add_highlight(window, 50)
+    window.reel.open()
+    window.reel.start(first)
+    window.sync_position()
+    core = window.core
+    core.playback.report(11)
+    core.playback.report(14)
+    assert core.last_highlight_revisited_at(first) is not None
+    revisit = core.last_highlight_revisited_at(first)
+    panel = window.playback_page.highlights_panel
+    QTest.mouseClick(panel.list.viewport(), Qt.MouseButton.LeftButton,
+                     pos=panel.list.visualItemRect(panel.list.item(1)).center())
+    assert core.reel_playback is None
+    assert core.playback.session.record_viewing
+    assert core.playback.position == 50
+    assert core.last_highlight_revisited_at(first) == revisit
+    assert not window.playback_page.reel_label.isVisible()
+    assert window.reel.shown is None
+
+
+@pytest.mark.parametrize('transition', ['series', 'reel'])
+def test_video_transition_resets_highlight_scroll_and_selection(window, transition):
+    core = window.core
+    first, second = core.videos()
+    # 공개 도메인 API로 두 영상에 충분히 긴 목록을 만든다.
+    for video in (first, second):
+        core.switch_to(video.id)
+        for position in range(1, 61):
+            core.playback.report(position, seeked=True)
+            core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
+    if transition == 'reel':
+        # 첫 영상 마지막 항목을 마치면 다음 영상으로 자동 전환한다.
+        window.reel.open()
+        window.reel.start(core.highlights(first.id)[-1].id)
+    else:
+        assert core.series_for_video(first.id).video_ids == (first.id, second.id)
+        window.play(first.id)
+    window.sync_position()
+    QApplication.processEvents()
+    panel = window.playback_page.highlights_panel
+    panel.list.setCurrentRow(55)
+    panel.list.scrollToBottom()
+    assert panel.list.verticalScrollBar().value() > 0
+    if transition == 'reel':
+        window.player.positions = [(core.reel_playback.end, False)]
+        window.poll_position()
+    else:
+        key(window, Qt.Key.Key_PageDown)
+    window.sync_position()
+    QApplication.processEvents()
+    assert core.playback.session.video_id == second.id
+    assert panel.list.count() == 60
+    assert panel.list.verticalScrollBar().value() == 0
+    assert panel.list.currentItem() is None
+    assert panel.list.selectedItems() == []
+
+
+def test_unassigned_point_key_guidance_and_panel_command_name(window):
+    bindings = {row.command: row.keys for row in window.core.key_bindings()}
+    bindings[Command(CommandType.POINT_HIGHLIGHT)] = ()
+    window.core.save_key_bindings(bindings)
+    window.refresh_key_help()
+    page = window.playback_page
+    assert '키 설정에서 지점 하이라이트 키를 정하면' in page.highlights_panel.empty.text()
+    assert '하이라이트 패널 접기 / 펴기' in page.highlights_button.toolTip()
+    key(window, Qt.Key.Key_F1)
+    assert '하이라이트 패널 접기 / 펴기' in page.help_panel.text.text()

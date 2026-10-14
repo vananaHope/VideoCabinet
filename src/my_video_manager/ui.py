@@ -259,6 +259,8 @@ class MainWindow(QMainWindow):
         self.progress.open_start = self.core.open_highlight_start
         self.progress.position = self.core.playback.position
         self.progress.update()
+        self.playback_page.highlights_panel.show_highlights(
+            self.progress.highlights, self.progress.position, video_id=self.core.playback.session.video_id)
 
     def show_highlights(self):
         if self.core.playback.session is not None:
