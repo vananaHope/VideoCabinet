@@ -19,5 +19,8 @@ my-video-manager = "my_video_manager.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+my_video_manager = ["theme_icons/*.svg"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

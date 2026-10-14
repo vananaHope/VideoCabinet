@@ -82,7 +82,7 @@ class TrayControls(QObject):
                     return
                 window.translations.shutdown()
             elif not QSystemTrayIcon.isSystemTrayAvailable():
-                raise RuntimeError("시스템 트레이를 사용할 수 없습니다. 앱 메뉴의 완전 종료를 이용하세요.")
+                raise RuntimeError("시스템 트레이를 사용할 수 없습니다. 사이드바 설정(Ctrl+6)의 완전 종료를 이용하세요.")
             window.end_playback()
         except Exception as error:
             self.quitting = False

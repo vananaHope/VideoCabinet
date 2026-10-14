@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 from .tag_ui import TagEditor
-from .theme import ACCENT, BORDER, TEXT, HIGHLIGHT_POINT, HIGHLIGHT_RANGE, HIGHLIGHT_OPEN
+from .theme import PROGRESS_PLAYED, BORDER, TEXT, HIGHLIGHT_POINT, HIGHLIGHT_RANGE, HIGHLIGHT_OPEN
 
 
 def timestamp(seconds: float) -> str:
@@ -42,7 +42,7 @@ class HighlightProgress(QWidget):
         def x(seconds):
             return left + round(width * max(0, min(1, seconds / self.duration)))
 
-        painter.fillRect(left, 10, x(self.position) - left, 12, QColor(ACCENT))
+        painter.fillRect(left, 10, x(self.position) - left, 12, QColor(PROGRESS_PLAYED))
         for highlight in self.highlights:
             if highlight.end is None:
                 painter.fillRect(x(highlight.start) - 2, 5, 4, 22, QColor(HIGHLIGHT_POINT))

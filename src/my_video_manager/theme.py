@@ -1,7 +1,10 @@
 """앱 전체의 고정 다크 테마. 페이지와 직접 그리는 위젯도 같은 색을 쓴다."""
 
+from pathlib import Path
+
 from PySide6.QtGui import QColor, QFont, QPalette
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject
+from PySide6.QtWidgets import QAbstractItemView
 
 BACKGROUND = "#181818"
 SURFACE = "#242424"
@@ -9,22 +12,28 @@ BORDER = "#454b54"
 TEXT = "#eeeeee"
 MUTED_TEXT = "#aaaaaa"
 ACCENT = "#79b8ff"
-ACCENT_TEXT = "#121212"
+ACCENT_TINT = "#1e3a5f"
+INACTIVE_SELECTION = "#2a3440"
+DISABLED_TEXT = "#777777"
+DISABLED_BORDER = "#333333"
+PROGRESS_PLAYED = "#355d87"
 WARNING = "#f69b50"
 HIGHLIGHT_POINT = "#ffd166"
 HIGHLIGHT_RANGE = "#70d6a3"
 HIGHLIGHT_OPEN = WARNING
 VIDEO_BACKGROUND = "#000000"
 
+_ICONS = (Path(__file__).parent / "theme_icons").as_posix()
+
 STYLE_SHEET = f"""
 QWidget {{ color: {TEXT}; background-color: {BACKGROUND}; }}
-QWidget:disabled {{ color: {MUTED_TEXT}; }}
+QWidget:disabled {{ color: {DISABLED_TEXT}; }}
 QLabel {{ background: transparent; }}
 QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox,
 QAbstractItemView {{
     background: {SURFACE}; border: 2px solid {BORDER};
-    border-radius: 3px; selection-background-color: {ACCENT};
-    selection-color: {ACCENT_TEXT};
+    border-radius: 3px; selection-background-color: {ACCENT_TINT};
+    selection-color: {TEXT};
 }}
 QLineEdit, QAbstractSpinBox, QComboBox {{ padding: 4px; }}
 QPushButton, QToolButton {{
@@ -32,7 +41,7 @@ QPushButton, QToolButton {{
     border-radius: 4px; padding: 5px 8px;
 }}
 QPushButton:hover, QToolButton:hover {{ border-color: {MUTED_TEXT}; }}
-QPushButton:checked {{ border-color: {ACCENT}; }}
+QPushButton:checked {{ background: {ACCENT_TINT}; border-color: {BORDER}; }}
 QPushButton:pressed, QToolButton:pressed {{ background: {BORDER}; }}
 QCheckBox, QRadioButton {{ border: 2px solid transparent; padding: 2px; }}
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QAbstractSpinBox:focus,
@@ -40,8 +49,10 @@ QComboBox:focus, QAbstractItemView:focus, QPushButton:focus, QToolButton:focus,
 QCheckBox:focus, QRadioButton:focus, QSlider:focus, QTabBar:focus {{
     border: 2px solid {ACCENT};
 }}
-QAbstractItemView::item:selected {{ background: {ACCENT}; color: {ACCENT_TEXT}; }}
-QAbstractItemView::item:focus {{ border: 1px solid {ACCENT}; }}
+QAbstractItemView::item {{ border: 1px solid transparent; }}
+QAbstractItemView::item:selected {{ background: {INACTIVE_SELECTION}; color: {TEXT}; }}
+QAbstractItemView[keyboardFocus="true"]::item:selected {{ background: {ACCENT_TINT}; }}
+QAbstractItemView::item:focus {{ border-color: {ACCENT}; }}
 QHeaderView::section, QTableCornerButton::section {{
     background: {SURFACE}; color: {TEXT}; border: 1px solid {BORDER}; padding: 4px;
 }}
@@ -49,7 +60,7 @@ QTableView {{ gridline-color: {BORDER}; }}
 QMenuBar, QMenu {{ background: {SURFACE}; }}
 QMenu {{ border: 1px solid {BORDER}; }}
 QMenu::item {{ padding: 5px 20px; }}
-QMenu::item:selected, QMenuBar::item:selected {{ background: {ACCENT}; color: {ACCENT_TEXT}; }}
+QMenu::item:selected, QMenuBar::item:selected {{ background: {ACCENT_TINT}; color: {TEXT}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px; }}
 QToolTip {{ background: {SURFACE}; color: {TEXT}; border: 1px solid {ACCENT}; padding: 4px; }}
 QScrollBar {{ background: {BACKGROUND}; }}
@@ -61,26 +72,57 @@ QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: {BACKGROUND}; }}
 QTabWidget::pane {{ border: 1px solid {BORDER}; }}
 QTabBar::tab {{ background: {SURFACE}; border: 2px solid {BORDER}; padding: 6px 12px; }}
-QTabBar::tab:selected {{ border-bottom-color: {ACCENT}; }}
+QTabBar::tab:selected {{ background: {ACCENT_TINT}; }}
 QTabBar::tab:focus {{ border-color: {ACCENT}; }}
 QGroupBox {{ border: 1px solid {BORDER}; margin-top: 12px; padding-top: 8px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 8px; }}
 QProgressBar {{ border: 1px solid {BORDER}; background: {SURFACE}; text-align: center; }}
-QProgressBar::chunk {{ background: {ACCENT}; }}
+QProgressBar::chunk {{ background: {PROGRESS_PLAYED}; }}
 QWidget#videoSurface {{ background: {VIDEO_BACKGROUND}; border: 2px solid {VIDEO_BACKGROUND}; }}
 QWidget#videoSurface:focus {{ border-color: {ACCENT}; }}
 QListWidget#navigation {{ border: 2px solid transparent; }}
 QListWidget#navigation:focus {{ border-color: {ACCENT}; }}
-QListWidget#navigation::item {{ padding: 10px 6px; }}
+QListWidget#navigation::item {{ padding: 10px 6px; border-left: 3px solid transparent; }}
+QListWidget#navigation::item:selected {{ border-left-color: {ACCENT}; }}
+QCheckBox::indicator {{
+    width: 14px; height: 14px; border: 2px solid {MUTED_TEXT};
+    background: {SURFACE}; border-radius: 2px;
+}}
+QCheckBox::indicator:checked {{ background: {MUTED_TEXT}; image: url("{_ICONS}/check.svg"); }}
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{
+    background: {MUTED_TEXT}; border: 1px solid {BORDER}; width: 18px;
+}}
+QAbstractSpinBox::up-arrow {{ image: url("{_ICONS}/up.svg"); width: 8px; height: 5px; }}
+QAbstractSpinBox::down-arrow {{ image: url("{_ICONS}/down.svg"); width: 8px; height: 5px; }}
+QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled,
+QAbstractSpinBox:disabled, QComboBox:disabled, QAbstractItemView:disabled,
+QPushButton:disabled, QToolButton:disabled, QCheckBox::indicator:disabled {{
+    color: {DISABLED_TEXT}; border-color: {DISABLED_BORDER};
+}}
+QCheckBox::indicator:checked:disabled {{ background: {DISABLED_TEXT}; }}
+QAbstractItemView::item:disabled {{ color: {DISABLED_TEXT}; }}
+QAbstractSpinBox::up-button:disabled, QAbstractSpinBox::down-button:disabled {{
+    background: {DISABLED_BORDER}; border-color: {DISABLED_BORDER};
+}}
 """
+
+
+class _SelectionFocus(QObject):
+    """Qt의 item :active는 창 활성 상태이므로 실제 목록 포커스는 별도로 표시한다."""
+
+    def eventFilter(self, watched, event):
+        if isinstance(watched, QAbstractItemView) and event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+            watched.setProperty("keyboardFocus", event.type() == QEvent.Type.FocusIn)
+            watched.style().unpolish(watched)
+            watched.style().polish(watched)
+            watched.viewport().update()
+        return False
 
 
 def apply_theme(app):
     """QApplication 생성 직후 한 번 호출한다. 독립 창에도 같은 팔레트가 상속된다."""
     if app.property("darkThemeApplied"):
         return
-    # OS 기본 스타일과 네이티브 파일 대화상자의 밝은 배경이 섞이지 않게 한다.
-    app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs)
     app.setStyle("Fusion")
     palette = QPalette()
     for role, color in {
@@ -93,8 +135,8 @@ def apply_theme(app):
         QPalette.ColorRole.ButtonText: TEXT,
         QPalette.ColorRole.ToolTipBase: SURFACE,
         QPalette.ColorRole.ToolTipText: TEXT,
-        QPalette.ColorRole.Highlight: ACCENT,
-        QPalette.ColorRole.HighlightedText: ACCENT_TEXT,
+        QPalette.ColorRole.Highlight: ACCENT_TINT,
+        QPalette.ColorRole.HighlightedText: TEXT,
         QPalette.ColorRole.PlaceholderText: MUTED_TEXT,
         QPalette.ColorRole.Link: ACCENT,
         QPalette.ColorRole.LinkVisited: ACCENT,
@@ -107,8 +149,11 @@ def apply_theme(app):
     }.items():
         palette.setColor(role, QColor(color))
     for role in (QPalette.ColorRole.Text, QPalette.ColorRole.WindowText, QPalette.ColorRole.ButtonText):
-        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(MUTED_TEXT))
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(DISABLED_TEXT))
+    palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, QColor(INACTIVE_SELECTION))
     app.setPalette(palette)
     app.setFont(QFont("Malgun Gothic", 10))
     app.setStyleSheet(STYLE_SHEET)
+    app._selection_focus = _SelectionFocus(app)
+    app.installEventFilter(app._selection_focus)
     app.setProperty("darkThemeApplied", True)
