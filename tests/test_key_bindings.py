@@ -345,6 +345,8 @@ def test_display_multiple_or_unassigned_keys(keys, expected):
 
 def test_fullscreen_default_label_rebinding_and_reset(tmp_path):
     core = open_core(tmp_path)
+    assert core.key_bindings()[0].command.kind == CommandType.TOGGLE_PAUSE
+    assert core.key_bindings()[-1].command.kind == CommandType.TOGGLE_FULLSCREEN
     command = Command(CommandType.TOGGLE_FULLSCREEN)
     row = next(row for row in core.key_bindings() if row.command == command)
     assert row.label == "전체 화면 켜기 / 끄기"

@@ -50,7 +50,6 @@ class Command:
 
 
 DEFAULT_KEY_BINDINGS = {
-    "'": Command(CommandType.TOGGLE_FULLSCREEN),
     "Enter": Command(CommandType.TOGGLE_PAUSE),
     "Left": Command(CommandType.SEEK, -5),
     "Right": Command(CommandType.SEEK, 5),
@@ -66,6 +65,7 @@ DEFAULT_KEY_BINDINGS = {
     "PgDn": Command(CommandType.NEXT_VIDEO),
     ".": Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE),
     "\\": Command(CommandType.TOGGLE_REEL_REPEAT),
+    "'": Command(CommandType.TOGGLE_FULLSCREEN),
 }
 
 MIN_PLAYBACK_SPEED = 0.25

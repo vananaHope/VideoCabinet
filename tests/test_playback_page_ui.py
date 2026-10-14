@@ -226,3 +226,69 @@ def test_inactive_window_does_not_handle_playback_keys(window):
     assert not window.isFullScreen()
     assert not window.playback_page.help_panel.isVisible()
     other.close()
+
+
+@pytest.mark.parametrize("fullscreen", [False, True])
+def test_settings_menu_shortcut_and_return_to_playback_focus(window, fullscreen):
+    if fullscreen:
+        key(window, Qt.Key.Key_Apostrophe)
+    key(window, Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+    assert QApplication.activePopupWidget() is window.settings_menu
+    assert window.isFullScreen() is fullscreen
+    QTest.keyClick(window.settings_menu, Qt.Key.Key_Escape)
+    QApplication.processEvents()
+    assert not window.settings_menu.isVisible()
+    assert window.surface.hasFocus()
+    assert window.isFullScreen() is fullscreen
+    assert window.core.playback.session is not None
+
+
+def test_open_range_start_is_visible_until_range_is_finished(window):
+    window.core.playback.report(10)
+    key(window, Qt.Key.Key_Delete)
+    page = window.playback_page
+    assert page.open_range_label.isVisible()
+    assert page.open_range_label.text() == "구간 시작 00:00:10"
+    assert "Delete: 끝내기" in page.position_label.toolTip()
+    window.core.playback.report(15)
+    key(window, Qt.Key.Key_Delete)
+    assert not page.open_range_label.isVisible()
+
+
+def test_general_notice_expires_and_does_not_change_fullscreen_bar(window):
+    page = window.playback_page
+    window.statusBar().showMessage("자막 대기열에 추가했습니다")
+    assert page.message_label.isVisible()
+    QTest.qWait(5200)
+    assert not page.message_label.isVisible()
+    assert page.message_label.text() == ""
+    key(window, Qt.Key.Key_Apostrophe)
+    window.statusBar().showMessage("번역 진행 · 10/100줄")
+    assert not page.bottom_bar.isVisible()
+    key(window, Qt.Key.Key_Right)
+    assert page.bottom_bar.isVisible()
+    assert not page.message_label.isVisible()
+    page.show_error("재생 위치 확인 실패")
+    window.statusBar().showMessage("번역 완료")
+    assert page.bottom_bar.isVisible()
+    assert page.message_label.isVisible()
+    assert page.message_label.text() == "재생 위치 확인 실패"
+    assert not page.notice_timer.isActive()
+
+
+@pytest.mark.parametrize(("pressed", "command"), [
+    (Qt.Key.Key_Return, Command(CommandType.TOGGLE_PAUSE)),
+    (Qt.Key.Key_Down, Command(CommandType.CHANGE_SPEED, -0.25)),
+])
+def test_back_button_focus_keeps_playback_commands(window, pressed, command):
+    window.playback_page.back_button.setFocus()
+    key(window, pressed)
+    assert window.player.commands == [command]
+    assert window.core.playback.session is not None
+
+
+def test_space_activates_focused_back_button(window):
+    window.playback_page.back_button.setFocus()
+    key(window, Qt.Key.Key_Space)
+    assert window.core.playback.session is None
+    assert window.pages.currentWidget() is window.library_page

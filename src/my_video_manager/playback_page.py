@@ -57,10 +57,13 @@ class PlaybackPage(QWidget):
         row = QHBoxLayout()
         row.setSpacing(12)
         self.position_label = QLabel("00:00:00.000 / 00:00:00.000")
+        self.open_range_label = QLabel()
+        self.open_range_label.hide()
         self.speed_label = QLabel("1×")
         self.subtitle_label = QLabel("자막 없음")
         self.subtitle_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row.addWidget(self.position_label)
+        row.addWidget(self.open_range_label)
         row.addWidget(self.speed_label)
         row.addWidget(self.subtitle_label, 1)
         self.menu_button = QToolButton()
@@ -86,6 +89,10 @@ class PlaybackPage(QWidget):
         self.message_label.setTextFormat(Qt.TextFormat.PlainText)
         self.message_label.setStyleSheet(f"color: {WARNING};")
         self.message_label.hide()
+        self.notice_timer = QTimer(self)
+        self.notice_timer.setSingleShot(True)
+        self.notice_timer.setInterval(5000)
+        self.notice_timer.timeout.connect(lambda: self.show_notice(""))
         bottom.addWidget(self.message_label)
         self._layout.addWidget(self.bottom_bar)
         self.help_panel = PlaybackHelp(window)
@@ -142,6 +149,7 @@ class PlaybackPage(QWidget):
         self.header.setVisible(not enabled)
         self.bar_timer.stop()
         self.bottom_bar.setVisible(not enabled)
+        self.message_label.setVisible(bool(self._error or (not enabled and self.message_label.text())))
         self._pointer_position = QCursor.pos()
         if enabled:
             self.pointer_timer.start()
@@ -188,10 +196,11 @@ class PlaybackPage(QWidget):
         return super().eventFilter(watched, event)
 
     def show_notice(self, text):
+        self.notice_timer.stop()
         self.message_label.setText(self._error or text)
-        self.message_label.setVisible(bool(self._error or text))
-        if text and self.isVisible():
-            self.reveal_bar()
+        self.message_label.setVisible(bool(self._error or (text and not self.fullscreen)))
+        if text and not self._error:
+            self.notice_timer.start()
 
     def refresh_details(self):
         if not self.isVisible() or self.core.playback.session is None:
@@ -244,6 +253,9 @@ class PlaybackPage(QWidget):
         self.progress.open_start = open_start
         self.progress.update()
         self.position_label.setText(f"{timestamp(position)} / {timestamp(duration)}")
+        self.open_range_label.setText(f"구간 시작 {timestamp(open_start).split('.')[0]}"
+                                      if open_start is not None else "")
+        self.open_range_label.setVisible(open_start is not None)
         self.position_label.setToolTip(f"구간 시작 {timestamp(open_start)} · {range_keys}: 끝내기"
                                       if open_start is not None else "")
         self.update_subtitle_label()
@@ -280,14 +292,15 @@ class PlaybackPage(QWidget):
         focus = QApplication.focusWidget()
         if focus in (self.menu_button, self.back_button) and event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
             return False
-        if (focus in (self.menu_button, self.back_button)
+        if (focus is self.back_button and event.key() == Qt.Key.Key_Space
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
+            return False
+        if (focus is self.menu_button
                 and event.modifiers() == Qt.KeyboardModifier.NoModifier
                 and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down)):
-            if focus is self.menu_button:
-                if not event.isAutoRepeat():
-                    self.menu.popup(self.menu_button.mapToGlobal(self.menu_button.rect().topRight()))
-                return True
-            return False
+            if not event.isAutoRepeat():
+                self.menu.popup(self.menu_button.mapToGlobal(self.menu_button.rect().topRight()))
+            return True
         command = window.core.command_for_key(key_name(event) or "")
         if command and command.kind == CommandType.TOGGLE_FULLSCREEN:
             if not event.isAutoRepeat():
