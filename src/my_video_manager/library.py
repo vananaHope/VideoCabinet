@@ -184,13 +184,12 @@ class Library:
     def _not_added(path: Path, message: str) -> ScanResult:
         return ScanResult(0, (ScanIssue(path, message, failed=False),))
 
-    def _already_registered(self, path: Path, excluded: bool, *, was_missing=False, moved=False) -> ScanResult:
+    def _already_registered(self, path: Path, excluded: bool, *, reconnected=False) -> ScanResult:
         if excluded:
             return self._not_added(path, "제외 목록에 있는 영상입니다. 제외 목록에서 되돌려 주세요.")
-        if was_missing:
-            message = "옮겨진 영상의 새 위치를 찾았습니다." if moved else "파일 없음이던 영상을 다시 찾았습니다."
-            # 검사 중 정상 이동은 알리지 않고, 검사 전부터 파일 없음이던 영상만 안내한다.
-            return ScanResult(0, (ScanIssue(path, message, failed=False),), reconnected=not moved)
+        if reconnected:
+            return ScanResult(0, (ScanIssue(path, "파일 없음이던 영상을 다시 찾았습니다.", failed=False),),
+                              reconnected=True)
         return self._not_added(path, "이미 등록된 영상입니다.")
 
     def _register(self, path: Path, *, on_registered=None, missing_at_start=None) -> ScanResult:
@@ -211,8 +210,8 @@ class Library:
                     db.execute("INSERT OR REPLACE INTO locations(path, video_id, size, mtime_ns) VALUES (?, ?, ?, ?)",
                                (str(path), known[0], *signature))
                     db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
-                    return self._already_registered(path, known["excluded"], was_missing=was_missing,
-                                                    moved=missing_at_start is not None and known[0] not in missing_at_start)
+                    return self._already_registered(path, known["excluded"], reconnected=was_missing
+                                                    and (missing_at_start is None or known[0] in missing_at_start))
                 if check["duration"] < minimum:
                     return self._not_added(path, f"최소 길이({minimum:g}초) 미만입니다.")
             legacy_gifs = {row["fingerprint"]: row for row in db.execute(
@@ -231,8 +230,8 @@ class Library:
                 db.execute("INSERT OR REPLACE INTO locations(path, video_id, size, mtime_ns) VALUES (?, ?, ?, ?)",
                            (str(path), legacy_gif["id"], *signature))
                 db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
-            return self._already_registered(path, legacy_gif["excluded"], was_missing=was_missing,
-                                            moved=missing_at_start is not None and legacy_gif["id"] not in missing_at_start)
+            return self._already_registered(path, legacy_gif["excluded"], reconnected=was_missing
+                                            and (missing_at_start is None or legacy_gif["id"] in missing_at_start))
         info = self._media.read(path)
         if info is not None and "gif" in info.format.lower().split(","):
             info = None
@@ -265,8 +264,8 @@ class Library:
             db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
         if not existing:
             (on_registered or self._on_registered)(video_id)
-        return (self._already_registered(path, existing["excluded"], was_missing=was_missing,
-                                         moved=missing_at_start is not None and existing[0] not in missing_at_start)
+        return (self._already_registered(path, existing["excluded"], reconnected=was_missing
+                                         and (missing_at_start is None or existing[0] in missing_at_start))
                 if existing else ScanResult(1, ()))
 
     def video(self, video_id: int) -> Video:
