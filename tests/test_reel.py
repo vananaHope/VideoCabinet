@@ -217,7 +217,7 @@ def test_point_range_cross_video_auto_advance_and_end(library):
     assert core.last_highlight_revisited_at(last.id) == clock.now
 
 
-def test_home_end_use_list_in_revisit_and_timestamps_in_normal_playback(library):
+def test_home_end_use_list_in_reel_and_timestamps_in_normal_playback(library):
     core, _ = library
     a, b, _ = core.videos()
     first, second = mark(core, a, 10), mark(core, b, 30)
@@ -476,7 +476,7 @@ def test_invalid_settings(value, field):
         ReelSettings(**{field: value})
 
 
-def test_pgup_pgdn_stay_in_revisit_and_use_video_groups(library):
+def test_pgup_pgdn_stay_in_reel_and_use_video_groups(library):
     core, _ = library
     a, b, c = core.videos()
     a1, a2, b1, b2, c1 = (mark(core, a, 10), mark(core, a, 20), mark(core, b, 10),
@@ -507,7 +507,7 @@ def test_pgup_pgdn_stay_in_revisit_and_use_video_groups(library):
 
 
 @pytest.mark.parametrize("key", ["Enter", "Left", "Right", ",", "Up", "Down", "/"])
-def test_regular_player_keys_unchanged_in_revisit(library, key):
+def test_regular_player_keys_unchanged_in_reel(library, key):
     core, _ = library
     before = core.command_for_key(key)
     mark(core, core.videos()[0], 10)

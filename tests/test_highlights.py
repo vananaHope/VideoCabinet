@@ -4,7 +4,7 @@ import pytest
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
 from my_video_manager.highlights import Note
-from my_video_manager.highlight_editing import resolve_time_input, time_input_maximum
+from my_video_manager.highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 
 
 class FakeMedia:
@@ -220,9 +220,8 @@ def test_editing_preserves_untouched_precision_and_saves_changed_times(
         core.playback.report(original_end)
         press(core, "Delete")
     highlight, = core.highlights(video.id)
-    maximum = time_input_maximum(video.duration)
-    initial_start = min(round(highlight.start, 3), maximum)
-    initial_end = min(round(highlight.end if highlight.end is not None else highlight.start, 3), maximum)
+    initial_start = initial_time_input(highlight.start, video.duration)
+    initial_end = initial_time_input(highlight.end if highlight.end is not None else highlight.start, video.duration)
     start = resolve_time_input(highlight.start, initial_start, entered_start)
     end = (resolve_time_input(highlight.end, initial_end, entered_end)
            if entered_end is not None else None)
