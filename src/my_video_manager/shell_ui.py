@@ -150,7 +150,7 @@ def settings_page(window):
 
 def build_shell(window):
     """페이지 자체의 구현과 별개로 셸에 탐색 목적지를 등록한다."""
-    library = window.library_page
+    library = window.home_page
     search = search_page(window)
     queue = queue_page(window)
     folders = folder_page(window)

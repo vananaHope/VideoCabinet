@@ -26,6 +26,9 @@ class Page(QWidget):
         self.played = []
         self.window = SimpleNamespace(play=self.played.append)
 
+    def is_active(self):
+        return self.isVisible()
+
     def payload(self):
         return {'videos': self.cards, 'visibleIds': self.visible_ids, 'selectedId': self.selected_id}
 

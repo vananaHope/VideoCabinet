@@ -8,11 +8,11 @@ import { VideoMenu } from "@/components/video-menu"
 import { LibraryGrid, openKeyboardMenu } from "@/components/library-grid"
 import type { HighlightSnapshot } from "@/components/highlight-panel"
 import { DetailPanel } from "@/components/detail-panel"
-import { connectBridge, getSnapshot, getDetails, request, type Bridge, type Action } from "@/bridge"
+import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
 import type { LibraryData, DetailsData, HighlightData } from "@/bridge-types"
 
 export default function LibraryPage() {
-  const [bridge, setBridge] = useState<Bridge | null>(null)
+  const [bridge, setBridge] = useState<LibraryBridge | null>(null)
   const [data, setData] = useState<LibraryData | null>(null)
   const [details, setDetails] = useState<DetailsData | null>(null)
   const [highlights, setHighlights] = useState<HighlightSnapshot | null>(null)
@@ -34,7 +34,7 @@ export default function LibraryPage() {
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}
-    connectBridge().then(async api => {
+    connectBridge().then(async ({ library: api, shell }) => {
       if (disposed) return
       const changed = (json: string) => { setData(JSON.parse(json)); setDetailRevision(n => n + 1) }
       const detailsChanged = () => setDetailRevision(n => n + 1)
@@ -72,8 +72,8 @@ export default function LibraryPage() {
       api.libraryDetailsChanged.connect(detailsChanged)
       api.libraryFocusRequested.connect(focus)
       api.libraryError.connect(showError)
-      api.shellChanged.connect(shellChanged)
-      disconnect = () => { api.libraryChanged.disconnect(changed); api.libraryDetailsChanged.disconnect(detailsChanged); api.libraryFocusRequested.disconnect(focus); api.libraryError.disconnect(showError); api.shellChanged.disconnect(shellChanged) }
+      shell.shellChanged.connect(shellChanged)
+      disconnect = () => { api.libraryChanged.disconnect(changed); api.libraryDetailsChanged.disconnect(detailsChanged); api.libraryFocusRequested.disconnect(focus); api.libraryError.disconnect(showError); shell.shellChanged.disconnect(shellChanged) }
       const initial = await getSnapshot(api)
       if (disposed) return
       setBridge(api)
