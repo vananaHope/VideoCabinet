@@ -64,29 +64,50 @@ class ActionPage(QWidget):
             self.buttons.append(button)
         layout.addStretch()
 
+    def handle_key(self, event) -> bool:
+        return False
+
     def focus_content(self):
         self.buttons[0].setFocus()
 
 
-def build_shell(window):
-    """페이지 자체의 구현과 별개로 셸에 탐색 목적지를 등록한다."""
+def search_page(window):
+    return ActionPage("검색", (("검색 열기", window.show_search),))
+
+
+def queue_page(window):
+    return ActionPage("자막 대기열", (("자막 대기열 / 자동 규칙", window.tray.show_queue),))
+
+
+def folder_page(window):
     library = window.library_page
     controls = library.library_controls
-    search = ActionPage("검색", (("검색 열기", window.show_search),))
-    queue = ActionPage("자막 대기열", (("자막 대기열 / 자동 규칙", window.tray.show_queue),))
-    folders = ActionPage("폴더 관리", (
+    page = ActionPage("폴더 관리", (
         ("감시 폴더 추가", library.add_folder), ("감시 폴더 해제", controls.remove_folder),
         ("다시 검사", window.scan), ("파일 직접 추가", controls.add_file),
         ("제외 목록", controls.show_excluded), ("최소 길이 설정", controls.settings),
         ("관심 없음 되돌리기", library.hidden_gems.show_dismissed),
         ("선택 영상 제목 변경", controls.rename), ("선택 영상 파일 다시 연결", controls.reconnect),
     ))
-    library.scan_state_changed.connect(folders.setDisabled)
-    settings = ActionPage("설정", (
+    library.scan_state_changed.connect(page.setDisabled)
+    return page
+
+
+def settings_page(window):
+    return ActionPage("설정", (
         ("키 배치…", window.show_settings),
         ("번역 CLI / 재시도", window.translations.settings),
         ("완전 종료", window.tray.quit),
     ))
+
+
+def build_shell(window):
+    """페이지 자체의 구현과 별개로 셸에 탐색 목적지를 등록한다."""
+    library = window.library_page
+    search = search_page(window)
+    queue = queue_page(window)
+    folders = folder_page(window)
+    settings = settings_page(window)
     for page in (search, queue, folders, settings):
         window.pages.addWidget(page)
     window.navigation_pages = (library, window.reel.page, search, queue, folders, settings)

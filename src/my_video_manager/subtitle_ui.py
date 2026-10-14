@@ -1,6 +1,6 @@
 """자막 요청과 작업자 연결. 자막 정책은 AppCore 공개 메서드에 맡긴다."""
 
-from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import QInputDialog, QMessageBox, QPushButton
 
 
@@ -38,10 +38,9 @@ class SubtitleControls(QObject):
         session = self.core.playback.session
         video_id = session.video_id if session else None
         if video_id is None:
-            item = self.window.list.currentItem()
-            if item is None:
+            video_id = self.window.library_page.selected_video_id()
+            if video_id is None:
                 return
-            video_id = item.data(Qt.ItemDataRole.UserRole)
         existing = self.core.transcript(video_id)
         languages = ["자동 감지", "ko", "en", "ja", "zh", "de", "fr", "es"]
         initial = existing.spoken_language if existing and existing.language_specified else "자동 감지"

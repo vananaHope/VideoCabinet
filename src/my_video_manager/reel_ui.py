@@ -7,15 +7,29 @@ from PySide6.QtWidgets import (
 )
 
 from .highlight_ui import timestamp
-from .core import CommandType
 from .key_display import display_keys
+
+
+class ReelPage(QWidget):
+    def __init__(self, controls):
+        super().__init__()
+        self.controls = controls
+
+    def handle_key(self, event) -> bool:
+        if event.key() == Qt.Key.Key_Escape:
+            self.controls.window.show_library()
+            return True
+        if self.controls.list.hasFocus() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.controls.play_selected(self.controls.list.currentItem())
+            return True
+        return False
 
 
 class ReelControls:
     def __init__(self, window):
         self.window, self.core = window, window.core
         self.shown = None
-        self.page = QWidget()
+        self.page = ReelPage(self)
         layout = QVBoxLayout(self.page)
         back = QPushButton("라이브러리로 (Esc)")
         back.clicked.connect(window.show_library)
@@ -163,15 +177,5 @@ class ReelControls:
             raise
 
     def update_label(self):
-        current = self.core.reel_playback
-        self.window.reel_label.setVisible(current is not None)
-        self.window.video_navigation_label.setVisible(current is None)
-        self.window.back_button.setText("모아보기 목록으로 (Esc)" if current else "목록으로 (Esc)")
-        if current:
-            repeat = "켜짐" if self.core.reel_repeat else "꺼짐"
-            keys = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
-            self.window.reel_label.setText(
-                f"모아보기 · {current.entry.video_title} · {timestamp(current.start)} — {timestamp(current.end)}\n"
-                f"반복 {repeat} ({keys[CommandType.TOGGLE_REEL_REPEAT]}) · "
-                f"이전/다음 하이라이트: {keys[CommandType.PREVIOUS_HIGHLIGHT]} / {keys[CommandType.NEXT_HIGHLIGHT]} · "
-                f"영상 단위 이동: {keys[CommandType.PREVIOUS_VIDEO]} / {keys[CommandType.NEXT_VIDEO]}")
+        keys = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
+        self.window.playback_page.show_reel(self.core.reel_playback, self.core.reel_repeat, keys)

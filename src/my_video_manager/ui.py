@@ -7,10 +7,10 @@ from .adapters import MpvPlayer
 from .core import AppCore, CommandType
 from .subtitle_ui import SubtitleControls
 from .translation_ui import TranslationControls
-from .highlight_ui import HighlightList, timestamp
+from .highlight_ui import HighlightList
 from .search_ui import SearchDialog, SearchPreparation
 from .reel_ui import ReelControls
-from .key_settings_ui import SettingsDialog, key_name
+from .key_settings_ui import SettingsDialog
 from .key_display import display_keys
 from .tray import TrayControls
 from .review_ui import ReviewDialog
@@ -48,17 +48,9 @@ class MainWindow(QMainWindow):
         # 기존 화면 어댑터용 연결점. 위젯 구성과 갱신은 각 페이지 모듈이 소유한다.
         self.list = self.library_page.list
         self.hidden_gems = self.library_page.hidden_gems
-        self.thumbnail_icons = self.library_page.thumbnail_icons
-        self.library_controls = self.library_page.library_controls
-        self.status = self.library_page.status
         self.surface = self.playback_page.surface
         self.progress = self.playback_page.progress
-        self.position_label = self.playback_page.position_label
-        self.reel_label = self.playback_page.reel_label
-        self.back_button = self.playback_page.back_button
-        self.video_navigation_label = self.playback_page.video_navigation_label
         self.reel = ReelControls(self)
-        self.library_page.buttons.addWidget(self.reel.button())
         build_shell(self)
         self._active_page = self.library_page
         self._return_page = self.library_page
@@ -107,9 +99,9 @@ class MainWindow(QMainWindow):
     def scan(self, checked=False, *, operation=None):
         self.library_page.scan(checked, operation=operation)
 
-    def play(self, item):
-        self.playback_list = tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
-        self.play_video(item.data(Qt.ItemDataRole.UserRole))
+    def play(self, video_id):
+        self.playback_list = self.library_page.visible_video_ids()
+        self.play_video(video_id)
 
     def show_search(self):
         dialog = SearchDialog(self.core, self, preparation=self.search_preparation)
@@ -146,7 +138,7 @@ class MainWindow(QMainWindow):
         self.stop_player()
         self.core.playback.end()
         self.reel.shown = None
-        self.reel_label.hide()
+        self.playback_page.show_reel(None, False, {})
 
     def stop_player(self):
         self.position_timer.stop()
@@ -169,14 +161,10 @@ class MainWindow(QMainWindow):
                 self.core.advance_reel_if_due(eof=True)
             self.core.save_viewings()
             position = self.core.playback.position
-            self.progress.position = position
-            self.progress.open_start = self.core.open_highlight_start
-            self.progress.update()
             opened = self.core.open_highlight_start
             range_keys = next((display_keys(row.keys) for row in self.core.key_bindings()
                                if row.command.kind == CommandType.RANGE_HIGHLIGHT), "키 미할당")
-            suffix = f" · 구간 시작 {timestamp(opened)} — {range_keys}: 끝내기" if opened is not None else ""
-            self.position_label.setText(f"{timestamp(position)} / {timestamp(self.progress.duration)}{suffix}")
+            self.playback_page.show_position(position, self.progress.duration, opened, range_keys)
             return position
         return None
 
@@ -186,7 +174,7 @@ class MainWindow(QMainWindow):
             self.reel.sync()
         except Exception as error:
             self.position_timer.stop()
-            self.position_label.setText(f"재생 위치 확인 실패: {error}")
+            self.playback_page.show_error(f"재생 위치 확인 실패: {error}")
 
     def refresh_highlights(self):
         if self.core.playback.session is None:
@@ -234,8 +222,7 @@ class MainWindow(QMainWindow):
 
     def show_review(self):
         session = self.core.playback.session
-        item = self.list.currentItem()
-        video_id = session.video_id if session else item.data(Qt.ItemDataRole.UserRole) if item else None
+        video_id = session.video_id if session else self.library_page.selected_video_id()
         if video_id is not None:
             ReviewDialog(self.core, video_id, self.review_jump, self.review_changed, self).exec()
 
@@ -255,7 +242,7 @@ class MainWindow(QMainWindow):
                     self.player = None
                 self.reel.shown = None
                 self.reel.update_label()
-                self.playback_list = tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
+                self.playback_list = self.library_page.visible_video_ids()
                 self.load_player(video_id, target.start)
         except Exception:
             self.end_playback()
@@ -276,65 +263,7 @@ class MainWindow(QMainWindow):
             if not event.isAutoRepeat():
                 self.navigate(event.key() - Qt.Key.Key_1)
             return True
-        if self.pages.currentIndex() == 0:
-            if event.modifiers() not in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier):
-                return False
-            if self.list.hasFocus() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                item = self.list.currentItem()
-                if item:
-                    self.play(item)
-                # 화면을 연 Enter가 부모로 전파되어 곧바로 pause를 실행하지 않게 소비한다.
-                return True
-            return False
-        if self.pages.currentWidget() is self.reel.page:
-            if event.key() == Qt.Key.Key_Escape:
-                self.show_library()
-                return True
-            if self.reel.list.hasFocus() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self.reel.play_selected(self.reel.list.currentItem())
-                return True  # 목록을 연 Enter가 재생 화면까지 전파되어 멈추지 않게 한다.
-            return False
-        if self.pages.currentWidget() is not self.playback_page:
-            return False
-        if event.key() == Qt.Key.Key_Escape:
-            self.back_to_list()
-            return True
-        command = self.core.command_for_key(key_name(event) or "")
-        if command and self.player:
-            try:
-                if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):
-                    if not event.isAutoRepeat():
-                        self.sync_position()
-                        target = self.core.execute_video_command(command, self.playback_list)
-                        if target is not None:
-                            self.play_video(target)
-                        else:
-                            self.reel.sync()
-                elif self.core.is_highlight_command(command):
-                    if event.isAutoRepeat() or self.sync_position() is None:
-                        return True
-                    self.reel.sync()
-                    if self.core.playback.session is None:
-                        return True
-                    target = self.core.execute_highlight_command(command)
-                    if target is not None:
-                        self.player.seek_to(target)
-                    self.reel.sync()
-                    self.refresh_highlights()
-                    self.sync_position()
-                elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
-                    if not event.isAutoRepeat():
-                        self.translations.toggle()
-                else:
-                    if command.kind == CommandType.SEEK:
-                        self.sync_position()
-                        self.reel.sync()
-                    if self.player:
-                        self.player.execute(command)
-            except Exception as error:
-                QMessageBox.warning(self, "재생 조작 실패", str(error))
-            return True
-        return False
+        return self.pages.currentWidget().handle_key(event)
 
     def closeEvent(self, event):
         self.tray.close_window(event)

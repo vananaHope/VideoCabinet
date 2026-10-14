@@ -31,6 +31,7 @@ class ScanWorker(QThread):
 
 class LibraryPage(QWidget):
     scan_state_changed = Signal(bool)
+    play_requested = Signal(object)
 
     def __init__(self, window):
         super().__init__(window)
@@ -53,8 +54,10 @@ class LibraryPage(QWidget):
         self.search_button = QPushButton("검색")
         self.search_button.clicked.connect(window.show_search)
         buttons.addWidget(self.search_button)
-        self.buttons = buttons
         buttons.addStretch()
+        reel_button = QPushButton("하이라이트 모아보기")
+        reel_button.clicked.connect(lambda: window.navigate(1))
+        buttons.addWidget(reel_button)
         layout.addLayout(buttons)
         layout.addWidget(review_button(window))
         self.library_controls = LibraryControls(window)
@@ -86,7 +89,8 @@ class LibraryPage(QWidget):
 
         self.add_button.clicked.connect(self.add_folder)
         self.scan_button.clicked.connect(self.scan)
-        self.list.itemActivated.connect(window.play)
+        self.list.itemActivated.connect(self.play_item)
+        self.play_requested.connect(window.play)
 
     def refresh(self, *, focus_gems=None):
         if focus_gems is None:
@@ -198,3 +202,26 @@ class LibraryPage(QWidget):
     def show_series(self):
         SeriesEditor(self.core, self).exec()
         self.refresh()
+
+    def visible_video_ids(self) -> tuple[int, ...]:
+        return tuple(self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
+
+    def selected_video_id(self) -> int | None:
+        item = self.list.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def play_item(self, item):
+        if item is not None:
+            self.play_requested.emit(item.data(Qt.ItemDataRole.UserRole))
+
+    def handle_key(self, event) -> bool:
+        if event.modifiers() not in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier):
+            return False
+        if self.list.hasFocus() and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.play_item(self.list.currentItem())
+            # 시작한 Enter가 재생 페이지의 일시정지로 전파되지 않게 소비한다.
+            return True
+        return False
+
+    def show_status(self, text):
+        self.status.setText(text)
