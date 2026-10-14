@@ -29,6 +29,18 @@ class VideoData(TypedDict):
     stoppedPercent: float | None
     tags: list[TagData]
     series: str
+    viewingCount: int
+    watchedSeconds: float
+    lastViewedAt: str | None
+    hasSubtitles: bool
+
+
+class HighlightData(TypedDict):
+    id: int
+    start: float
+    end: float | None
+    note: str
+    tags: list[TagData]
 
 
 class GemData(TypedDict):
@@ -56,12 +68,13 @@ class LibraryData(TypedDict):
     scanning: bool
 
 
-def snapshot_data(snapshot) -> list[VideoData]:
+def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
     series = {vid: f"{s.name} · {i + 1}/{len(s.video_ids)}"
               for s in snapshot.series for i, vid in enumerate(s.video_ids)}
     result = []
     for video in snapshot.videos:
         status = snapshot.statuses[video.id]
+        statistics = snapshot.video_statistics.get(video.id)
         result.append(VideoData(
             id=video.id, title=video.title, duration=video.duration,
             # 숫자 host는 Chromium이 IP로 정규화하므로 고정 host 아래에 ID를 둔다.
@@ -71,8 +84,20 @@ def snapshot_data(snapshot) -> list[VideoData]:
             resumePoint=status.resume_point, stoppedPercent=status.stopped_percent,
             tags=[TagData(id=t.id, name=t.name) for t in snapshot.tags.get(video.id, ())],
             series=series.get(video.id, ""),
+            viewingCount=statistics.viewing_count if statistics else 0,
+            watchedSeconds=statistics.watched_seconds if statistics else 0,
+            lastViewedAt=statistics.last_viewed_at if statistics else None,
+            hasSubtitles=video.id in subtitled_ids,
         ))
     return result
+
+
+def highlights_data(core, video_id) -> list[HighlightData]:
+    tags = core.highlight_tags_map(video_id)
+    return [HighlightData(id=h.id, start=h.start, end=h.end,
+                          note=h.note.text if h.note else '',
+                          tags=[TagData(id=t.id, name=t.name) for t in tags.get(h.id, ())])
+            for h in core.highlights(video_id)]
 
 
 def filter_ids(videos: list[VideoData], query: str, tag_id: int | None) -> list[int]:

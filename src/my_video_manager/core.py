@@ -299,6 +299,24 @@ class AppCore:
                                   translated.translated_lines, original.queue_state, translated.queue_state,
                                   self._highlights.count(video_id, connection=db))
 
+    def subtitled_video_ids(self) -> frozenset[int]:
+        """자막 보유 ID 일괄 조회. 통계·has_transcript와 같은 transcripts 존재 기준이다."""
+        with self._connect() as db:
+            return frozenset(row[0] for row in db.execute("SELECT video_id FROM transcripts"))
+
+    def highlight_tags_map(self, video_id: int) -> dict[int, tuple[Tag, ...]]:
+        """선택 영상의 하이라이트 태그를 한 번에 읽는다. 태그 없는 항목도 포함한다."""
+        grouped = {}
+        with self._connect() as db:
+            for row in db.execute("""SELECT h.id AS highlight_id, t.id, t.name FROM highlights h
+                    LEFT JOIN highlight_tags a ON a.highlight_id = h.id
+                    LEFT JOIN tags t ON t.id = a.tag_id WHERE h.video_id = ?
+                    ORDER BY t.name_key, t.id""", (video_id,)):
+                tags = grouped.setdefault(row['highlight_id'], [])
+                if row['id'] is not None:
+                    tags.append(Tag(row['id'], row['name']))
+        return {hid: tuple(tags) for hid, tags in grouped.items()}
+
     def hidden_gems(self, *, snapshot: LibrarySnapshot | None = None) -> tuple[HiddenGem, ...]:
         snapshot = self.library_snapshot() if snapshot is None else snapshot
         return select_hidden_gems(

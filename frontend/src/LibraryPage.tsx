@@ -8,12 +8,17 @@ import { VideoMenu } from "@/components/video-menu"
 import { LibraryGrid, openKeyboardMenu } from "@/components/library-grid"
 import { DetailPanel } from "@/components/detail-panel"
 import { connectBridge, getSnapshot, getDetails, request, type Bridge, type Action } from "@/bridge"
-import type { LibraryData, DetailsData } from "@/bridge-types"
+import type { LibraryData, DetailsData, HighlightData } from "@/bridge-types"
 
 export default function LibraryPage() {
   const [bridge, setBridge] = useState<Bridge | null>(null)
   const [data, setData] = useState<LibraryData | null>(null)
   const [details, setDetails] = useState<DetailsData | null>(null)
+  const [highlights, setHighlights] = useState<HighlightData[] | null>(null)
+  const [detailTab, setDetailTab] = useState("info")
+  const detailVideo = useRef<number | null>(null)
+  const highlightReturn = useRef(false)
+  const gemRow = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState("")
   const [tag, setTag] = useState(0)
   const [error, setError] = useState("")
@@ -38,7 +43,7 @@ export default function LibraryPage() {
           savedScroll.current = {
             grid: document.getElementById('library-grid')?.scrollTop ?? 0,
             gems: document.getElementById('hidden-gems')?.scrollLeft ?? 0,
-            detail: document.querySelector('aside')?.scrollTop ?? 0,
+            detail: document.getElementById('detail-scroll')?.scrollTop ?? 0,
           }
         }
       }
@@ -50,14 +55,15 @@ export default function LibraryPage() {
           const position = savedScroll.current
           const grid = document.getElementById('library-grid')
           const gems = document.getElementById('hidden-gems')
-          const detail = document.querySelector('aside')
+          const detail = document.getElementById('detail-scroll')
           if (position) {
             if (grid) grid.scrollTop = position.grid
             if (gems) gems.scrollLeft = position.gems
             if (detail) detail.scrollTop = position.detail
             savedScroll.current = null
           }
-          const destination = target === 'gems' && gems ? gems : grid
+          const destination = highlightReturn.current && detail ? detail : target === 'gems' && gems ? gems : grid
+          highlightReturn.current = false
           destination?.focus({ preventScroll: true })
         }))
       }
@@ -82,16 +88,39 @@ export default function LibraryPage() {
 
   useEffect(() => {
     let current = true
-    setDetails(null)
+    if (detailVideo.current !== data?.selectedId) {
+      setDetails(null)
+      setHighlights(null)
+      detailVideo.current = data?.selectedId ?? null
+    }
     if (bridge && data?.selectedId != null) getDetails(bridge, data.selectedId).then(value => { if (current) setDetails(value) }).catch(error => { if (current) showError(error) })
     return () => { current = false }
   }, [bridge, data?.selectedId, detailRevision, showError])
+
+  useEffect(() => {
+    let current = true
+    const videoId = data?.selectedId
+    if (bridge && videoId != null && detailTab === "highlights") request<HighlightData[]>(reply => bridge.highlights(videoId, reply)).then(value => { if (current) setHighlights(value) }).catch(error => { if (current) showError(error) })
+    return () => { current = false }
+  }, [bridge, data?.selectedId, detailRevision, detailTab, showError])
 
   const byId = useMemo(() => new Map(data?.videos.map(video => [video.id, video]) ?? []), [data?.videos])
   const visible = useMemo(() => data?.visibleIds.flatMap(id => byId.get(id) ?? []) ?? [], [data?.visibleIds, byId])
   const gems = data?.gems ?? []
   const activeGem = gems.some(g => g.videoId === gemId) ? gemId : gems[0]?.videoId
   const activeTag = data?.tags.some(t => t.id === tag) ? tag : 0
+  useEffect(() => {
+    const row = gemRow.current
+    if (!row) return
+    const wheel = (event: WheelEvent) => {
+      if (event.ctrlKey || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
+      if (row.scrollWidth <= row.clientWidth) return
+      event.preventDefault()
+      row.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? row.clientWidth : 1)
+    }
+    row.addEventListener("wheel", wheel, { passive: false })
+    return () => row.removeEventListener("wheel", wheel)
+  }, [gems.length])
 
   function filter(text: string, tagId: number) {
     if (!bridge) return
@@ -113,10 +142,29 @@ export default function LibraryPage() {
       savedScroll.current = {
         grid: document.getElementById('library-grid')?.scrollTop ?? 0,
         gems: document.getElementById('hidden-gems')?.scrollLeft ?? 0,
-        detail: document.querySelector('aside')?.scrollTop ?? 0,
+        detail: document.getElementById('detail-scroll')?.scrollTop ?? 0,
       }
     }
     if (bridge) request(reply => bridge.action(name, id, reply)).catch(error => {
+      layoutPaused.current = false
+      savedScroll.current = null
+      window.dispatchEvent(new Event('resize'))
+      showError(error)
+    })
+  }
+  function highlightAction(videoId: number, highlightId: number, edit: boolean) {
+    if (!bridge) return
+    if (!edit) {
+      highlightReturn.current = true
+      layoutPaused.current = true
+      savedScroll.current = {
+        grid: document.getElementById('library-grid')?.scrollTop ?? 0,
+        gems: document.getElementById('hidden-gems')?.scrollLeft ?? 0,
+        detail: document.getElementById('detail-scroll')?.scrollTop ?? 0,
+      }
+    }
+    request(reply => edit ? bridge.editHighlight(videoId, highlightId, reply) : bridge.playHighlight(videoId, highlightId, reply)).catch(error => {
+      highlightReturn.current = false
       layoutPaused.current = false
       savedScroll.current = null
       window.dispatchEvent(new Event('resize'))
@@ -149,7 +197,6 @@ export default function LibraryPage() {
   }
 
   return <main aria-label="라이브러리" className="flex h-full flex-col gap-2 p-2">
-    <p aria-label="라이브러리 등록·표시 개수" className="shrink-0 text-xs text-muted-foreground">등록 영상 {data?.videos.length ?? 0}개 · 표시 {data?.visibleIds.length ?? 0}개</p>
     <div className="flex items-center gap-3">
       <div className="min-w-0 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목으로 빠른 검색" value={query}
         onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter(event.currentTarget.value, activeTag) }}
@@ -159,11 +206,12 @@ export default function LibraryPage() {
           <option value={0}>모든 태그</option>{data?.tags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
         </NativeSelect>
       </label>
+      <p aria-label="라이브러리 등록·표시 개수" className="shrink-0 text-xs text-muted-foreground">등록 영상 {data?.videos.length ?? 0}개 · 표시 {data?.visibleIds.length ?? 0}개</p>
     </div>
     {error && <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-destructive p-3 text-destructive"><span>{error}</span><Button variant="outline" size="sm" onClick={() => setError("")}>닫기</Button></div>}
     <section aria-label="숨겨진 보석" className="flex shrink-0 flex-col gap-1">
-      <div className="flex items-center gap-2"><Sparkles className="size-4 text-primary-text" aria-hidden="true" /><h2 className="text-sm font-semibold">숨겨진 보석</h2><span className="text-xs text-muted-foreground">{data?.gemError ? `불러오지 못했어요: ${data.gemError}` : gems.length ? "←/→ 선택 · Enter 재생 · Backspace 관심 없음" : "지금은 추천할 영상이 없어요"}</span></div>
-      {gems.length > 0 && <div id="hidden-gems" role="listbox" aria-label="숨겨진 보석 추천 카드" aria-activedescendant={`gem-${activeGem}`} tabIndex={0} onKeyDown={gemKey} className="gem-row rounded-lg p-1">
+      <div className="flex items-center gap-2"><Sparkles className="size-4 text-primary-text" aria-hidden="true" /><h2 className="text-sm font-semibold">숨겨진 보석 · {gems.length}개</h2><span className="text-xs text-muted-foreground">{data?.gemError ? `불러오지 못했어요: ${data.gemError}` : gems.length ? "←/→ 선택 · Enter 재생 · Backspace 관심 없음" : "지금은 추천할 영상이 없어요"}</span></div>
+      {gems.length > 0 && <div ref={gemRow} id="hidden-gems" role="listbox" aria-label="숨겨진 보석 추천 카드" aria-activedescendant={`gem-${activeGem}`} tabIndex={0} onKeyDown={gemKey} className="gem-row rounded-lg p-1">
         {gems.map(gem => { const video = byId.get(gem.videoId); return video && <VideoMenu key={gem.videoId} id={gem.videoId} gem scanning={false} onAction={action}>
           <GemCard id={`gem-${gem.videoId}`} video={video} reason={gem.reason} variant={activeGem === gem.videoId ? "selected" : "default"} role="option" aria-selected={activeGem === gem.videoId} tabIndex={-1}
             onClick={() => { setGemId(gem.videoId); action("playGem", gem.videoId) }} onContextMenu={() => setGemId(gem.videoId)} />
@@ -172,7 +220,7 @@ export default function LibraryPage() {
     </section>
     <div className="flex min-h-0 flex-1 gap-2">
       <LibraryGrid videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} />
-      <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} scanning={data?.scanning ?? false} onAction={action} />
+      <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} />
     </div>
   </main>
 }

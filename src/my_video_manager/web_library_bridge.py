@@ -4,12 +4,12 @@ import json
 
 from PySide6.QtCore import QObject, QTimer
 
-from .web_library_data import details_data
+from .web_library_data import details_data, highlights_data
 from .web_contract import MENU_ACTIONS, GEM_ACTIONS, SCAN_LOCKED_ACTIONS, TABS, bridge_slot, bridge_signal
 
 
 def encode(value):
-    return json.dumps(value, ensure_ascii=False, allow_nan=False)
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
 
 
 class LibraryBridge(QObject):
@@ -66,6 +66,61 @@ class LibraryBridge(QObject):
         # WebChannel 응답을 먼저 돌려주고 Qt 대화상자의 중첩 이벤트 루프를 연다.
         QTimer.singleShot(0, lambda: self.perform(action, video_id))
         return encode({'ok': True})
+
+    @bridge_slot('highlights')
+    def highlights(self, video_id):
+        try:
+            if video_id not in self.page.video_ids:
+                raise ValueError('현재 라이브러리에 없는 영상입니다.')
+            return encode(highlights_data(self.page.core, video_id))
+        except (ValueError, OSError) as error:
+            return encode({'error': str(error)})
+
+    @bridge_slot('playHighlight')
+    def playHighlight(self, video_id, highlight_id):
+        return self.queue_highlight(video_id, highlight_id, edit=False)
+
+    @bridge_slot('editHighlight')
+    def editHighlight(self, video_id, highlight_id):
+        return self.queue_highlight(video_id, highlight_id, edit=True)
+
+    def require_highlight(self, video_id, highlight_id):
+        if video_id not in self.page.video_ids:
+            raise ValueError('현재 라이브러리에 없는 영상입니다.')
+        highlight = next((h for h in self.page.core.highlights(video_id) if h.id == highlight_id), None)
+        if highlight is None:
+            raise ValueError('현재 영상에 없는 하이라이트입니다.')
+        return highlight
+
+    def queue_highlight(self, video_id, highlight_id, *, edit):
+        try:
+            self.require_highlight(video_id, highlight_id)
+            if self.busy:
+                raise ValueError('진행 중인 작업이 끝난 뒤 다시 시도하세요.')
+        except (ValueError, OSError) as error:
+            return encode({'error': str(error)})
+        self.busy = True
+        QTimer.singleShot(0, lambda: self.perform_highlight(video_id, highlight_id, edit=edit))
+        return encode({'ok': True})
+
+    def perform_highlight(self, video_id, highlight_id, *, edit):
+        page = self.page
+        try:
+            highlight = self.require_highlight(video_id, highlight_id)
+            page.selected_id = video_id
+            if edit:
+                from .highlight_ui import HighlightEditor
+                HighlightEditor(page.core, highlight, page.core.video(video_id).duration, page).exec()
+                page.refresh_details(video_id)
+            else:
+                page.window.playback_list = page.visible_video_ids()
+                page.window.play_video(video_id, start=highlight.start)
+        except (ValueError, OSError, RuntimeError) as error:
+            self.libraryError.emit(str(error))
+        finally:
+            self.busy = False
+            if not edit and page.isVisible():
+                page.focus_content()
 
     shellChanged = bridge_signal('shellChanged')
     shellStatusChanged = bridge_signal('shellStatusChanged')

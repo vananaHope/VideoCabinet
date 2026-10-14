@@ -24,6 +24,18 @@ export interface VideoData {
   stoppedPercent: number | null
   tags: Array<TagData>
   series: string
+  viewingCount: number
+  watchedSeconds: number
+  lastViewedAt: string | null
+  hasSubtitles: boolean
+}
+
+export interface HighlightData {
+  id: number
+  start: number
+  end: number | null
+  note: string
+  tags: Array<TagData>
 }
 
 export interface GemData {
@@ -67,6 +79,9 @@ export interface Bridge {
   action: (name: Action, id: number, reply: Reply) => void
   shellSnapshot: (reply: Reply) => void
   navigate: (tab: Tab, reply: Reply) => void
+  highlights: (videoId: number, reply: Reply) => void
+  playHighlight: (videoId: number, highlightId: number, reply: Reply) => void
+  editHighlight: (videoId: number, highlightId: number, reply: Reply) => void
   libraryChanged: Signal<string>
   libraryDetailsChanged: Signal<number>
   libraryFocusRequested: Signal<string>
@@ -84,6 +99,9 @@ export function publicBridge(raw: Bridge): Bridge {
     action: raw.action.bind(raw),
     shellSnapshot: raw.shellSnapshot.bind(raw),
     navigate: raw.navigate.bind(raw),
+    highlights: raw.highlights.bind(raw),
+    playHighlight: raw.playHighlight.bind(raw),
+    editHighlight: raw.editHighlight.bind(raw),
     libraryChanged: Object.freeze({ connect: raw.libraryChanged.connect.bind(raw.libraryChanged), disconnect: raw.libraryChanged.disconnect.bind(raw.libraryChanged) }),
     libraryDetailsChanged: Object.freeze({ connect: raw.libraryDetailsChanged.connect.bind(raw.libraryDetailsChanged), disconnect: raw.libraryDetailsChanged.disconnect.bind(raw.libraryDetailsChanged) }),
     libraryFocusRequested: Object.freeze({ connect: raw.libraryFocusRequested.connect.bind(raw.libraryFocusRequested), disconnect: raw.libraryFocusRequested.disconnect.bind(raw.libraryFocusRequested) }),

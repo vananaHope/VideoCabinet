@@ -1,10 +1,12 @@
 import { cva, type VariantProps } from "class-variance-authority"
 import { Button } from "@/components/ui/button"
+import { EmptyState, Tabs } from "@/components/page-parts"
+import { HighlightPanel } from "@/components/highlight-panel"
 import { Thumbnail, duration, viewing } from "@/components/video-card"
-import type { VideoData, DetailsData } from "@/bridge-types"
+import type { VideoData, DetailsData, HighlightData } from "@/bridge-types"
 import { actions, lockedDuringScan, type Action } from "@/bridge"
 
-const detailVariants = cva("flex h-full w-64 shrink-0 flex-col gap-2 overflow-y-auto rounded-lg border border-border bg-card p-2", {
+const detailVariants = cva("flex h-full w-72 shrink-0 flex-col gap-2 overflow-hidden rounded-lg border border-border bg-card p-3", {
   variants: { variant: { selected: "", empty: "items-center justify-center text-center text-muted-foreground" } },
   defaultVariants: { variant: "selected" },
 })
@@ -17,22 +19,23 @@ function DetailAction({ name, title, videoId, scanning, onAction, variant }: Var
   </div>
 }
 function DetailActions({ videoId, scanning, onAction }: { videoId: number; scanning: boolean; onAction: Props['onAction'] }) {
-  const wide = ['play', 'subtitles', 'review']
-  const ordered = [...actions.filter(([name]) => wide.includes(name)), ...actions.filter(([name]) => !wide.includes(name))]
-  return <div aria-label="영상 작업" className="grid grid-cols-2 gap-1.5">
-    {ordered.map(([name, title]) => <DetailAction key={name} name={name} title={title} variant={wide.includes(name) ? "wide" : "compact"} videoId={videoId} scanning={scanning} onAction={onAction} />)}
+  const wide = ['subtitles', 'review']
+  return <div aria-label="영상 작업" className="grid shrink-0 grid-cols-2 gap-1.5">
+    {actions.map(([name, title]) => <DetailAction key={name} name={name} title={title} variant={wide.includes(name) ? "wide" : "compact"} videoId={videoId} scanning={scanning} onAction={onAction} />)}
   </div>
 }
 const queueLabels: Record<string, string> = { queued: "대기", transcribing: "받아쓰는 중", translating: "번역 중", completed: "완료", failed: "실패", held: "보류" }
-type Props = VariantProps<typeof detailVariants> & { video?: VideoData; details: DetailsData | null; scanning: boolean; onAction: (action: Action, id: number) => void }
-export function DetailPanel({ video, details, scanning, onAction, variant }: Props) {
+type Props = VariantProps<typeof detailVariants> & { video?: VideoData; details: DetailsData | null; highlights: HighlightData[] | null; tab: string; onTabChange: (tab: string) => void; scanning: boolean; onAction: (action: Action, id: number) => void; onHighlight: (videoId: number, highlightId: number, edit: boolean) => void }
+export function DetailPanel({ video, details, highlights, tab, onTabChange, scanning, onAction, onHighlight, variant }: Props) {
   return <aside aria-label="선택 영상 상세" className={detailVariants({ variant })}>
-    {!video ? <p>영상을 선택하면<br />상세 정보와 작업이 표시됩니다.</p> : <>
-      <Thumbnail video={video} variant="detail" />
+    {!video ? <EmptyState title="선택한 영상 없음" description="영상을 선택하면 상세 정보와 작업이 표시됩니다." /> : <>
       <h2 title={video.title} className="line-clamp-2 shrink-0 text-sm leading-5 font-semibold wrap-anywhere">{video.title}</h2>
-      <p className="text-xs text-muted-foreground">{duration(video.duration)} · {viewing(video)}</p>
+      <Tabs label="영상 상세 탭" value={tab} onChange={onTabChange} items={[{ value: "info", label: "정보" }, { value: "highlights", label: `하이라이트${details ? ` · ${details.highlight_count}` : ""}` }]} />
+      {tab === "highlights" ? <HighlightPanel key={video.id} videoId={video.id} highlights={highlights} onAction={onHighlight} /> : <>
       <DetailActions videoId={video.id} scanning={scanning} onAction={onAction} />
-      <div className="space-y-2 border-t pt-3 text-xs leading-5 text-muted-foreground">
+      <div id="detail-scroll" className="min-h-0 flex-1 space-y-2 overflow-y-auto border-t pt-2 text-xs leading-5 text-muted-foreground wrap-anywhere">
+        <Thumbnail video={video} variant="detail" />
+        <p>{duration(video.duration)} · {viewing(video)}</p>
         {video.missing ? <p>파일 없음 · 다시 검사하거나 파일을 연결하세요.</p> : <p>위치 {video.locationCount}개</p>}
         {video.resumePoint !== null && <p>이어볼 위치 {duration(video.resumePoint)} ({Math.round(video.stoppedPercent ?? 0)}%)</p>}
         <p>태그: {video.tags.map(t => t.name).join(", ") || "없음"}</p>
@@ -44,6 +47,7 @@ export function DetailPanel({ video, details, scanning, onAction, variant }: Pro
           <p>하이라이트 {details.highlight_count}개</p>
         </>}
       </div>
+      </>}
     </>}
   </aside>
 }

@@ -27,6 +27,8 @@ parser.add_argument('--prepare', action='store_true')
 parser.add_argument('--source', type=Path)
 parser.add_argument('--verify', action='store_true')
 parser.add_argument('--verify-shell', action='store_true')
+parser.add_argument('--verify-library', action='store_true', help='카드 통계·태그와 하이라이트 재생·편집·복귀 확인')
+parser.add_argument('--profile-refresh', action='store_true', help='갱신의 Python·JSON 파싱·후속 웹 프레임 비용 측정')
 parser.add_argument('--long-content', action='store_true')
 parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-46')
 parser.add_argument('--verify-gems', action='store_true', help='보석 0·1·4·5·10개의 배치와 가로 키 이동 검증')
@@ -39,8 +41,8 @@ if args.verify_gems:
 os.environ['QT_QPA_PLATFORM'] = 'windows'
 os.environ['MVM_WEB_UI'] = '1' if args.mode == 'web' else '0'
 
-from PySide6.QtCore import Qt, QEventLoop, QTimer, QPoint, QObject, QEvent
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtCore import Qt, QEventLoop, QTimer, QPoint, QPointF, QObject, QEvent
+from PySide6.QtGui import QColor, QImage, QPainter, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 if args.mode == 'web':
@@ -113,7 +115,7 @@ if args.prepare:
     raise SystemExit()
 
 if args.long_content and core.videos():
-    first = core.videos()[0]
+    first = next((v for v in core.videos() if v.title.startswith('아주 긴 한글')), core.videos()[0])
     core.rename_video(first.id, '아주 긴 한글 제목과 공백 없는 영문 제목의 카드 경계 확인 ' + 'LongVideoTitle' * 14)
     for index in range(4):
         core.add_video_tag(first.id, f'{index} 긴 태그 이름 ' + '태그' * 20)
@@ -195,6 +197,14 @@ else:
     app.processEvents()
     assert page.grid.model().rowCount() == args.count
 settle()
+if args.long_content and args.mode == 'web':
+    page.selected_id = first.id
+    page.refresh()
+    columns = int(js("document.getElementById('library-grid').getAttribute('aria-colcount')"))
+    row_height = float(js("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--grid-row-height')) * parseFloat(getComputedStyle(document.documentElement).fontSize)"))
+    index = page.visible_ids.index(first.id)
+    js(f"document.getElementById('library-grid').scrollTop = {index // columns * row_height}")
+    settle()
 startup = (time.perf_counter() - STARTED) * 1000
 screens = args.output
 screens.mkdir(parents=True, exist_ok=True)
@@ -280,7 +290,7 @@ if args.verify_shell and args.mode == 'web':
 def gem_layout():
     return js_json("""(() => {
       const panel = document.querySelector('aside').getBoundingClientRect();
-      const buttons = [...document.querySelectorAll('aside button')];
+      const buttons = [...document.querySelectorAll('[aria-label="영상 작업"] button')];
       const row = document.getElementById('hidden-gems');
       const bounds = row?.getBoundingClientRect();
       const cards = [...document.querySelectorAll('#hidden-gems [role=option]')];
@@ -299,8 +309,8 @@ def gem_layout():
 
 
 def verify_detail_access():
-    """#48 전까지 기존 패널 스크롤을 유지한다. 모든 작업에 Tab으로 닿아야 한다."""
-    js("document.querySelector('aside button').focus()")
+    """작업 8개가 스크롤 없이 보이고 Tab으로 모두 닿아야 한다."""
+    js("document.querySelector('[aria-label=\"영상 작업\"] button').focus()")
     reached = []
     for index in range(8):
         settle(40)
@@ -381,6 +391,15 @@ if args.verify_gems:
               const r = row.getBoundingClientRect(); return card.left >= r.left && card.right <= r.right;})()"""), '왼쪽 첫 추천 카드가 보여야 한다'
             layout['keyboardScrolledToEndAndBack'] = True
             js("document.getElementById('hidden-gems').scrollLeft = 0")
+            point = js_json("(() => {const r = document.getElementById('hidden-gems').getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()")
+            local = QPoint(*map(int, point))
+            wheel = QWheelEvent(QPointF(local), QPointF(page.view.mapToGlobal(local)), QPoint(), QPoint(0, -120),
+                                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                                Qt.ScrollPhase.NoScrollPhase, False)
+            QApplication.sendEvent(page.view.focusProxy(), wheel)
+            wait_until(lambda: js("document.getElementById('hidden-gems').scrollLeft") > 0)
+            layout['verticalWheelScrolledHorizontally'] = True
+            js("document.getElementById('hidden-gems').scrollLeft = 0")
     (screens / 'web-gems-check.json').write_text(json.dumps(layouts, ensure_ascii=False, indent=2), encoding='utf-8')
     button_selector = 'aside button[data-variant="destructive-outline"]'
     contrasts = {'button': contrast(button_selector)}
@@ -411,12 +430,12 @@ if args.verify and args.mode == 'web':
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
     metrics['checks'].append('시작 직후 격자 포커스 (명시적 focus_content 호출 없음)')
     layout = gem_layout()
-    assert layout['buttons'] == 8, layout
+    assert layout['buttons'] == layout['visibleButtons'] == 8, layout
     layout['keyboardAccessibleActions'] = verify_detail_access()
     assert layout['gems'] == len(page.gem_ids) and layout['rows'] <= 1, layout
     assert layout['visibleGems'] == min(4, len(page.gem_ids)), layout
     metrics['layout'] = layout
-    metrics['checks'].append('1100×720 작업 버튼 8개 Tab·스크롤 접근, 보석 한 줄과 첫 4개 노출')
+    metrics['checks'].append('1100×720 작업 버튼 8개 동시 노출·Tab 접근, 보석 한 줄과 첫 4개 노출')
     js("document.getElementById('library-grid').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, isComposing:true}))")
     settle(100)
     assert core.playback.session is None
@@ -499,6 +518,9 @@ if args.verify and args.mode == 'web':
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
     metrics['checks'].append('Tab 검색 → 태그 → 숨겨진 보석 → 격자')
     for index in range(1, 7):
+        window.raise_()
+        window.activateWindow()
+        assert QTest.qWaitForWindowActive(window, 5000), '검증 창 활성화 실패'
         page.focus_content()
         window.pages.setCurrentWidget(page)
         QTest.qWait(80)
@@ -518,7 +540,8 @@ if args.verify and args.mode == 'web':
     if playable:
         index = next(i for i, v in enumerate(core.videos()) if v.id == playable.id)
         columns = int(js("Number(document.getElementById('library-grid').getAttribute('aria-colcount'))"))
-        js(f"document.getElementById('library-grid').scrollTop = {index // columns * 256}")
+        row_height = float(js("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--grid-row-height')) * parseFloat(getComputedStyle(document.documentElement).fontSize)"))
+        js(f"document.getElementById('library-grid').scrollTop = {index // columns * row_height}")
         wait_until(lambda: bool(js(f"!!document.getElementById('video-{playable.id}')")))
         js(f"document.getElementById('video-{playable.id}')?.click()")
         wait_until(lambda: page.selected_video_id() == playable.id)
@@ -585,11 +608,119 @@ if args.verify and args.mode == 'web':
         page.refresh()
         metrics['checks'].append('관심 없음·되돌리기, 라이브러리 선택 보존')
 
+if args.verify_library and args.mode == 'web':
+    layout = gem_layout()
+    assert layout['buttons'] == layout['visibleButtons'] == 8, layout
+    assert layout['visibleGems'] == min(4, len(page.gem_ids)), layout
+    metrics['layout'] = layout
+    stats = core.video_viewing_statistics()[page.selected_id]
+    card = js(f"document.getElementById('video-{page.selected_id}').textContent")
+    assert f'{stats.viewing_count}회' in card and '시청 시간' in card and '마지막 시청' in card
+    if args.long_content:
+        assert '+3' in card or '+2' in card, card
+        assert js("""[...document.querySelectorAll('[role=gridcell] [aria-label="태그"] span')].some(el => getComputedStyle(el).textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth)"""), '긴 태그 말줄임'
+    metrics['checks'].append('통계 카드·긴 태그 말줄임과 +N·작업 8개·보석 4개')
+    first = page.selected_id
+    for highlight in core.highlights(first):
+        core.delete_highlight(highlight.id)
+    page.refresh_details(first)
+    js("document.querySelector('aside [data-tab=highlights]').click()")
+    wait_until(lambda: js("document.getElementById('detail-scroll')?.textContent.includes('하이라이트 없음')"))
+    settle()
+    window.grab().save(str(screens / 'web-highlights-0.png'))
+
+    playable = max((v for v in core.videos() if any(loc.path.stat().st_size > 1000 for loc in v.locations)),
+                   key=lambda v: max(loc.path.stat().st_size for loc in v.locations))
+    for h in core.highlights(playable.id):
+        core.delete_highlight(h.id)
+    for index in range(32):
+        core.playback.start(playable.id, 1.125 + index * 0.25)
+        core.execute_highlight_command(core.command_for_key('Insert'))
+        core.playback.end()
+    for index, h in enumerate(core.highlights(playable.id)):
+        core.update_highlight(h.id, start=h.start, end=h.start + 0.125 if index % 2 else None,
+                              note=f'장면 {index + 1} · 긴 메모 ' + '다시 보고 싶은 순간 ' * 4)
+        core.add_highlight_tag(h.id, '복습')
+        if index == 0:
+            core.add_highlight_tag(h.id, '긴 하이라이트 태그 ' + '태그' * 18)
+    page.selected_id = playable.id
+    page.refresh()
+    wait_until(lambda: js("document.querySelectorAll('[role=option][id^=highlight-]').length") == 32)
+    js("document.getElementById('detail-scroll').focus()")
+    settle()
+    window.grab().save(str(screens / 'web-highlights-many.png'))
+    for _ in range(6):
+        QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Down)
+    settle()
+    selection = js("document.getElementById('detail-scroll').getAttribute('aria-activedescendant')")
+    top = js("document.getElementById('detail-scroll').scrollTop")
+    hid = int(selection.removeprefix('highlight-'))
+    start = next(h.start for h in core.highlights(playable.id) if h.id == hid)
+    QTest.keyClick(page.view.focusProxy(), Qt.Key.Key_Return)
+    wait_until(lambda: window.pages.currentWidget() is window.playback_page)
+    assert core.playback.session.video_id == playable.id
+    assert abs(core.playback.position - start) < 1.0, (core.playback.position, start)
+    settle(250)
+    window.grab().save(str(screens / 'web-highlight-mpv.png'))
+    QTest.keyClick(window.surface, Qt.Key.Key_Escape)
+    wait_until(lambda: window.pages.currentWidget() is page)
+    settle(400)
+    assert js("document.querySelector('aside [data-tab=highlights]').getAttribute('aria-current')") == 'page'
+    assert js("document.getElementById('detail-scroll').getAttribute('aria-activedescendant')") == selection
+    assert js("document.getElementById('detail-scroll').scrollTop") == top
+    assert js("document.activeElement.id") == 'detail-scroll'
+    window.grab().save(str(screens / 'web-highlight-return.png'))
+    metrics['checks'].append('하이라이트 ↑/↓·Enter 실제 mpv 정확한 시각 재생·Esc 탭/선택/스크롤/포커스 복원')
+    js(f"document.getElementById('{selection}').querySelector('button').click()")
+    wait_until(lambda: window.pages.currentWidget() is window.playback_page)
+    QTest.keyClick(window.surface, Qt.Key.Key_Escape)
+    wait_until(lambda: window.pages.currentWidget() is page)
+    settle(300)
+    observed = []
+
+    def edit_note():
+        modal = QApplication.activeModalWidget()
+        if modal and type(modal).__name__ == 'HighlightEditor':
+            observed.append(modal.highlight.id)
+            modal.note.setPlainText('웹에서 연 기존 편집기로 저장한 메모')
+            modal.save()
+
+    closer = QTimer()
+    closer.setInterval(20)
+    closer.timeout.connect(edit_note)
+    closer.start()
+    js(f"document.getElementById('{selection}').querySelectorAll('button')[1].click()")
+    wait_until(lambda: bool(observed) and not page.bridge.busy)
+    closer.stop()
+    wait_until(lambda: js(f"document.getElementById('{selection}').textContent.includes('웹에서 연 기존 편집기로 저장한 메모')"))
+    assert observed == [hid]
+    metrics['checks'].append('하이라이트 클릭 재생·기존 HighlightEditor 저장 후 목록 반영')
+    js("document.querySelector('aside [data-tab=info]').click()")
+    settle()
+
 # 목록 갱신: Python 조회부터 다음 웹 프레임/Qt paint까지.
+if args.profile_refresh and args.mode == 'web':
+    js("""(() => {
+      window.__refreshParsing = [];
+      const parse = JSON.parse;
+      JSON.parse = function(...args) {
+        const started = performance.now();
+        const result = parse.apply(this, args);
+        if (result && Array.isArray(result.videos)) {
+          const ended = performance.now();
+          const sample = {parseMs: ended - started};
+          window.__refreshParsing.push(sample);
+          requestAnimationFrame(() => requestAnimationFrame(() => sample.afterParseToFrameMs = performance.now() - ended));
+        }
+        return result;
+      };
+    })()""")
 refresh = []
+refresh_python = []
 for _ in range(5):
     start = time.perf_counter()
     window.refresh()
+    refresh_python.append(round((time.perf_counter() - start) * 1000, 2))
     if args.mode == 'web':
         run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
     else:
@@ -597,6 +728,9 @@ for _ in range(5):
         page.grid.repaint()
     refresh.append(round((time.perf_counter() - start) * 1000, 2))
 metrics['refresh_ms'] = refresh
+metrics['refresh_python_ms'] = refresh_python
+if args.profile_refresh and args.mode == 'web':
+    metrics['refresh_web_parsing'] = js_json('window.__refreshParsing')
 
 if args.mode == 'web':
     run_web_frames("""

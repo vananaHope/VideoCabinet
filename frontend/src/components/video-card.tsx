@@ -1,7 +1,8 @@
 import { cva, type VariantProps } from "class-variance-authority"
 import type { ComponentProps } from "react"
 import { Film } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { StatusBadge } from "@/components/page-parts"
+import { VideoTags } from "@/components/video-tags"
 import type { VideoData } from "@/bridge-types"
 
 const cardVariants = cva("group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring", {
@@ -19,7 +20,7 @@ export function viewing(video: VideoData) {
   return video.missing ? "파일 없음" : video.finished ? "다 봄" : video.abandoned ? `보다 만 ${Math.round(video.stoppedPercent ?? 0)}%` : "아직 안 봄"
 }
 const thumbnailVariants = cva("relative flex w-full shrink-0 items-center justify-center overflow-hidden bg-muted", {
-  variants: { variant: { default: "aspect-video", card: "h-28", gem: "h-20", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
+  variants: { variant: { default: "aspect-video", card: "h-24", gem: "h-20", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
 })
 export function Thumbnail({ video, variant }: { video: VideoData } & VariantProps<typeof thumbnailVariants>) {
   return <div className={thumbnailVariants({ variant })}>
@@ -29,18 +30,30 @@ export function Thumbnail({ video, variant }: { video: VideoData } & VariantProp
 }
 
 type Props = Omit<ComponentProps<"button">, "className"> & VariantProps<typeof cardVariants> & { video: VideoData }
+const dateFormatter = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" })
+function lastViewed(value: string | null) {
+  return value ? dateFormatter.format(new Date(value)) : "기록 없음"
+}
+function VideoStatistics({ video }: { video: VideoData }) {
+  return <span aria-label="시청 통계" className="grid grid-cols-2 gap-1 rounded-lg border bg-background/40 p-1.5 text-xs">
+    <span className="flex flex-col gap-1 rounded-md border p-2"><span className="text-muted-foreground">시청 횟수</span><span className="font-medium tabular-nums">{video.viewingCount}회</span></span>
+    <span className="flex flex-col gap-1 rounded-md border p-2"><span className="text-muted-foreground">시청 시간</span><span className="font-medium tabular-nums">{duration(video.watchedSeconds)}</span></span>
+    <span className="col-span-2 flex items-center justify-between gap-1 rounded-md border px-2 py-1.5"><span className="text-muted-foreground">마지막 시청</span><span className="tabular-nums">{lastViewed(video.lastViewedAt)}</span></span>
+  </span>
+}
 export function VideoCard({ video, variant, ...props }: Props) {
   return <button {...props} className={cardVariants({ variant })} title={video.title}>
     <Thumbnail video={video} variant="card" />
     <div className="flex min-h-0 w-full flex-1 flex-col gap-1.5 p-3">
-      <span className="line-clamp-2 leading-5 font-medium">{video.title}</span>
-      <span className="text-xs text-muted-foreground">{duration(video.duration)} · {viewing(video)}</span>
-      {video.series && <span className="truncate text-xs text-muted-foreground">{video.series}</span>}
-      <span className="mt-auto flex min-w-0 gap-1 overflow-hidden">
-        {video.favorite && <Badge variant="secondary">즐겨 보는</Badge>}
-        {video.tags.slice(0, 2).map(tag => <Badge key={tag.id} variant="secondary">{tag.name}</Badge>)}
-        {video.tags.length > 2 && <span className="text-xs text-muted-foreground">+{video.tags.length - 2}</span>}
+      <span className="line-clamp-2 min-h-10 leading-5 font-medium wrap-anywhere">{video.title}</span>
+      <span className="truncate text-xs text-muted-foreground" title={video.series}>{duration(video.duration)}{video.series && ` · ${video.series}`}</span>
+      <span className="flex flex-wrap gap-1">
+        <StatusBadge variant={video.missing ? "destructive" : video.finished ? "success" : video.abandoned ? "info" : "muted"}>{viewing(video)}</StatusBadge>
+        {video.hasSubtitles && <StatusBadge variant="info">자막 있음</StatusBadge>}
+        {video.favorite && <StatusBadge variant="highlight">즐겨 보는</StatusBadge>}
       </span>
+      <VideoStatistics video={video} />
+      <span className="mt-auto min-w-0"><VideoTags tags={video.tags} /></span>
     </div>
   </button>
 }

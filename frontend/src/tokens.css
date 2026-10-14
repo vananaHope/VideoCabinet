@@ -29,8 +29,8 @@
   --primary-text: #a5b4fc;
   --radius: 0.75rem;
   --spacing: 0.25rem;
-  --grid-row-height: 16rem;
-  --grid-card-width: 12rem;
+  --grid-row-height: 23rem;
+  --grid-card-width: 14rem;
 }
 @theme {
   --font-sans: "Malgun Gothic", sans-serif;

@@ -29,6 +29,9 @@ SLOTS = {
     'select': (Argument('id', int, 'number'),), 'details': (Argument('id', int, 'number'),),
     'action': (Argument('name', str, 'Action'), Argument('id', int, 'number')),
     'shellSnapshot': (), 'navigate': (Argument('tab', str, 'Tab'),),
+    'highlights': (Argument('videoId', int, 'number'),),
+    'playHighlight': (Argument('videoId', int, 'number'), Argument('highlightId', int, 'number')),
+    'editHighlight': (Argument('videoId', int, 'number'), Argument('highlightId', int, 'number')),
 }
 SIGNALS = {
     'libraryChanged': str, 'libraryDetailsChanged': int,
