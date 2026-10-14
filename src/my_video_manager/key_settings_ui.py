@@ -98,7 +98,7 @@ class KeySettings(QWidget):
             buttons.addWidget(button)
         layout.addLayout(buttons)
         note = QLabel("이전/다음 하이라이트 명령은 현재 화면에, 이전/다음 영상 명령은 시리즈·현재 목록에 따라 동작합니다.\n"
-                      "Esc, Alt+S, Ctrl+1~Ctrl+6은 취소·설정·페이지 이동용 예약 키입니다. 목록 탐색과 편집 대화상자의 키는 바뀌지 않습니다.")
+                      "Esc, F1, Alt+S, Ctrl+1~Ctrl+6은 취소·키 안내·설정·페이지 이동용 예약 키입니다. 목록 탐색과 편집 대화상자의 키는 바뀌지 않습니다.")
         note.setWordWrap(True)
         layout.addWidget(note)
         self.refresh()

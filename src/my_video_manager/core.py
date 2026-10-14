@@ -40,6 +40,7 @@ class CommandType(str, Enum):
     NEXT_VIDEO = "next_video"
     TOGGLE_SUBTITLE_LANGUAGE = "toggle_subtitle_language"
     TOGGLE_REEL_REPEAT = "toggle_reel_repeat"
+    TOGGLE_FULLSCREEN = "toggle_fullscreen"
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ DEFAULT_KEY_BINDINGS = {
     "PgDn": Command(CommandType.NEXT_VIDEO),
     ".": Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE),
     "\\": Command(CommandType.TOGGLE_REEL_REPEAT),
+    "'": Command(CommandType.TOGGLE_FULLSCREEN),
 }
 
 MIN_PLAYBACK_SPEED = 0.25
@@ -222,6 +224,11 @@ class AppCore:
 
     def toggle_subtitle_language(self) -> tuple[bool, str]:
         return self._subtitle_selection.toggle()
+
+    @property
+    def playback_subtitle_language(self) -> str:
+        """현재 재생에서 선택한 자막 종류. 표시 켜짐 여부는 플레이어가 소유한다."""
+        return "translated" if self._subtitle_selection.translated else "original"
 
     def reel_entries(self, tag_id: int | None = None) -> tuple[ReelEntry, ...]:
         return self._reel.list(tag_id)

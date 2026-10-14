@@ -333,8 +333,10 @@ def test_period_policy_keeps_transcript_before_translation_then_toggles_and_rese
     finish(core)
     assert core.playback_subtitle(a.id).read_text(encoding="utf-8") == original
     assert core.toggle_subtitle_language() == (True, "번역 자막")
+    assert core.playback_subtitle_language == "translated"
     assert "번역" in core.playback_subtitle(a.id).read_text(encoding="utf-8")
     assert core.toggle_subtitle_language() == (True, "원어 자막")
+    assert core.playback_subtitle_language == "original"
     core.toggle_subtitle_language()
     core.playback.start(b.id, 0)
     assert not core.toggle_subtitle_language()[0]
@@ -622,6 +624,7 @@ def test_series_switch_to_resets_language_and_keeps_translations_with_their_vide
     core.switch_to(target)
     assert "다른 영상" not in core.playback_subtitle(b.id).read_text(encoding="utf-8")
     assert core.toggle_subtitle_language() == (True, "번역 자막")
+    assert core.playback_subtitle_language == "translated"
     assert "다른 영상" in core.playback_subtitle(b.id).read_text(encoding="utf-8")
     core.switch_to(core.adjacent_video(b.id, (), forward=False))
     assert "번역" not in core.playback_subtitle(a.id).read_text(encoding="utf-8")

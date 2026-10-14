@@ -1,6 +1,7 @@
 """화면은 입력을 코어에 전달하고 결과를 표시한다."""
 
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
+from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QStackedWidget
 
 from .adapters import MpvPlayer
@@ -42,10 +43,15 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.library_count)
         self.settings_menu = self.menuBar().addMenu("설정(&S)")
         self.settings_menu.addAction("키 배치…", self.show_settings)
+        # 숨은 메뉴바의 니모닉은 동작하지 않으므로 전체 화면에서만 보완한다.
+        self.fullscreen_settings_shortcut = QShortcut("Alt+S", self)
+        self.fullscreen_settings_shortcut.setEnabled(False)
+        self.fullscreen_settings_shortcut.activated.connect(self.show_fullscreen_settings_menu)
 
         self.library_page = LibraryPage(self)
         self.pages.addWidget(self.library_page)
         self.playback_page = PlaybackPage(self)
+        self.settings_menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.playback_page.focus_content))
         self.pages.addWidget(self.playback_page)
         # 기존 화면 어댑터용 연결점. 위젯 구성과 갱신은 각 페이지 모듈이 소유한다.
         self.surface = self.playback_page.surface
@@ -65,10 +71,40 @@ class MainWindow(QMainWindow):
         if playing and self._active_page is not self.playback_page:
             self._return_page = self._active_page
         self._active_page = page
+        if not playing:
+            self.set_playback_fullscreen(False)
+            self.playback_page.close_help()
         self.sidebar.setVisible(not playing)
         self.statusBar().setVisible(not playing)
         if page in self.navigation_pages:
             self.sidebar.select(self.navigation_pages.index(page))
+
+    def set_playback_fullscreen(self, enabled):
+        enabled = enabled and self.pages.currentWidget() is self.playback_page
+        if enabled and not self.isFullScreen():
+            self._playback_was_maximized = self.isMaximized()
+            self.showFullScreen()
+        elif not enabled and self.isFullScreen():
+            self.showNormal()
+            if getattr(self, "_playback_was_maximized", False):
+                self.showMaximized()
+        self.menuBar().setVisible(not enabled)
+        self.playback_page.set_fullscreen(enabled)
+        playing = self.pages.currentWidget() is self.playback_page
+        self.sidebar.setVisible(not playing)
+        self.statusBar().setVisible(not playing)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        # 트레이의 showNormal 등 창 바깥 경로도 실제 창 상태와 표시를 맞춘다.
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "playback_page"):
+            self.fullscreen_settings_shortcut.setEnabled(self.isFullScreen())
+            self.menuBar().setVisible(not self.isFullScreen())
+            self.playback_page.set_fullscreen(self.isFullScreen())
+
+    def show_fullscreen_settings_menu(self):
+        self.playback_page.close_help()
+        self.settings_menu.popup(self.mapToGlobal(QPoint(12, 12)))
 
     def navigate(self, index):
         if not 0 <= index < len(self.navigation_pages):
