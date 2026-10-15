@@ -7,9 +7,9 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QToolTip
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
 from my_video_manager.ui import MainWindow
@@ -460,3 +460,97 @@ def test_unassigned_point_key_guidance_and_panel_command_name(window):
     assert '하이라이트 패널 접기 / 펴기' in page.highlights_button.toolTip()
     key(window, Qt.Key.Key_F1)
     assert '하이라이트 패널 접기 / 펴기' in page.help_panel.text.text()
+
+
+@pytest.mark.parametrize('fullscreen', [False, True])
+def test_progress_click_keeps_focus_and_fullscreen_drag_keeps_bar(window, fullscreen):
+    page = window.playback_page
+    if fullscreen:
+        key(window, Qt.Key.Key_Apostrophe)
+        page.reveal_bar()
+    QApplication.processEvents()
+    progress = page.progress
+    assert progress.focusPolicy() == Qt.FocusPolicy.NoFocus
+    QTest.mousePress(progress, Qt.MouseButton.LeftButton, pos=QPoint(5, 7))
+    assert window.player.seeks == [(0, False)]
+    assert window.surface.hasFocus()
+    page.hide_temporary_bar()
+    assert page.bottom_bar.isVisible()
+    QTest.mouseRelease(progress, Qt.MouseButton.LeftButton, pos=QPoint(progress.width() + 20, 7))
+    assert window.player.seeks[-1] == (120, False)
+    key(window, Qt.Key.Key_Return)
+    assert window.player.commands[-1].kind == CommandType.TOGGLE_PAUSE
+
+
+@pytest.mark.parametrize('fullscreen', [False, True])
+def test_progress_hover_through_window_input_after_click(window, fullscreen):
+    from my_video_manager.highlight_ui import progress_time
+    from my_video_manager.time_display import timestamp
+
+    page = window.playback_page
+    if fullscreen:
+        key(window, Qt.Key.Key_Apostrophe)
+        page.reveal_bar()
+    QApplication.processEvents()
+    progress = page.progress
+    pos = QPoint(progress.width() // 3, 7)
+    QTest.mouseClick(progress, Qt.MouseButton.LeftButton, pos=pos)
+    # QWidget 오버로드의 OS 커서 이동에 기대지 않고 실제 창의 입력 경로로 보낸다.
+    QTest.mouseMove(window.windowHandle(), progress.mapTo(window, pos))
+    assert QToolTip.isVisible()
+    assert QToolTip.text() == timestamp(progress_time(pos.x(), progress.width(), 120))
+    assert window.surface.hasFocus()
+
+
+@pytest.mark.parametrize('input_kind', ['mouse', 'keyboard'])
+def test_progress_and_keyboard_seek_share_viewing_and_open_range_rules(window, input_kind):
+    core, player = window.core, window.player
+    video_id = core.playback.session.video_id
+    player.positions = [(0, True), (55, False)]
+    key(window, Qt.Key.Key_Delete)
+    assert core.open_highlight_start == 55
+    window.progress.setFixedWidth(110)
+    if input_kind == 'mouse':
+        QTest.mouseClick(window.progress, Qt.MouseButton.LeftButton, pos=QPoint(55, 7))
+        assert player.seeks == [(60, False)]
+    else:
+        key(window, Qt.Key.Key_Right)
+        assert player.commands[-1] == Command(CommandType.SEEK, 5)
+    # 입력만으로 위치를 바꾸지 않고, 두 경로 모두 같은 엔진 보고를 기다린다.
+    assert core.playback.position == 55
+    assert core.open_highlight_start == 55
+    player.positions = [(60, True), (70, False)]
+    window.sync_position()
+    key(window, Qt.Key.Key_Delete)
+    highlight = core.highlights(video_id)[0]
+    assert (highlight.start, highlight.end) == (55, 70)
+    window.back_to_list()
+    viewing = core.viewings(video_id)[-1]
+    assert viewing.intervals == ((0, 55), (60, 70))
+    assert viewing.last_position == 70
+    assert core.resume_start(video_id) == 67
+
+
+@pytest.mark.parametrize('input_kind', ['mouse', 'keyboard'])
+def test_progress_and_keyboard_seek_keep_reel_until_normal_boundary(window, input_kind):
+    first = add_highlight(window, 10, end=40)
+    second = add_highlight(window, 50, end=80)
+    window.reel.open()
+    window.reel.start(first)
+    window.sync_position()
+    core, player = window.core, window.player
+    viewings = core.viewings(core.playback.session.video_id)
+    player.positions = [(10, True), (11, False)]
+    window.sync_position()
+    if input_kind == 'mouse':
+        QTest.mouseClick(window.progress, Qt.MouseButton.LeftButton,
+                         pos=QPoint(window.progress.width() // 2, 7))
+    else:
+        key(window, Qt.Key.Key_Right)
+    assert core.reel_playback.entry.highlight.id == first
+    assert not core.playback.session.record_viewing
+    player.positions = [(45, True)]
+    window.poll_position()
+    assert core.reel_playback.entry.highlight.id == second
+    assert core.last_highlight_revisited_at(first) is None
+    assert core.viewings(core.playback.session.video_id) == viewings

@@ -6,7 +6,7 @@ from PySide6.QtCore import QEvent, QItemSelectionModel, QSignalBlocker, QSize, Q
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget,
-    QStyledItemDelegate, QStyle, QSizePolicy,
+    QStyledItemDelegate, QStyle, QSizePolicy, QToolTip,
 )
 
 from .highlights import nearest_highlight
@@ -15,22 +15,102 @@ from .time_display import timestamp
 
 
 HIGHLIGHT_FOLLOW_IDLE_SECONDS = 3.0
+PROGRESS_MARGIN = 5
+
+
+def progress_time(x: float, width: float, duration: float) -> float | None:
+    """그려진 막대의 좌표를 영상 시각으로 바꾸고 양 끝에 고정한다."""
+    if duration <= 0 or width <= 2 * PROGRESS_MARGIN:
+        return None
+    fraction = (x - PROGRESS_MARGIN) / (width - 2 * PROGRESS_MARGIN)
+    return max(0.0, min(1.0, fraction)) * duration
 
 
 class HighlightProgress(QWidget):
+    seek_requested = Signal(float)
+
     def __init__(self):
         super().__init__()
         self.setMinimumHeight(30)
         self.setAccessibleName("재생 진행과 하이라이트 위치")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(
+            f"QToolTip {{ color: {PLAYBACK_COLORS['foreground']}; "
+            f"background-color: {PLAYBACK_COLORS['card']}; "
+            f"border: 1px solid {PLAYBACK_COLORS['border']}; }}"
+        )
         self.duration = 0
         self.position = 0
         self.highlights = ()
         self.open_start = None
+        self._drag_position = None
+        self._press_position = None
+        self._drag_moved = False
+
+    @property
+    def dragging(self):
+        return self._drag_position is not None
+
+    @property
+    def displayed_position(self):
+        return self._drag_position if self.dragging else self.position
+
+    def cancel_drag(self):
+        self._drag_position = self._press_position = None
+        self._drag_moved = False
+        QToolTip.hideText()
+        self.update()
+
+    def hideEvent(self, event):
+        self.cancel_drag()
+        super().hideEvent(event)
+
+    def mousePressEvent(self, event):
+        target = progress_time(event.position().x(), self.width(), self.duration)
+        if event.button() != Qt.MouseButton.LeftButton or target is None:
+            event.ignore()
+            return
+        # Qt는 누른 위젯에 마우스를 잡아 두므로 막대 밖 release도 전달된다.
+        self._drag_position = self._press_position = target
+        self.update()
+        self.seek_requested.emit(target)
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        target = progress_time(event.position().x(), self.width(), self.duration)
+        if target is None:
+            self.cancel_drag()
+            return
+        QToolTip.showText(event.globalPosition().toPoint(), timestamp(target), self)
+        if self.dragging:
+            # 드래그 중에는 미리보기만 갱신한다. 엔진 탐색은 놓을 때 한 번 한다.
+            self._drag_position = target
+            self._drag_moved = self._drag_moved or target != self._press_position
+            self.update()
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton or not self.dragging:
+            event.ignore()
+            return
+        target = progress_time(event.position().x(), self.width(), self.duration)
+        start = self._press_position
+        moved = self._drag_moved
+        self.cancel_drag()
+        if target is not None and (moved or target != start):
+            self.seek_requested.emit(target)
+        event.accept()
+
+    def leaveEvent(self, event):
+        QToolTip.hideText()
+        super().leaveEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         c = PLAYBACK_COLORS
-        left, width = 5, max(1, self.width() - 10)
+        left, width = PROGRESS_MARGIN, max(1, self.width() - 2 * PROGRESS_MARGIN)
         painter.fillRect(left, 5, width, 4, QColor(c['border']))
         if self.duration <= 0:
             return
@@ -39,7 +119,8 @@ class HighlightProgress(QWidget):
             return left + round(width * max(0, min(1, seconds / self.duration)))
 
         # 위는 진행, 아래는 하이라이트: 짧은 구간도 재생 위치에 가리지 않는다.
-        painter.fillRect(left, 5, x(self.position) - left, 4, QColor(c['ring']))
+        position = self.displayed_position
+        painter.fillRect(left, 5, x(position) - left, 4, QColor(c['ring']))
         for highlight in self.highlights:
             if highlight.end is None:
                 painter.fillRect(x(highlight.start) - 2, 16, 4, 10, QColor(c['highlight']))
@@ -47,10 +128,10 @@ class HighlightProgress(QWidget):
                 painter.fillRect(x(highlight.start), 18,
                                  max(3, x(highlight.end) - x(highlight.start)), 6, QColor(c['highlight-range']))
         if self.open_start is not None:
-            start, end = sorted((x(self.open_start), x(self.position)))
+            start, end = sorted((x(self.open_start), x(position)))
             painter.fillRect(start, 18, max(3, end - start), 6, QColor(c['highlight-open']))
         painter.setPen(QPen(QColor(c['foreground']), 2))
-        painter.drawLine(x(self.position), 2, x(self.position), 12)
+        painter.drawLine(x(position), 2, x(position), 12)
 
 
 class _PlaybackHighlightDelegate(QStyledItemDelegate):

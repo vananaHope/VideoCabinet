@@ -72,6 +72,7 @@ class PlaybackPage(QWidget):
         bottom.setContentsMargins(8, 0, 8, 4)
         bottom.setSpacing(0)
         self.progress = HighlightProgress()
+        self.progress.seek_requested.connect(self.seek)
         self.progress.setFixedHeight(30)
         bottom.addWidget(self.progress)
         row = QHBoxLayout()
@@ -141,6 +142,20 @@ class PlaybackPage(QWidget):
     def focus_content(self):
         if self.isVisible() and QApplication.activeModalWidget() is None:
             self.surface.setFocus()
+
+    def seek(self, position=None, *, command=None):
+        """마우스와 키보드 탐색은 같은 위치 보고·모아보기 동기화를 거친다."""
+        window = self.shell
+        try:
+            window.sync_position()
+            window.reel.sync()
+            if window.player:
+                if command is not None:
+                    window.player.execute(command)
+                else:
+                    window.player.seek_to(position)
+        except Exception as error:
+            QMessageBox.warning(window, "재생 조작 실패", str(error))
 
     def run_action(self, action):
         self.close_help()
@@ -249,7 +264,8 @@ class PlaybackPage(QWidget):
 
     def hide_temporary_bar(self):
         if self.fullscreen:
-            if self.menu.isVisible() or self.bottom_bar.isAncestorOf(QApplication.focusWidget()):
+            if (self.progress.dragging or self.menu.isVisible()
+                    or self.bottom_bar.isAncestorOf(QApplication.focusWidget())):
                 self.bar_timer.start()
             elif not self._error:
                 self.bottom_bar.hide()
@@ -317,6 +333,7 @@ class PlaybackPage(QWidget):
     def show_position(self, position, duration, open_start, range_keys):
         session = self.core.playback.session
         if session and self._shown_session is not session:
+            self.progress.cancel_drag()
             self._shown_session = session
             self._error = ""
             self.show_notice("")
@@ -423,12 +440,10 @@ class PlaybackPage(QWidget):
                 elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
                     if not event.isAutoRepeat():
                         window.translations.toggle()
+                elif command.kind == CommandType.SEEK:
+                    self.seek(command=command)
                 else:
-                    if command.kind == CommandType.SEEK:
-                        window.sync_position()
-                        window.reel.sync()
-                    if window.player:
-                        window.player.execute(command)
+                    window.player.execute(command)
             except Exception as error:
                 QMessageBox.warning(window, "재생 조작 실패", str(error))
             return True
