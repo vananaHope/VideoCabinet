@@ -15,21 +15,41 @@ Node는 [공식 다운로드](https://nodejs.org/en/download)에서 22 LTS 이�
 powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
 ```
 
-스크립트는 `.venv`를 만들고 Python 의존성을 설치합니다. 이어서 `frontend/`에서
+스크립트는 `uv venv`로 worktree별 `.venv`를 만들고
+`uv pip install --link-mode hardlink -e '.[dev,cuda]'`로 사용자 uv 캐시의 패키지를 하드링크합니다.
+`uv`가 없으면 winget의 `astral-sh.uv` **0.8.15**(2025-09-03 출시)를 설치합니다.
+이미 설치된 uv는 그대로 사용합니다. 캐시와 worktree가 다른 드라이브에 있는 등 하드링크가
+불가능하면 uv가 경고를 출력하고 복사로 전환합니다. 하드링크된 `.venv` 패키지 파일을
+직접 수정하지 마세요. 의존성 변경은 각 worktree에서 uv로 설치합니다. 이어서 `frontend/`에서
 `npm ci`, lint, 타입 검사, 빌드를 실행합니다. PySide6 6.10.2에 WebEngine과 WebChannel이 포함돼 있습니다.
 FFmpeg가 없으면 winget의 `Gyan.FFmpeg` **9.0.2**를 설치하며,
 7-Zip이 없으면 `7zip.7zip` **26.04**를 설치합니다(관리자 권한 확인이 표시될 수 있습니다).
 FFmpeg를 이미 별도로 설치했다면 `-SkipFFmpeg`를 붙일 수 있습니다.
-마지막으로 libmpv를 내려받아 압축을 풀고 pytest를 실행합니다.
+마지막으로 libmpv를 준비하고 FFmpeg·CUDA를 확인한 뒤 pytest를 실행합니다.
+
+이미 도구가 설치된 PC의 새 worktree에서는 빠른 모드를 사용합니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup.ps1 -Worktree
+```
+
+빠른 모드는 전체 pytest, 프런트 lint·타입 검사, FFmpeg·7-Zip의 winget 설치를 건너뜁니다.
+`npm ci`, `npm run build`, 브리지 타입 생성 검사(`--check`), WebEngine·FFmpeg·CUDA 확인은 유지합니다.
+FFmpeg/ffprobe나 7-Zip이 없으면 전체 모드를 먼저 실행하라는 안내와 함께 실패합니다.
+제출 전에는 별도로 전체 pytest와 프런트 lint·타입 검사를 실행하세요.
+`-Worktree` 없이 실행하면 이 검사들을 모두 포함한 전체 준비 절차를 실행합니다.
 
 libmpv는 [mpv 공식 설치 안내](https://mpv.io/installation/)에 연결된
 [shinchiro Windows 빌드](https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261013)의
 `mpv-dev-x86_64-20261013-git-9d144e57b6.7z`를 사용합니다.
 `scripts/install_libmpv.py`에 고정 URL과 SHA-256이 있으며, 해시가 다르면 설치를 중단합니다.
-DLL은 `.runtime/mpv/libmpv-2.dll`에만 둡니다. 아카이브의 BCJ2 필터 때문에 7-Zip이 필요합니다.
+검증한 압축 파일은 `%LOCALAPPDATA%\my-video-manager\cache\libmpv\`에 보관합니다.
+재사용할 때도 SHA-256을 다시 검사하며 손상된 캐시는 버리고 다시 받습니다.
+프로세스 간 잠금과 임시 파일의 원자 교체로 동시 준비 및 다운로드 중단을 처리합니다.
+캐시는 worktree를 삭제해도 남으며, 각 worktree의 DLL은 `.runtime/mpv/libmpv-2.dll`에만 둡니다. 아카이브의 BCJ2 필터 때문에 7-Zip이 필요합니다.
 바이너리와 가상환경은 Git에서 제외합니다. 빌드 교체 시 URL과 SHA-256을 함께 갱신하세요.
 
-수동으로 같은 환경을 준비하려면:
+`uv` 대신 `pip`만으로 수동 준비할 수도 있습니다(패키지를 복사하므로 디스크를 더 사용합니다):
 
 ```powershell
 python -m venv .venv
