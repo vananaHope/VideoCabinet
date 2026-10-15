@@ -190,15 +190,61 @@ def test_backfill_cancelled_during_probe_retries_and_does_not_hold_database_lock
 
 def test_probe_failure_finishes_once_and_scan_retries_without_losing_location(tmp_path):
     class BrokenMedia(ResolutionMedia):
+        broken = False
+
+        def read(self, path):
+            if self.broken:
+                raise RuntimeError('probe timeout')
+            return super().read(path)
+
         def read_resolution(self, path, *, cancellation):
-            raise RuntimeError('probe timeout')
-    core = legacy(tmp_path, 1, BrokenMedia())
+            return self.read(path)
+    media = BrokenMedia()
+    core = legacy(tmp_path, 1, media)
+    media.broken = True
     result = core.fill_next_resolution(cancellation=Event())
     assert result.state == 'unknown' and 'timeout' in result.message
     assert core.fill_next_resolution(cancellation=Event()).state == 'exhausted'
-    core.scan()
+    for _ in range(2):
+        assert not any(issue.failed for issue in core.scan().issues)
+        assert core.videos()[0].width is None
+        assert not core.videos()[0].missing
+        assert core.fill_next_resolution(cancellation=Event()).state == 'unknown'
+        assert core.fill_next_resolution(cancellation=Event()).state == 'exhausted'
+    media.broken = False
+    assert not any(issue.failed for issue in core.scan().issues)
+    assert core.videos()[0].width is None
+    assert core.fill_next_resolution(cancellation=Event()).state == 'completed'
     assert core.videos()[0].width == 1920
     assert not core.videos()[0].missing
+
+
+def test_first_scan_after_v2_migration_leaves_unchanged_videos_for_backfill(tmp_path):
+    media = ResolutionMedia()
+    core = legacy(tmp_path, 3, media)
+    media.reads.clear()
+    assert not any(issue.failed for issue in core.scan().issues)
+    assert len(media.reads) == 0
+    assert all(video.width is None for video in core.videos())
+    assert core.fill_next_resolution(cancellation=Event()).state == 'completed'
+    assert len(media.reads) == 1
+
+
+def test_resolution_pending_description_tracks_backfill_and_excludes_hidden_videos(tmp_path):
+    core = legacy(tmp_path, 3)
+    core.exclude_video(core.videos()[-1].id)
+    inventory = core.statistics_dashboard(30).inventory
+    assert inventory.resolution_pending_count == 2
+    assert inventory.resolution_pending_description == '확인 중 2개 포함'
+    assert inventory.resolution_distribution[-1].video_count == 2
+    assert core.fill_next_resolution(cancellation=Event()).state == 'completed'
+    inventory = core.statistics_dashboard(30).inventory
+    assert inventory.resolution_pending_count == 1
+    assert inventory.resolution_pending_description == '확인 중 1개 포함'
+    assert core.fill_next_resolution(cancellation=Event()).state == 'completed'
+    inventory = core.statistics_dashboard(30).inventory
+    assert inventory.resolution_pending_count == 0
+    assert inventory.resolution_pending_description == ''
 
 
 @pytest.mark.parametrize('lock', ['IMMEDIATE', 'EXCLUSIVE'])

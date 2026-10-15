@@ -89,6 +89,8 @@ class LibraryInventory:
     duration_distribution: tuple[DistributionBucket, ...]
     format_distribution: tuple[DistributionBucket, ...]
     resolution_distribution: tuple[DistributionBucket, ...]
+    resolution_pending_count: int
+    resolution_pending_description: str
 
 
 @dataclass(frozen=True)
@@ -251,6 +253,7 @@ def _inventory(video_rows, sizes, korean, highlighted, tagged, revisited, activi
     visible = [row for row in video_rows if not row['excluded']]
     bands = [0] * 5
     resolutions = [0] * 6
+    pending = sum(row['resolution_checked'] == 0 for row in visible)
     formats = {}
     format_names = {'matroska,webm': 'Matroska / WebM', 'matroska': 'Matroska',
                     'webm': 'WebM', 'mov,mp4,m4a,3gp,3g2,mj2': 'MP4 / QuickTime',
@@ -275,6 +278,7 @@ def _inventory(video_rows, sizes, korean, highlighted, tagged, revisited, activi
         tuple(DistributionBucket(label, count) for label, count in sorted(formats.items(), key=lambda x: (-x[1], x[0]))),
         tuple(DistributionBucket(label, count) for label, count in zip(
             ('SD', '720p', '1080p', '1440p', '4K 이상', '알 수 없음'), resolutions)),
+        pending, f'확인 중 {pending:,}개 포함' if pending else '',
     )
 
 
@@ -317,7 +321,7 @@ class StatisticsReader:
         now = now.astimezone(tz)
         with self._connect() as db:
             db.execute('BEGIN')
-            video_rows = db.execute('SELECT id, title, registered_at, excluded, duration, format, width, height FROM videos').fetchall()
+            video_rows = db.execute('SELECT id, title, registered_at, excluded, duration, format, width, height, resolution_checked FROM videos').fetchall()
             snapshot = self._viewings.read_rows(connection=db)
         # 현황은 시청 스냅샷과 별개다. 명시적 BEGIN 없이 각 fetch 직후 읽기 잠금을
         # 풀어 시청·자막 작업자의 커밋이 여러 현황 쿼리 전체를 기다리지 않게 한다.

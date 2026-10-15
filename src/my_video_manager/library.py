@@ -216,9 +216,9 @@ class Library:
         signature = _signature(path)
         minimum = self.minimum_duration
         with self._connect() as db:
-            old = db.execute("""SELECT l.video_id, l.size, l.mtime_ns, v.excluded, v.resolution_checked FROM locations l
+            old = db.execute("""SELECT l.video_id, l.size, l.mtime_ns, v.excluded FROM locations l
                 JOIN videos v ON v.id=l.video_id WHERE l.path=?""", (str(path),)).fetchone()
-            if old and (old["size"], old["mtime_ns"]) == signature and old['resolution_checked']:
+            if old and (old["size"], old["mtime_ns"]) == signature:
                 return self._already_registered(path, old["excluded"])
             check = db.execute("SELECT * FROM library_file_checks WHERE path=?", (str(path),)).fetchone()
             if check and (check["size"], check["mtime_ns"]) == signature:
@@ -238,13 +238,6 @@ class Library:
                 """SELECT id, fingerprint, excluded FROM videos
                    WHERE ',' || lower(format) || ',' LIKE '%,gif,%' AND fingerprint LIKE ?""",
                 (f"v1:{signature[0]}:%",))}
-        if old and (old['size'], old['mtime_ns']) == signature:
-            info = self._media.read(path)
-            self._check_unchanged(path, signature)
-            with self._connect() as db:
-                db.execute('UPDATE videos SET width=?, height=?, resolution_checked=1 WHERE id=?',
-                           (info.width if info else None, info.height if info else None, old['video_id']))
-            return self._already_registered(path, old['excluded'])
         # 다른 내용으로 교체된 위치는 읽기/캡처 실패 시에도 옛 영상에 남기지 않는다.
         self._forget_location(path)
         # 새 GIF는 등록하지 않지만 이전 DB의 GIF와 사용자의 되돌리기 결정은 보존한다.

@@ -26,11 +26,14 @@ parser.add_argument('--offscreen', action='store_true')
 parser.add_argument('--count', type=int, choices=(0, 8, 50000), default=8)
 parser.add_argument('--verify', action='store_true')
 parser.add_argument('--empty-library', action='store_true')
+parser.add_argument('--resolution-pending', action='store_true')
 parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-52')
 args = parser.parse_args()
 if args.empty_library and (args.count != 0 or args.verify):
     parser.error('--empty-library는 --count 0의 스크린샷 검사에만 사용합니다')
 sample = 'empty' if args.empty_library else str(args.count)
+if args.resolution_pending:
+    sample += '-pending'
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 if args.offscreen:
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu'
@@ -85,6 +88,8 @@ if not args.empty_library:
                        [(height, 3840, i) if height else (None, None, i)
                         for i in range(1, video_count + 1)
                         for height in [(480, 720, 1080, 1440, 2160, None)[(i - 1) % 6]]])
+        if args.resolution_pending:
+            db.execute('UPDATE videos SET resolution_checked=0 WHERE width IS NULL')
         rows = []
         for i in range(args.count):
             # 730일에 분/초/마이크로초를 퍼뜨려 분 단위 메모에 유리하지 않게 한다.
@@ -101,6 +106,8 @@ if not args.empty_library:
     db.close()
 
 window = MainWindow(core)
+# 스크린샷의 미확인 상태가 실행 시간에 따라 달라지지 않게 고정한다.
+window.resolutions.shutdown()
 window.resize(1100, 720)
 window.show()
 if not args.offscreen:
@@ -237,6 +244,11 @@ try:
             distribution = json.loads(js("""JSON.stringify([...document.querySelectorAll('[data-statistics-inventory] section')]
                 .find(e => e.querySelector('h2')?.textContent === '해상도 분포')?.innerText)"""))
             assert distribution and '알 수 없음' in distribution
+            pending_description = expected['inventory']['resolution_pending_description']
+            if pending_description:
+                assert pending_description in distribution
+            else:
+                assert '확인 중' not in distribution
             for bucket in expected['inventory']['resolution_distribution']:
                 assert bucket['label'] in distribution
                 assert f"{bucket['video_count']:,}개" in distribution
