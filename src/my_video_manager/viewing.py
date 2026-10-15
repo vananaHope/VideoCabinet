@@ -116,16 +116,10 @@ class ViewingStatus:
 
 
 def viewing_status(viewings: tuple[Viewing, ...], settings: ViewingSettings) -> ViewingStatus:
-    finished_count = sum(v.classify(settings) == ViewingKind.FINISHED for v in viewings)
-    finished = finished_count > 0
-    abandoned = not finished and any(v.classify(settings) == ViewingKind.ABANDONED for v in viewings)
-    # 시작 시각이 같은 가짜 시계/빠른 재실행에도 ID가 최종 순서를 보장한다.
-    last = max((v for v in viewings if v.last_position is not None), key=lambda v: v.id, default=None)
-    point = last.last_position if abandoned and last is not None else None
-    return ViewingStatus(finished, abandoned, finished_count >= settings.favorite_count,
-                         finished_count, point,
-                         point / last.duration * 100 if point is not None else None,
-                         max((v.updated_at for v in viewings), default=None))
+    state = _ViewingState()
+    for viewing in viewings:
+        state.add(viewing, settings)
+    return state.status(settings)
 
 
 @dataclass(frozen=True)
@@ -154,15 +148,45 @@ class ViewingSummary:
     statistics: dict[int, VideoViewingStatistics]
 
 
-@dataclass
-class _ViewingTotals:
+@dataclass(slots=True)
+class _ViewingState:
+    """단일·일괄 조회가 공유하는 상태 계산. 통계 합계는 만들지 않는다."""
     finished_count: int = 0
-    viewing_count: int = 0
-    seconds: float = 0.0
+    has_abandoned: bool = False
     last_viewed_at: datetime | None = None
-    last_position_id: int = -1
+    last_position_id: int | None = None
     last_position: float | None = None
     last_duration: float = 1.0
+
+    def add(self, viewing: Viewing | ViewingRecord, settings: ViewingSettings) -> ViewingKind:
+        kind = classify_viewing(viewing.played_seconds, viewing.duration, settings)
+        self.finished_count += kind == ViewingKind.FINISHED
+        self.has_abandoned = self.has_abandoned or kind == ViewingKind.ABANDONED
+        updated = (datetime.fromisoformat(viewing.updated_at)
+                   if isinstance(viewing.updated_at, str) else viewing.updated_at)
+        if self.last_viewed_at is None or updated > self.last_viewed_at:
+            self.last_viewed_at = updated
+        # 틀어보기도 위치를 갱신하며, 시작/갱신 시각과 무관하게 ID 순서를 따른다.
+        if viewing.last_position is not None and (
+                self.last_position_id is None or viewing.id > self.last_position_id):
+            self.last_position_id = viewing.id
+            self.last_position = viewing.last_position
+            self.last_duration = viewing.duration
+        return kind
+
+    def status(self, settings: ViewingSettings) -> ViewingStatus:
+        finished = self.finished_count > 0
+        abandoned = not finished and self.has_abandoned
+        point = self.last_position if abandoned else None
+        return ViewingStatus(
+            finished, abandoned, self.finished_count >= settings.favorite_count, self.finished_count,
+            point, point / self.last_duration * 100 if point is not None else None, self.last_viewed_at)
+
+
+@dataclass(slots=True)
+class _ViewingTotals(_ViewingState):
+    viewing_count: int = 0
+    seconds: float = 0.0
 
 
 def summarize_viewings(records: Iterable[ViewingRecord], video_ids: Iterable[int],
@@ -173,27 +197,13 @@ def summarize_viewings(records: Iterable[ViewingRecord], video_ids: Iterable[int
         total = totals.get(record.video_id)
         if total is None:
             continue
-        kind = classify_viewing(record.played_seconds, record.duration, settings)
+        kind = total.add(record, settings)
         if kind != ViewingKind.GLANCE:
             total.viewing_count += 1
             total.seconds += record.played_seconds
-            total.finished_count += kind == ViewingKind.FINISHED
-        updated = (datetime.fromisoformat(record.updated_at)
-                   if isinstance(record.updated_at, str) else record.updated_at)
-        if total.last_viewed_at is None or updated > total.last_viewed_at:
-            total.last_viewed_at = updated
-        if record.last_position is not None and record.id > total.last_position_id:
-            total.last_position_id = record.id
-            total.last_position = record.last_position
-            total.last_duration = record.duration
     statuses, statistics = {}, {}
     for vid, total in totals.items():
-        finished = total.finished_count > 0
-        abandoned = not finished and total.viewing_count > 0
-        point = total.last_position if abandoned else None
-        statuses[vid] = ViewingStatus(
-            finished, abandoned, total.finished_count >= settings.favorite_count, total.finished_count,
-            point, point / total.last_duration * 100 if point is not None else None, total.last_viewed_at)
+        statuses[vid] = total.status(settings)
         statistics[vid] = VideoViewingStatistics(
             vid, total.viewing_count, total.seconds,
             total.last_viewed_at.isoformat() if total.last_viewed_at is not None else None)
