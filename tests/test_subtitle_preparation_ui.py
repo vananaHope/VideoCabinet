@@ -69,7 +69,8 @@ def test_shutdown_cancels_preparation_and_joins_worker(window_factory, core, mon
 
     def prepare(*, cancellation, progress):
         assert cancellation.wait(5)
-        raise PreparationError('cancelled')
+        assert cancellation.reason == 'interrupted'
+        raise PreparationError(cancellation.reason)
 
     monkeypatch.setattr(core, 'prepare_subtitle_support', prepare)
     controls.prepare()
@@ -93,7 +94,7 @@ def test_general_version_and_fixed_release_browser_link(window_factory, monkeypa
     assert opened == [RELEASES_URL]
 
 
-@pytest.mark.parametrize('kind', ['cancelled', 'network'])
+@pytest.mark.parametrize('kind', ['cancelled', 'interrupted', 'network', 'server'])
 def test_restart_waits_for_explicit_retry(window_factory, core, monkeypatch, kind):
     from my_video_manager import subtitle_controls
     window = window_factory()

@@ -1,10 +1,9 @@
 """자막 준비 작업자의 수명과 웹 표시 상태. 다운로드 정책은 코어가 소유한다."""
-from threading import Event
 from time import monotonic
 
 from PySide6.QtCore import QThread, Signal
 
-from .cuda_runtime import PreparationError
+from .cuda_runtime import PreparationError, PreparationCancellation
 from .runtime_assets import preparation_download_label
 from .subtitle_preparation_state import safe_detail
 
@@ -29,7 +28,7 @@ class PreparationWorker(QThread):
     def __init__(self, core, parent):
         super().__init__(parent)
         self.core = core
-        self.cancellation = Event()
+        self.cancellation = PreparationCancellation()
         self.last_report = 0.0
 
     def report(self, value):
@@ -45,7 +44,7 @@ class PreparationWorker(QThread):
         except PreparationError as error:
             self.result.emit(error.kind, failure_message(error.kind, str(error), error.detail))
         except Exception as error:
-            self.result.emit('other', failure_message('other', detail=str(error)))
+            self.result.emit('other', failure_message('other', detail=error))
 
 
 def preparation_state(state='idle', *, message='', phase='', asset='', completed=0, total=0, kind='',

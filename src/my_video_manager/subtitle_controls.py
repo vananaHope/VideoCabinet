@@ -151,7 +151,7 @@ class SubtitleControls(QObject):
         self.timer.stop()
         self.stopping = True
         if self.preparation_worker:
-            self.preparation_worker.cancellation.set()
+            self.preparation_worker.cancellation.interrupt()
             self.preparation_worker.wait()
         self.core.stop_subtitle_processing()
         if self.worker:

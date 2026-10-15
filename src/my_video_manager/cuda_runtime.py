@@ -17,22 +17,25 @@ import urllib.request
 import zipfile
 
 from .runtime_assets import CUDA_WHEELS, WHISPER_FILES, WHISPER_REVISION, DownloadAsset
+from .subtitle_preparation_state import safe_detail, log_failure
 
 
 class PreparationError(RuntimeError):
     MESSAGES = {
         "gpu_unavailable": "사용 가능한 NVIDIA GPU가 없습니다. GPU와 드라이버를 확인하세요.",
         "network": "다운로드가 끊겼습니다. 인터넷 연결을 확인하고 다시 시도하세요.",
+        "server": "서버가 일시적으로 응답하지 않습니다. 잠시 뒤 다시 시도하세요.",
         "hash_mismatch": "다운로드 파일의 해시가 다릅니다. 다시 내려받으세요.",
         "disk_full": "저장 공간이 부족합니다. 데이터 폴더의 여유 공간을 확보하세요.",
         "cancelled": "자막 기능 준비를 취소했습니다. 다음에 다시 시도할 수 있습니다.",
+        "interrupted": "준비가 끝나기 전에 중단되었습니다. 다음에 다시 시도할 수 있습니다.",
         "invalid_archive": "CUDA 휠에서 올바른 DLL을 찾을 수 없습니다.",
         "storage": "준비 파일을 저장할 수 없습니다. 데이터 폴더의 권한을 확인하세요.",
         "preparation_required": "자막 기능 준비를 먼저 실행하세요.",
     }
 
-    def __init__(self, kind: str, detail: str = ""):
-        self.kind, self.detail = kind, detail
+    def __init__(self, kind: str, detail: str | Exception = ""):
+        self.kind, self.detail = kind, safe_detail(detail)
         super().__init__(self.MESSAGES[kind])
 
 
@@ -86,9 +89,18 @@ def _directory_lock(directory: Path, cancellation: Event):
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
+class PreparationCancellation(Event):
+    """기존 Event 계약에 앱 종료 사유를 더한다."""
+    reason = 'cancelled'
+
+    def interrupt(self):
+        self.reason = 'interrupted'
+        self.set()
+
+
 def _check_cancel(cancellation: Event):
     if cancellation.is_set():
-        raise PreparationError("cancelled")
+        raise PreparationError(getattr(cancellation, 'reason', 'cancelled'))
 
 
 def _report(progress: Progress | None, cancellation: Event, phase, asset, completed, total):
@@ -107,7 +119,8 @@ class RuntimeDownloadAdapter:
             response = urllib.request.urlopen(asset.url, timeout=10)
         except (OSError, http.client.HTTPException) as error:
             _check_cancel(cancellation)
-            raise PreparationError("network", f"{asset.name}: {error}") from error
+            kind = 'server' if isinstance(error, urllib.error.HTTPError) and 500 <= error.code < 600 else 'network'
+            raise PreparationError(kind, f"{asset.name}: {safe_detail(error)}") from error
         with response, target.open("wb") as output:
             count = 0
             while True:
@@ -117,7 +130,7 @@ class RuntimeDownloadAdapter:
                     chunk = response.read1(_CHUNK)
                 except (OSError, http.client.HTTPException) as error:
                     _check_cancel(cancellation)
-                    raise PreparationError("network", f"{asset.name}: {error}") from error
+                    raise PreparationError("network", f"{asset.name}: {safe_detail(error)}") from error
                 if not chunk:
                     break
                 if count + len(chunk) > asset.size:
@@ -164,7 +177,7 @@ class RuntimeDownloadAdapter:
                             count += len(chunk)
                             _report(progress, cancellation, "extract", path.name, count, entry.file_size)
         except zipfile.BadZipFile as error:
-            raise PreparationError("invalid_archive", str(error)) from error
+            raise PreparationError("invalid_archive", error) from error
 
     def require_space(self, target: Path, size: int):
         if shutil.disk_usage(target).free < size:
@@ -209,7 +222,7 @@ def cuda_gpu_available(*, command: tuple[str, ...] | None = None, timeout: float
             raise ValueError("GPU 탐지 응답은 bool이어야 합니다.")
         return available
     except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as error:
-        raise PreparationError("gpu_unavailable", str(error)) from error
+        raise PreparationError("gpu_unavailable", error) from error
     finally:
         if job:
             job.close()
@@ -278,7 +291,9 @@ class SubtitlePreparation:
             for position, asset in enumerate(assets, 1):
                 if value.asset == asset.name:
                     index = position
-                    amount = min(asset.size, value.completed) if value.phase == 'download' else asset.size
+                    if value.phase == 'download' and value.completed == 0:
+                        completed[asset.name] = 0
+                    amount = min(asset.size, value.completed) if value.phase in ('download', 'verify') else asset.size
                     completed[asset.name] = max(completed[asset.name], amount)
                     break
             if progress:
@@ -288,30 +303,36 @@ class SubtitlePreparation:
 
         try:
             # 강제 종료도 다음 시작에서 자동 다운로드로 이어지지 않게 한다.
-            history.save('cancelled', '이전 준비가 끝나기 전에 앱이 종료되었습니다.')
+            history.save('interrupted')
             result = self._prepare(cancellation=cancellation, progress=report)
-            history.save('ready')
+            try:
+                history.save('ready')
+            except OSError as error:
+                log_failure(self.data_directory, 'storage', '준비 완료 기록을 저장하지 못했습니다.', error)
             return result
         except PreparationError as error:
             history.failed(error.kind, str(error), error.detail)
             raise
         except OSError as error:
-            failure = PreparationError('storage', str(error))
+            failure = PreparationError('storage', error)
             history.failed(failure.kind, str(failure), failure.detail)
             raise failure from error
         except Exception as error:
-            history.failed('other', '자막 기능 준비에 실패했습니다.', str(error))
+            history.failed('other', '자막 기능 준비에 실패했습니다.', error)
             raise
 
     def status(self):
         """이전 실패와 완료 manifest를 읽기만 한다. 다운로드는 시작하지 않는다."""
         from .subtitle_preparation_state import PreparationHistory
-        previous = PreparationHistory(self.data_directory).read()
-        if previous and previous['kind'] != 'ready':
-            return previous
         try:
             self.prepared()
         except PreparationError:
+            previous = PreparationHistory(self.data_directory).read()
+            if previous and previous['kind'] != 'ready':
+                return previous
+            if previous is None and (any((self.data_directory / 'runtime/cuda').glob('*.partial'))
+                                     or any((self.data_directory / 'models').rglob('*.partial'))):
+                return dict(kind='cancelled', message=PreparationError.MESSAGES['interrupted'], detail='')
             return dict(kind='idle', message='', detail='')
         return dict(kind='ready', message='', detail='')
 
@@ -329,7 +350,7 @@ class SubtitlePreparation:
             except PreparationError:
                 raise
             except Exception as error:
-                raise PreparationError("gpu_unavailable", str(error)) from error
+                raise PreparationError("gpu_unavailable", error) from error
             if not available:
                 raise PreparationError("gpu_unavailable")
             with _directory_lock(self.data_directory, cancellation):
@@ -341,7 +362,7 @@ class SubtitlePreparation:
             return PreparedSubtitles(directories, model)
         except OSError as error:
             kind = "disk_full" if error.errno == errno.ENOSPC or getattr(error, "winerror", None) in (39, 112) else "storage"
-            raise PreparationError(kind, str(error)) from error
+            raise PreparationError(kind, error) from error
         finally:
             _preparation_lock.release()
 

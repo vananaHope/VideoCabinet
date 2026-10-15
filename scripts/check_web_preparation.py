@@ -68,14 +68,14 @@ class Adapter:
     def download(self, asset, target, cancellation, progress):
         if asset.name == 'model.bin':
             if self.fail:
-                raise PreparationError('network', 'model.bin: HTTP Error 503 Service Unavailable\n'
+                raise PreparationError('server', 'model.bin: HTTP Error 503 Service Unavailable\n'
                                        'https://example.invalid/model?token=hidden ' + '응답 지연 ' * 80)
             # 실제 청크 간격처럼 UI의 0.1초 신호 제한 뒤에 진행을 보낸다.
             time.sleep(0.15)
             progress(PreparationProgress('download', asset.name, asset.size // 3, asset.size))
             if not cancellation.wait(60):
                 raise RuntimeError('검사에서 취소 입력을 받지 못했습니다.')
-            raise PreparationError('cancelled')
+            raise PreparationError(getattr(cancellation, 'reason', 'cancelled'))
         target.write_bytes(b'fixture')
         progress(PreparationProgress('download', asset.name, asset.size, asset.size))
 
@@ -187,11 +187,25 @@ try:
     metrics['checks'].append('배너 취소와 queued 300개 보존, 영속 취소 결과')
     adapter.fail = True
     click('다시 시도')
-    wait(lambda: controls.preparation_worker is None and controls.preparation['kind'] == 'network')
+    wait(lambda: controls.preparation_worker is None and controls.preparation['kind'] == 'server')
     wait(lambda: js("document.body.innerText.includes('HTTP Error 503')"))
     assert not js("document.body.innerText.includes('token=hidden')")
     capture('06-failed-detail')
+    assert js("document.body.innerText.includes('서버가 일시적으로 응답하지 않습니다')")
     metrics['checks'].append('웹 다시 시도·HTTP 503 상세·민감 값 가림·긴 상세 말줄임')
+    adapter.fail = False
+    click('다시 시도')
+    wait(lambda: controls.preparation['asset'] == 'model.bin')
+    assert controls.shutdown()
+    wait(lambda: controls.preparation_worker is None)
+    previous = service.status()
+    assert previous['kind'] == 'interrupted'
+    from my_video_manager.subtitle_preparation_ui import failure_message
+    controls.preparation_result(previous['kind'], failure_message(**previous))
+    wait(lambda: js("document.body.innerText.includes('준비가 끝나기 전에 중단되었습니다')"))
+    capture('08-interrupted')
+    metrics['checks'].append('준비 중 종료·영속 중단 결과·중단됨 배너')
+    controls.stopping = False
     for video in videos:
         core.remove_from_subtitle_queue(video.id)
     controls.process_queue()

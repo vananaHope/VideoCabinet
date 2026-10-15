@@ -217,15 +217,16 @@ def test_missing_ready_dll_triggers_download_again(tmp_path, server):
 
 
 @pytest.mark.parametrize("status", [404, 500, 503])
-def test_http_error_is_network(tmp_path, server, status):
+def test_http_error_distinguishes_server_failure(tmp_path, server, status):
     server[0].status = status
     with pytest.raises(PreparationError) as caught:
         preparation(tmp_path, server).prepare()
-    assert caught.value.kind == "network"
+    kind = 'server' if status >= 500 else 'network'
+    assert caught.value.kind == kind
     assert str(status) in caught.value.detail
     assert 'cuda.whl' in caught.value.detail
     restarted = preparation(tmp_path, server)
-    assert restarted.status()['kind'] == 'network'
+    assert restarted.status()['kind'] == kind
     assert str(status) in restarted.status()['detail']
     log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
     assert str(status) in log and 'cuda.whl' in log
@@ -412,8 +413,8 @@ def test_log_failure_does_not_replace_preparation_error(tmp_path, server):
     server[0].status = 503
     with pytest.raises(PreparationError) as caught:
         preparation(tmp_path, server).prepare()
-    assert caught.value.kind == 'network'
-    assert preparation(tmp_path, server).status()['kind'] == 'network'
+    assert caught.value.kind == 'server'
+    assert preparation(tmp_path, server).status()['kind'] == 'server'
 
 
 def test_preparation_log_is_rotated_and_excluded_from_backup(tmp_path, server):
@@ -432,3 +433,113 @@ def test_preparation_log_is_rotated_and_excluded_from_backup(tmp_path, server):
     core.create_backup(archive, include_thumbnails=True)
     with zipfile.ZipFile(archive) as bundle:
         assert all(not name.startswith('logs/') and not name.endswith('.log') for name in bundle.namelist())
+
+@pytest.mark.parametrize('location', ['runtime/cuda/old.partial', 'models/large-v3/old.partial'])
+def test_upgrade_partial_waits_for_retry(tmp_path, server, location):
+    (tmp_path / location).mkdir(parents=True)
+    service = preparation(tmp_path, server)
+    assert service.status()['kind'] == 'cancelled'
+    assert server[0].requests == []
+    service.prepare()
+    assert service.status()['kind'] == 'ready'
+
+
+@pytest.mark.parametrize('history', ['{broken', '[]', '{"kind":"cancelled","message":"","detail":""}'])
+def test_ready_manifest_wins_over_bad_history(tmp_path, server, history):
+    service = preparation(tmp_path, server)
+    service.prepare()
+    requests = server[0].requests[:]
+    (tmp_path / 'subtitle-preparation.json').write_text(history)
+    assert service.status()['kind'] == 'ready'
+    assert server[0].requests == requests
+
+
+def test_ready_history_write_failure_preserves_success(tmp_path, server, monkeypatch):
+    from my_video_manager.subtitle_preparation_state import PreparationHistory
+    save = PreparationHistory.save
+    def fail_ready(self, kind, *args, **kwargs):
+        if kind == 'ready':
+            raise PermissionError(errno.EACCES, 'denied', str(Path.home() / 'ready.json'))
+        return save(self, kind, *args, **kwargs)
+    monkeypatch.setattr(PreparationHistory, 'save', fail_ready)
+    service = preparation(tmp_path, server)
+    assert service.prepare() == service.prepared()
+    assert service.status()['kind'] == 'ready'
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    assert 'ERROR' in log and '~' in log and str(Path.home()) not in log
+
+
+def test_oserror_paths_redacted_in_banner_history_and_log(tmp_path, server):
+    from my_video_manager.subtitle_preparation_ui import failure_message
+    class Denied(RuntimeDownloadAdapter):
+        def download(self, *args):
+            raise PermissionError(errno.EACCES, 'denied', str(Path.home() / 'private-model.bin'))
+    service = preparation(tmp_path, server, adapter=Denied())
+    with pytest.raises(PreparationError) as caught:
+        service.prepare()
+    banner = failure_message(caught.value.kind, str(caught.value), caught.value.detail)
+    history = json.loads((tmp_path / 'subtitle-preparation.json').read_text(encoding='utf-8'))
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    for content in (banner, history['detail'], log):
+        assert str(Path.home()) not in content
+        assert str(Path.home()).replace('\\', '\\\\') not in content
+        assert '~' in content and 'private-model.bin' in content
+
+
+def test_userinfo_and_bare_hf_token_redacted(tmp_path, server):
+    from my_video_manager.subtitle_preparation_ui import failure_message
+    service = preparation(tmp_path, server)
+    def fail():
+        raise PreparationError('network', 'https://alice:password@host/model?secret=query hf_AbC123secret')
+    service.gpu_available = fail
+    with pytest.raises(PreparationError):
+        service.prepare()
+    status = service.status()
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    for content in (failure_message(**status), status['detail'], log):
+        assert 'host/model' in content
+        assert all(secret not in content for secret in ('alice', 'password', 'query', 'hf_AbC123secret'))
+
+
+@pytest.mark.parametrize('interrupted', [False, True])
+def test_cancel_reason_is_durable_and_logged_as_one_info_line(tmp_path, server, interrupted):
+    from my_video_manager.cuda_runtime import PreparationCancellation
+    signal = PreparationCancellation()
+    signal.interrupt() if interrupted else signal.set()
+    service = preparation(tmp_path, server)
+    with pytest.raises(PreparationError):
+        service.prepare(cancellation=signal)
+    expected = 'interrupted' if interrupted else 'cancelled'
+    assert preparation(tmp_path, server).status()['kind'] == expected
+    lines = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8').splitlines()
+    assert len(lines) == 1 and 'INFO' in lines[0] and 'ERROR' not in lines[0]
+
+
+def test_abrupt_exit_marker_prevents_automatic_retry(tmp_path, server):
+    service = preparation(tmp_path, server)
+    def abrupt_exit():
+        raise SystemExit(1)
+    service.gpu_available = abrupt_exit
+    with pytest.raises(SystemExit):
+        service.prepare()
+    assert preparation(tmp_path, server).status()['kind'] == 'interrupted'
+    assert server[0].requests == []
+
+
+def test_cache_verification_uses_bytes_and_redownload_resets_progress(tmp_path, server, monkeypatch):
+    from my_video_manager import cuda_runtime
+    monkeypatch.setattr(cuda_runtime, '_CHUNK', 4)
+    service = preparation(tmp_path, server)
+    cached = tmp_path / 'models/models--Systran--faster-whisper-large-v3/snapshots/test-revision'
+    cached.mkdir(parents=True)
+    (cached / 'model.bin').write_bytes(b'x' * service.model_assets[0].size)
+    events = []
+    service.prepare(progress=events.append)
+    model = [event for event in events if event.asset == 'model.bin']
+    baseline = service.cuda_assets[0].size
+    assert model[0].phase == 'verify' and model[0].overall_completed == baseline
+    assert model[1].overall_completed == baseline + 4
+    downloads = [event for event in model if event.phase == 'download']
+    assert downloads[0].overall_completed == baseline
+    assert downloads[1].overall_completed == baseline + 4
+    assert downloads[-1].overall_completed == baseline + service.model_assets[0].size

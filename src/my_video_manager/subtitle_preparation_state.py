@@ -14,8 +14,15 @@ _log_lock = Lock()
 
 def safe_detail(detail):
     """진단 원문에서 인증 값과 사용자 홈 경로만 가린다."""
+    if isinstance(detail, OSError) and detail.strerror is not None:
+        # OSError.__str__은 파일명을 repr로 넣어 Windows 경로를 이중 이스케이프한다.
+        parts = [f'[Errno {detail.errno}] {detail.strerror}']
+        parts.extend(str(name) for name in (detail.filename, detail.filename2) if name is not None)
+        detail = ': '.join(parts)
     detail = re.sub(r'https?://[^\s<>\"\']+',
-                    lambda match: re.split(r'[?#]', match[0], maxsplit=1)[0], str(detail))
+                    lambda match: re.sub(r'(https?://)[^/]*@', r'\1[가림]@',
+                                         re.split(r'[?#]', match[0], maxsplit=1)[0]), str(detail))
+    detail = re.sub(r'\bhf_[A-Za-z0-9]+\b', '[가림]', detail)
     detail = re.sub(r'(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|(?:token|api[_-]?key|password|secret)\s*[:=]\s*)[^\s,;]+',
                     r'\1[가림]', detail)
     for home in (str(Path.home()), Path.home().as_posix()):
@@ -24,7 +31,7 @@ def safe_detail(detail):
 
 
 def log_failure(directory, kind, message, detail):
-    """전역 로깅 설정을 바꾸지 않고 실패 때만 열고 닫는다. 로그 오류는 무시한다."""
+    """실패는 ERROR, 사용자 취소·중단은 INFO로 기록한다. 로그 오류는 무시한다."""
     try:
         with _log_lock:
             folder = Path(directory) / 'logs'
@@ -34,8 +41,12 @@ def log_failure(directory, kind, message, detail):
             try:
                 handler.setFormatter(logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s'))
                 logger = logging.getLogger('my_video_manager.preparation')
-                record = logger.makeRecord(logger.name, logging.ERROR, '', 0, '%s: %s\n%s',
-                                           (kind, safe_detail(message), safe_detail(detail)), None)
+                cancelled = kind in ('cancelled', 'interrupted')
+                text = f'{kind}: {safe_detail(message)} · {safe_detail(detail)}'.strip(' ·')
+                if cancelled:
+                    text = ' '.join(text.split())
+                record = logger.makeRecord(logger.name, logging.INFO if cancelled else logging.ERROR,
+                                           '', 0, text, (), None)
                 handler.handle(record)
             finally:
                 handler.close()
@@ -58,7 +69,7 @@ class PreparationHistory:
             return None
         except (OSError, ValueError) as error:
             # 손상된 취소 기록을 무시해 큰 다운로드를 시작하지 않는다.
-            return dict(kind='storage', message='이전 준비 결과를 읽을 수 없습니다. 다시 시도해 주세요.', detail=str(error))
+            return dict(kind='storage', message='이전 준비 결과를 읽을 수 없습니다. 다시 시도해 주세요.', detail=safe_detail(error))
 
     def save(self, kind, detail='', message=''):
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -78,4 +89,4 @@ class PreparationHistory:
             self.save(kind, detail, message)
         except OSError as error:
             # 최초 시작 기록이 있으면 그대로 차단한다. 원래 준비 오류도 보존한다.
-            log_failure(self.directory, 'storage', '준비 결과를 저장하지 못했습니다.', str(error))
+            log_failure(self.directory, 'storage', '준비 결과를 저장하지 못했습니다.', error)
