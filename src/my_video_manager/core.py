@@ -28,6 +28,7 @@ from .library_details import LibraryDetails
 from .statistics import StatisticsReader, VideoViewingStatistics, ViewingStatistics
 from .statistics import StatisticsDashboard
 from .external_subtitles import ExternalSubtitleFile, ExternalSubtitleFileSummary
+from .resolution import ResolutionBackfill, ResolutionResult
 
 
 class CommandType(str, Enum):
@@ -160,6 +161,11 @@ class AppCore:
                                    self._revisits, reel_settings or ReelSettings())
         self.playback.subscribe(self._reel)
         self._search = Search(self._connect)
+        self._resolution = ResolutionBackfill(self._connect, media)
+
+    def fill_next_resolution(self, *, cancellation) -> ResolutionResult:
+        """작업자용 API. 한 영상 처리 후 반환하며 취소 시 다음 호출에서 이어진다."""
+        return self._resolution.step(cancellation)
 
     def prepare_subtitle_support(self, *, cancellation=None, progress=None, preparation=None):
         """작업자 스레드용 자막 준비 API. progress 콜백은 예외를 던지지 않아야 한다."""

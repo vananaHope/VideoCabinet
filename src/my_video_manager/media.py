@@ -9,6 +9,30 @@ from .core import MediaInfo
 VIDEO_SUFFIXES = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv", ".ts", ".m2ts"}
 
 
+def _display_dimensions(stream):
+    try:
+        width, height = int(stream.get('width')), int(stream.get('height'))
+    except (TypeError, ValueError, OverflowError):
+        return None, None
+    if width <= 0 or height <= 0:
+        return None, None
+    # ffprobe가 display matrix에서 해석한 rotation을 구형 rotate 태그보다 우선한다.
+    rotations = [item.get('rotation') for item in stream.get('side_data_list', [])
+                 if item.get('side_data_type') == 'Display Matrix']
+    rotations.append(stream.get('tags', {}).get('rotate'))
+    for value in rotations:
+        try:
+            rotation = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(rotation):
+            continue
+        if math.isclose(rotation % 180, 90, abs_tol=0.01):
+            width, height = height, width
+        break
+    return width, height
+
+
 def parse_ffprobe_result(output: str, *, suffix: str, returncode: int = 0, error: str = "") -> MediaInfo | None:
     """GIF·정지 이미지·음성·문서는 건너뛰고, 손상된 영상은 오류로 알린다."""
     if returncode:
@@ -37,5 +61,5 @@ def parse_ffprobe_result(output: str, *, suffix: str, returncode: int = 0, error
         except (TypeError, ValueError):
             continue
         if math.isfinite(duration) and duration > 0:
-            return MediaInfo(duration, format_name)
+            return MediaInfo(duration, format_name, *_display_dimensions(streams[0]))
     return None

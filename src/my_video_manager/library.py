@@ -17,6 +17,8 @@ from .external_subtitles import ExternalSubtitles
 class MediaInfo:
     duration: float
     format: str
+    width: int | None = None
+    height: int | None = None
 
 
 class MediaReader(Protocol):
@@ -45,6 +47,8 @@ class Video:
     registered_at: datetime
     locations: tuple[Location, ...]
     excluded: bool = False
+    width: int | None = None
+    height: int | None = None
 
     @property
     def missing(self) -> bool:
@@ -84,11 +88,11 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 2
+LIBRARY_DB_VERSION = 3
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
-    """다른 기능 테이블에는 손대지 않고 v1 라이브러리를 v2로 이전한다."""
+    """기존 기록을 보존하며 라이브러리를 현재 버전으로 이전한다."""
     version = db.execute("PRAGMA user_version").fetchone()[0]
     if version > LIBRARY_DB_VERSION:
         raise ValueError("더 최신 버전에서 만든 라이브러리입니다. 프로그램을 업데이트하세요.")
@@ -113,6 +117,13 @@ def migrate_library(db, *, before_upgrade=None) -> None:
             duration REAL, fingerprint TEXT)""")
         db.execute("UPDATE videos SET excluded=1 WHERE ',' || lower(format) || ',' LIKE '%,gif,%'")
         db.execute("PRAGMA user_version = 2")
+    if version < 3:
+        db.execute("ALTER TABLE videos ADD COLUMN width INTEGER")
+        db.execute("ALTER TABLE videos ADD COLUMN height INTEGER")
+        # 0=미처리, 1=확인, 2=파일 없음/실패(명시적 검사 때 재시도).
+        db.execute("ALTER TABLE videos ADD COLUMN resolution_checked INTEGER NOT NULL DEFAULT 0")
+        db.execute("CREATE INDEX videos_resolution_pending ON videos(id) WHERE resolution_checked=0")
+        db.execute("PRAGMA user_version = 3")
 
 
 class Library:
@@ -182,7 +193,7 @@ class Library:
             return tuple(
                 Video(row["id"], row["title"], row["fingerprint"], row["duration"], row["format"],
                       self._thumbnails / Path(row["thumbnail"]).name, datetime.fromisoformat(row["registered_at"]),
-                      tuple(locations.get(row["id"], [])), bool(row["excluded"]))
+                      tuple(locations.get(row["id"], [])), bool(row["excluded"]), row["width"], row["height"])
                 for row in db.execute("SELECT * FROM videos WHERE excluded=? ORDER BY title, id", (excluded,)))
 
     def _forget_location(self, path: Path) -> None:
@@ -271,6 +282,8 @@ class Library:
             db.execute("INSERT OR REPLACE INTO locations(path, video_id, size, mtime_ns) VALUES (?, ?, ?, ?)",
                        (str(path), video_id, *signature))
             db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
+            db.execute("UPDATE videos SET width=?, height=?, resolution_checked=1 WHERE id=?",
+                       (info.width, info.height, video_id))
         if not existing:
             (on_registered or self._on_registered)(video_id)
         return (self._already_registered(path, existing["excluded"], reconnected=was_missing
@@ -287,7 +300,7 @@ class Library:
                 "SELECT path FROM locations WHERE video_id = ? ORDER BY path", (video_id,)))
             return Video(row["id"], row["title"], row["fingerprint"], row["duration"], row["format"],
                          self._thumbnails / Path(row["thumbnail"]).name, datetime.fromisoformat(row["registered_at"]),
-                         locations, bool(row["excluded"]))
+                         locations, bool(row["excluded"]), row["width"], row["height"])
 
     @staticmethod
     def _check_unchanged(path, signature):
@@ -321,6 +334,7 @@ class Library:
                 db.execute("INSERT OR REPLACE INTO locations(path, video_id, size, mtime_ns) VALUES (?, ?, ?, ?)",
                            (str(path), video_id, *signature))
                 db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
+                db.execute("UPDATE videos SET resolution_checked=0 WHERE id=? AND width IS NULL", (video_id,))
 
     def playback_location(self, video_id: int) -> Location:
         with self._connect() as db:
@@ -349,6 +363,7 @@ class Library:
         inaccessible: set[Path] = set()
         # 직접 추가한 파일도 변경/사라짐을 확인한다. 읽기 권한 오류는 위치 삭제로 해석하지 않는다.
         with self._connect() as db:
+            db.execute('UPDATE videos SET resolution_checked=0 WHERE resolution_checked=2')
             paths = [Path(row[0]) for row in db.execute("SELECT path FROM locations")]
             missing_at_start = {row[0] for row in db.execute(
                 "SELECT id FROM videos WHERE NOT EXISTS (SELECT 1 FROM locations WHERE video_id = videos.id)")}
