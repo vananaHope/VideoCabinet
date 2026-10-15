@@ -115,6 +115,8 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
 README의 빌드 환경이 필요합니다. `main`에서만 실행하며 작업 트리가 깨끗하고 `main`,
 `origin/main`, 실제 원격 main이 모두 같아야 합니다. 기존 로컬/원격 태그나 GitHub Release가 있으면 멈춥니다.
 현재는 PyInstaller 포장이 후속 범위이므로 실제 릴리스는 #62 마무리 이후에 실행합니다.
+`-DryRun -Build`도 PyInstaller가 연결되기 전까지는 실패합니다. 빌드 뼈대만 확인하려면
+`scripts/build.ps1 -SkipPyInstaller -AppDirectory <준비한 실행 폴더>`를 직접 실행하세요.
 
 ```powershell
 # 검사와 계획 출력만: 버전·커밋·태그·원격·원격 추적 ref를 바꾸지 않음
@@ -131,8 +133,10 @@ powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0
 노트는 현재 main에 포함된 가장 높은 버전 태그 이후의 커밋 제목입니다(태그가 없으면 전체).
 설치 파일은 `dist/installer/MyVideoManager-Setup-<version>.exe`, 체크섬은 그 옆의 `.exe.sha256`입니다.
 기존 태그·Release를 덮어쓰거나 강제 push하지 않습니다.
-빌드가 실패하면 원격 발행 전의 로컬 버전 커밋이 남을 수 있고, push 뒤 Release 생성이 실패하면
-원격 태그가 남습니다. 자동 재발행하지 않으므로 안내에 따라 상태를 확인하세요.
+빌드 실패나 원격에서 거부한 push는 로컬 버전 커밋과 이번에 만든 태그를 자동 복구합니다.
+다른 파일 변경이나 불확실한 원격 상태가 있으면 보존하고 복구 명령을 안내합니다.
+push 뒤 Release 생성이 실패하면 원격 main과 태그를 유지하며 Release 확인·생성·자산 추가 명령을 안내합니다.
+자동 재발행하지 않으므로 안내에 따라 상태를 확인하세요.
 `-DryRun -Build`의 빌드 산출물은 Git에서 제외된 폴더에 남으며 tracked 파일과 커밋은 그대로입니다.
 
 ## 실행과 사용

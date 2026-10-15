@@ -294,8 +294,9 @@ def test_native_cuda_imports_are_confined_to_transcription_child():
     for source in root.rglob("*.py"):
         tree = ast.parse(source.read_text(encoding="utf-8-sig"))
         for node in ast.walk(tree):
-            native_import = ((isinstance(node, ast.Import) and any(alias.name == "ctranslate2" for alias in node.names))
-                             or (isinstance(node, ast.ImportFrom) and node.module == "ctranslate2"))
+            native_modules = {"ctranslate2", "faster_whisper"}
+            native_import = ((isinstance(node, ast.Import) and any(alias.name.split(".")[0] in native_modules for alias in node.names))
+                             or (isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in native_modules))
             if native_import:
                 imports.append(source.name)
                 assert any(isinstance(function, ast.FunctionDef)
