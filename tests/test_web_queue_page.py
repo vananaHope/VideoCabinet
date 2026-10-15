@@ -78,7 +78,7 @@ def test_progress_delta_contains_only_changed_row_and_no_order(queue_page, setup
     monkeypatch.setattr(core, 'subtitle_queue_items', lambda: (replace(entries[0], progress=.5), entries[1]))
     page.refresh()
     assert changes == [dict(rows=[dict(videoId=a.id, title=a.title, state='queued', progress=.5, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기')],
-                            removed=[], order=None, counts=None)]
+                            removed=[], order=None, counts=None, canRetryFailed=False)]
 
 
 def test_queue_delta_reports_promoted_order_and_removed_ids(queue_page, setup):
@@ -91,7 +91,7 @@ def test_queue_delta_reports_promoted_order_and_removed_ids(queue_page, setup):
     page.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
 
     reply(page.bridge.action('promote', b.id))
-    assert changes.pop() == dict(rows=[], removed=[], order=[b.id, a.id], counts=None)
+    assert changes.pop() == dict(rows=[], removed=[], order=[b.id, a.id], counts=None, canRetryFailed=False)
 
     for removed_id, remaining in ((b.id, [a.id]), (a.id, [])):
         reply(page.bridge.action('remove', removed_id))
@@ -234,3 +234,23 @@ def test_bulk_failure_releases_busy_state(queue_page, monkeypatch):
     wait(lambda: bool(results))
     assert results == [{'error': '등록 실패'}]
     assert not queue_page.bridge.bulk_running
+
+
+def test_retry_failed_availability_tracks_failure_retry_and_empty(queue_page, setup):
+    core, transcriber, (video, _) = setup
+    page = queue_page
+    assert reply(page.bridge.snapshot())['canRetryFailed'] is False
+    core.request_subtitles(video.id)
+    page.refresh()
+    assert reply(page.bridge.snapshot())['canRetryFailed'] is False
+    transcriber.error = RuntimeError('failure')
+    core.process_next_subtitle()
+    changes = []
+    page.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+    page.refresh()
+    assert changes[-1]['canRetryFailed'] is True
+    assert reply(page.bridge.snapshot())['canRetryFailed'] is True
+    reply(page.bridge.action('retryFailed', -1))
+    assert changes[-1]['canRetryFailed'] is False
+    reply(page.bridge.action('remove', video.id))
+    assert reply(page.bridge.snapshot())['canRetryFailed'] is False

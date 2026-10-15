@@ -8,6 +8,8 @@ import re
 GLOSSARY_LIMIT = 200
 GLOSSARY_TERM_LENGTH = 60
 GLOSSARY_PROMPT_BYTES = 24 * 1024
+_WORD_EDGE = re.compile(
+    r'[^\W\u1100-\u11ff\u3040-\u30ff\u3130-\u318f\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff\U00020000-\U000323af]')
 
 
 @dataclass(frozen=True)
@@ -55,7 +57,10 @@ class Glossary:
             entries[entry.source] = original
         text = '\n'.join(line.text for line in lines)
         for source in tuple(entries):
-            if re.search(r'\b' + re.escape(source) + r'\b', text):
+            # CJK는 조사나 다른 글자에 붙어 쓰인다. CJK 외 단어 끝만 경계로 보호한다.
+            left = r'\b' if _WORD_EDGE.match(source[0]) else ''
+            right = r'\b' if _WORD_EDGE.match(source[-1]) else ''
+            if re.search(left + re.escape(source) + right, text):
                 entries[source] = entries.pop(source)
         return Glossary(tuple(entries.values())[-GLOSSARY_LIMIT:])
 

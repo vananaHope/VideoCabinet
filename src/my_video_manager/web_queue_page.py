@@ -43,7 +43,8 @@ class WebQueuePage(WebPageController):
 
     def payload(self):
         return dict(rows=[row_data(self.entries[id]) for id in self.order], removed=[],
-                    order=self.order, counts=self.counts)
+                    order=self.order, counts=self.counts,
+                    canRetryFailed=any(item.state == 'failed' for item in self.entries.values()))
 
     def refresh(self):
         if not self.is_active() or self.bridge.bulk_running:
@@ -57,6 +58,7 @@ class WebQueuePage(WebPageController):
             return
         counts = counts_data(items)
         delta = dict(rows=changed, removed=removed,
+                     canRetryFailed=any(item.state == 'failed' for item in items),
                      order=order if order != self.order else None,
                      counts=counts if counts != self.counts else None)
         self.entries, self.order, self.counts = entries, order, counts

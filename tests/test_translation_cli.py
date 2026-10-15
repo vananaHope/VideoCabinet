@@ -279,3 +279,20 @@ core.process_next_translation()
         if parent.poll() is None:
             subprocess.run(["taskkill", "/PID", str(parent.pid), "/T", "/F"], capture_output=True)
         parent.communicate(timeout=CHILD_READY_TIMEOUT)
+
+
+def test_cli_work_directory_permission_error_attempted_once(tmp_path, monkeypatch):
+    translator = SubscriptionCLITranslator(tmp_path, commands={'codex': ('unused',)})
+    translator.directory.mkdir()
+    mkdir = Path.mkdir
+    attempts = []
+    def denied(path, *args, **kwargs):
+        if path.parent == translator.directory:
+            attempts.append(path)
+            raise PermissionError('denied')
+        return mkdir(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'mkdir', denied)
+    with pytest.raises(PermissionError):
+        translator.translate(LINES, 'en')
+    assert len(attempts) == 1
+    assert list(translator.directory.iterdir()) == []

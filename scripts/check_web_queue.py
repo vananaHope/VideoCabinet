@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('--offscreen', action='store_true')
 parser.add_argument('--verify', action='store_true')
+parser.add_argument('--quick', action='store_true', help='빈 목록과 선택 행 캡처 2장만 검사')
 parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-50')
 args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
@@ -151,6 +152,7 @@ try:
     assert js("document.body.innerText.includes('자막 대기열이 비어 있습니다')")
     assert js("document.querySelectorAll('#queue-list [role=columnheader]').length") == 0
     assert js("document.querySelectorAll('#queue-list h2').length") == 1
+    assert js("Array.from(document.querySelectorAll('button')).find(b => b.textContent === '실패 항목 모두 재시도').disabled")
     capture('empty')
 
     if args.verify:
@@ -275,7 +277,18 @@ try:
     core.subtitle_queue_items = display_items
     page.refresh()
     settle()
+    assert not js("Array.from(document.querySelectorAll('button')).find(b => b.textContent === '실패 항목 모두 재시도').disabled")
+    assert js("""(() => {
+        const row = document.querySelector('[data-queue-row][aria-selected=true]');
+        const badge = row.querySelector('[role=gridcell] span');
+        const track = row.querySelector('[role=progressbar]');
+        return getComputedStyle(row).backgroundColor !== getComputedStyle(badge).backgroundColor
+            && getComputedStyle(row).backgroundColor !== getComputedStyle(track).backgroundColor;
+    })()""")
     capture('few-all-states-long')
+    if args.quick:
+        print('quick: empty disabled, failed enabled, selected badge/track visible; 2 captures', flush=True)
+        raise SystemExit(0)
     visual_count = 300
     page.refresh()
     wait(lambda: js('document.querySelectorAll("[data-queue-row]").length') == 300)

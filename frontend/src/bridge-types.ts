@@ -171,6 +171,7 @@ export interface QueueCountData {
 }
 
 export interface QueueDeltaData {
+  canRetryFailed: boolean
   rows: Array<QueueRowData>
   removed: Array<number>
   order: Array<number> | null
