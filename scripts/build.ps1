@@ -74,7 +74,7 @@ Confirm-Exit 'Generated contracts'
 # 3. onedir: CUDA는 제외하고 Qt WebEngine·웹·미디어 도구를 동봉한다.
 if (-not $SkipPyInstaller) {
     & $Python -m PyInstaller --version
-    Confirm-Exit 'PyInstaller (pip install -e .[build])'
+    Confirm-Exit 'PyInstaller (uv pip install --python .venv/Scripts/python.exe --link-mode hardlink -e .[build])'
     & $Python scripts/prepare_bundle.py --version $Version
     Confirm-Exit 'Bundle assets'
     & $Python -m PyInstaller --noconfirm --clean --distpath (Split-Path $AppDirectory) installer/my-video-manager.spec

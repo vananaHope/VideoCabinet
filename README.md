@@ -78,11 +78,12 @@ Inno Setup 6.5.4는 2025-09-24 공개된 고정 버전입니다.
 `ISCC.exe`를 PATH에 넣거나 `-InnoCompiler '설치 경로/ISCC.exe'`로 지정할 수 있습니다.
 
 ```powershell
-.venv/Scripts/python -m pip install -e '.[build]'
+uv pip install --python .venv/Scripts/python.exe --link-mode hardlink -e '.[build]'
 winget install --id JRSoftware.InnoSetup --version 6.5.4 --exact --source winget --silent --accept-package-agreements --accept-source-agreements
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 ```
 
+`setup.ps1`이 만든 `.venv`에는 pip이 없어도 됩니다. 위 명령은 uv로 해당 환경에 빌드 도구를 추가합니다.
 웹 빌드 → 생성 검사 → PyInstaller 6.16.0 onedir → Inno Setup 순서입니다.
 버전은 `pyproject.toml`에서 읽고 `dist/installer/MyVideoManager-Setup-<version>.exe`로 만듭니다.
 실행 폴더는 `dist/my-video-manager/`이며 웹·디자인 토큰·아이콘·Qt WebEngine 리소스와 로캘,
@@ -154,7 +155,8 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
 ## 새 버전 올리기
 
 `scripts/release.ps1`은 로컬 릴리스용입니다. Git for Windows, GitHub CLI의 `gh auth login`,
-README의 빌드 환경이 필요합니다. `main`에서만 실행하며 작업 트리가 깨끗하고 `main`,
+README의 "설치 파일 만들기"에 있는 빌드 extra 설치까지 먼저 마쳐야 합니다.
+`release.ps1`은 의존성을 설치하지 않고 `build.ps1`을 호출합니다. `main`에서만 실행하며 작업 트리가 깨끗하고 `main`,
 `origin/main`, 실제 원격 main이 모두 같아야 합니다. 기존 로컬/원격 태그나 GitHub Release가 있으면 멈춥니다.
 
 ```powershell
