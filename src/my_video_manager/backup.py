@@ -61,7 +61,7 @@ class BackupStorageError(OSError):
         super().__init__(code, message)
 
 
-def _storage_error(error):
+def _storage_error(error, *, creating=False):
     if isinstance(error, BackupStorageError):
         return error
     logging.getLogger(__name__).warning("백업 저장 작업 실패: %s", error, exc_info=error)
@@ -82,8 +82,13 @@ def _storage_error(error):
         for name in (error.filename, error.filename2):
             if name is not None:
                 anchor = Path(name).anchor
-                if anchor and not Path(anchor).exists():
-                    return failure("백업이 있던 드라이브를 찾을 수 없습니다. 드라이브 연결을 확인하세요.",
+                try:
+                    missing_drive = bool(anchor) and not Path(anchor).exists()
+                except OSError:
+                    missing_drive = False
+                if missing_drive:
+                    location = "백업을 저장할" if creating else "백업이 있던"
+                    return failure(f"{location} 드라이브를 찾을 수 없습니다. 드라이브 연결을 확인하세요.",
                                    "storage_error")
         return failure("백업 파일이나 폴더를 찾을 수 없습니다(지워졌거나 옮겨졌습니다). "
                        "위치를 확인하거나 목록을 새로고침하세요.", "storage_error")
@@ -205,50 +210,53 @@ def _database_metadata(path):
 def create_backup(database: Path, destination: Path, *, include_thumbnails=False,
                   active_viewings=(), reason="manual") -> BackupResult:
     """독립 연결의 작은 backup_step으로 복사한다. UI에서는 작업자에서 호출한다."""
-    database, destination = Path(database).resolve(), Path(destination).resolve()
-    if destination.suffix.lower() != ".zip":
-        raise BackupError("백업 파일의 확장자는 .zip이어야 합니다.")
-    if destination == database or destination == pending_backup_restore_path(database):
-        raise BackupError("라이브러리 또는 백업 복원 요청을 백업 대상으로 쓸 수 없습니다.")
-    with _staging_directory(destination.parent, ".backup-") as temporary:
-        stage = Path(temporary)
-        snapshot = stage / DATABASE_NAME
-        elapsed, max_step, restarts = _snapshot(database, snapshot)
-        # 저장 주기 전 진행분도 담되, 복사하는 동안 더 최신 저장/종료가
-        # 들어왔다면 그 기록을 과거 진행분으로 덮어쓰지 않는다.
-        if active_viewings:
-            with closing(sqlite3.connect(snapshot)) as db, db:
-                for viewing in active_viewings:
-                    db.execute("UPDATE viewings SET updated_at=?, intervals=?, last_position=? "
-                               "WHERE id=? AND ended_at IS NULL AND updated_at<=?",
-                               (viewing.updated_at.isoformat(), json.dumps(viewing.intervals),
-                                viewing.last_position, viewing.id, viewing.updated_at.isoformat()))
-        db_version, count = _database_metadata(snapshot)
-        metadata = BackupMetadata(version(APPLICATION), db_version,
-                                  datetime.now(timezone.utc).isoformat(), count, include_thumbnails)
-        files = {DATABASE_NAME: _sha256(snapshot)}
-        archive = stage / "backup.zip"
-        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-            bundle.write(snapshot, DATABASE_NAME)
-            if include_thumbnails:
-                with closing(_readonly(snapshot)) as db:
-                    names = {Path(row[0]).name for row in db.execute("SELECT thumbnail FROM videos")}
-                for name in sorted(names):
-                    source = database.parent / "thumbnails" / name
-                    if not source.is_file() or source.is_symlink():
-                        continue
-                    # 파일이 바뀌더라도 해시와 압축 내용은 같은 사본에서 만든다.
-                    thumbnail = stage / "thumbnail"
-                    shutil.copyfile(source, thumbnail)
-                    member = "thumbnails/" + name
-                    files[member] = _sha256(thumbnail)
-                    bundle.write(thumbnail, member)
-            manifest = dict(application=APPLICATION, format_version=FORMAT_VERSION,
-                            **asdict(metadata), files=files, reason=reason)
-            bundle.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
-        _sync(archive)
-        os.replace(archive, destination)
-    return BackupResult(destination, metadata, elapsed, max_step, restarts)
+    try:
+        database, destination = Path(database).resolve(), Path(destination).resolve()
+        if destination.suffix.lower() != ".zip":
+            raise BackupError("백업 파일의 확장자는 .zip이어야 합니다.")
+        if destination == database or destination == pending_backup_restore_path(database):
+            raise BackupError("라이브러리 또는 백업 복원 요청을 백업 대상으로 쓸 수 없습니다.")
+        with _staging_directory(destination.parent, ".backup-") as temporary:
+            stage = Path(temporary)
+            snapshot = stage / DATABASE_NAME
+            elapsed, max_step, restarts = _snapshot(database, snapshot)
+            # 저장 주기 전 진행분도 담되, 복사하는 동안 더 최신 저장/종료가
+            # 들어왔다면 그 기록을 과거 진행분으로 덮어쓰지 않는다.
+            if active_viewings:
+                with closing(sqlite3.connect(snapshot)) as db, db:
+                    for viewing in active_viewings:
+                        db.execute("UPDATE viewings SET updated_at=?, intervals=?, last_position=? "
+                                   "WHERE id=? AND ended_at IS NULL AND updated_at<=?",
+                                   (viewing.updated_at.isoformat(), json.dumps(viewing.intervals),
+                                    viewing.last_position, viewing.id, viewing.updated_at.isoformat()))
+            db_version, count = _database_metadata(snapshot)
+            metadata = BackupMetadata(version(APPLICATION), db_version,
+                                      datetime.now(timezone.utc).isoformat(), count, include_thumbnails)
+            files = {DATABASE_NAME: _sha256(snapshot)}
+            archive = stage / "backup.zip"
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                bundle.write(snapshot, DATABASE_NAME)
+                if include_thumbnails:
+                    with closing(_readonly(snapshot)) as db:
+                        names = {Path(row[0]).name for row in db.execute("SELECT thumbnail FROM videos")}
+                    for name in sorted(names):
+                        source = database.parent / "thumbnails" / name
+                        if not source.is_file() or source.is_symlink():
+                            continue
+                        # 파일이 바뀌더라도 해시와 압축 내용은 같은 사본에서 만든다.
+                        thumbnail = stage / "thumbnail"
+                        shutil.copyfile(source, thumbnail)
+                        member = "thumbnails/" + name
+                        files[member] = _sha256(thumbnail)
+                        bundle.write(thumbnail, member)
+                manifest = dict(application=APPLICATION, format_version=FORMAT_VERSION,
+                                **asdict(metadata), files=files, reason=reason)
+                bundle.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
+            _sync(archive)
+            os.replace(archive, destination)
+        return BackupResult(destination, metadata, elapsed, max_step, restarts)
+    except FileNotFoundError as error:
+        raise _storage_error(error, creating=True) from error
 
 
 def _valid_member(name):
@@ -355,7 +363,7 @@ def create_automatic_backup(database: Path, *, include_thumbnails=False, reason=
     except BackupBusyError:
         raise
     except OSError as error:
-        raise _storage_error(error) from error
+        raise _storage_error(error, creating=True) from error
     except sqlite3.OperationalError as error:
         if "full" in str(error).lower():
             raise _storage_error(OSError(errno.ENOSPC, str(error))) from error

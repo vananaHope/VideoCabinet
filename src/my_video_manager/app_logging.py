@@ -20,7 +20,7 @@ def safe_detail(detail):
                     lambda match: re.sub(r'(https?://)[^/]*@', r'\1[가림]@',
                                          re.split(r'[?#]', match[0], maxsplit=1)[0]), str(detail))
     detail = re.sub(r'\bhf_[A-Za-z0-9]+\b', '[가림]', detail)
-    detail = re.sub(r'(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|(?:token|api[_-]?key|password|secret)\s*[:=]\s*)[^\s,;]+',
+    detail = re.sub(r'''(?i)((?:authorization|token|api[\s_-]*key|password|secret)["']?\s*[:=]\s*["']?(?:bearer\s+)?|\bbearer\s+)[^\s,;"'<>}]+''',
                     r'\1[가림]', detail)
     home = str(Path.home())
     for path in sorted({home, Path.home().as_posix(), home.replace('\\', '\\\\')}, key=len, reverse=True):
@@ -39,12 +39,16 @@ class _SafeFormatter(logging.Formatter):
 
 
 class _QuietRotatingFileHandler(RotatingFileHandler):
+    def _open(self):
+        return open(self.baseFilename, self.mode, encoding=self.encoding,
+                    errors=self.errors, newline='')
+
     def shouldRollover(self, record):
         if self.stream is None:
             self.stream = self._open()
         self.stream.seek(0, 2)
         # 한글 진단도 문자 수가 아닌 UTF-8 바이트 수로 제한한다.
-        return self.stream.tell() + len(self.format(record).encode('utf-8')) + 2 >= self.maxBytes
+        return self.stream.tell() + len((self.format(record) + self.terminator).encode('utf-8')) >= self.maxBytes
 
     def handleError(self, record):
         # 디스크 부족/읽기 전용/회전 실패가 앱을 중단하거나 stderr에 원문을 노출하지 않는다.

@@ -75,6 +75,31 @@ def test_log_directory_creation_failure_is_ignored(tmp_path):
     assert configure_app_logging(tmp_path) is None
 
 
+def test_multiline_log_respects_byte_budget(app_log):
+    path, _ = app_log
+    logger = logging.getLogger('my_video_manager')
+    for _ in range(4):
+        logger.warning('가\n' * LOG_MAX_BYTES)
+    files = list(path.parent.glob('app.log*'))
+    assert len(files) == 3
+    assert all(p.stat().st_size <= LOG_MAX_BYTES for p in files)
+    assert b'\r\n' not in path.read_bytes()
+
+
+@pytest.mark.parametrize('detail', [
+    '{"Authorization": "Bearer sk-private-value"}',
+    "{'Authorization': 'Bearer sk-private-value'}",
+    'Bearer sk-private-value',
+    'API key: sk-private-value',
+])
+def test_credentials_are_redacted_in_app_log(app_log, detail):
+    path, _ = app_log
+    logging.getLogger('my_video_manager').warning('%s', detail)
+    content = path.read_text(encoding='utf-8')
+    assert 'sk-private-value' not in content
+    assert '[가림]' in content
+
+
 @pytest.mark.parametrize('failure', ['write', 'rotate'])
 def test_log_write_and_rotation_failures_do_not_escape_or_echo_secrets(app_log, monkeypatch, capsys, failure):
     _, handler = app_log

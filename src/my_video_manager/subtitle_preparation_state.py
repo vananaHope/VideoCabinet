@@ -3,8 +3,8 @@ import json
 import logging
 import os
 from pathlib import Path
-import tempfile
 from threading import Lock
+from uuid import uuid4
 
 from .app_logging import safe_detail, file_log_handler
 
@@ -51,15 +51,17 @@ class PreparationHistory:
 
     def save(self, kind, detail='', message=''):
         self.directory.mkdir(parents=True, exist_ok=True)
-        fd, name = tempfile.mkstemp(prefix='.subtitle-preparation-', suffix='.tmp', dir=self.directory)
+        temporary = self.directory / f'.subtitle-preparation-{uuid4().hex}.tmp'
+        # 권한 오류나 이름 충돌을 재시도하지 않고 한 번만 생성한다.
+        output = temporary.open('x', encoding='utf-8')
         try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as output:
+            with output:
                 json.dump(dict(kind=kind, message=safe_detail(message), detail=safe_detail(detail)), output, ensure_ascii=False)
                 output.flush()
                 os.fsync(output.fileno())
-            Path(name).replace(self.path)
+            temporary.replace(self.path)
         finally:
-            Path(name).unlink(missing_ok=True)
+            temporary.unlink(missing_ok=True)
 
     def failed(self, kind, message, detail):
         log_failure(self.directory, kind, message, detail)

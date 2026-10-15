@@ -1,6 +1,7 @@
 """설정/DB와 분리한 Windows 사용자 단위 구독 키 저장소."""
 
 import ctypes
+import logging
 from ctypes import wintypes
 from pathlib import Path
 import os
@@ -111,12 +112,12 @@ class SecretStore:
                 try:
                     temporary.unlink(missing_ok=True)
                 except OSError:
-                    failed = True
+                    logging.getLogger(__name__).warning("키 저장 임시 파일을 정리하지 못했습니다.")
             if stage is not None:
                 try:
                     stage.rmdir()
                 except OSError:
-                    failed = True
+                    logging.getLogger(__name__).warning("키 저장 임시 폴더를 정리하지 못했습니다.")
         # Raise outside except: even exception chaining must not retain raw key diagnostics.
         if failed:
             raise SecretStoreError("키를 암호화해 저장하지 못했습니다.")
