@@ -15,6 +15,40 @@ from test_playback_page_ui import Player
 from my_video_manager.core import AppCore, CommandType, ScanResult
 
 
+@pytest.mark.parametrize('section', ['excluded', 'dismissed'])
+def test_library_restore_entry_opens_existing_folder_section(window_factory, section):
+    window = window_factory()
+    host = window.web_host
+    requested = []
+    host.controllers['folders'].bridge.foldersFocusRequested.connect(requested.append)
+    host.bridge.ready()
+    host.controllers['folders'].bridge.ready()
+    if section == 'excluded':
+        window.library_page.library_controls.show_excluded()
+    else:
+        window.library_page.hidden_gems.show_dismissed()
+    assert host.active_tab == 'folders' and window.pages.currentWidget() is host
+    assert requested[-1] == 'folders-' + section
+
+
+def test_playback_settings_menu_entry_opens_web_key_bindings(window_factory, core):
+    window = window_factory()
+    window.player_factory = Player
+    host = window.web_host
+    requested = []
+    host.controllers['settings'].bridge.settingsFocusRequested.connect(requested.append)
+    host.bridge.ready()
+    host.controllers['settings'].bridge.ready()
+    window.play_video(core.videos()[0].id)
+    video_id = core.playback.session.video_id
+    window.player.positions.append((40, False))
+    window.settings_menu.actions()[0].trigger()
+    assert core.playback.session is None
+    assert core.viewing_status(video_id).resume_point == 40
+    assert host.active_tab == 'settings'
+    assert requested[-1] == 'settings-keys'
+
+
 def bridges(window):
     return window.web_host.channel.registeredObjects()
 
@@ -55,7 +89,7 @@ def test_restore_lists_and_folder_removal_preserve_video(window_factory, core, t
     video = next(v for v in core.videos() if v.title == path.stem)
     core.dismiss_video(video.id)
     core.exclude_video(video.id)
-    window = window_factory('1')
+    window = window_factory()
     bridge = bridges(window)['folders']
     state = json.loads(bridge.snapshot())
     assert state['folders'] == [str(folder.resolve())]
@@ -78,7 +112,7 @@ def test_native_file_and_folder_pickers_and_tag_entry(window_factory, core, tmp_
     folder.mkdir()
     path = tmp_path / '직접 추가.mkv'
     path.write_bytes(b'directly added')
-    window = window_factory('1')
+    window = window_factory()
     bridge = bridges(window)['folders']
     calls = []
     monkeypatch.setattr(QFileDialog, 'getExistingDirectory', lambda *args: calls.append('folder') or str(folder))
@@ -96,7 +130,7 @@ def test_native_file_and_folder_pickers_and_tag_entry(window_factory, core, tmp_
 def test_scan_locks_mutations_but_allows_dismissed_restore_and_reports(window_factory, core):
     video = core.videos()[0]
     core.dismiss_video(video.id)
-    window = window_factory('1')
+    window = window_factory()
     api = bridges(window)
     finished = threading.Event()
 
@@ -123,7 +157,7 @@ def test_scan_locks_mutations_but_allows_dismissed_restore_and_reports(window_fa
 
 
 def test_minimum_shared_between_pages_and_survives_restart(window_factory, core):
-    api = bridges(window_factory('1'))
+    api = bridges(window_factory())
     for name, value in (('folders', 12.5), ('settings', 0)):
         assert 'error' not in json.loads(api[name].setMinimum(value))
         for page in ('folders', 'settings'):
@@ -135,14 +169,14 @@ def test_minimum_shared_between_pages_and_survives_restart(window_factory, core)
 
 
 def test_key_save_updates_playback_f1_empty_reel_and_restart(window_factory, core):
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = Player
     bridge = bridges(window)['settings']
     proposed = draft(bridge)
     proposed['point_highlight:0'] = ['N']
     proposed['toggle_pause:0'] = ['P']
     assert 'error' not in json.loads(bridge.saveKeys(json.dumps(proposed)))
-    assert 'N로 지점' in window.reel.empty.text()
+    assert 'N로 지점' in window.web_host.controllers['reel'].payload()['emptyDescription']
     assert 'N로 지점' in json.loads(bridges(window)['reel'].snapshot())['emptyDescription']
     assert core.command_for_key('N').kind == CommandType.POINT_HIGHLIGHT
     assert core.command_for_key('Insert') is None
@@ -159,7 +193,7 @@ def test_key_save_updates_playback_f1_empty_reel_and_restart(window_factory, cor
 
 
 def test_conflicts_reserved_keys_and_reset_do_not_partially_save(window_factory, core):
-    bridge = bridges(window_factory('1'))['settings']
+    bridge = bridges(window_factory())['settings']
     before = draft(bridge)
     proposed = {**before, 'point_highlight:0': ['Enter']}
     assert '같은 키' in json.loads(bridge.saveKeys(json.dumps(proposed)))['error']
@@ -186,7 +220,7 @@ def test_conflicts_reserved_keys_and_reset_do_not_partially_save(window_factory,
     (Qt.Key.Key_N, Qt.KeyboardModifier.NoModifier),
 ])
 def test_qt_capture_precedes_shell_keys(window_factory, key, modifier):
-    window = window_factory('1')
+    window = window_factory()
     window.navigate_web_tab('settings')
     window.activateWindow()
     tick()
@@ -209,7 +243,7 @@ def test_qt_capture_precedes_shell_keys(window_factory, key, modifier):
 
 
 def test_capture_cancelled_when_leaving_and_alt_s_opens_web_settings(window_factory):
-    window = window_factory('1')
+    window = window_factory()
     window.activateWindow()
     tick()
     bridge = bridges(window)['settings']
@@ -224,7 +258,7 @@ def test_capture_cancelled_when_leaving_and_alt_s_opens_web_settings(window_fact
 
 
 def test_translation_and_quit_use_current_entry_points(window_factory, core, monkeypatch):
-    window = window_factory('1')
+    window = window_factory()
     bridge = bridges(window)['settings']
     calls = []
     monkeypatch.setattr(window.translations, 'settings', lambda: (calls.append('translation'), core.set_translation_cli('claude')))
@@ -240,7 +274,7 @@ def test_translation_and_quit_use_current_entry_points(window_factory, core, mon
 
 @pytest.mark.parametrize('fullscreen', [False, True])
 def test_web_playback_alt_s_preserves_session_and_focus(window_factory, core, fullscreen):
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = Player
     window.play_video(core.videos()[0].id)
     window.activateWindow()
@@ -264,7 +298,7 @@ def test_web_playback_alt_s_preserves_session_and_focus(window_factory, core, fu
 
 
 def test_unsupported_key_keeps_capture_until_supported_input(window_factory):
-    window = window_factory('1')
+    window = window_factory()
     window.navigate_web_tab('settings')
     window.activateWindow()
     tick()
@@ -287,7 +321,7 @@ def test_unsupported_key_keeps_capture_until_supported_input(window_factory):
 
 
 def test_inactive_refresh_skips_payload_and_timer_only_emits_changes(window_factory, core, monkeypatch):
-    window = window_factory('1')
+    window = window_factory()
     pages = window.web_host.controllers
     for name in ('folders', 'settings'):
         with monkeypatch.context() as patch:
@@ -308,7 +342,7 @@ def test_inactive_refresh_skips_payload_and_timer_only_emits_changes(window_fact
 
 
 def test_folders_reactivation_delivers_changes_skipped_while_hidden(window_factory, core, tmp_path):
-    window = window_factory('1')
+    window = window_factory()
     window.navigate_web_tab('folders')
     changes = []
     bridges(window)['folders'].foldersChanged.connect(lambda value: changes.append(json.loads(value)))

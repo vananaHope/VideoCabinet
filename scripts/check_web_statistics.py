@@ -31,7 +31,6 @@ args = parser.parse_args()
 if args.empty_library and (args.count != 0 or args.verify):
     parser.error('--empty-library는 --count 0의 스크린샷 검사에만 사용합니다')
 sample = 'empty' if args.empty_library else str(args.count)
-os.environ['MVM_WEB_UI'] = '1'
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 if args.offscreen:
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu'

@@ -112,8 +112,7 @@ class WebShellHost(QWidget):
         if controller.bridge is not None:
             self.channel.registerObject(controller.tab, controller.bridge)
 
-    def register_native(self, tab, index):
-        self._register_route(tab, index)
+
 
     def _register_route(self, tab, route):
         if tab in self.routes:
@@ -158,23 +157,15 @@ class WebShellHost(QWidget):
         self.window.pages.setCurrentWidget(self)
         self.controllers[self.active_tab].return_from_playback(focus_gems=focus_gems)
 
-    def native_page_shown(self, index):
-        for tab, route in self.routes.items():
-            if isinstance(route, int) and route == index:
-                self.set_tab(tab)
-                return
+
 
     def navigate(self, tab):
         route = self.routes[tab]
-        if isinstance(route, int):
-            self.set_tab(tab)
-            self.window.navigate(route)
-        else:
-            self.window.end_playback()
-            self.set_tab(tab)
-            self.window.pages.setCurrentWidget(self)
-            route.refresh()
-            self.focus_content()
+        self.window.end_playback()
+        self.set_tab(tab)
+        self.window.pages.setCurrentWidget(self)
+        route.refresh()
+        self.focus_content()
 
     def handle_key(self, event):
         return False  # 예약 키는 창, 나머지는 Chromium/React가 처리한다.

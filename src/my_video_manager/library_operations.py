@@ -1,8 +1,7 @@
 """라이브러리 작업과 검사 수명주기 연결."""
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox
-from .tag_ui import TagEditor, TagManager
-from .series_ui import SeriesEditor
+from .web_dialogs_entries import TagEditor, TagManager
 
 
 class ScanWorker(QThread):
@@ -21,7 +20,7 @@ class ScanWorker(QThread):
 
 
 class LibraryOperations:
-    """Qt·웹 페이지가 공유하는 대화상자와 검사 수명주기."""
+    """웹 라이브러리의 업무 대화상자와 검사 수명주기."""
 
     def edit_video_tags(self):
         if (video_id := self.selected_video_id()) is not None:
@@ -78,15 +77,10 @@ class LibraryOperations:
         self.selection_changed()
 
     def show_series(self):
-        editor = SeriesEditor(self.core, self)
         video_id = self.selected_video_id()
         series = next((s for s in self.snapshot.series if video_id in s.video_ids), None)
-        if series:
-            editor.selector.setCurrentIndex(editor.selector.findData(series.id))
-        editor.exec()
+        self.window.web_host.dialogs.run('series', series_id=series.id if series else None)
         self.refresh()
 
     def show_status(self, text):
         self.window.show_status(text)
-
-

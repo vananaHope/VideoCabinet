@@ -14,10 +14,10 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 from test_web_library_data import core
 from test_web_library_page import window_factory
 from test_review import setup, finish
-from my_video_manager.tag_ui import TagEditor, TagManager
-from my_video_manager.series_ui import SeriesEditor
-from my_video_manager.highlight_ui import HighlightEditor, HighlightList
-from my_video_manager.review_ui import ReviewDialog
+from my_video_manager.web_dialogs_entries import TagEditor, TagManager
+from my_video_manager.web_dialogs_entries import SeriesEditor
+from my_video_manager.web_dialogs_entries import HighlightEditor, HighlightList
+from my_video_manager.web_dialogs_entries import ReviewDialog
 from my_video_manager.web_dialogs_models import DialogModel
 
 
@@ -59,8 +59,52 @@ def within(entry, dialogs, callback):
         raise errors[0]
 
 
+def test_library_title_entry_validates_then_saves_in_web(window_factory, core):
+    window = window_factory()
+    video = core.videos()[0]
+    window.library_page.bridge.select(video.id)
+    dialogs = window.web_host.dialogs
+    def check():
+        assert state(dialogs)['kind'] == 'video-rename'
+        assert state(dialogs)['values']['name'] == video.title
+        result = json.loads(dialogs.bridge.act(state(dialogs)['id'], 'save', json.dumps({'name': ''})))
+        assert 'error' in result and core.video(video.id).title == video.title
+        act(dialogs, 'save', name='변경한 한글 제목')
+        assert core.video(video.id).title == '변경한 한글 제목'
+    within(window.library_page.library_controls.rename, dialogs, check)
+    assert next(card for card in window.library_page.cards if card['id'] == video.id)['title'] == '변경한 한글 제목'
+
+
+@pytest.mark.parametrize('accept', [False, True])
+def test_library_exclude_entry_uses_web_confirmation_and_preserves_file(window_factory, core, accept):
+    window = window_factory()
+    video = core.videos()[0]
+    window.library_page.bridge.select(video.id)
+    dialogs = window.web_host.dialogs
+    def check():
+        data = state(dialogs)
+        assert data['kind'] == 'video-exclude' and data['confirm_destructive']
+        act(dialogs, 'confirm' if accept else 'cancel-confirm')
+    within(window.library_page.library_controls.exclude, dialogs, check)
+    assert core.video(video.id).excluded is accept
+    assert video.locations[0].path.exists()
+
+
+def test_library_series_entry_selects_current_series(window_factory, core):
+    window = window_factory()
+    video = core.videos()[0]
+    series = core.create_series('현재 시리즈', (video.id,))
+    window.refresh()
+    window.library_page.bridge.select(video.id)
+    dialogs = window.web_host.dialogs
+    def check():
+        assert state(dialogs)['values']['choice'] == str(series.id)
+        assert state(dialogs)['values']['members'] == [str(video.id)]
+    within(window.library_page.show_series, dialogs, check)
+
+
 def test_tag_entry_immediate_changes_nested_manager_and_stale_frame(window_factory, core):
-    window = window_factory('1')
+    window = window_factory()
     dialogs, video = window.web_host.dialogs, core.videos()[0]
     def check():
         assert window.web_host.view.parent() is window.web_host
@@ -86,7 +130,7 @@ def test_tag_entry_immediate_changes_nested_manager_and_stale_frame(window_facto
 
 
 def test_series_entry_saves_order_without_changing_other_series(window_factory, core):
-    window = window_factory('1')
+    window = window_factory()
     dialogs = window.web_host.dialogs
     videos = core.videos()
     def check():
@@ -96,7 +140,7 @@ def test_series_entry_saves_order_without_changing_other_series(window_factory, 
 
 
 def test_highlight_precision_and_nested_tags(window_factory, core):
-    window = window_factory('1')
+    window = window_factory()
     dialogs, video = window.web_host.dialogs, core.videos()[0]
     core.playback.start(video.id, 0)
     core.playback.report(1.234567)
@@ -117,7 +161,7 @@ def test_highlight_precision_and_nested_tags(window_factory, core):
 
 
 def test_highlight_empty_input_is_rejected_and_changed_time_rounds(window_factory, core):
-    window = window_factory('1')
+    window = window_factory()
     video = core.videos()[0]
     from my_video_manager.core import Command, CommandType
     core.playback.start(video.id, 0)
@@ -136,7 +180,7 @@ def test_highlight_empty_input_is_rejected_and_changed_time_rounds(window_factor
 
 @pytest.mark.parametrize('kind', ['tag-manager', 'translation', 'subtitles'])
 def test_remaining_entry_functions_use_web_layer(window_factory, core, kind):
-    window = window_factory('1')
+    window = window_factory()
     dialogs = window.web_host.dialogs
     entries = {'tag-manager': lambda: TagManager(core, window).exec(),
                'translation': window.translations.settings, 'subtitles': window.subtitles.request}
@@ -146,7 +190,7 @@ def test_remaining_entry_functions_use_web_layer(window_factory, core, kind):
 
 
 def test_dialog_blocks_reserved_navigation_keys(window_factory, core):
-    window = window_factory('1')
+    window = window_factory()
     dialogs = window.web_host.dialogs
     def check():
         window.activateWindow()
@@ -163,7 +207,7 @@ def test_dialog_blocks_reserved_navigation_keys(window_factory, core):
 
 @pytest.mark.parametrize('target', ['reel', 'queue', 'search'], ids=['H-reel-completed', 'tray-show-queue', 'show-search'])
 def test_program_navigation_keeps_dialog_as_shell_overlay(window_factory, core, target):
-    window = window_factory('1')
+    window = window_factory()
     host, dialogs = window.web_host, window.web_host.dialogs
     navigate = {'reel': window.reel.open, 'queue': window.tray.show_queue, 'search': window.show_search}[target]
     window.pages.setCurrentWidget(window.playback_page)
@@ -184,7 +228,7 @@ def test_program_navigation_keeps_dialog_as_shell_overlay(window_factory, core, 
 def test_modal_keys_reach_other_qt_consumers(window_factory, core):
     from PySide6.QtCore import QObject
     from PySide6.QtWidgets import QLineEdit
-    window = window_factory('1')
+    window = window_factory()
     received = []
     class Capture(QObject):
         def eventFilter(self, watched, event):
@@ -204,7 +248,7 @@ def test_modal_keys_reach_other_qt_consumers(window_factory, core):
 
 @pytest.mark.parametrize('after_detach', [False, True], ids=['A-late-callback', 'B-open-container'])
 def test_shell_return_always_reattaches_live_dialog(window_factory, core, after_detach):
-    window = window_factory('1')
+    window = window_factory()
     host, dialogs = window.web_host, window.web_host.dialogs
     def check():
         window.pages.setCurrentWidget(window.playback_page)
@@ -220,7 +264,7 @@ def test_shell_return_always_reattaches_live_dialog(window_factory, core, after_
 
 
 def test_dialog_snapshot_failure_cleans_run_and_allows_retry(window_factory, monkeypatch):
-    window = window_factory('1')
+    window = window_factory()
     dialogs = window.web_host.dialogs
     with monkeypatch.context() as patch:
         def fail(self):
@@ -234,7 +278,7 @@ def test_dialog_snapshot_failure_cleans_run_and_allows_retry(window_factory, mon
 
 
 def test_common_modal_gate_clears_on_navigation_reload_and_playback(window_factory):
-    window = window_factory('1')
+    window = window_factory()
     host = window.web_host
     host.dialogs.bridge.modalState(1)
     window.activateWindow()
@@ -255,7 +299,7 @@ def test_common_modal_gate_clears_on_navigation_reload_and_playback(window_facto
 def test_translation_choices_come_from_adapter(window_factory, monkeypatch):
     from my_video_manager import translation_cli
     monkeypatch.setattr(translation_cli, 'TRANSLATION_CLI_CHOICES', (('codex', 'Codex 표시 이름'), ('claude', 'Claude 표시 이름')))
-    window = window_factory('1')
+    window = window_factory()
     dialogs = window.web_host.dialogs
     def check():
         assert [(r['id'], r['title']) for r in state(dialogs)['choices']] == list(translation_cli.TRANSLATION_CLI_CHOICES)
@@ -266,7 +310,6 @@ def test_translation_choices_come_from_adapter(window_factory, monkeypatch):
 def review_window(setup, monkeypatch):
     from my_video_manager.ui import MainWindow
     app = QApplication.instance() or QApplication([])
-    monkeypatch.setenv('MVM_WEB_UI', '1')
     core, video_id, *_ = setup
     window = MainWindow(core)
     window.subtitles.timer.stop()

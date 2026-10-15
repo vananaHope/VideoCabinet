@@ -112,7 +112,7 @@ def test_escape_closes_help_then_fullscreen_then_playback(window):
     assert page.header.isVisible() and page.bottom_bar.isVisible()
     key(window, Qt.Key.Key_Escape)
     assert window.core.playback.session is None
-    assert window.statusBar().isVisible()
+    assert not window.statusBar().isVisible()
 
 
 def test_next_episode_keeps_fullscreen_and_sidebar_navigation_exits(window):
@@ -125,7 +125,7 @@ def test_next_episode_keeps_fullscreen_and_sidebar_navigation_exits(window):
     key(window, Qt.Key.Key_3, Qt.KeyboardModifier.ControlModifier)
     assert not window.isFullScreen()
     assert window.core.playback.session is None
-    assert window.sidebar.isVisible() and window.statusBar().isVisible()
+    assert window.web_host.active_tab == 'search'
 
 
 def test_reel_next_item_preserves_fullscreen_and_shows_position(window):
@@ -294,7 +294,7 @@ def test_space_activates_focused_back_button(window):
     window.playback_page.back_button.setFocus()
     key(window, Qt.Key.Key_Space)
     assert window.core.playback.session is None
-    assert window.pages.currentWidget() is window.library_page
+    assert window.pages.currentWidget() is window.web_host
 
 
 def add_highlight(window, start, end=None, note=''):

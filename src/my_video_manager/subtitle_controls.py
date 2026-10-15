@@ -1,7 +1,7 @@
 """자막 요청과 작업자 연결. 자막 정책은 AppCore 공개 메서드에 맡긴다."""
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
-from PySide6.QtWidgets import QInputDialog, QMessageBox, QPushButton
+from PySide6.QtWidgets import QMessageBox
 
 
 class SubtitleWorker(QThread):
@@ -31,49 +31,13 @@ class SubtitleControls(QObject):
         self.timer.timeout.connect(self.process_queue)
         self.timer.start(500)
 
-    def button(self):
-        button = QPushButton("자막 만들기 / 원어 지정")
-        button.clicked.connect(self.request)
-        return button
+
 
     def request(self):
         session = self.core.playback.session
-        video_id = session.video_id if session else None
-        if video_id is None:
-            video_id = self.window.library_page.selected_video_id()
-            if video_id is None:
-                return
-        existing = self.core.transcript(video_id)
-        from .web_dialogs_host import web_dialogs
-        if dialogs := web_dialogs(self.window):
-            dialogs.run('subtitles', video_id=video_id)
-            return
-        languages = ["자동 감지", "ko", "en", "ja", "zh", "de", "fr", "es"]
-        initial = existing.spoken_language if existing and existing.language_specified else "자동 감지"
-        if initial not in languages:
-            languages.append(initial)
-        prompt = "원어를 고르거나 언어 코드를 입력하세요 (예: en, ko, ja)."
-        if existing:
-            source = "직접 지정" if existing.language_specified else "자동 감지"
-            prompt += f"\n현재 원어: {existing.spoken_language or '알 수 없음'} ({source})"
-        language, accepted = QInputDialog.getItem(
-            self.window, "원어 자막 만들기", prompt,
-            languages, languages.index(initial), True,
-        )
-        if not accepted:
-            return
-        if existing and QMessageBox.question(
-            self.window, "원어 자막 다시 생성", self.core.subtitle_regeneration_warning(video_id),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            self.core.request_subtitles(video_id, None if language == "자동 감지" else language)
-            self.window.statusBar().showMessage("자막 대기열에 추가했습니다. 재생 중에도 계속 처리합니다.")
-            self.video_changed.emit(video_id)
-        except Exception as error:
-            QMessageBox.warning(self.window, "자막 요청 실패", str(error))
+        video_id = session.video_id if session else self.window.library_page.selected_video_id()
+        if video_id is not None:
+            self.window.web_host.dialogs.run('subtitles', video_id=video_id)
 
     def process_queue(self):
         if self.worker:

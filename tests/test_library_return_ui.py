@@ -71,8 +71,8 @@ def library_window(tmp_path, app, monkeypatch):
 
 def test_tray_reopen_updates_finished_viewing_without_refreshing_while_hidden(library_window, app):
     window, core, video = library_window
-    assert "보다 만" in window.library_page.grid.model().index(0, 0).data()
-    assert window.library_page.hidden_gems.list.count() == 1
+    assert window.library_page.snapshot.statuses[video.id].abandoned
+    assert len(window.library_page.gems) == 1
     window.play_video(video.id, start=0, from_gems=True)
     # 마지막 엔진 보고를 닫기 경로에서 받아 시청을 저장한다.
     window.player.positions.append((95, False))
@@ -80,15 +80,15 @@ def test_tray_reopen_updates_finished_viewing_without_refreshing_while_hidden(li
     app.processEvents()
     assert not window.isVisible()
     assert core.viewing_status(video.id).finished
-    assert "보다 만" in window.library_page.grid.model().index(0, 0).data()
-    assert window.library_page.hidden_gems.list.count() == 1
+    assert window.library_page.snapshot.statuses[video.id].abandoned
+    assert len(window.library_page.gems) == 1
 
     window.tray.open()
     app.processEvents()
     assert window.isVisible()
-    assert "다 봄" in window.library_page.grid.model().index(0, 0).data()
-    assert window.library_page.hidden_gems.list.count() == 0
-    assert window.library_page.grid.hasFocus()
+    assert window.library_page.snapshot.statuses[video.id].finished
+    assert len(window.library_page.gems) == 0
+    assert window.web_host._pending_focus == 'grid' or window.web_host.view.hasFocus()
 
 
 def test_tray_open_of_visible_playback_does_not_end_viewing(library_window):
@@ -99,22 +99,24 @@ def test_tray_open_of_visible_playback_does_not_end_viewing(library_window):
     assert window.pages.currentIndex() == 1
 
 
+def test_tray_queue_during_playback_finishes_viewing(library_window):
+    window, core, video = library_window
+    window.play_video(video.id)
+    window.tray.show_queue()
+    assert core.playback.session is None
+    assert window.web_host.active_tab == 'queue'
+
+
 @pytest.mark.parametrize("return_first", [False, True])
 def test_reel_return_does_not_reuse_previous_gem_focus(library_window, app, return_first):
     window, core, video = library_window
-    window.library_page.hidden_gems.play(window.library_page.hidden_gems.list.item(0))
+    window.library_page.bridge.perform('playGem', video.id)
     if return_first:
         window.show_library()
         app.processEvents()
-        assert window.library_page.hidden_gems.list.hasFocus()
+        assert window.web_host._pending_focus == 'gems' or window.web_host.view.hasFocus()
     window.reel.open()
     window.show_library()
     app.processEvents()
-    assert window.library_page.hidden_gems.list.count() == 1
-    assert window.library_page.grid.hasFocus()
-
-
-def test_gem_rendering_does_not_shrink_library_thumbnail(library_window):
-    window, core, video = library_window
-    window.library_page.hidden_gems.list.viewport().grab()
-    assert window.library_page.grid.model().index(0, 0).data(Qt.ItemDataRole.DecorationRole).actualSize(QSize(192, 108)) == QSize(192, 108)
+    assert len(window.library_page.gems) == 1
+    assert window.web_host._pending_focus == 'grid' or window.web_host.view.hasFocus()

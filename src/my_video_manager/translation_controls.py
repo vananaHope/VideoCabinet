@@ -1,7 +1,6 @@
 """번역 작업자와 최소 CLI 설정 입력. 정책은 AppCore에 둔다."""
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
-from PySide6.QtWidgets import QInputDialog, QPushButton
 
 from .core import CommandType
 from .key_display import display_keys
@@ -33,35 +32,10 @@ class TranslationControls(QObject):
         self.timer.timeout.connect(self.process_queue)
         self.timer.start(500)
 
-    def button(self):
-        button = QPushButton("번역 CLI / 재시도")
-        button.clicked.connect(self.settings)
-        return button
+
 
     def settings(self):
-        from .web_dialogs_host import web_dialogs
-        if dialogs := web_dialogs(self.window):
-            dialogs.run('translation')
-            return
-        from .translation_cli import TRANSLATION_CLI_CHOICES
-        choices = [identifier for identifier, _ in TRANSLATION_CLI_CHOICES]
-        labels = [label for _, label in TRANSLATION_CLI_CHOICES]
-        waiting = [e for e in self.core.translation_queue() if e.state in ("failed", "held")]
-        prompt = "한국어 번역에 사용할 구독 CLI를 고르세요. 설치와 로그인이 필요합니다."
-        if waiting:
-            prompt += f"\n확인하면 실패·보류 중인 번역 {len(waiting)}건을 저장한 묶음부터 재시도합니다."
-            prompt += "\n선택한 CLI의 사용량 한도 보류 시간이 남았으면 그 시각까지 기다립니다."
-        selected, accepted = QInputDialog.getItem(
-            self.window, "번역 CLI", prompt, labels, choices.index(self.core.translation_cli), False)
-        if accepted:
-            selected = choices[labels.index(selected)]
-            self.core.set_translation_cli(selected)
-            for entry in waiting:
-                try:
-                    self.core.request_translation(entry.video_id)
-                except ValueError:
-                    pass  # 대화상자를 연 사이 원어가 재생성된 영상은 새 요청을 따른다.
-            self.window.statusBar().showMessage(f"번역 CLI: {selected}", 5000)
+        self.window.web_host.dialogs.run('translation')
 
     def process_queue(self):
         if self.worker or not self.core.translation_ready():

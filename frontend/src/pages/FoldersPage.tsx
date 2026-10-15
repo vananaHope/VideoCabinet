@@ -17,7 +17,11 @@ export default function FoldersPage() {
     connectBridge().then(async ({ folders: api }) => {
       if (disposed) return
       const changed = (json: string) => setData(JSON.parse(json))
-      const focus = () => requestAnimationFrame(() => document.getElementById('folders-add')?.focus())
+      const focus = (target: string) => {
+        const next = target.replace('folders-', '')
+        if (['folders', 'excluded', 'dismissed'].includes(next)) setSection(next)
+        requestAnimationFrame(() => document.getElementById(target === 'folders-add' ? target : 'folders-section')?.focus())
+      }
       api.foldersChanged.connect(changed)
       api.foldersError.connect(setError)
       api.foldersFocusRequested.connect(focus)
@@ -45,7 +49,7 @@ export default function FoldersPage() {
       {data.scanning && <StatusBadge variant="info">검사 중 · 폴더 및 제외 변경 잠금</StatusBadge>}
     </div>
     <Tabs label="폴더 관리 구역" value={section} onChange={setSection} items={[{ value: 'folders', label: `감시 폴더 ${data.folders.length}` }, { value: 'excluded', label: `제외 목록 ${data.excluded.length}` }, { value: 'dismissed', label: `관심 없음 되돌리기 ${data.dismissed.length}` }]} />
-    <section className="min-h-32 flex-1 overflow-y-auto rounded-xl border bg-card" aria-label={section === 'folders' ? '감시 폴더 목록' : '되돌리기 목록'}>
+    <section id="folders-section" tabIndex={-1} className="min-h-32 flex-1 overflow-y-auto rounded-xl border bg-card" aria-label={section === 'folders' ? '감시 폴더 목록' : '되돌리기 목록'}>
       {section === 'folders' ? (data.folders.length ? <ul className="divide-y">{data.folders.map(path => <li key={path} className="flex items-center gap-3 px-3 py-1.5"><p className="min-w-0 flex-1 break-all text-sm" title={path}>{path}</p><Button variant="outline" size="sm" disabled={data.scanning} aria-label={`${path} 해제`} onClick={() => setRemove(path)}>해제</Button></li>)}</ul> : <div className="p-3"><EmptyState title="감시 폴더가 없습니다" description="감시 폴더 추가로 영상이 있는 폴더를 고르면 자동으로 검사합니다." /></div>)
       : <><p className="border-b px-3 py-2 text-sm text-muted-foreground">{section === 'excluded' ? '되돌리면 라이브러리에 다시 보입니다. 파일과 기록은 그대로 남아 있습니다.' : '되돌린 영상은 다시 숨겨진 보석으로 추천될 수 있습니다. 라이브러리 표시는 그대로입니다.'}</p>{videos.length ? <ul className="divide-y">{videos.map(video => <li key={video.id} className="flex items-center gap-3 px-3 py-1.5"><div className="min-w-0 flex-1"><p className="break-all">{video.title}</p>{(video.missing || (section !== 'excluded' && video.excluded)) && <p className="text-xs text-muted-foreground">{section !== 'excluded' && video.excluded ? '제외' : '파일 없음'}</p>}</div><Button variant="outline" size="sm" disabled={section === 'excluded' && data.scanning} onClick={() => act(section === 'excluded' ? 'restoreExcluded' : 'restoreDismissed', String(video.id))}>되돌리기</Button></li>)}</ul> : <div className="p-3"><EmptyState title={section === 'excluded' ? '제외한 영상이 없습니다' : '관심 없음으로 뺀 영상이 없습니다'} description="되돌릴 영상이 있으면 여기에 표시합니다." /></div>}</>}
     </section>

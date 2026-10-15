@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QWidget
 
 
 class WebPageController(QWidget):
-    # QWidget은 기존 Qt 대화상자의 부모 수명주기를 위한 것이다. 화면은 호스트 하나에만 있다.
+    # QWidget은 부모 소유권과 이벤트 수명주기를 위한 것이다. 화면은 호스트 하나에만 있다.
     default_focus = 'shell'
     bridge = None
     focus_requested = None

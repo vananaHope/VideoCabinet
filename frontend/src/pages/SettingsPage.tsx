@@ -21,7 +21,10 @@ export default function SettingsPage() {
     connectBridge().then(async ({ settings: api, shell }) => {
       if (disposed) return
       const changed = (json: string) => setData(JSON.parse(json))
-      const focus = () => requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('#settings-category [aria-current="true"]')?.focus())
+      const focus = (target: string) => {
+        if (target === 'settings-keys') setCategory('keys')
+        requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('#settings-category [aria-current="true"]')?.focus())
+      }
       api.settingsChanged.connect(changed)
       api.settingsError.connect(setError)
       api.settingsFocusRequested.connect(focus)

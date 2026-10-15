@@ -176,18 +176,13 @@ def test_retry_held_translation_uses_existing_public_request(queue_page, setup):
     assert core.translation_queue()[0].state == 'queued'
 
 
-@pytest.mark.parametrize('mode', ['0', '1'])
-def test_tray_opens_queue_in_selected_ui(window_factory, mode):
-    window = window_factory(mode)
+def test_tray_opens_web_queue(window_factory):
+    window = window_factory()
     window.hide()
     window.tray.show_queue()
     assert window.isVisible()
-    if mode == '1':
-        assert window.pages.currentWidget() is window.web_host
-        assert window.web_host.active_tab == 'queue'
-        assert window.web_host.controllers['queue'].timer.isActive()
-        window.navigate_web_tab('library')
-        assert not window.web_host.controllers['queue'].timer.isActive()
-    else:
-        from my_video_manager.queue_ui import SubtitleQueuePage
-        assert isinstance(window.pages.currentWidget(), SubtitleQueuePage)
+    assert window.pages.currentWidget() is window.web_host
+    assert window.web_host.active_tab == 'queue'
+    assert window.web_host.controllers['queue'].timer.isActive()
+    window.navigate_web_tab('library')
+    assert not window.web_host.controllers['queue'].timer.isActive()

@@ -32,7 +32,7 @@ def test_reel_play_uses_web_filter_without_populating_hidden_qt_list(window_fact
     mark(core, video, 10, 15)
     selected = mark(core, video, 30, 35)
     tag = core.add_highlight_tag(selected.id, '선택 태그')
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = ReelPlayer
     window.navigate_web_tab('reel')
     page = window.web_host.controllers['reel']
@@ -40,12 +40,12 @@ def test_reel_play_uses_web_filter_without_populating_hidden_qt_list(window_fact
     page.bridge.play(0)
     QApplication.processEvents()
     assert core.reel_playback.entry.highlight.id == selected.id
-    assert window.reel.list.count() == 0
+    assert window.pages.count() == 2
 
 
 def test_reel_navigation_and_playback_return_read_entries_once(window_factory, core, monkeypatch):
     mark(core, core.videos()[0], 10, 15)
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = ReelPlayer
     calls = []
     original = core.reel_entries
@@ -66,7 +66,7 @@ def test_reel_navigation_and_playback_return_read_entries_once(window_factory, c
 @pytest.mark.parametrize('tab,action,args', [('reel', 'refresh', ()), ('reel', 'filter', (0,)), ('search', 'find', ('Python',))])
 def test_result_changes_have_one_data_message_and_small_ack(window_factory, core, tab, action, args):
     core.prepare_search()
-    window = window_factory('1')
+    window = window_factory()
     window.navigate_web_tab(tab)
     page = window.web_host.controllers[tab]
     changes = []
@@ -77,7 +77,7 @@ def test_result_changes_have_one_data_message_and_small_ack(window_factory, core
 
 
 def test_reel_filter_selection_missing_and_current_keys(window_factory, core):
-    window = window_factory('1')
+    window = window_factory()
     window.navigate_web_tab('reel')
     page = window.web_host.controllers['reel']
     assert 'Insert' in snapshot(page)['emptyDescription']
@@ -113,7 +113,7 @@ def test_reel_filter_selection_missing_and_current_keys(window_factory, core):
 def test_reel_reuses_playback_auto_advance_repeat_and_records_only_revisit(window_factory, core):
     video = core.videos()[0]
     first, second = mark(core, video, 10, 15), mark(core, video, 30, 35)
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = ReelPlayer
     window.navigate_web_tab('reel')
     page = window.web_host.controllers['reel']
@@ -153,7 +153,7 @@ def test_reel_reuses_playback_auto_advance_repeat_and_records_only_revisit(windo
 def test_reel_completion_status_clears_on_list_update(window_factory, core, action):
     highlight = mark(core, core.videos()[0], 10, 15)
     tag = core.add_highlight_tag(highlight.id, '복습')
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = ReelPlayer
     window.navigate_web_tab('reel')
     page = window.web_host.controllers['reel']
@@ -188,7 +188,7 @@ def test_search_scene_return_keeps_query_results_selection_and_playlist(window_f
     h = mark(core, video, 12.125)
     core.update_highlight(h.id, start=h.start, end=None, note='Python 장면')
     core.prepare_search()
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = Player
     window.show_search()
     page = window.web_host.controllers['search']
@@ -211,7 +211,7 @@ def test_search_scene_return_keeps_query_results_selection_and_playlist(window_f
 
 def test_search_preparing_empty_no_results_limit_and_missing(window_factory, core, monkeypatch):
     core.prepare_search()
-    window = window_factory('1')
+    window = window_factory()
     window.show_search()
     page = window.web_host.controllers['search']
     page.bridge.find('')
@@ -255,16 +255,8 @@ def test_web_search_highlight_preserves_normalized_match_and_literal_markup(text
     ('👩\u200d💻 장면 장 면', '장면', [(4, 6), (7, 10)]),
     ('한글', ' ', []),
 ])
-def test_shared_match_spans_are_original_slices_and_qt_html_stays_equivalent(text, query, expected):
-    from html import escape
-    from my_video_manager.search_ui import highlighted_text
-    from my_video_manager.theme import ACCENT
-
+def test_shared_match_spans_are_original_slices_and_web_parts_stay_equivalent(text, query, expected):
     assert match_spans(text, query) == expected
-    previous, html = 0, []
-    for start, end in expected:
-        html.extend((escape(text[previous:start]),
-                     f'<span style="color:{ACCENT}; font-weight:600">{escape(text[start:end])}</span>'))
-        previous = end
-    html.append(escape(text[previous:]))
-    assert highlighted_text(text, query) == ''.join(html)
+    parts = matched_parts(text, query)
+    assert ''.join(part['text'] for part in parts) == text
+    assert [part['text'] for part in parts if part['matched']] == [text[start:end] for start, end in expected]

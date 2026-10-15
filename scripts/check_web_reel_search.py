@@ -1,4 +1,4 @@
-"""#49 Qt/웹 1100×720 비교와 실제 Chromium 키 입력·mpv 왕복 검사.
+"""#49 웹 1100×720 비교와 실제 Chromium 키 입력·mpv 왕복 검사.
 
 스크린샷: python scripts/check_web_reel_search.py --offscreen
 실창: desktop_lock.py run --owner issue-49 -- python scripts/check_web_reel_search.py --verify --no-screenshots
@@ -106,8 +106,7 @@ def mark(core, video, start, end=None, note='기억할 장면'):
     return core.update_highlight(highlight.id, start=start, end=end, note=note)
 
 
-def make_window(mode, core):
-    os.environ['MVM_WEB_UI'] = '1' if mode == 'web' else '0'
+def make_window(core):
     window = MainWindow(core)
     window.resize(1100, 720)
     windows.append(window)
@@ -115,80 +114,56 @@ def make_window(mode, core):
     if not args.offscreen:
         window.raise_()
         window.activateWindow()
-    if mode == 'web':
-        wait_until(lambda: read(window, "!!document.getElementById('search-query')"))
-        wait_until(lambda: window.web_host._frontend_ready)
+    wait_until(lambda: read(window, "!!document.getElementById('search-query')"))
+    wait_until(lambda: window.web_host._frontend_ready)
     settle()
     return window
 
 
-def capture_pair(core, label, tab, text='', preparing=False, failed=False, completed=False):
+def capture_page(core, label, tab, text='', preparing=False, failed=False, completed=False):
     if args.no_screenshots:
         return
-    pictures = []
-    for mode in ('qt', 'web'):
-        window = make_window(mode, core)
-        if mode == 'web':
-            window.navigate_web_tab(tab)
-            if tab == 'search':
-                page = window.web_host.controllers['search']
-                if preparing:
-                    page.preparation = SimpleNamespace(ready=lambda: False)
-                if failed:
-                    def fail():
-                        raise RuntimeError('검증용 색인 오류')
-                    page.preparation = SimpleNamespace(ready=fail)
-                page.bridge.find(text)
-                query(window, text)
-                if failed:
-                    wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent === '검색 실패: 검증용 색인 오류'"))
-                elif preparing:
-                    wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('색인 준비 중')"))
-                else:
-                    expected = len(core.search(text).results)
-                    wait_until(lambda: read(window, f"document.querySelectorAll('#search-results [role=\"option\"]').length === {expected} && document.getElementById('search-results').getAttribute('aria-busy') === 'false'"))
-                    if core.search(text).truncated:
-                        assert read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('500개')")
-            wait_until(lambda: read(window, f"!document.querySelector('main[aria-label=\"{'검색' if tab == 'search' else '하이라이트 모아보기'}\"]').parentElement.hidden"))
+    window = make_window(core)
+    window.navigate_web_tab(tab)
+    if tab == 'search':
+        page = window.web_host.controllers['search']
+        if preparing:
+            page.preparation = SimpleNamespace(ready=lambda: False)
+        if failed:
+            def fail():
+                raise RuntimeError('검증용 색인 오류')
+            page.preparation = SimpleNamespace(ready=fail)
+        page.bridge.find(text)
+        query(window, text)
+        if failed:
+            wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent === '검색 실패: 검증용 색인 오류'"))
+        elif preparing:
+            wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('색인 준비 중')"))
         else:
-            window.navigate(2 if tab == 'search' else 1)
-            if tab == 'search':
-                page = window.navigation_pages[2]
-                if preparing:
-                    page.preparation = SimpleNamespace(ready=lambda: False)
-                if failed:
-                    def fail():
-                        raise RuntimeError('검증용 색인 오류')
-                    page.preparation = SimpleNamespace(ready=fail)
-                page.query.setText(text)
-                page.refresh()
-        if completed:
-            last = core.reel_entries()[-1].highlight
-            core.start_reel(highlight_id=last.id)
-            window.reel.shown = core.reel_playback
-            core.playback.report(core.reel_playback.end)
-            core.advance_reel_if_due()
-            window.reel.sync()
-            if mode == 'web':
-                wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"하이라이트 모아보기\"] [role=\"status\"]').textContent.includes('모아보기를 마쳤습니다')"))
-        settle(500)
-        picture = window.grab().toImage()
-        assert picture.width() == 1100 and picture.height() == 720
-        picture.save(str(args.output / f'{mode}-{label}.png'))
-        pictures.append(picture)
-        if mode == 'web':
-            assert read(window, 'document.documentElement.scrollWidth <= innerWidth'), label
-        window.tray.quit()
-        window.deleteLater()
-        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        windows.remove(window)
-    pair = QImage(2200, 720, QImage.Format.Format_RGB32)
-    painter = QPainter(pair)
-    for index, picture in enumerate(pictures):
-        painter.drawImage(index * 1100, 0, picture)
-    painter.end()
-    pair.save(str(args.output / f'pair-{label}.png'))
-    checks.append(f'1100×720 Qt/웹: {label}')
+            expected = len(core.search(text).results)
+            wait_until(lambda: read(window, f"document.querySelectorAll('#search-results [role=\"option\"]').length === {expected} && document.getElementById('search-results').getAttribute('aria-busy') === 'false'"))
+            if core.search(text).truncated:
+                assert read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('500개')")
+    wait_until(lambda: read(window, f"!document.querySelector('main[aria-label=\"{'검색' if tab == 'search' else '하이라이트 모아보기'}\"]').parentElement.hidden"))
+    if completed:
+        last = core.reel_entries()[-1].highlight
+        core.start_reel(highlight_id=last.id)
+        window.reel.shown = core.reel_playback
+        core.playback.report(core.reel_playback.end)
+        core.advance_reel_if_due()
+        window.reel.sync()
+        wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"하이라이트 모아보기\"] [role=\"status\"]').textContent.includes('모아보기를 마쳤습니다')"))
+    settle(500)
+    picture = window.grab().toImage()
+    assert picture.width() == 1100 and picture.height() == 720
+    picture.save(str(args.output / f'web-{label}.png'))
+    assert read(window, 'document.documentElement.scrollWidth <= innerWidth'), label
+    window.tray.quit()
+    window.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    windows.remove(window)
+    checks.append(f'1100×720 웹: {label}')
+
 
 
 def screenshots():
@@ -198,11 +173,11 @@ def screenshots():
     core.add_file(path)
     video = core.videos()[0]
     core.prepare_search()
-    capture_pair(core, 'reel-empty', 'reel')
-    capture_pair(core, 'search-empty', 'search')
-    capture_pair(core, 'search-none', 'search', '없는검색어')
-    capture_pair(core, 'search-preparing', 'search', '장면', preparing=True)
-    capture_pair(core, 'search-error', 'search', '장면', failed=True)
+    capture_page(core, 'reel-empty', 'reel')
+    capture_page(core, 'search-empty', 'search')
+    capture_page(core, 'search-none', 'search', '없는검색어')
+    capture_page(core, 'search-preparing', 'search', '장면', preparing=True)
+    capture_page(core, 'search-error', 'search', '장면', failed=True)
     first = mark(core, video, 2, 4)
     mark(core, video, 6, 8, '다시 볼 장면')
     tag = core.add_highlight_tag(first.id, '복습')
@@ -210,20 +185,20 @@ def screenshots():
     core.playback.report(4)
     core.advance_reel_if_due()
     core.playback.end()
-    capture_pair(core, 'reel-few', 'reel')
-    capture_pair(core, 'search-few', 'search', '장면')
-    capture_pair(core, 'reel-completed', 'reel', completed=True)
+    capture_page(core, 'reel-few', 'reel')
+    capture_page(core, 'search-few', 'search', '장면')
+    capture_page(core, 'reel-completed', 'reel', completed=True)
     core.update_highlight(first.id, start=2, end=4, note=('긴 메모와 줄바꿈\n' + '공백없는아주긴메모' * 30))
     core.rename_video(video.id, '긴 영상 제목 ' + 'LongTitle' * 20)
     long_tag = core.add_highlight_tag(first.id, '공백없는태그' * 8)
-    capture_pair(core, 'reel-long', 'reel')
+    capture_page(core, 'reel-long', 'reel')
     core.update_highlight(first.id, start=2, end=4, note='기억할 장면')
     core.delete_tag(long_tag.id)
     core.rename_video(video.id, '검증 영상')
     for index in range(501):
         mark(core, video, 10 + index / 100, note=f'검색할 장면 {index:03d}')
-    capture_pair(core, 'reel-many', 'reel')
-    capture_pair(core, 'search-cap', 'search', '장면')
+    capture_page(core, 'reel-many', 'reel')
+    capture_page(core, 'search-cap', 'search', '장면')
 
 
 def verify():
@@ -237,7 +212,7 @@ def verify():
     first, second = mark(core, video, 2, 4), mark(core, video, 6, 8)
     core.add_highlight_tag(first.id, '복습')
     core.prepare_search()
-    window = make_window('web', core)
+    window = make_window(core)
     try:
         # 예약 탭 키는 Qt가, 입력·목록 키는 Chromium이 처리한다.
         key(window, Qt.Key.Key_3, Qt.KeyboardModifier.ControlModifier)
@@ -296,7 +271,7 @@ def verify():
         assert core.last_highlight_revisited_at(second.id) is not None
         assert core.viewings(video.id) == before
         wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"하이라이트 모아보기\"] [role=\"status\"]').textContent.includes('모아보기를 마쳤습니다')"))
-        assert window.reel.list.count() == 0
+        assert window.pages.count() == 2
         checks.append('모아보기 키보드 버튼 접근·실제 mpv 반복·자동 전환·복습 기록·시청 비간섭·웹 복귀')
         key(window, Qt.Key.Key_Escape)
         wait_until(lambda: window.web_host.active_tab == 'library')

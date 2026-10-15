@@ -142,7 +142,7 @@ def test_deleted_highlight_is_revalidated_before_queued_play(bridge):
 
 
 def test_highlight_edit_opens_existing_editor_and_refreshes_details(bridge, monkeypatch):
-    from my_video_manager.highlight_ui import HighlightEditor
+    from my_video_manager.web_dialogs_entries import HighlightEditor
     bridge, page, app = bridge
     hid = add_highlight(page.core, page.selected_id)
     refreshed = []
@@ -150,8 +150,8 @@ def test_highlight_edit_opens_existing_editor_and_refreshes_details(bridge, monk
 
     def save(dialog):
         assert dialog.highlight.id == hid
-        dialog.note.setPlainText('수정한 메모')
-        dialog.save()
+        dialog.core.update_highlight(hid, start=dialog.highlight.start,
+                                     end=dialog.highlight.end, note='수정한 메모')
 
     monkeypatch.setattr(HighlightEditor, 'exec', save)
     assert json.loads(bridge.editHighlight(page.selected_id, hid)) == {'ok': True}

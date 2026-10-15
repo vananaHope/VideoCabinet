@@ -250,11 +250,11 @@ class WebDialogs(QObject):
 
 
 def web_dialogs(parent):
-    """기존 진입 함수의 부모 사슬에서 웹 셸을 찾는다. 웹을 끄면 None."""
+    """진입 함수의 부모 사슬에서 업무 대화상자를 소유하는 웹 셸을 찾는다."""
     node = parent
     while node is not None:
         host = getattr(node, 'web_host', None)
         if host is not None:
             return host.dialogs
         node = node.parent()
-    return None
+    raise RuntimeError('업무 대화상자를 열 웹 셸이 없습니다.')

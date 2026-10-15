@@ -1,22 +1,18 @@
 """화면은 입력을 코어에 전달하고 결과를 표시한다."""
 
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QShortcut
-from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QStackedWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
 
 from .adapters import MpvPlayer
 from .core import AppCore, CommandType
 from .subtitle_controls import SubtitleControls
 from .translation_controls import TranslationControls
-from .highlight_ui import HighlightList
-from .reel_ui import ReelControls
-from .key_settings_ui import SettingsDialog
+from .web_dialogs_entries import HighlightList
 from .key_display import display_keys
 from .tray import TrayControls
-from .review_ui import ReviewDialog
-from .library_page import LibraryPage
+from .web_dialogs_entries import ReviewDialog
 from .playback_page import PlaybackPage
-from .shell_ui import SEARCH_PAGE_INDEX, build_shell
 from .theme import apply_theme
 
 
@@ -38,9 +34,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("영상 라이브러리")
         self.resize(1100, 720)
         self.pages = QStackedWidget()
-        self.library_count = QLabel()
-        self.library_count.setAccessibleName("라이브러리 등록·표시 개수")
-        self.statusBar().addPermanentWidget(self.library_count)
         self.settings_menu = self.menuBar().addMenu("설정(&S)")
         self.settings_menu.addAction("키 배치…", self.show_settings)
         # 숨은 메뉴바의 니모닉은 동작하지 않으므로 전체 화면에서만 보완한다.
@@ -48,18 +41,12 @@ class MainWindow(QMainWindow):
         self.fullscreen_settings_shortcut.setEnabled(False)
         self.fullscreen_settings_shortcut.activated.connect(self.show_fullscreen_settings_menu)
 
-        import os
-        self.web_ui = os.environ.get("MVM_WEB_UI") == "1"
-        if self.web_ui:
-            self.menuBar().hide()
-            self.statusBar().hide()
-            from .web_page_registry import create_web_shell
-            self.web_host = create_web_shell(self)
-            self.library_page = self.web_host.controllers['library']
-        else:
-            self.library_page = LibraryPage(self)
-        # home_page는 표시할 셸/Qt 화면, library_page는 라이브러리 작업 담당이다.
-        self.home_page = self.web_host if self.web_ui else self.library_page
+        self.menuBar().hide()
+        self.statusBar().hide()
+        from .web_page_registry import create_web_shell
+        self.web_host = create_web_shell(self)
+        self.library_page = self.web_host.controllers['library']
+        self.home_page = self.web_host
         self.pages.addWidget(self.home_page)
         self.playback_page = PlaybackPage(self)
         self.settings_menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.playback_page.focus_content))
@@ -67,12 +54,9 @@ class MainWindow(QMainWindow):
         # 기존 화면 어댑터용 연결점. 위젯 구성과 갱신은 각 페이지 모듈이 소유한다.
         self.surface = self.playback_page.surface
         self.progress = self.playback_page.progress
-        if self.web_ui:
-            from .web_reel_page import WebReelControls
-            self.reel = WebReelControls(self)
-        else:
-            self.reel = ReelControls(self)
-        build_shell(self)
+        from .web_reel_page import WebReelControls
+        self.reel = WebReelControls(self)
+        self.setCentralWidget(self.pages)
         self._active_page = self.home_page
         self._return_page = self.home_page
         self.pages.currentChanged.connect(self.page_changed)
@@ -89,15 +73,6 @@ class MainWindow(QMainWindow):
         if not playing:
             self.set_playback_fullscreen(False)
             self.playback_page.close_help()
-        self.sidebar.setVisible(not playing and not self.web_ui)
-        if self.web_ui:
-            self.web_return_bar.setVisible(not playing and page_is_native(self))
-        self.statusBar().setVisible(not playing and not self.web_ui)
-        if page in self.navigation_pages:
-            index = self.navigation_pages.index(page)
-            self.sidebar.select(index)
-            if self.web_ui and index:
-                self.web_host.native_page_shown(index)
 
     def set_playback_fullscreen(self, enabled):
         enabled = enabled and self.pages.currentWidget() is self.playback_page
@@ -108,60 +83,27 @@ class MainWindow(QMainWindow):
             self.showNormal()
             if getattr(self, "_playback_was_maximized", False):
                 self.showMaximized()
-        self.menuBar().setVisible(not enabled and not self.web_ui)
         self.playback_page.set_fullscreen(enabled)
-        playing = self.pages.currentWidget() is self.playback_page
-        self.sidebar.setVisible(not playing and not self.web_ui)
-        if self.web_ui:
-            self.web_return_bar.setVisible(not playing and page_is_native(self))
-        self.statusBar().setVisible(not playing and not self.web_ui)
 
     def changeEvent(self, event):
         super().changeEvent(event)
         # 트레이의 showNormal 등 창 바깥 경로도 실제 창 상태와 표시를 맞춘다.
         if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "playback_page"):
             self.fullscreen_settings_shortcut.setEnabled(self.isFullScreen())
-            if self.web_ui:
-                self.web_host.dialogs.sync_shortcut()
-            self.menuBar().setVisible(not self.isFullScreen() and not self.web_ui)
+            self.web_host.dialogs.sync_shortcut()
             self.playback_page.set_fullscreen(self.isFullScreen())
 
     def show_fullscreen_settings_menu(self):
-        if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
+        if self.web_host.dialogs.blocks_shell_actions:
             return
         self.playback_page.close_help()
-        if self.web_ui:
-            if self.pages.currentWidget() is self.playback_page:
-                self.web_host.popup_settings_menu()
-            else:
-                self.navigate_web_tab('settings')
+        if self.pages.currentWidget() is self.playback_page:
+            self.web_host.popup_settings_menu()
         else:
-            self.settings_menu.popup(self.mapToGlobal(QPoint(12, 12)))
-
-    def navigate(self, index):
-        if not 0 <= index < len(self.navigation_pages):
-            return
-        focus = QApplication.focusWidget()
-        from_sidebar = focus is not None and self.sidebar.isAncestorOf(focus)
-        if index == 0:
-            self.show_library()
-        elif index == 1:
-            self.reel.open()
-        else:
-            self.end_playback()
-            self._return_to_gems = False
-            self.pages.setCurrentWidget(self.navigation_pages[index])
-            self.navigation_pages[index].focus_content()
-        self.sidebar.select(index)
-        # 방향키로 페이지를 훑는 동안에는 사이드바의 키보드 포커스를 유지한다.
-        if from_sidebar:
-            (self.sidebar.settings if index == 5 else self.sidebar.list).setFocus()
+            self.navigate_web_tab('settings')
 
     def navigate_web_tab(self, tab):
         self.web_host.navigate(tab)
-
-    def return_to_web(self):
-        self.web_host.navigate(self.web_host.last_web_tab)
 
     @property
     def worker(self):
@@ -182,10 +124,7 @@ class MainWindow(QMainWindow):
         self.play_video(video_id)
 
     def show_search(self):
-        if self.web_ui:
-            self.navigate_web_tab('search')
-        else:
-            self.navigate(SEARCH_PAGE_INDEX)
+        self.navigate_web_tab('search')
 
     def play_video(self, video_id, *, start=None, from_gems=False):
         if self.pages.currentWidget() is not self.playback_page:
@@ -202,7 +141,7 @@ class MainWindow(QMainWindow):
 
     def load_player(self, video_id, start):
         location = self.core.playback_location(video_id)
-        if self.web_ui and self.pages.currentWidget() is self.web_host:
+        if self.pages.currentWidget() is self.web_host:
             self.web_host.remember_playback_tab()
         self.pages.setCurrentIndex(1)
         if self.player is None:
@@ -273,8 +212,7 @@ class MainWindow(QMainWindow):
 
     def show_library(self):
         self.end_playback()
-        if self.web_ui:
-            self.web_host.set_tab("library")
+        self.web_host.set_tab("library")
         self.pages.setCurrentIndex(0)
         self.refresh(focus_gems=self._return_to_gems)
         self._return_to_gems = False
@@ -282,31 +220,16 @@ class MainWindow(QMainWindow):
     def back_to_list(self):
         if self.reel.shown is not None or self.core.reel_playback is not None:
             self.reel.open()
-        elif self._return_page is self.home_page:
-            if self.web_ui:
-                self.web_host.return_from_playback(focus_gems=self._return_to_gems)
-                self._return_to_gems = False
-            else:
-                self.show_library()
         else:
-            self.end_playback()
-            self.pages.setCurrentWidget(self._return_page)
-            if self._return_page is self.reel.page:
-                self.reel.refresh()
-                self.reel.list.setFocus()
-            else:
-                self._return_page.focus_content()
+            self.web_host.return_from_playback(focus_gems=self._return_to_gems)
+            self._return_to_gems = False
 
     def refresh_key_help(self):
         self.playback_page.refresh_key_help()
 
     def show_settings(self):
-        SettingsDialog(self.core, self).exec()
-        self.refresh_key_help()
-        self.reel.update_label()
-        self.reel.refresh_guidance()
-        if self.pages.currentIndex() == 1:
-            self.surface.setFocus()
+        self.navigate_web_tab('settings')
+        self.web_host.request_focus('settings-keys')
 
     def show_review(self):
         session = self.core.playback.session
@@ -343,7 +266,7 @@ class MainWindow(QMainWindow):
             self.player.set_subtitle(self.core.playback_subtitle(video_id))
 
     def eventFilter(self, watched, event):
-        if (self.web_ui and self.isActiveWindow() and QApplication.activeModalWidget() is None
+        if (self.isActiveWindow() and QApplication.activeModalWidget() is None
                 and QApplication.activePopupWidget() is None):
             settings = self.web_host.controllers.get('settings')
             if settings is not None and settings.capture_event(event):
@@ -352,39 +275,21 @@ class MainWindow(QMainWindow):
                 or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):
             return super().eventFilter(watched, event)
         if (event.modifiers() == Qt.KeyboardModifier.ControlModifier
-                and Qt.Key.Key_1 <= event.key() <= (Qt.Key.Key_7 if self.web_ui else Qt.Key.Key_6)):
-            if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
+                and Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_7):
+            if self.web_host.dialogs.blocks_shell_actions:
                 return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
-                if self.web_ui:
-                    from .web_contract import TABS
-                    self.navigate_web_tab(TABS[event.key() - Qt.Key.Key_1][0])
-                else:
-                    self.navigate(event.key() - Qt.Key.Key_1)
+                from .web_contract import TABS
+                self.navigate_web_tab(TABS[event.key() - Qt.Key.Key_1][0])
             return True
         if event.modifiers() == Qt.KeyboardModifier.AltModifier and event.key() == Qt.Key.Key_S:
-            if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
+            if self.web_host.dialogs.blocks_shell_actions:
                 return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
-                if self.web_ui:
-                    if self.pages.currentWidget() is self.playback_page:
-                        self.web_host.popup_settings_menu()
-                    else:
-                        self.navigate_web_tab('settings')
-                else:
-                    self.settings_menu.popup(self.menuBar().mapToGlobal(self.menuBar().actionGeometry(
-                        self.settings_menu.menuAction()).bottomLeft()))
-            return True
-        if (self.web_ui and page_is_native(self) and event.key() == Qt.Key.Key_Escape
-                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
-            self.return_to_web()
+                self.show_fullscreen_settings_menu()
             return True
         handle_key = getattr(self.pages.currentWidget(), "handle_key", None)
         return handle_key(event) if callable(handle_key) else False
 
     def closeEvent(self, event):
         self.tray.close_window(event)
-
-
-def page_is_native(window):
-    return window.pages.currentWidget() not in (window.home_page, window.playback_page)

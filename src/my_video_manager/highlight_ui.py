@@ -1,31 +1,20 @@
 """하이라이트 표시와 편집. 도메인 변경은 AppCore 공개 API에 맡긴다."""
 
-import sqlite3
 from time import monotonic
 
 from PySide6.QtCore import QEvent, QItemSelectionModel, QSignalBlocker, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDoubleSpinBox, QFormLayout,
-    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
-    QPushButton, QTextEdit, QVBoxLayout, QWidget, QStyledItemDelegate, QStyle, QSizePolicy,
+    QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget,
+    QStyledItemDelegate, QStyle, QSizePolicy,
 )
 
-from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 from .highlights import nearest_highlight
-from .dialog_ui import dialog_buttons, primary_button, space_layout
-from .tag_ui import TagEditor
 from .theme import PLAYBACK_COLORS, playback_font, playback_pixels
+from .time_display import timestamp
 
 
 HIGHLIGHT_FOLLOW_IDLE_SECONDS = 3.0
-
-
-def timestamp(seconds: float) -> str:
-    milliseconds = round(seconds * 1000)
-    hours, rest = divmod(milliseconds, 3600000)
-    minutes, rest = divmod(rest, 60000)
-    return f"{hours:02}:{minutes:02}:{rest / 1000:06.3f}"
 
 
 class HighlightProgress(QWidget):
@@ -147,6 +136,21 @@ class PlaybackHighlights(QWidget):
     def record_interaction(self, *_):
         self._last_interaction = self._clock()
 
+    def follow_nearest(self):
+        if (not self.isVisible() or self.list.verticalScrollBar().isSliderDown()
+                or self._clock() - self._last_interaction < HIGHLIGHT_FOLLOW_IDLE_SECONDS):
+            return
+        for row in range(self.list.count()):
+            item = self.list.item(row)
+            if item.data(Qt.ItemDataRole.UserRole).id == self._nearest_id:
+                self.list.scrollToItem(item, QListWidget.ScrollHint.EnsureVisible)
+                break
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.list.doItemsLayout()
+        self.follow_nearest()
+
     def eventFilter(self, watched, event):
         if event.type() in (QEvent.Type.Wheel, QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress):
             self.record_interaction()
@@ -198,130 +202,6 @@ class PlaybackHighlights(QWidget):
                 item.setData(Qt.ItemDataRole.UserRole + 1, active)
                 item.setData(Qt.ItemDataRole.AccessibleTextRole,
                              ('현재 위치와 가까움 · ' if active else '') + item.text())
-                if (active and nearest_changed and not content_changed and self.isVisible()
-                        and not self.list.verticalScrollBar().isSliderDown()
-                        and self._clock() - self._last_interaction >= HIGHLIGHT_FOLLOW_IDLE_SECONDS):
-                    self.list.scrollToItem(item, QListWidget.ScrollHint.EnsureVisible)
             self.list.viewport().update()
-
-
-class HighlightEditor(QDialog):
-    def exec(self):
-        from .web_dialogs_host import web_dialogs
-        if dialogs := web_dialogs(self):
-            return dialogs.run('highlight', highlight=self.highlight, duration=self.web_duration)
-        return super().exec()
-
-    def __init__(self, core, highlight, duration, parent):
-        super().__init__(parent)
-        self.core, self.highlight = core, highlight
-        self.web_duration = duration
-        self.setWindowTitle("하이라이트 시각·메모 편집")
-        self.resize(470, 320)
-        layout = space_layout(QVBoxLayout(self))
-        form = QFormLayout()
-        self.start = QDoubleSpinBox()
-        self.end = QDoubleSpinBox()
-        for field in (self.start, self.end):
-            field.setDecimals(3)
-            field.setRange(0, time_input_maximum(duration))
-            field.setSuffix(" 초")
-        self.start.setValue(initial_time_input(highlight.start, duration))
-        self.end.setValue(initial_time_input(highlight.end if highlight.end is not None else highlight.start, duration))
-        self.initial_start = self.start.value()
-        self.initial_end = self.end.value()
-        self.range = QCheckBox("구간 하이라이트")
-        self.range.setChecked(highlight.end is not None)
-        self.end.setEnabled(self.range.isChecked())
-        self.range.toggled.connect(self.end.setEnabled)
-        form.addRow("시작", self.start)
-        form.addRow(self.range)
-        form.addRow("끝", self.end)
-        self.note = QTextEdit()
-        self.note.setPlainText(highlight.note.text if highlight.note else "")
-        form.addRow("메모", self.note)
-        layout.addLayout(form)
-        buttons = dialog_buttons(self.save, self.reject, save=True)
-        layout.addWidget(buttons)
-
-    def save(self):
-        try:
-            start = resolve_time_input(self.highlight.start, self.initial_start, self.start.value())
-            end = (resolve_time_input(self.highlight.end, self.initial_end, self.end.value())
-                   if self.range.isChecked() else None)
-            self.core.update_highlight(self.highlight.id, start=start, end=end,
-                                       note=self.note.toPlainText())
-        except (ValueError, OSError, sqlite3.Error) as error:
-            QMessageBox.warning(self, "하이라이트 저장 실패", str(error))
-            return
-        self.accept()
-
-
-class HighlightList(QDialog):
-    def exec(self):
-        from .web_dialogs_host import web_dialogs
-        if dialogs := web_dialogs(self):
-            return dialogs.run('highlights', video_id=self.video_id, duration=self.duration)
-        return super().exec()
-
-    def __init__(self, core, video_id, duration, parent):
-        super().__init__(parent)
-        self.core, self.video_id, self.duration = core, video_id, duration
-        self.setWindowTitle("현재 영상의 하이라이트")
-        self.resize(660, 420)
-        layout = space_layout(QVBoxLayout(self))
-        layout.addWidget(QLabel("더블클릭 또는 Enter로 시각·메모 편집"))
-        self.list = QListWidget()
-        self.list.itemActivated.connect(self.edit)
-        layout.addWidget(self.list)
-        buttons = QHBoxLayout()
-        self.edit_button = primary_button(QPushButton("시각·메모 편집"))
-        self.delete_button = QPushButton("하이라이트 삭제")
-        self.tags_button = QPushButton("태그 편집")
-        close = QPushButton("닫기")
-        self.edit_button.clicked.connect(self.edit)
-        self.delete_button.clicked.connect(self.delete)
-        self.tags_button.clicked.connect(self.edit_tags)
-        close.clicked.connect(self.accept)
-        for button in (self.edit_button, self.tags_button, self.delete_button, close):
-            if button is close:
-                buttons.addStretch()
-            button.setAutoDefault(False)
-            buttons.addWidget(button)
-        layout.addLayout(buttons)
-        self.refresh()
-
-    def refresh(self):
-        row = self.list.currentRow()
-        self.list.clear()
-        for highlight in self.core.highlights(self.video_id):
-            end = f" – {timestamp(highlight.end)}" if highlight.end is not None else " (지점)"
-            note = highlight.note.text if highlight.note else "메모 없음"
-            item = QListWidgetItem(f"{timestamp(highlight.start)}{end}\n{note}")
-            tags = self.core.highlight_tags(highlight.id)
-            if tags:
-                item.setText(item.text() + "\n태그: " + ", ".join(tag.name for tag in tags))
-            item.setData(Qt.ItemDataRole.UserRole, highlight)
-            self.list.addItem(item)
-        self.list.setCurrentRow(max(0, min(row, self.list.count() - 1)))
-        self.edit_button.setEnabled(self.list.count() > 0)
-        self.delete_button.setEnabled(self.list.count() > 0)
-        self.tags_button.setEnabled(self.list.count() > 0)
-
-    def edit_tags(self):
-        if item := self.list.currentItem():
-            TagEditor(self.core, highlight_id=item.data(Qt.ItemDataRole.UserRole).id, parent=self).exec()
-            self.refresh()
-
-    def edit(self, *_):
-        if item := self.list.currentItem():
-            HighlightEditor(self.core, item.data(Qt.ItemDataRole.UserRole), self.duration, self).exec()
-            self.refresh()
-
-    def delete(self):
-        if item := self.list.currentItem():
-            try:
-                self.core.delete_highlight(item.data(Qt.ItemDataRole.UserRole).id)
-            except (ValueError, OSError, sqlite3.Error) as error:
-                QMessageBox.warning(self, "하이라이트 삭제 실패", str(error))
-            self.refresh()
+            if video_changed or (nearest_changed and not content_changed):
+                self.follow_nearest()

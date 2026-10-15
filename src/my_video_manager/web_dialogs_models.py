@@ -13,6 +13,7 @@ TITLES = {
     'highlight': '하이라이트 시각·메모 편집', 'subtitles': '원어 자막 만들기',
     'review': '자막 검수 · SRT 내보내기', 'line': '자막 줄 수정',
     'range': '구간 원어 자막 다시 생성', 'translation': '번역 CLI / 재시도',
+    'video-rename': '제목 변경', 'video-exclude': '영상 제외',
 }
 
 
@@ -46,6 +47,19 @@ class DialogModel:
                                end=line.original.end if line else self.core.video(context['video_id']).duration)
         elif kind == 'tag-rename':
             self.values['name'] = context['tag'].name
+        elif kind == 'series' and context.get('series_id') is not None:
+            selected = next(s for s in self.core.series() if s.id == context['series_id'])
+            self.values = values(choice=str(selected.id), name=selected.name,
+                                 members=[str(v) for v in selected.video_ids])
+        elif kind == 'video-rename':
+            self.values['name'] = self.core.video(context['video_id']).title
+        elif kind == 'video-exclude':
+            video = self.core.video(context['video_id'])
+            def exclude():
+                self.core.exclude_video(video.id)
+                self.owner.pop(accepted=True)
+            self.confirm(f"'{video.title}'을 제외할까요?\n실제 파일과 기록은 남으며 제외 목록에서 되돌릴 수 있습니다.",
+                         exclude, title='영상 제외', destructive=True)
 
     def snapshot(self):
         c, ctx, kind = self.core, self.context, self.kind
@@ -69,7 +83,7 @@ class DialogModel:
                         choices=[row('', '새 시리즈'), *[row(s.id, s.name) for s in series]],
                         available=[row(v.id, v.title, '파일 없음' if v.missing else '') for v in c.videos() if v.id not in assigned])
         elif kind == 'highlights':
-            from .highlight_ui import timestamp
+            from .time_display import timestamp
             data.update(description='더블클릭 또는 Enter로 시각·메모 편집', rows=[
                 row(h.id, timestamp(h.start) + (f' – {timestamp(h.end)}' if h.end is not None else ' (지점)'),
                     h.note.text if h.note else '메모 없음', ', '.join(t.name for t in c.highlight_tags(h.id)), h.start, h.end)
@@ -143,11 +157,17 @@ class DialogModel:
             return
         if action == 'cancel-confirm':
             self.pending, self.confirmation = None, ''
+            if kind == 'video-exclude':
+                self.owner.pop()
             return
         if self.pending:
             raise ValueError('확인 또는 취소를 먼저 선택하세요.')
         if action == 'close':
             self.owner.pop(accepted=bool(data.get('accepted', False)))
+            return
+        if kind == 'video-rename' and action == 'save':
+            c.rename_video(ctx['video_id'], data['name'])
+            self.owner.pop(accepted=True)
             return
         if kind == 'tags':
             highlight = ctx.get('highlight_id')

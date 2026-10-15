@@ -104,7 +104,7 @@ class LibraryBridge(QObject):
             highlight = self.require_highlight(video_id, highlight_id)
             page.selected_id = video_id
             if edit:
-                from .highlight_ui import HighlightEditor
+                from .web_dialogs_entries import HighlightEditor
                 HighlightEditor(page.core, highlight, page.core.video(video_id).duration, page).exec()
                 page.refresh_details(video_id)
             else:

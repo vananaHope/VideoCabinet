@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 from .core import CommandType
-from .highlight_ui import HighlightProgress, PlaybackHighlights, timestamp
+from .highlight_ui import HighlightProgress, PlaybackHighlights
+from .time_display import timestamp
 from .key_display import display_keys
 from .qt_keys import key_name
 from .playback_help import PlaybackHelp
