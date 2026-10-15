@@ -45,6 +45,8 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
   }, [layoutPaused, cardSize])
   const { columns, rowHeight } = dimensions
   const virtual = useVirtualizer({ count: Math.ceil(videos.length / columns), getScrollElement: () => scroll.current, estimateSize: () => rowHeight, overscan: 2 })
+  // estimateSize 변경만으로는 TanStack의 기존 행 위치 캐시가 비워지지 않는다.
+  useLayoutEffect(() => { virtual.measure() }, [virtual, rowHeight, columns])
   const selectedIndex = videos.findIndex(video => video.id === selectedId)
   const lastIds = useRef("")
   useEffect(() => {
