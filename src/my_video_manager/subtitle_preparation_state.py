@@ -1,45 +1,23 @@
 """준비의 마지막 결과를 데이터 폴더에 원자적으로 보존한다."""
 import json
 import logging
-from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
-import re
 import tempfile
 from threading import Lock
 
+from .app_logging import safe_detail, file_log_handler
+
 
 _log_lock = Lock()
-
-
-def safe_detail(detail):
-    """진단 원문에서 인증 값과 사용자 홈 경로만 가린다."""
-    if isinstance(detail, OSError) and detail.strerror is not None:
-        # OSError.__str__은 파일명을 repr로 넣어 Windows 경로를 이중 이스케이프한다.
-        parts = [f'[Errno {detail.errno}] {detail.strerror}']
-        parts.extend(str(name) for name in (detail.filename, detail.filename2) if name is not None)
-        detail = ': '.join(parts)
-    detail = re.sub(r'https?://[^\s<>\"\']+',
-                    lambda match: re.sub(r'(https?://)[^/]*@', r'\1[가림]@',
-                                         re.split(r'[?#]', match[0], maxsplit=1)[0]), str(detail))
-    detail = re.sub(r'\bhf_[A-Za-z0-9]+\b', '[가림]', detail)
-    detail = re.sub(r'(?i)(authorization\s*[:=]\s*(?:bearer\s+)?|(?:token|api[_-]?key|password|secret)\s*[:=]\s*)[^\s,;]+',
-                    r'\1[가림]', detail)
-    for home in (str(Path.home()), Path.home().as_posix()):
-        detail = re.sub(re.escape(home), '~', detail, flags=re.IGNORECASE)
-    return detail
 
 
 def log_failure(directory, kind, message, detail):
     """실패는 ERROR, 사용자 취소·중단은 INFO로 기록한다. 로그 오류는 무시한다."""
     try:
         with _log_lock:
-            folder = Path(directory) / 'logs'
-            folder.mkdir(parents=True, exist_ok=True)
-            handler = RotatingFileHandler(folder / 'subtitle-preparation.log',
-                                          maxBytes=256 * 1024, backupCount=2, encoding='utf-8')
+            handler = file_log_handler(Path(directory) / 'logs/subtitle-preparation.log')
             try:
-                handler.setFormatter(logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s'))
                 logger = logging.getLogger('my_video_manager.preparation')
                 cancelled = kind in ('cancelled', 'interrupted')
                 text = f'{kind}: {safe_detail(message)} · {safe_detail(detail)}'.strip(' ·')

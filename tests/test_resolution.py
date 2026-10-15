@@ -182,7 +182,7 @@ def test_backfill_cancelled_during_probe_retries_and_does_not_hold_database_lock
     assert core.video(video.id).title == '읽는 동안 저장'
 
 
-def test_probe_failure_finishes_once_and_scan_retries_without_losing_location(tmp_path):
+def test_probe_failure_is_not_repeated_until_file_changes(tmp_path):
     class BrokenMedia(ResolutionMedia):
         broken = False
 
@@ -203,12 +203,17 @@ def test_probe_failure_finishes_once_and_scan_retries_without_losing_location(tm
         assert not any(issue.failed for issue in core.scan().issues)
         assert core.videos()[0].width is None
         assert not core.videos()[0].missing
-        assert core.fill_next_resolution(cancellation=Event()).state == 'unknown'
         assert core.fill_next_resolution(cancellation=Event()).state == 'exhausted'
+    # 실패 판정은 재시작 뒤에도 유지한다.
+    core = open_core(core.database, media)
+    core.scan()
+    assert core.fill_next_resolution(cancellation=Event()).state == 'exhausted'
     media.broken = False
+    path = core.videos()[0].locations[0].path
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
     assert not any(issue.failed for issue in core.scan().issues)
-    assert core.videos()[0].width is None
-    assert core.fill_next_resolution(cancellation=Event()).state == 'completed'
+    assert core.fill_next_resolution(cancellation=Event()).state == 'exhausted'
     assert core.videos()[0].width == 1920
     assert not core.videos()[0].missing
 

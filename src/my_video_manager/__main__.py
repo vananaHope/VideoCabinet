@@ -36,6 +36,8 @@ def main():
         instance = SingleInstance(data_directory, app)
         if not instance.start():
             return 0
+        from .app_logging import configure_app_logging
+        configure_app_logging(data_directory)
         from .backup_recovery import open_with_backup_recovery
         core = open_with_backup_recovery(data_directory / "library.sqlite3", instance,
             lambda: AppCore(media=FFmpegMediaReader(), clock=lambda: datetime.now(timezone.utc),
@@ -49,6 +51,8 @@ def main():
         instance.activated.connect(window.tray.open)
         app.aboutToQuit.connect(instance.close)
     except Exception as error:
+        import logging
+        logging.getLogger(__name__).exception('앱 시작 실패')
         message = str(error)
         QMessageBox.critical(None, "시작 실패", message)
         if instance is not None:

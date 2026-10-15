@@ -79,6 +79,12 @@ def _storage_error(error):
         return failure("다른 프로그램이 파일을 사용 중이거나 접근 권한이 없습니다. "
                        "파일을 연 프로그램을 닫고 읽기 전용 설정과 권한을 확인하세요.", "file_in_use")
     if isinstance(error, FileNotFoundError):
+        for name in (error.filename, error.filename2):
+            if name is not None:
+                anchor = Path(name).anchor
+                if anchor and not Path(anchor).exists():
+                    return failure("백업이 있던 드라이브를 찾을 수 없습니다. 드라이브 연결을 확인하세요.",
+                                   "storage_error")
         return failure("백업 파일이나 폴더를 찾을 수 없습니다(지워졌거나 옮겨졌습니다). "
                        "위치를 확인하거나 목록을 새로고침하세요.", "storage_error")
     return failure("백업 저장 장치에 접근할 수 없습니다. 연결과 쓰기 권한을 확인하세요.", "storage_error")
@@ -442,7 +448,17 @@ def _preserve_damaged_database(database):
 def _safety_backup(database):
     if not database.exists():
         return None
-    _check_replace_available(database)
+    # 재시작 직후 이전 프로세스가 마지막 파일 핸들을 놓을 시간을 준다.
+    # 안전 백업/DB 교체 전에만 재시도하므로 부수 효과를 반복하지 않는다.
+    for attempt in range(9):
+        try:
+            _check_replace_available(database)
+            break
+        except OSError as error:
+            if attempt == 8 or not (getattr(error, 'winerror', None) in (32, 33)
+                                   or error.errno == errno.EBUSY):
+                raise
+            time.sleep(0.25)
     try:
         # 깨진 헤더와 저널이 함께 있으면 readonly SQLite가 손상 대신
         # 저널 복구를 위한 쓰기 권한 오류를 먼저 낼 수 있다.
@@ -611,5 +627,6 @@ def apply_pending_backup_restore(database: Path, *, instance) -> BackupRestoreRe
         return _deferred_restore_result(database, failure.kind, failure.strerror)
     except Exception:
         # 예상하지 못한 준비 오류도 예약을 보존하고 현재 DB로 시작하게 한다.
+        logging.getLogger(__name__).exception("백업 복원 준비 실패")
         return _deferred_restore_result(database, "restore_failed",
                                         "백업 복원을 완료하지 못했습니다. 예약을 취소하거나 다른 백업으로 다시 시도하세요.")

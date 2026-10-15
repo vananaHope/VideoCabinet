@@ -5,7 +5,7 @@ from ctypes import wintypes
 from pathlib import Path
 import os
 import sys
-from tempfile import NamedTemporaryFile
+from uuid import uuid4
 
 
 class SecretStoreError(RuntimeError):
@@ -90,12 +90,16 @@ class SecretStore:
     def save(self, key: Secret | str) -> None:
         key = key if isinstance(key, Secret) else Secret(key)
         temporary = None
+        stage = None
         failed = False
         try:
             encrypted = self._protector.protect(key.reveal().encode("utf-8"))
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with NamedTemporaryFile(dir=self.path.parent, prefix=".key-", delete=False) as stream:
-                temporary = Path(stream.name)
+            candidate = self.path.parent / f".key-{uuid4().hex}"
+            candidate.mkdir()
+            stage = candidate
+            temporary = stage / "encrypted"
+            with temporary.open('xb') as stream:
                 stream.write(encrypted)
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -106,6 +110,11 @@ class SecretStore:
             if temporary is not None:
                 try:
                     temporary.unlink(missing_ok=True)
+                except OSError:
+                    failed = True
+            if stage is not None:
+                try:
+                    stage.rmdir()
                 except OSError:
                     failed = True
         # Raise outside except: even exception chaining must not retain raw key diagnostics.

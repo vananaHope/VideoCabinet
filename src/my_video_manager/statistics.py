@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, tzinfo
 from typing import Iterable
 
 from .viewing import (VideoViewingStatistics, Viewing, ViewingKind, ViewingRecord, ViewingSettings,
-                      classify_viewing, merge_intervals, summarize_viewings)
+                      _ViewingState, merge_intervals, summarize_viewings)
 
 
 @dataclass(frozen=True)
@@ -174,17 +174,16 @@ def _period_statistics(records, videos, days, today, local_date, settings, activ
     daily_counts = [0] * days
     video_seconds: dict[int, float] = {}
     video_counts: dict[int, int] = {}
-    finished, abandoned = set(), set()
+    states = {vid: _ViewingState() for vid in videos}
     previous_seconds, previous_count = 0.0, 0
     for viewing in records:
         if viewing.video_id not in videos:
             continue
-        kind = classify_viewing(viewing.played_seconds, viewing.duration, settings)
+        kind = states[viewing.video_id].add(viewing, settings)
         if activity is not None:
             activity.record(viewing, kind)
         if kind == ViewingKind.GLANCE:
             continue
-        (finished if kind == ViewingKind.FINISHED else abandoned).add(viewing.video_id)
         day = local_date(viewing.started_at)
         if start <= day <= today:
             if activity is not None:
@@ -206,8 +205,9 @@ def _period_statistics(records, videos, days, today, local_date, settings, activ
         streak = streak + 1 if daily_count else 0
         longest = max(longest, streak)
     visible = [video for video in videos.values() if not video.excluded]
-    finished_count = sum(video.id in finished for video in visible)
-    abandoned_count = sum(video.id in abandoned and video.id not in finished for video in visible)
+    statuses = [states[video.id].status(settings) for video in visible]
+    finished_count = sum(status.finished for status in statuses)
+    abandoned_count = sum(status.abandoned for status in statuses)
     ranked = sorted(video_counts, key=lambda vid: (
         -video_seconds[vid], -video_counts[vid], videos[vid].title, vid))[:5]
     return ViewingStatistics(
