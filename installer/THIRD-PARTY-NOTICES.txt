@@ -58,6 +58,38 @@ Their download sources and terms apply separately when subtitle preparation runs
 Complete collected Python license texts: licenses/python/<package>/.
 The manifest lists the distributions actually included by PyInstaller.
 Each package has a NOTICE.txt with version, license and upstream URLs;
-metadata_only entries identify installed distributions without original texts.
+Original texts are required unless an explicit version-specific exception is approved.
 Web production dependency texts: licenses/web/; see THIRD-PARTY-WEB.txt
 and manifest.json there for versions, paths and hashes (including transitive dependencies).
+
+CPython: the build runtime version is recorded in licenses/python/manifest.json.
+License and Windows bundled OpenSSL, bzip2, libffi and other additional conditions:
+licenses/python/python/LICENSE.txt (copied unchanged from the build Python).
+
+CTranslate2 4.8.3 includes Intel OpenMP runtime (libiomp5md.dll).
+Copyright (c) Intel Corporation. All rights reserved.
+Intel Simplified Software License and redistribution terms:
+https://www.intel.com/content/www/us/en/developer/articles/license/end-user-license-agreement.html
+Runtime source: https://github.com/llvm/llvm-project/tree/main/openmp
+CTranslate2 and tokenizers originals: licenses/python/ctranslate2/LICENSE and
+licenses/python/tokenizers/LICENSE.
+
+PyAV 17.1.0 bundled FFmpeg 8.1.1 (LGPLv3+), avcodec 62.28.101.
+Copyright (c) the FFmpeg developers and the respective dependency authors.
+av.libs includes FFmpeg avcodec, avdevice, avfilter, avformat, avutil,
+swresample and swscale; libx264 and libx265 (GPLv2+); LAME and libiconv (LGPL);
+libopencore-amrnb/wb, libopus, libvpx, libdav1d, libwebp, SVT-AV1, libvpl;
+GCC libgcc_s_seh and libstdc++ (GPL with GCC Runtime Library Exception),
+MinGW-w64 libwinpthread and zlib. These are separate shared libraries.
+GPL texts: licenses/GPL-2.0.txt and licenses/GPL-3.0.txt.
+LGPLv3 text: licenses/LGPL-3.0.txt; dependency license/source files are in
+these pinned build recipes (including exact dependency source URLs):
+https://github.com/PyAV-Org/pyav-ffmpeg/tree/8.1.1-2
+FFmpeg source: https://ffmpeg.org/releases/ffmpeg-8.1.1.tar.xz
+Wheel build configuration:
+https://github.com/PyAV-Org/PyAV/blob/v17.1.0/scripts/ffmpeg-latest.json
+
+shadcn/ui copied UI components: MIT; licenses/shadcn-ui-MIT.txt.
+Source: https://github.com/shadcn-ui/ui
+Tailwind CSS and Vite embedded CSS/polyfill: MIT; originals in
+licenses/web/node_modules/tailwindcss/ and licenses/web/node_modules/vite/.

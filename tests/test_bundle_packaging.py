@@ -147,6 +147,8 @@ def bundle(packaging, tmp_path, monkeypatch):
         'files': {name: ffmpeg.digest(tmp_path / 'ffmpeg' / name) for name in ffmpeg.EXECUTABLES}}))
     monkeypatch.setattr(checker.subprocess, 'run', lambda args, **kw: subprocess.CompletedProcess(args, 0,
         f'{Path(args[0]).stem} version {ffmpeg.VERSION}-essentials_build-www.gyan.dev Copyright\n', ''))
+    monkeypatch.setattr(checker, 'pyav_versions', lambda directory: ((62, 28, 101), '8.1.1'))
+    (tmp_path / 'THIRD-PARTY-NOTICES.txt').write_text('PyAV 17.1.0 bundled FFmpeg 8.1.1')
     return checker, tmp_path
 
 
@@ -158,8 +160,8 @@ def test_bundle_logs_pinned_ffmpeg_version(bundle, capsys):
 
 @pytest.mark.parametrize('name', ['THIRD-PARTY-NOTICES.txt', 'ffmpeg/LICENSE.txt',
     'ffmpeg/README.txt', 'licenses/LGPL-3.0.txt',
-    'licenses/GPL-3.0.txt', 'licenses/python/ctranslate2/NOTICE.txt',
-    'licenses/python/faster-whisper/metadata/LICENSE', 'licenses/python/tokenizers/NOTICE.txt',
+    'licenses/GPL-3.0.txt', 'licenses/python/ctranslate2/LICENSE',
+    'licenses/python/faster-whisper/metadata/LICENSE', 'licenses/python/tokenizers/LICENSE',
     'licenses/python/av/metadata/licenses/LICENSE.txt',
     'licenses/web/THIRD-PARTY-WEB.txt', 'licenses/web/node_modules/react/LICENSE', 'PySide6/QtWebEngineProcess.exe', 'PySide6/resources/v8_context_snapshot.bin',
     'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak'])
@@ -260,17 +262,19 @@ def assert_hidden_console(source, label):
                     modules[alias.asname or alias.name] = alias.name
         if isinstance(node, ast.ImportFrom):
             assert node.module != 'subprocess', (label, node.lineno, 'Use qualified subprocess calls')
-            assert not (node.module == 'os' and any(a.name in ('system', '*') for a in node.names)), (label, node.lineno)
+            assert not (node.module == 'os' and any((a.name in ('system', 'popen', '*') or a.name.startswith(('spawn', 'exec'))) for a in node.names)), (label, node.lineno)
             assert not (node.module == 'asyncio' and any(a.name.startswith('create_subprocess_') or a.name == '*'
                         for a in node.names)), (label, node.lineno)
     parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
     calls = []
     for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            assert node.func.attr not in ('subprocess_exec', 'subprocess_shell'), (label, node.lineno)
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name)):
             continue
         module, method = modules.get(node.func.value.id), node.func.attr
-        assert not (module == 'os' and method == 'system'), (label, node.lineno, 'os.system')
+        assert not (module == 'os' and (method in ('system', 'popen') or method.startswith(('spawn', 'exec')))), (label, node.lineno, 'os.system')
         assert not (module == 'asyncio' and method.startswith('create_subprocess_')), (label, node.lineno)
         if module != 'subprocess' or method not in (
                 'Popen', 'run', 'call', 'check_call', 'check_output', 'getoutput', 'getstatusoutput'):
@@ -308,6 +312,10 @@ def test_source_subprocess_calls_hide_windows_console():
     "from subprocess import Popen\nPopen(['tool'])",
     "from subprocess import run as launch\nlaunch(['tool'])",
     "import subprocess as sp\nsp.check_output(['tool'])",
+    *(f"import os\nos.{method}('tool')" for method in ('popen', 'spawnl', 'spawnve', 'execl', 'execve')),
+    "from os import popen as launch\nlaunch('tool')",
+    "import asyncio\nasyncio.get_event_loop().subprocess_exec('tool')",
+    "loop.subprocess_shell('tool')",
     "import os\nos.system('tool')",
     "import os as system\nsystem.system('tool')",
     "from os import system as launch\nlaunch('tool')",
@@ -361,9 +369,12 @@ def test_python_licenses_follow_analysis_files_not_installed_requirements(licens
         ('pure', 'module.py', 'PYMODULE'), ('native', 'native.pyd', 'EXTENSION'),
         ('data', 'data.bin', 'DATA'), ('no-text', 'module.py', 'PYMODULE')]]
     target = tmp_path / 'licenses'
+    with pytest.raises(RuntimeError, match='Missing license originals'):
+        licenses.python_licenses(entries, target)
+    monkeypatch.setattr(licenses, 'PYTHON_METADATA_ONLY', {('no-text', '1.0')})
     packages = licenses.python_licenses(entries, target)
-    assert {p['name'] for p in packages} == {'pure', 'native', 'data', 'no-text'}
-    assert sum(len(p['files']) for p in packages) == 9
+    assert {p['name'] for p in packages} == {'pure', 'native', 'data', 'no-text', 'python'}
+    assert sum(len(p['files']) for p in packages) == 10
     assert (target / 'pure/metadata/licenses/LICENSE').read_bytes() == b'original copyright\r\npermission\r\n'
     notice = (target / 'no-text/NOTICE.txt').read_text()
     assert 'MIT' in notice and 'https://example.org/source' in notice and 'no LICENSE' in notice
@@ -435,3 +446,46 @@ def test_bundle_validates_all_manifest_license_files(bundle, change):
         manifest.write_text('[]')
     with pytest.raises(RuntimeError, match='[Ll]icense'):
         checker.check_bundle(directory)
+
+
+@pytest.mark.parametrize('change', ['codec', 'ffmpeg', 'notice'])
+def test_pyav_notice_matches_actual_dll_versions(bundle, monkeypatch, change):
+    checker, directory = bundle
+    if change == 'notice':
+        (directory / 'THIRD-PARTY-NOTICES.txt').write_text('FFmpeg 8.0')
+    else:
+        monkeypatch.setattr(checker, 'pyav_versions', lambda directory:
+                            ((62, 0, 0), '8.1.1') if change == 'codec' else ((62, 28, 101), '8.2'))
+    with pytest.raises(RuntimeError, match='PyAV FFmpeg'):
+        checker.check_bundle(directory)
+
+
+@pytest.mark.parametrize('name,version', [('ctranslate2', '4.8.3'), ('tokenizers', '0.23.3')])
+@pytest.mark.parametrize('change', ['valid', 'hash', 'version'])
+def test_python_supplement_is_exact_and_verified(licenses, tmp_path, monkeypatch, name, version, change):
+    from importlib.metadata import PathDistribution
+    info = tmp_path / f'{name}.dist-info'
+    info.mkdir()
+    (info / 'METADATA').write_text(f'Name: {name}\nVersion: {version if change != "version" else "99.0"}\n')
+    module = tmp_path / 'module.py'
+    module.touch()
+    (info / 'RECORD').write_text('module.py,,\n')
+    monkeypatch.setattr(licenses.metadata, 'distributions', lambda: [PathDistribution(info)])
+    if change == 'hash':
+        source = tmp_path / f'{name}-{version}/LICENSE'
+        source.parent.mkdir()
+        source.write_text('changed')
+        monkeypatch.setattr(licenses, 'LICENSE_SOURCES', tmp_path)
+    if change != 'valid':
+        with pytest.raises(RuntimeError, match='supplemental|Missing license originals'):
+            licenses.python_licenses([('module', str(module), 'PYMODULE')], tmp_path / 'out')
+    else:
+        packages = licenses.python_licenses([('module', str(module), 'PYMODULE')], tmp_path / 'out')
+        assert packages[0]['files'][0]['sha256'] == licenses.PYTHON_SUPPLEMENTS[name, version]['sha256']
+        assert (tmp_path / 'out/python/LICENSE.txt').read_bytes() == Path(sys.base_prefix, 'LICENSE.txt').read_bytes()
+
+
+def test_web_embedded_build_tools_are_collected(licenses, npm_tree, tmp_path, monkeypatch):
+    monkeypatch.setattr(licenses, 'WEB_BUNDLED_BUILD_TOOLS', {'node_modules/dev-only'})
+    packages = licenses.web_licenses(npm_tree, tmp_path / 'out')
+    assert 'dev-only' in {p['name'] for p in packages}

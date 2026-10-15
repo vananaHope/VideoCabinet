@@ -1,9 +1,12 @@
 """Inno에 넘기기 전 필수 자산과 CUDA 제외를 확인한다."""
 import argparse
+import ctypes
+import os
 import json
 from pathlib import Path
 import subprocess
 
+from bundle_licenses import PYTHON_METADATA_ONLY
 from bundle_ffmpeg import EXECUTABLES, SHA256, URL, VERSION, digest
 
 
@@ -11,10 +14,11 @@ MAX_BUNDLE_BYTES = 950_000_000  # MB (decimal), not MiB
 UNUSED_QT_PREFIXES = ("qt6quick3d", "qt63d", "qt6charts", "qt6graphs",
                       "qt6multimedia", "qt6virtualkeyboard", "qt6pdf", "qt6location")
 REQUIRED_LICENSES = (
-    'licenses/GPL-3.0.txt', 'licenses/python/manifest.json',
-    'licenses/python/ctranslate2/NOTICE.txt',
+    'licenses/GPL-3.0.txt', 'licenses/GPL-2.0.txt', 'licenses/python/python/LICENSE.txt',
+    'licenses/shadcn-ui-MIT.txt', 'licenses/python/manifest.json',
+    'licenses/python/ctranslate2/LICENSE',
     'licenses/python/faster-whisper/metadata/LICENSE',
-    'licenses/python/tokenizers/NOTICE.txt',
+    'licenses/python/tokenizers/LICENSE',
     'licenses/python/av/metadata/licenses/LICENSE.txt',
     'licenses/python/onnxruntime/onnxruntime/LICENSE',
     'licenses/python/onnxruntime/onnxruntime/ThirdPartyNotices.txt',
@@ -33,12 +37,37 @@ def check_licenses(directory):
         for package in packages:
             files = package['files']
             if not files and not (kind == 'python' and package.get('metadata_only')
+                                  and (package['name'], package.get('version')) in PYTHON_METADATA_ONLY
                                   and package.get('license') and package.get('urls')):
                 raise RuntimeError(f'Missing license originals: {package["name"]}')
             for record in files:
                 path = (base / record['path']).resolve()
                 if not path.is_relative_to(base.resolve()) or not path.is_file() or digest(path) != record['sha256']:
                     raise RuntimeError(f'License file missing or changed: {record["path"]}')
+
+def pyav_versions(directory):
+    libraries = directory / 'av.libs'
+    codecs = list(libraries.glob('avcodec-*.dll'))
+    utils = list(libraries.glob('avutil-*.dll'))
+    if len(codecs) != 1 or len(utils) != 1:
+        raise RuntimeError('PyAV FFmpeg DLL set missing or ambiguous')
+    with os.add_dll_directory(str(libraries.resolve())):
+        codec = ctypes.CDLL(str(codecs[0].resolve()))
+        codec.avcodec_version.restype = ctypes.c_uint
+        version = codec.avcodec_version()
+        util = ctypes.CDLL(str(utils[0].resolve()))
+        util.av_version_info.restype = ctypes.c_char_p
+        return ((version >> 16, (version >> 8) & 255, version & 255),
+                util.av_version_info().decode('ascii'))
+
+
+def check_pyav(directory):
+    version, ffmpeg = pyav_versions(directory)
+    notices = (directory / 'THIRD-PARTY-NOTICES.txt').read_text(encoding='utf-8')
+    if version != (62, 28, 101) or ffmpeg != '8.1.1' or (
+            'PyAV 17.1.0 bundled FFmpeg 8.1.1' not in notices):
+        raise RuntimeError(f'PyAV FFmpeg notice/version mismatch: {version}, {ffmpeg}')
+
 
 def check_bundle(directory: Path):
     required = (
@@ -66,6 +95,7 @@ def check_bundle(directory: Path):
     if missing or cuda or unnecessary:
         raise RuntimeError(f'설치판 자산 검사 실패: missing={missing}, CUDA={cuda}, unnecessary={unnecessary}')
     check_licenses(directory)
+    check_pyav(directory)
     total_bytes = sum(path.stat().st_size for path in directory.rglob('*') if path.is_file())
     if total_bytes > MAX_BUNDLE_BYTES:
         raise RuntimeError(f'설치판 크기 상한 초과: {total_bytes} > {MAX_BUNDLE_BYTES} bytes')

@@ -9,6 +9,22 @@ import json
 from pathlib import Path
 import re
 import shutil
+import sys
+
+
+LICENSE_SOURCES = Path(__file__).resolve().parents[1] / "installer/license-sources"
+PYTHON_METADATA_ONLY = frozenset()  # Explicit exceptions only; none currently needed.
+WEB_BUNDLED_BUILD_TOOLS = {"node_modules/tailwindcss", "node_modules/vite"}
+PYTHON_SUPPLEMENTS = {
+    ("ctranslate2", "4.8.3"): {
+        "url": "https://raw.githubusercontent.com/OpenNMT/CTranslate2/v4.8.3/LICENSE",
+        "sha256": "54aa79d9fe3c09e67a16dcd95b9e88676405a6ec174efda31036983cf7672ecb",
+    },
+    ("tokenizers", "0.23.3"): {
+        "url": "https://raw.githubusercontent.com/huggingface/tokenizers/v0.23.3/LICENSE",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    },
+}
 
 
 WEB_SUPPLEMENTS = {
@@ -84,6 +100,15 @@ def python_licenses(entries, destination):
             target = destination / name / Path(*parts)
             record = copy_license(Path(dist.locate_file(file)), target, destination)
             originals.append({**record, 'source': str(file)})
+        supplement = PYTHON_SUPPLEMENTS.get((name, dist.version))
+        if not originals and supplement:
+            source = LICENSE_SOURCES / f'{name}-{dist.version}' / 'LICENSE'
+            if hashlib.sha256(source.read_bytes()).hexdigest() != supplement['sha256']:
+                raise RuntimeError(f'Changed supplemental license: {source}')
+            record = copy_license(source, destination / name / 'LICENSE', destination)
+            originals.append({**record, 'source': supplement['url']})
+        if not originals and (name, dist.version) not in PYTHON_METADATA_ONLY:
+            raise RuntimeError(f'Missing license originals: {name} {dist.version}')
         if not originals and (not license_name or not urls):
             raise RuntimeError(f'Missing license name or URL for {name}')
         notice = (f'{info["Name"]} {dist.version}\nLicense: {license_name or "See original files"}\n'
@@ -91,11 +116,18 @@ def python_licenses(entries, destination):
                   + ('Original license files are included below this directory.\n' if originals else
                      'This installed distribution contains no LICENSE, COPYING or NOTICE text.\n'
                      'License name and upstream URLs above are supplied from its package metadata.\n'))
+        if name.startswith('pyside6') or name == 'shiboken6':
+            notice += ('Distributed under LGPL-3.0; see licenses/LGPL-3.0.txt '
+                       'and licenses/GPL-3.0.txt.\n')
         write_text(destination / name / 'NOTICE.txt', notice)
         packages.append({'name': name, 'version': dist.version, 'license': license_name,
                          'urls': urls, 'files': originals, 'metadata_only': not originals})
     if not packages:
         raise RuntimeError('No bundled Python distributions found')
+    source = Path(sys.base_prefix, 'LICENSE.txt')
+    record = copy_license(source, destination / 'python/LICENSE.txt', destination)
+    packages.append({'name': 'python', 'version': sys.version, 'license': 'PSF-2.0',
+                     'files': [{**record, 'source': str(source)}], 'metadata_only': False})
     write_text(destination / 'manifest.json', json.dumps(packages, indent=2, ensure_ascii=False) + '\n')
     return packages
 
@@ -111,7 +143,7 @@ def web_licenses(frontend, destination):
     packages, sections = [], []
     for location, locked in sorted(lock['packages'].items()):
         # devOptional can also be an optional dependency of production code.
-        if not location or locked.get('dev'):
+        if not location or (locked.get('dev') and location not in WEB_BUNDLED_BUILD_TOOLS):
             continue
         relative = Path(location)
         if relative.is_absolute() or '..' in relative.parts or relative.parts[0] != 'node_modules':
