@@ -38,6 +38,7 @@ class TranscriberError(RuntimeError):
             "gpu_unavailable": "GPU를 사용할 수 없습니다. 드라이버와 CUDA 환경을 확인하세요.",
             "decode": "영상의 음성을 읽을 수 없습니다.",
             "model_download": "받아쓰기 모델을 내려받을 수 없습니다. 연결과 저장 공간을 확인하세요.",
+            "preparation_required": "자막 기능 준비를 먼저 실행하세요.",
         }.get(kind, "받아쓰기에 실패했습니다. 자세한 내용을 확인하세요."))
 
 

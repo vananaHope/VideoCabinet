@@ -111,10 +111,9 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
     if getattr(sys, "frozen", False):
         from .cuda_runtime import PreparationError, SubtitlePreparation
         try:
-            prepared = SubtitlePreparation(model_directory.parent).prepare()
+            prepared = SubtitlePreparation(model_directory.parent).prepared()
         except PreparationError as error:
-            kind = "gpu_unavailable" if error.kind == "gpu_unavailable" else "model_download"
-            raise TranscriberError(kind, f"{error.kind}: {error}") from error
+            raise TranscriberError(error.kind, str(error)) from error
     try:
         prepare_cuda_runtime(model_directory.parent)
         import ctranslate2
@@ -173,8 +172,17 @@ def report_progress(seconds):
         pass
 
 
+def probe_cuda_device() -> bool:
+    """--probe-cuda 자식 전용. 앱 프로세스에서는 호출하지 않는다."""
+    import ctranslate2
+    return ctranslate2.get_cuda_device_count() > 0
+
+
 if __name__ == "__main__":
     try:
+        if sys.argv[1:] == ["--probe-cuda"]:
+            print(json.dumps({"available": probe_cuda_device()}))
+            raise SystemExit(0)
         transcript = transcribe_on_gpu(Path(sys.argv[1]), Path(sys.argv[2]),
                                        None if sys.argv[3] == "auto" else sys.argv[3], progress=report_progress,
                                        start=float(sys.argv[4]) if len(sys.argv) > 4 else 0,

@@ -96,7 +96,7 @@ def test_transcription_model_path_keeps_source_cache_and_uses_prepared_installat
     class Preparation:
         def __init__(self, data):
             calls.append(("prepare", data))
-        def prepare(self):
+        def prepared(self):
             return SimpleNamespace(model_directory=prepared_path)
     monkeypatch.setattr(cuda_runtime, "SubtitlePreparation", Preparation)
     result = transcription.transcribe_on_gpu(tmp_path / "video.mkv", model_directory, "ko")
@@ -110,3 +110,28 @@ def test_transcription_model_path_keeps_source_cache_and_uses_prepared_installat
         assert ("download", "large-v3", str(model_directory)) in calls
         assert ("model", "source-cache") in calls
         assert not any(call[0] == "prepare" for call in calls)
+
+
+def test_missing_bundled_mpv_keeps_system_search(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "app.exe"))
+    monkeypatch.setenv("PATH", "original")
+    monkeypatch.setattr(os, "add_dll_directory", lambda path: pytest.fail("없는 폴더 등록"))
+    adapters._prepare_mpv_runtime.cache_clear()
+    try:
+        assert adapters._prepare_mpv_runtime() is None
+        assert os.environ["PATH"] == "original"
+    finally:
+        adapters._prepare_mpv_runtime.cache_clear()
+
+
+def test_unprepared_frozen_transcription_never_downloads(tmp_path, monkeypatch):
+    from my_video_manager.subtitles import TranscriberError
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(cuda_runtime.SubtitlePreparation, "prepare", lambda *a, **kw: pytest.fail("자식 다운로드"))
+    monkeypatch.setattr(transcription, "prepare_cuda_runtime", lambda *a: pytest.fail("준비 전 CUDA 등록"))
+    with pytest.raises(TranscriberError) as caught:
+        transcription.transcribe_on_gpu(tmp_path / "video.mkv", tmp_path / "models", "ko")
+    assert caught.value.kind == "preparation_required"
+    assert "준비" in str(caught.value)
+    assert not list(tmp_path.iterdir())

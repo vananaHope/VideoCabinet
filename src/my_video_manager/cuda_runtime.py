@@ -8,6 +8,7 @@ import http.client
 import json
 from pathlib import Path, PurePosixPath
 import shutil
+import subprocess
 import sys
 from threading import Event, Lock
 from typing import Callable
@@ -26,6 +27,7 @@ class PreparationError(RuntimeError):
         "cancelled": "자막 기능 준비를 취소했습니다. 다음에 다시 시도할 수 있습니다.",
         "invalid_archive": "CUDA 휠에서 올바른 DLL을 찾을 수 없습니다.",
         "storage": "준비 파일을 저장할 수 없습니다. 데이터 폴더의 권한을 확인하세요.",
+        "preparation_required": "자막 기능 준비를 먼저 실행하세요.",
     }
 
     def __init__(self, kind: str, detail: str = ""):
@@ -164,10 +166,24 @@ class RuntimeDownloadAdapter:
             raise PreparationError("disk_full", f"{target}: {size} bytes required")
 
 
-def cuda_gpu_available() -> bool:
-    # cuBLAS/cuDNN 다운로드 전에 드라이버가 보고하는 CUDA 장치를 검사한다.
-    import ctranslate2
-    return ctranslate2.get_cuda_device_count() > 0
+def cuda_gpu_available(*, command: tuple[str, ...] | None = None, timeout: float = 15) -> bool:
+    """네이티브 CUDA 탐지는 별도 프로세스에서만 실행한다."""
+    if command is None:
+        if getattr(sys, "frozen", False):
+            # #62 마무리: 실행 파일 하위 명령을 구현한 뒤 --probe-cuda로 연결한다.
+            raise PreparationError("gpu_unavailable", "설치판 GPU 탐지 하위 명령이 아직 연결되지 않았습니다.")
+        command = (sys.executable, "-m", "my_video_manager.transcription", "--probe-cuda")
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                timeout=timeout, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+        if result.returncode:
+            raise PreparationError("gpu_unavailable", result.stderr.strip() or f"종료 코드 {result.returncode}")
+        available = json.loads(result.stdout)["available"]
+        if not isinstance(available, bool):
+            raise ValueError("GPU 탐지 응답은 bool이어야 합니다.")
+        return available
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as error:
+        raise PreparationError("gpu_unavailable", str(error)) from error
 
 
 def _manifest(assets):
@@ -202,6 +218,7 @@ class SubtitlePreparation:
 
     소스 실행은 기존 .venv CUDA와 HF 모델 캐시를 사용한다. 이 API는 설치판의
     명시적인 준비 진입점이며 데이터는 항상 전달받은 data_directory 아래에 둔다.
+    progress 콜백은 예외를 던지지 않아야 한다. 콜백의 오류 처리는 호출자가 맡는다.
     """
 
     def __init__(self, data_directory: Path, *, adapter: RuntimeDownloadAdapter | None = None,
@@ -223,6 +240,8 @@ class SubtitlePreparation:
             _check_cancel(cancellation)
             try:
                 available = self.gpu_available()
+            except PreparationError:
+                raise
             except Exception as error:
                 raise PreparationError("gpu_unavailable", str(error)) from error
             if not available:
@@ -231,8 +250,7 @@ class SubtitlePreparation:
                 directories = tuple(self._prepare_group(
                     self.data_directory / "runtime/cuda" / asset.sha256, (asset,), True, cancellation, progress)
                     for asset in self.cuda_assets)
-                model = self._prepare_group(self.data_directory / "models" / "large-v3" / self.model_revision,
-                                            self.model_assets, False, cancellation, progress)
+                model = self._prepare_model(cancellation, progress)
             _report(progress, cancellation, "ready", "subtitles", 1, 1)
             return PreparedSubtitles(directories, model)
         except OSError as error:
@@ -240,6 +258,47 @@ class SubtitlePreparation:
             raise PreparationError(kind, str(error)) from error
         finally:
             _preparation_lock.release()
+
+    def prepared(self) -> PreparedSubtitles:
+        """이미 검증·게시된 결과만 읽는다. 탐지·다운로드·해시 검증·쓰기는 하지 않는다."""
+        directories = tuple(self.data_directory / "runtime/cuda" / asset.sha256 for asset in self.cuda_assets)
+        if all(_is_ready(path, (asset,)) for path, asset in zip(directories, self.cuda_assets)):
+            for model in self._model_directories():
+                if _is_ready(model, self.model_assets):
+                    return PreparedSubtitles(directories, model)
+        raise PreparationError("preparation_required")
+
+    def _model_directories(self):
+        models = self.data_directory / "models"
+        return (models / "large-v3" / self.model_revision,
+                models / "models--Systran--faster-whisper-large-v3" / "snapshots" / self.model_revision)
+
+    def _prepare_model(self, cancellation, progress):
+        target, cached = self._model_directories()
+        if _is_ready(target, self.model_assets):
+            return self._prepare_group(target, self.model_assets, False, cancellation, progress)
+        if _is_ready(cached, self.model_assets):
+            _report(progress, cancellation, "reuse", str(cached), 1, 1)
+            return cached
+        if all((cached / asset.name).is_file() and (cached / asset.name).stat().st_size == asset.size
+               for asset in self.model_assets):
+            try:
+                for asset in self.model_assets:
+                    self.adapter.verify(asset, cached / asset.name, cancellation, progress)
+            except PreparationError as error:
+                if error.kind != "hash_mismatch":
+                    raise
+                # 다른 작업이 쓰는 HF 캐시는 지우지 않고 앱 전용 폴더에 새로 받는다.
+            else:
+                _check_cancel(cancellation)
+                manifest = {"assets": _manifest(self.model_assets),
+                            "files": {asset.name: asset.size for asset in self.model_assets}}
+                partial = cached / "ready.json.part"
+                partial.write_text(json.dumps(manifest), encoding="utf-8")
+                partial.replace(cached / "ready.json")
+                _report(progress, cancellation, "reuse", str(cached), 1, 1)
+                return cached
+        return self._prepare_group(target, self.model_assets, False, cancellation, progress)
 
     def _prepare_group(self, target, assets, extract, cancellation, progress):
         stage = target.with_name(target.name + ".partial")

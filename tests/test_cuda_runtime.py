@@ -32,16 +32,28 @@ def server():
         bodies = {"/cuda.whl": wheel_bytes(), "/model.bin": b"fake whisper"}
         requests = []
         interrupted = False
+        status = 200
+        stall = None
+        unstalled = Event()
 
         def log_message(self, *args):
             pass
 
         def do_GET(self):
             self.requests.append(self.path)
+            if self.stall == "headers":
+                self.unstalled.wait(2)
+                return
+            if self.status != 200:
+                self.send_error(self.status)
+                return
             body = self.bodies[self.path]
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
+            if self.stall == "body":
+                self.unstalled.wait(2)
+                return
             self.wfile.write(body[:len(body) // 2] if self.interrupted else body)
             self.close_connection = True
 
@@ -53,6 +65,7 @@ def server():
         return DownloadAsset(name, f"http://127.0.0.1:{httpd.server_port}/{name}",
                              hashlib.sha256(body).hexdigest(), len(body))
     yield Handler, asset
+    Handler.unstalled.set()
     httpd.shutdown()
     thread.join()
     httpd.server_close()
@@ -201,6 +214,94 @@ def test_missing_ready_dll_triggers_download_again(tmp_path, server):
     service.prepare()
     assert server[0].requests.count("/cuda.whl") == 2
     assert server[0].requests.count("/model.bin") == 1
+
+
+@pytest.mark.parametrize("status", [404, 500, 503])
+def test_http_error_is_network(tmp_path, server, status):
+    server[0].status = status
+    with pytest.raises(PreparationError) as caught:
+        preparation(tmp_path, server).prepare()
+    assert caught.value.kind == "network"
+    assert str(status) in caught.value.detail
+
+
+@pytest.mark.parametrize("stall", ["headers", "body"])
+def test_unresponsive_server_is_network(tmp_path, server, monkeypatch, stall):
+    from my_video_manager import cuda_runtime
+    original = cuda_runtime.urllib.request.urlopen
+    timeouts = []
+    def short_timeout(url, *, timeout):
+        timeouts.append(timeout)
+        return original(url, timeout=0.05)
+    monkeypatch.setattr(cuda_runtime.urllib.request, "urlopen", short_timeout)
+    server[0].stall = stall
+    with pytest.raises(PreparationError) as caught:
+        preparation(tmp_path, server).prepare()
+    assert caught.value.kind == "network"
+    assert timeouts == [10]
+
+
+def test_matching_hf_cache_is_hashed_and_reused_without_model_download(tmp_path, server):
+    service = preparation(tmp_path, server)
+    cached = tmp_path / "models/models--Systran--faster-whisper-large-v3/snapshots/test-revision"
+    cached.mkdir(parents=True)
+    (cached / "model.bin").write_bytes(server[0].bodies["/model.bin"])
+    events = []
+    result = service.prepare(progress=events.append)
+    assert result.model_directory == cached
+    assert (cached / "ready.json").is_file()
+    assert any(event.phase == "verify" and event.asset == "model.bin" for event in events)
+    assert "/model.bin" not in server[0].requests
+    assert service.prepared() == result
+    events.clear()
+    assert service.prepare(progress=events.append) == result
+    assert not any(event.phase == "verify" for event in events)
+
+
+@pytest.mark.parametrize("wrong", [b"x", b"bad whisper!"])
+def test_invalid_hf_cache_is_preserved_and_model_downloaded(tmp_path, server, wrong):
+    service = preparation(tmp_path, server)
+    cached = tmp_path / "models/models--Systran--faster-whisper-large-v3/snapshots/test-revision"
+    cached.mkdir(parents=True)
+    (cached / "model.bin").write_bytes(wrong)
+    result = service.prepare()
+    assert result.model_directory != cached
+    assert (cached / "model.bin").read_bytes() == wrong
+    assert "/model.bin" in server[0].requests
+    assert not (cached / "ready.json").exists()
+
+
+@pytest.mark.parametrize("script,expected", [("print('{\"available\": true}')", True),
+                                            ("print('{\"available\": false}')", False)])
+def test_gpu_probe_is_child_only(script, expected):
+    from my_video_manager.cuda_runtime import cuda_gpu_available
+    assert cuda_gpu_available(command=(sys.executable, "-c", script)) is expected
+
+
+@pytest.mark.parametrize("script,timeout", [("raise SystemExit(99)", 5), ("print('broken')", 5),
+                                           ("import time; time.sleep(10)", 0.1)])
+def test_gpu_probe_failure_is_isolated(script, timeout):
+    from my_video_manager.cuda_runtime import cuda_gpu_available
+    with pytest.raises(PreparationError) as caught:
+        cuda_gpu_available(command=(sys.executable, "-c", script), timeout=timeout)
+    assert caught.value.kind == "gpu_unavailable"
+
+
+def test_native_cuda_imports_are_confined_to_transcription_child():
+    import ast
+    root = Path(__file__).parents[1] / "src"
+    imports = []
+    for source in root.rglob("*.py"):
+        tree = ast.parse(source.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            native_import = ((isinstance(node, ast.Import) and any(alias.name == "ctranslate2" for alias in node.names))
+                             or (isinstance(node, ast.ImportFrom) and node.module == "ctranslate2"))
+            if native_import:
+                imports.append(source.name)
+                assert any(isinstance(function, ast.FunctionDef)
+                           and function.name in ("transcribe_on_gpu", "probe_cuda_device")
+                           and node in ast.walk(function) for function in tree.body)
+    assert imports and set(imports) == {"transcription.py"}
 
 
 def test_cuda_pins_match_pyproject_versions():

@@ -2,7 +2,8 @@
     [switch]$SkipPyInstaller,
     [string]$AppDirectory = 'dist/my-video-manager',
     [string]$OutputDirectory = 'dist/installer',
-    [string]$InnoCompiler = ''
+    [string]$InnoCompiler = '',
+    [string]$Version = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
@@ -57,8 +58,10 @@ except ModuleNotFoundError:
     import tomli as tomllib
 print(tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])
 '@
-$Version = & $Python -c $VersionScript
-Confirm-Exit 'pyproject.toml version (Python 3.10은 setup의 tomli 필요)'
+if (-not $Version) {
+    $Version = & $Python -c $VersionScript
+    Confirm-Exit 'pyproject.toml version (Python 3.10은 setup의 tomli 필요)'
+}
 if ($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { throw "Inno Setup에 사용할 수 없는 버전: $Version" }
 
 # 1. 웹 빌드
