@@ -162,7 +162,7 @@ def _database_metadata(path):
 
 
 def create_backup(database: Path, destination: Path, *, include_thumbnails=False,
-                  active_viewings=()) -> BackupResult:
+                  active_viewings=(), reason="manual") -> BackupResult:
     """독립 연결의 작은 backup_step으로 복사한다. UI에서는 작업자에서 호출한다."""
     database, destination = Path(database).resolve(), Path(destination).resolve()
     if destination.suffix.lower() != ".zip":
@@ -203,7 +203,7 @@ def create_backup(database: Path, destination: Path, *, include_thumbnails=False
                     files[member] = _sha256(thumbnail)
                     bundle.write(thumbnail, member)
             manifest = dict(application=APPLICATION, format_version=FORMAT_VERSION,
-                            **asdict(metadata), files=files)
+                            **asdict(metadata), files=files, reason=reason)
             bundle.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
         _sync(archive)
         os.replace(archive, destination)
@@ -304,13 +304,13 @@ def automatic_backups(database: Path) -> tuple[Path, ...]:
     return tuple(sorted(paths, key=lambda path: path.name, reverse=True))
 
 
-def create_automatic_backup(database: Path, *, include_thumbnails=False) -> BackupResult:
+def create_automatic_backup(database: Path, *, include_thumbnails=False, reason="before_restore") -> BackupResult:
     directory = Path(database).resolve().parent / "backups"
     try:
         directory.mkdir(exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         result = create_backup(database, directory / f"auto-{stamp}-{uuid4().hex}.zip",
-                               include_thumbnails=include_thumbnails)
+                               include_thumbnails=include_thumbnails, reason=reason)
     except BackupBusyError:
         raise
     except OSError as error:
@@ -336,7 +336,7 @@ def backup_before_migration(db, target_version: int) -> BackupResult | None:
     if db.in_transaction:
         raise BackupError("DB 이전 전 백업은 트랜잭션 시작 전에 만들어야 합니다.")
     filename = next(row[2] for row in db.execute("PRAGMA database_list") if row[1] == "main")
-    return create_automatic_backup(Path(filename)) if filename else None
+    return create_automatic_backup(Path(filename), reason="before_migration") if filename else None
 
 
 def _check_replace_available(database):
@@ -358,7 +358,7 @@ def _check_replace_available(database):
         if not path.exists():
             continue
         if path.stat().st_file_attributes & 0x1:  # FILE_ATTRIBUTE_READONLY
-            raise PermissionError(errno.EACCES, "읽기 전용 파일의 속성을 해제한 뒤 다시 시도하세요.", str(path))
+            raise BackupStorageError(errno.EACCES, "읽기 전용 파일의 속성을 해제한 뒤 다시 시도하세요.", "file_in_use")
         # DELETE | GENERIC_READ, 공유 없음, OPEN_EXISTING. 내용을 읽거나 바꾸지 않는다.
         handle = create(str(path), 0x00010000 | 0x80000000, 0, None, 3, 0, None)
         if handle == wintypes.HANDLE(-1).value:

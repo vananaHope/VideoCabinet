@@ -401,6 +401,8 @@ def test_fake_next_migration_backs_up_before_ddl_and_survives_rollback(core):
     with closing(sqlite3.connect(core.database)) as db:
         saved = backup_before_migration(db, 4)
         assert saved.metadata.db_version == 3
+        with zipfile.ZipFile(saved.path) as archive:
+            assert json.loads(archive.read('manifest.json'))['reason'] == 'before_migration'
         with pytest.raises(RuntimeError), db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("ALTER TABLE videos ADD COLUMN fake_migration TEXT")
@@ -587,6 +589,8 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
             self.aboutToQuit = Signal()
         def setQuitOnLastWindowClosed(self, value):
             pass
+        def property(self, name):
+            return None
         def exec(self):
             for callback in self.aboutToQuit.callbacks:
                 callback()
@@ -620,13 +624,23 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
     monkeypatch.setattr(translation_cli, "SubscriptionCLITranslator", lambda path: Translator())
     errors = []
     monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *args: errors.append(args))
+    from my_video_manager import backup_recovery
+    recovery_messages = []
+    class Recovery:
+        def __init__(self, database, result, error):
+            recovery_messages.append(result.error_message + '\n' + result.guidance + '\n' + str(error))
+        def exec(self):
+            return 0
+        def deleteLater(self):
+            pass
+    monkeypatch.setattr(backup_recovery, 'BackupRecoveryDialog', Recovery)
     for attempt in range(2):
         if failure == "damaged_and_full":
             assert __main__.main() == 1
             assert started == []
             assert core.database.read_bytes() == b"damaged header"
             assert core.pending_backup_restore() is not None
-            message = errors[-1][2]
+            message = recovery_messages[-1]
             assert "디스크 공간을 확보한 뒤 다시 시작하면 예약된 백업 복원이 적용" in message
             assert str(core.database.with_name(core.database.name + ".restore-pending.zip")) in message
             assert "[Errno" not in message
@@ -642,11 +656,11 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
         else:
             assert state is None
     if failure == "damaged_and_full":
-        assert len(errors) == 2
+        assert len(recovery_messages) == 2 and not errors
         monkeypatch.setattr(shutil, "copyfile", real_copy)
         assert __main__.main() == 0
         assert started[-1].backup_restore_status().status == "applied"
-        assert len(errors) == 2
+        assert len(recovery_messages) == 2 and not errors
         return
     assert errors == []
     if failure == "disk_full":
@@ -894,6 +908,7 @@ def test_readonly_database_defers_without_accumulating_backups(core, tmp_path):
             result = apply(core.database)
             assert result.status == "deferred"
             assert result.error_kind == "file_in_use"
+            assert "읽기 전용" in result.error_message
             assert core.automatic_backups() == ()
             assert core.database.read_bytes() == original
             assert core.pending_backup_restore() is not None

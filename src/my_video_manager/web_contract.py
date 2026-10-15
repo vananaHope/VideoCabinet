@@ -13,6 +13,7 @@ from .statistics import DistributionBucket, LibraryInventory, StatisticsDashboar
 from . import web_dialogs_data
 from . import web_folders_data
 from . import web_settings_data
+from . import web_backup_data
 
 TABS = (
     ('library', '라이브러리'), ('reel', '모아보기'), ('search', '검색'),
@@ -138,11 +139,18 @@ SETTINGS = BridgeContract(name='settings', interface='SettingsBridge', slots={
     'captureKey': (Argument('key', str, 'string'),), 'cancelCapture': (),
     'setMinimum': (Argument('seconds', float, 'number'),),
     'action': (Argument('name', str, 'SettingsAction'),),
+    'backupSnapshot': (),
+    'backupAction': (Argument('name', str, 'BackupAction'), Argument('target', str, 'string'),
+                     Argument('includeThumbnails', bool, 'boolean')),
 }, signals={'settingsChanged': str, 'settingsFocusRequested': str,
-            'keyCaptured': str, 'settingsError': str},
-    aliases=(TypeAlias('SettingsAction', ('translation', 'quit', 'releases')),),
+            'keyCaptured': str, 'settingsError': str, 'backupChanged': str},
+    aliases=(TypeAlias('SettingsAction', ('translation', 'quit', 'releases')),
+             TypeAlias('BackupAction', ('refresh', 'create', 'choose', 'preview', 'schedule',
+                                       'discard', 'cancel', 'restart', 'openFolder'))),
     data_types=(web_settings_data.SettingKeyData, web_settings_data.SettingsData,
-                web_settings_data.CapturedKeyData))
+                web_settings_data.CapturedKeyData, web_backup_data.BackupMetadataData,
+                web_backup_data.AutomaticBackupData, web_backup_data.BackupStartupData,
+                web_backup_data.BackupData))
 
 # 새 페이지는 독립 묶음을 선언한 뒤 여기에 한 줄 등록한다.
 QUEUE = BridgeContract(name='queue', interface='QueueBridge', slots={

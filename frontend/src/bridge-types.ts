@@ -591,7 +591,50 @@ export interface CapturedKeyData {
   continuing: boolean
 }
 
+export interface BackupMetadataData {
+  app_version: string
+  db_version: number
+  created_at: string
+  video_count: number
+  includes_thumbnails: boolean
+}
+
+export interface AutomaticBackupData {
+  path: string
+  created_at: string
+  size: number
+  reason: string
+  error: string
+}
+
+export interface BackupStartupData {
+  status: string
+  error: string
+  guidance: string
+  safety_backup: string
+  rejected_path: string
+}
+
+export interface BackupData {
+  busy: boolean
+  operation: string
+  message: string
+  failure: string
+  preview: BackupMetadataData | null
+  previewPath: string
+  pending: boolean
+  pendingDeferred: boolean
+  pendingPath: string
+  startup: BackupStartupData | null
+  automatic: Array<AutomaticBackupData>
+  folder: string
+  dbVersion: number
+  keep: number
+  guidance: string
+}
+
 export type SettingsAction = "translation" | "quit" | "releases"
+export type BackupAction = "refresh" | "create" | "choose" | "preview" | "schedule" | "discard" | "cancel" | "restart" | "openFolder"
 export interface SettingsBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void
@@ -601,10 +644,13 @@ export interface SettingsBridge {
   cancelCapture: (reply: Reply) => void
   setMinimum: (seconds: number, reply: Reply) => void
   action: (name: SettingsAction, reply: Reply) => void
+  backupSnapshot: (reply: Reply) => void
+  backupAction: (name: BackupAction, target: string, includeThumbnails: boolean, reply: Reply) => void
   settingsChanged: Signal<string>
   settingsFocusRequested: Signal<string>
   keyCaptured: Signal<string>
   settingsError: Signal<string>
+  backupChanged: Signal<string>
 }
 export function publicSettingsBridge(raw: SettingsBridge): SettingsBridge {
   return Object.freeze({
@@ -616,10 +662,13 @@ export function publicSettingsBridge(raw: SettingsBridge): SettingsBridge {
     cancelCapture: raw.cancelCapture.bind(raw),
     setMinimum: raw.setMinimum.bind(raw),
     action: raw.action.bind(raw),
+    backupSnapshot: raw.backupSnapshot.bind(raw),
+    backupAction: raw.backupAction.bind(raw),
     settingsChanged: Object.freeze({ connect: raw.settingsChanged.connect.bind(raw.settingsChanged), disconnect: raw.settingsChanged.disconnect.bind(raw.settingsChanged) }),
     settingsFocusRequested: Object.freeze({ connect: raw.settingsFocusRequested.connect.bind(raw.settingsFocusRequested), disconnect: raw.settingsFocusRequested.disconnect.bind(raw.settingsFocusRequested) }),
     keyCaptured: Object.freeze({ connect: raw.keyCaptured.connect.bind(raw.keyCaptured), disconnect: raw.keyCaptured.disconnect.bind(raw.keyCaptured) }),
     settingsError: Object.freeze({ connect: raw.settingsError.connect.bind(raw.settingsError), disconnect: raw.settingsError.disconnect.bind(raw.settingsError) }),
+    backupChanged: Object.freeze({ connect: raw.backupChanged.connect.bind(raw.backupChanged), disconnect: raw.backupChanged.disconnect.bind(raw.backupChanged) }),
   })
 }
 

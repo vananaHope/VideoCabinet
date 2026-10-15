@@ -59,10 +59,17 @@ class TrayControls(QObject):
         self.quitting = True
         self.window.close()
 
+    def restart(self):
+        self.quit()
+        if self.quitting:
+            QApplication.instance().setProperty('backupRestartRequested', True)
+
     def close_window(self, event):
         window = self.window
         try:
             if self.quitting:
+                if window.web_host.controllers['settings'].backups.busy:
+                    raise RuntimeError("백업 작업이 끝난 뒤 완전 종료해 주세요.")
                 if window.worker and window.worker.isRunning():
                     raise RuntimeError("검사가 끝난 뒤 완전 종료해 주세요.")
                 if not window.subtitles.shutdown():

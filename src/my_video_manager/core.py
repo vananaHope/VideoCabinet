@@ -231,6 +231,11 @@ class AppCore:
     def translation_line_providers(self, video_id):
         return self._translations.line_providers(video_id)
 
+    def backup_inventory(self, *, include_automatic=True):
+        """목록·예약 존재 여부만 조회한다. 실제 복원은 inspect/request에서 검증한다."""
+        from .backup_catalog import backup_inventory
+        return backup_inventory(self.database, include_automatic=include_automatic)
+
     def review_lines(self, video_id):
         return self._review.lines(video_id)
 
