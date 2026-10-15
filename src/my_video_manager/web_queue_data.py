@@ -22,6 +22,10 @@ class PreparationData(TypedDict):
     completed: int
     total: int
     kind: str
+    summary: str
+    percent: int | None
+    percentLabel: str
+    guidance: str
 
 
 class QueueCountData(TypedDict):

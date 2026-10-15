@@ -101,6 +101,7 @@ class DialogModel:
                         choices=[row(v, v) for v in languages])
             if transcript:
                 data['description'] += f" 현재 원어: {transcript.spoken_language or '알 수 없음'} ({'직접 지정' if transcript.language_specified else '자동 감지'})"
+            data['information'] = c.subtitle_preparation_notice()
         elif kind == 'review':
             from .translation_models import TRANSLATION_CHOICES
             names = dict(TRANSLATION_CHOICES)

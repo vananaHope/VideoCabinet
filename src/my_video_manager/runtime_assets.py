@@ -8,6 +8,10 @@ Whisper: https://huggingface.co/Systran/faster-whisper-large-v3/tree/edaa852ec7e
 from dataclasses import dataclass
 
 
+def preparation_download_label():
+    return f'약 {sum(asset.size for asset in CUDA_WHEELS + WHISPER_FILES) / 1_000_000_000:.1f} GB'
+
+
 @dataclass(frozen=True)
 class DownloadAsset:
     name: str

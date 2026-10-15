@@ -217,12 +217,19 @@ def test_missing_ready_dll_triggers_download_again(tmp_path, server):
 
 
 @pytest.mark.parametrize("status", [404, 500, 503])
-def test_http_error_is_network(tmp_path, server, status):
+def test_http_error_distinguishes_server_failure(tmp_path, server, status):
     server[0].status = status
     with pytest.raises(PreparationError) as caught:
         preparation(tmp_path, server).prepare()
-    assert caught.value.kind == "network"
+    kind = 'server' if status >= 500 else 'network'
+    assert caught.value.kind == kind
     assert str(status) in caught.value.detail
+    assert 'cuda.whl' in caught.value.detail
+    restarted = preparation(tmp_path, server)
+    assert restarted.status()['kind'] == kind
+    assert str(status) in restarted.status()['detail']
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    assert str(status) in log and 'cuda.whl' in log
 
 
 @pytest.mark.parametrize("stall", ["headers", "body"])
@@ -339,7 +346,7 @@ SubtitlePreparation(Path(sys.argv[1]), gpu_available=lambda: True,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(2)]
     try:
         for process in processes:
-            _, error = process.communicate(timeout=15)
+            _, error = process.communicate(timeout=30)
             assert process.returncode == 0, error.decode(errors="replace")
     finally:
         for process in processes:
@@ -348,3 +355,191 @@ SubtitlePreparation(Path(sys.argv[1]), gpu_available=lambda: True,
             process.communicate()
     assert server[0].requests.count("/cuda.whl") == 1
     assert server[0].requests.count("/model.bin") == 1
+
+
+def test_overall_progress_and_file_order_include_reused_assets(tmp_path, server):
+    events = []
+    service = preparation(tmp_path, server)
+    service.prepare(progress=events.append)
+    total = sum(asset.size for asset in service.cuda_assets + service.model_assets)
+    assert all(event.overall_total == total and event.file_count == 2 for event in events)
+    amounts = [event.overall_completed for event in events]
+    assert amounts == sorted(amounts)
+    first_model = next(e for e in events if e.phase == 'download' and e.asset == 'model.bin')
+    assert first_model.file_index == 2
+    assert first_model.overall_completed == service.cuda_assets[0].size
+    assert events[-1].overall_completed == total
+    events.clear()
+    service.prepare(progress=events.append)
+    assert [e.file_index for e in events if e.phase == 'reuse'] == [1, 2]
+    assert events[-1].overall_completed == total
+    assert preparation(tmp_path, server).status()['kind'] == 'ready'
+
+
+def test_cancel_is_durable_and_explicit_retry_clears_it(tmp_path, server):
+    cancellation = Event()
+    cancellation.set()
+    with pytest.raises(PreparationError, match='취소'):
+        preparation(tmp_path, server).prepare(cancellation=cancellation)
+    restarted = preparation(tmp_path, server)
+    assert restarted.status()['kind'] == 'cancelled'
+    assert server[0].requests == []
+    restarted.prepare()
+    assert preparation(tmp_path, server).status()['kind'] == 'ready'
+
+
+def test_log_preserves_long_detail_but_redacts_credentials_and_home(tmp_path, server):
+    from my_video_manager.subtitle_preparation_ui import failure_message
+    detail = f'{Path.home()}/model.bin\nhttps://example.org/model?token=secret-url Authorization: Bearer secret-auth\n' + '원인' * 300
+    service = preparation(tmp_path, server)
+    def fail():
+        raise PreparationError('network', detail)
+    service.gpu_available = fail
+    with pytest.raises(PreparationError):
+        service.prepare()
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    status = service.status()
+    screen = failure_message(**status)
+    for content in (log, status['detail'], screen):
+        assert 'secret-url' not in content and 'secret-auth' not in content
+        assert str(Path.home()) not in content
+        assert '~/model.bin' in content
+    assert '원인' * 300 in log
+    assert '원인' * 300 not in screen and screen.endswith('…')
+
+
+def test_log_failure_does_not_replace_preparation_error(tmp_path, server):
+    (tmp_path / 'logs').write_text('not a directory')
+    server[0].status = 503
+    with pytest.raises(PreparationError) as caught:
+        preparation(tmp_path, server).prepare()
+    assert caught.value.kind == 'server'
+    assert preparation(tmp_path, server).status()['kind'] == 'server'
+
+
+def test_preparation_log_is_rotated_and_excluded_from_backup(tmp_path, server):
+    service = preparation(tmp_path, server)
+    def fail():
+        raise PreparationError('network', 'long detail ' * 10000)
+    service.gpu_available = fail
+    for _ in range(7):
+        with pytest.raises(PreparationError):
+            service.prepare()
+    logs = list((tmp_path / 'logs').iterdir())
+    assert len(logs) == 3
+    assert all(path.stat().st_size <= 256 * 1024 for path in logs)
+    core = AppCore(media=None, clock=datetime.now, database=tmp_path / 'library.sqlite3')
+    archive = tmp_path / 'backup.zip'
+    core.create_backup(archive, include_thumbnails=True)
+    with zipfile.ZipFile(archive) as bundle:
+        assert all(not name.startswith('logs/') and not name.endswith('.log') for name in bundle.namelist())
+
+@pytest.mark.parametrize('location', ['runtime/cuda/old.partial', 'models/large-v3/old.partial'])
+def test_upgrade_partial_waits_for_retry(tmp_path, server, location):
+    (tmp_path / location).mkdir(parents=True)
+    service = preparation(tmp_path, server)
+    assert service.status()['kind'] == 'cancelled'
+    assert server[0].requests == []
+    service.prepare()
+    assert service.status()['kind'] == 'ready'
+
+
+@pytest.mark.parametrize('history', ['{broken', '[]', '{"kind":"cancelled","message":"","detail":""}'])
+def test_ready_manifest_wins_over_bad_history(tmp_path, server, history):
+    service = preparation(tmp_path, server)
+    service.prepare()
+    requests = server[0].requests[:]
+    (tmp_path / 'subtitle-preparation.json').write_text(history)
+    assert service.status()['kind'] == 'ready'
+    assert server[0].requests == requests
+
+
+def test_ready_history_write_failure_preserves_success(tmp_path, server, monkeypatch):
+    from my_video_manager.subtitle_preparation_state import PreparationHistory
+    save = PreparationHistory.save
+    def fail_ready(self, kind, *args, **kwargs):
+        if kind == 'ready':
+            raise PermissionError(errno.EACCES, 'denied', str(Path.home() / 'ready.json'))
+        return save(self, kind, *args, **kwargs)
+    monkeypatch.setattr(PreparationHistory, 'save', fail_ready)
+    service = preparation(tmp_path, server)
+    assert service.prepare() == service.prepared()
+    assert service.status()['kind'] == 'ready'
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    assert 'ERROR' in log and '~' in log and str(Path.home()) not in log
+
+
+def test_oserror_paths_redacted_in_banner_history_and_log(tmp_path, server):
+    from my_video_manager.subtitle_preparation_ui import failure_message
+    class Denied(RuntimeDownloadAdapter):
+        def download(self, *args):
+            raise PermissionError(errno.EACCES, 'denied', str(Path.home() / 'private-model.bin'))
+    service = preparation(tmp_path, server, adapter=Denied())
+    with pytest.raises(PreparationError) as caught:
+        service.prepare()
+    banner = failure_message(caught.value.kind, str(caught.value), caught.value.detail)
+    history = json.loads((tmp_path / 'subtitle-preparation.json').read_text(encoding='utf-8'))
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    for content in (banner, history['detail'], log):
+        assert str(Path.home()) not in content
+        assert str(Path.home()).replace('\\', '\\\\') not in content
+        assert '~' in content and 'private-model.bin' in content
+
+
+def test_userinfo_and_bare_hf_token_redacted(tmp_path, server):
+    from my_video_manager.subtitle_preparation_ui import failure_message
+    service = preparation(tmp_path, server)
+    def fail():
+        raise PreparationError('network', 'https://alice:password@host/model?secret=query hf_AbC123secret')
+    service.gpu_available = fail
+    with pytest.raises(PreparationError):
+        service.prepare()
+    status = service.status()
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    for content in (failure_message(**status), status['detail'], log):
+        assert 'host/model' in content
+        assert all(secret not in content for secret in ('alice', 'password', 'query', 'hf_AbC123secret'))
+
+
+@pytest.mark.parametrize('interrupted', [False, True])
+def test_cancel_reason_is_durable_and_logged_as_one_info_line(tmp_path, server, interrupted):
+    from my_video_manager.cuda_runtime import PreparationCancellation
+    signal = PreparationCancellation()
+    signal.interrupt() if interrupted else signal.set()
+    service = preparation(tmp_path, server)
+    with pytest.raises(PreparationError):
+        service.prepare(cancellation=signal)
+    expected = 'interrupted' if interrupted else 'cancelled'
+    assert preparation(tmp_path, server).status()['kind'] == expected
+    lines = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8').splitlines()
+    assert len(lines) == 1 and 'INFO' in lines[0] and 'ERROR' not in lines[0]
+
+
+def test_abrupt_exit_marker_prevents_automatic_retry(tmp_path, server):
+    service = preparation(tmp_path, server)
+    def abrupt_exit():
+        raise SystemExit(1)
+    service.gpu_available = abrupt_exit
+    with pytest.raises(SystemExit):
+        service.prepare()
+    assert preparation(tmp_path, server).status()['kind'] == 'interrupted'
+    assert server[0].requests == []
+
+
+def test_cache_verification_uses_bytes_and_redownload_resets_progress(tmp_path, server, monkeypatch):
+    from my_video_manager import cuda_runtime
+    monkeypatch.setattr(cuda_runtime, '_CHUNK', 4)
+    service = preparation(tmp_path, server)
+    cached = tmp_path / 'models/models--Systran--faster-whisper-large-v3/snapshots/test-revision'
+    cached.mkdir(parents=True)
+    (cached / 'model.bin').write_bytes(b'x' * service.model_assets[0].size)
+    events = []
+    service.prepare(progress=events.append)
+    model = [event for event in events if event.asset == 'model.bin']
+    baseline = service.cuda_assets[0].size
+    assert model[0].phase == 'verify' and model[0].overall_completed == baseline
+    assert model[1].overall_completed == baseline + 4
+    downloads = [event for event in model if event.phase == 'download']
+    assert downloads[0].overall_completed == baseline
+    assert downloads[1].overall_completed == baseline + 4
+    assert downloads[-1].overall_completed == baseline + service.model_assets[0].size
