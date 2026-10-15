@@ -1,9 +1,8 @@
 """트레이 어댑터와 창 숨기기·완전 종료 연결."""
 
 from PySide6.QtCore import QObject, QTimer
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QStyle, QSystemTrayIcon
 
-from .shell_ui import QUEUE_PAGE_INDEX
 
 class TrayControls(QObject):
     def __init__(self, window):
@@ -25,11 +24,6 @@ class TrayControls(QObject):
         self.timer.timeout.connect(self.notify_completion)
         self.timer.start(750)
 
-    def button(self):
-        button = QPushButton("자막 대기열 / 자동 규칙")
-        button.clicked.connect(self.show_queue)
-        return button
-
     def open(self):
         was_hidden = not self.window.isVisible()
         self.window.showNormal()
@@ -45,10 +39,7 @@ class TrayControls(QObject):
 
     def show_queue(self):
         self.open()
-        if getattr(self.window, 'web_host', None) is not None:
-            self.window.navigate_web_tab('queue')
-        else:
-            self.window.navigate(QUEUE_PAGE_INDEX)
+        self.window.navigate_web_tab('queue')
 
     def notify_completion(self):
         counts = self.core.take_subtitle_queue_completion()
@@ -78,7 +69,7 @@ class TrayControls(QObject):
                     return
                 window.translations.shutdown()
             elif not QSystemTrayIcon.isSystemTrayAvailable():
-                raise RuntimeError("시스템 트레이를 사용할 수 없습니다. 사이드바 설정(Ctrl+6)의 완전 종료를 이용하세요.")
+                raise RuntimeError("시스템 트레이를 사용할 수 없습니다. 설정(Ctrl+7)의 완전 종료를 이용하세요.")
             window.end_playback()
         except Exception as error:
             self.quitting = False

@@ -1,4 +1,4 @@
-"""#51 화면 비교와 실제 Qt/WebEngine 포커스 검사 (독립 임시 라이브러리).
+"""웹 폴더·설정 화면과 실제 Qt/WebEngine 포커스 검사 (독립 임시 라이브러리).
 
 스크린샷: python scripts/check_web_folders_settings.py --offscreen
 실창: desktop_lock.py run --owner issue-51 -- python scripts/check_web_folders_settings.py
@@ -19,7 +19,6 @@ parser.add_argument('--offscreen', action='store_true')
 parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-51')
 args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
-os.environ['MVM_WEB_UI'] = '1'
 if args.offscreen:
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu'
 
@@ -30,7 +29,6 @@ from PySide6.QtWidgets import QApplication
 from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.core import AppCore, CommandType, MediaInfo, ScanResult
-from my_video_manager.key_settings_ui import SettingsDialog, KeyCapture
 from my_video_manager.ui import MainWindow
 
 
@@ -78,7 +76,7 @@ window.raise_()
 window.activateWindow()
 host = window.web_host
 checks = []
-qt_window = None
+
 
 
 def wait(predicate, message='조건 대기', timeout=20):
@@ -151,38 +149,19 @@ def content(selector):
     return js(f'document.querySelector({json.dumps(selector)}).textContent')
 
 
-def capture(name, qt_source=None):
+def capture(name):
     if not args.offscreen:
         return
     settle()
     web = window.grab().toImage()
     assert (web.width(), web.height()) == (1100, 720)
     web.save(str(args.output / f'web-{name}.png'))
-    if qt_source is not None:
-        qt = qt_source.grab().toImage() if hasattr(qt_source, 'grab') else qt_source
-        qt.save(str(args.output / f'qt-{name}.png'))
-        combined = QImage(2200, 720, QImage.Format.Format_RGB32)
-        combined.fill(Qt.GlobalColor.black)
-        painter = QPainter(combined)
-        painter.drawImage(0, 0, qt.scaled(1100, 720, Qt.AspectRatioMode.KeepAspectRatio))
-        painter.drawImage(1100, 0, web)
-        painter.end()
-        combined.save(str(args.output / f'compare-{name}.png'))
 
 
 try:
     wait(lambda: host._frontend_ready and {'folders', 'settings'} <= host._ready_pages, 'React 초기화')
-    if args.offscreen:
-        os.environ['MVM_WEB_UI'] = '0'
-        qt_window = MainWindow(core, player_factory=Player)
-        qt_window.resize(1100, 720)
-        qt_window.show()
-        os.environ['MVM_WEB_UI'] = '1'
-        window.activateWindow()
     navigate('folders')
-    if qt_window:
-        qt_window.navigate(4)
-    capture('folders-empty', qt_window)
+    capture('folders-empty')
     folders = []
     for index in range(80):
         folder = workspace / f'감시 폴더 {index:02}' / ('긴 경로 설명 ' * 4).strip()
@@ -191,13 +170,9 @@ try:
         folders.append(folder)
         if index == 0:
             window.refresh()
-            if qt_window:
-                qt_window.refresh()
-            capture('folders-one-long', qt_window)
+            capture('folders-one-long')
     window.refresh()
-    if qt_window:
-        qt_window.refresh()
-    capture('folders-many', qt_window)
+    capture('folders-many')
     assert js('document.documentElement.scrollWidth <= innerWidth'), '페이지가 가로로 넘칩니다'
     checks.append('폴더 0·1·80개와 긴 경로 배치')
     finish = threading.Event()
@@ -207,16 +182,14 @@ try:
         return ScanResult(0, ())
 
     window.scan(operation=slow_scan)
-    if qt_window:
-        qt_window.scan(operation=slow_scan)
     try:
         settle()
         assert js('document.getElementById("folders-add").disabled')
         assert js('!!document.querySelector("[role=progressbar]")')
-        capture('folders-scanning', qt_window)
+        capture('folders-scanning')
     finally:
         finish.set()
-        wait(lambda: window.worker is None and (qt_window is None or qt_window.worker is None))
+        wait(lambda: window.worker is None)
     checks.append('실제 검사 작업자의 진행 표시와 잠금')
     for title in ('복원할 긴 한글 영상 제목 ' * 4, '관심 없음 영상'):
         path = workspace / f'{title[:75]}.mkv'
@@ -239,11 +212,9 @@ try:
     core.exclude_video(missing_video.id)
     core.remove_watched_folder(missing_folder)
     window.refresh()
-    if qt_window:
-        qt_window.refresh()
     settle()
     assert content('[aria-label="폴더 관리"]').count('파일 없음') == 1
-    capture('folders-excluded', qt_window)
+    capture('folders-excluded')
     core.dismiss_video(missing_video.id)
     window.refresh()
     click('[data-tab="dismissed"]')
@@ -260,7 +231,7 @@ try:
     assert button('되돌리기')
     wait(lambda: not core.excluded_videos())
     click('[data-tab="dismissed"]')
-    capture('folders-dismissed', qt_window)
+    capture('folders-dismissed')
     assert button('되돌리기')
     wait(lambda: not core.dismissed_videos())
     checks.append('웹 제외 목록·관심 없음 복원과 제외/파일 없음 꼬리표 우선순위')
@@ -274,42 +245,18 @@ try:
     wait(lambda: core.minimum_duration == 25.5, '최소 길이 저장')
     navigate('settings')
     assert js('document.getElementById("settings-minimum").value') == '25.5'
-    if qt_window:
-        qt_window.navigate(5)
-    capture('settings-general', qt_window)
+    capture('settings-general')
     category('translation')
     assert 'codex' in content('[aria-label="번역 CLI 설정"]')
-    capture('settings-translation', qt_window)
+    capture('settings-translation')
     category('transcription')
-    capture('settings-transcription', qt_window)
+    capture('settings-transcription')
     category('keys')
-    keys_dialog = None
-    if qt_window:
-        keys_dialog = SettingsDialog(core, qt_window)
-        keys_dialog.resize(1100, 720)
-        # modal exec 없이 offscreen 비교 이미지에만 사용한다.
-        keys_dialog.show()
-        window.activateWindow()
-    capture('settings-keys', keys_dialog)
-    if keys_dialog:
-        keys_dialog.hide()
+
+    capture('settings-keys')
     begin()
-    qt_capture = None
-    if keys_dialog:
-        # 원래 Qt 키 캡처 창도 실제 위젯으로 그린다(데스크톱 화면 캡처 아님).
-        native_capture = KeyCapture('지점 하이라이트 만들기', keys_dialog)
-        native_capture.show()
-        settle()
-        qt_capture = keys_dialog.grab().toImage()
-        popup = native_capture.grab().toImage()
-        painter = QPainter(qt_capture)
-        painter.drawImage((qt_capture.width() - popup.width()) // 2,
-                          (qt_capture.height() - popup.height()) // 2, popup)
-        painter.end()
-        native_capture.hide()
-        window.activateWindow()
-        host.view.setFocus()
-    capture('keys-capture', qt_capture)
+
+    capture('keys-capture')
     # 조합 중의 웹 입력은 키 배치를 바꾸거나 캡처를 종료하지 않는다.
     js('document.dispatchEvent(new KeyboardEvent("keydown", {key:"n", isComposing:true, bubbles:true, cancelable:true}))')
     assert js('!!document.querySelector("[role=dialog]")')
@@ -351,7 +298,7 @@ try:
     key(Qt.Key.Key_Comma)
     assert ', (쉼표)' in content('[aria-label="키 배치 편집"]')
     assert '적용하지 않은 변경 2건' in content('[aria-label="키 배치 편집"]')
-    capture('keys-draft', keys_dialog)
+    capture('keys-draft')
     assert button('변경 취소')
     assert not js('document.querySelector("tr[data-changed=true]") !== null')
     assert core.command_for_key('Insert').kind == CommandType.POINT_HIGHLIGHT
@@ -360,13 +307,13 @@ try:
     key(Qt.Key.Key_Return)
     assert '같은 키를 사용' in content('[aria-label="키 배치 편집"]')
     assert js('[...document.querySelectorAll("button")].find(e=>e.textContent==="적용").disabled')
-    capture('keys-conflict', keys_dialog)
+    capture('keys-conflict')
     begin()
     key(Qt.Key.Key_N)
     assert button('적용')
     wait(lambda: core.command_for_key('N') is not None, '키 배치 저장')
     assert core.command_for_key('N').kind == CommandType.POINT_HIGHLIGHT
-    assert 'N로 지점' in window.reel.empty.text()
+    assert 'N로 지점' in window.web_host.controllers['reel'].payload()['emptyDescription']
     assert js('document.activeElement.dataset.command') == 'point_highlight:0', js('document.activeElement.outerHTML')[:600]
     navigate('reel')
     assert 'N로 지점' in content('[aria-label="하이라이트 모아보기"]')
@@ -375,7 +322,7 @@ try:
     category('general')
     assert button('완전 종료')
     wait(lambda: js('!!document.querySelector("[role=alertdialog]")'))
-    capture('settings-quit-confirm', qt_window)
+    capture('settings-quit-confirm')
     assert button('취소')
     settle()
     assert window.isVisible()
@@ -421,13 +368,28 @@ try:
     wait(lambda: core.command_for_key('Insert') is not None)
     assert core.command_for_key('N') is None
     checks.append('전체 기본값 복원')
+    window.play_video(first.id)
+    core.playback.report(40)
+    key(Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+    window.settings_menu.actions()[0].trigger()
+    window.settings_menu.hide()
+    settle()
+    assert core.playback.session is None
+    assert core.viewing_status(first.id).resume_point == 40
+    assert host.active_tab == 'settings'
+    assert js('document.querySelector("#settings-category [aria-current=true]").textContent') == '키 배치'
+    checks.append('Alt+S 키 배치 선택: 이어볼 위치 저장 후 웹 키 배치 구역으로 이동')
+    window.library_page.library_controls.show_excluded()
+    settle()
+    assert '제외 목록' in content('[aria-label="폴더 관리 구역"] [aria-current="page"]')
+    window.library_page.hidden_gems.show_dismissed()
+    settle()
+    assert '관심 없음' in content('[aria-label="폴더 관리 구역"] [aria-current="page"]')
+    checks.append('라이브러리 되돌리기 진입점: 폴더 관리의 제외·관심 없음 구역 선택')
     result = {'mode': 'offscreen' if args.offscreen else 'windows', 'checks': checks, 'passed': len(checks)}
     (args.output / f'{result["mode"]}-results.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(result, ensure_ascii=True))
 finally:
-    if qt_window:
-        qt_window.tray.quit()
-        qt_window.deleteLater()
     window.tray.quit()
     window.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)

@@ -1,4 +1,4 @@
-"""대기열 Qt/웹 비교 캡처·변경분 측정·실제 WebEngine 키보드 검사.
+"""대기열 웹 비교 캡처·변경분 측정·실제 WebEngine 키보드 검사.
 
 python scripts/check_web_queue.py --offscreen
 python <desktop_lock.py> run --owner issue-50 -- .venv/Scripts/python scripts/check_web_queue.py --verify
@@ -27,7 +27,6 @@ args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 if args.offscreen:
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu'
-os.environ['MVM_WEB_UI'] = '1'
 
 from PySide6.QtCore import Qt, QEvent, QEventLoop, QTimer
 from PySide6.QtGui import QFontDatabase, QImage, QPainter
@@ -36,7 +35,6 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.core import AppCore, MediaInfo
-from my_video_manager.queue_ui import SubtitleQueuePage
 from my_video_manager.subtitle_queue import SubtitleQueueItem
 from my_video_manager.ui import MainWindow
 
@@ -80,8 +78,7 @@ window.tray.timer.stop()
 window.navigate_web_tab('queue')
 host = window.web_host
 page = host.controllers['queue']
-qt_page = window.findChild(SubtitleQueuePage)
-metrics = {'checks': [], 'condition': '300개 공개 AppCore 조회 + 첫 행 진행률만 변경, 40회; Qt와 웹에 같은 입력'}
+metrics = {'checks': [], 'condition': '웹 기본 상태; 300개 공개 AppCore 조회 + 첫 행 진행률만 변경, 40회'}
 
 
 def settle(ms=150):
@@ -144,18 +141,7 @@ def capture(name):
     host.engine_page.titleChanged.disconnect(ready)
     assert completed, '캡처 프레임 대기 시간 초과'
     window.grab().save(str(args.output / f'web-{name}.png'))
-    # Qt 대기열을 기존 셸에서 보여 주어 같은 1100×720 창을 비교한다.
-    window.pages.setCurrentWidget(qt_page)
-    settle(150)
-    window.grab().save(str(args.output / f'qt-{name}.png'))
-    window.navigate_web_tab('queue')
-    settle(150)
-    pair = QImage(2200, 720, QImage.Format.Format_RGB32)
-    painter = QPainter(pair)
-    painter.drawImage(0, 0, QImage(str(args.output / f'qt-{name}.png')))
-    painter.drawImage(1100, 0, QImage(str(args.output / f'web-{name}.png')))
-    painter.end()
-    pair.save(str(args.output / f'compare-{name}.png'))
+
 
 
 try:
@@ -318,13 +304,11 @@ try:
     assert selected_row() == f'queue-row-{videos[-1 - page_size].id}'
     metrics['checks'].append(f'PageUp/PageDown 표시 행 {page_size}개만큼 이동 및 양 끝 경계')
     click_text('자동 자막 규칙')
-    qt_page.tabs.setCurrentIndex(1)
     capture('rules-empty')
     for index, video in enumerate(videos[:4]):
         tag = core.add_video_tag(video.id, f'태그 {index} 긴 자동 자막 대상 ' + '배움' * 12)
         core.set_auto_subtitle_rule(tag_id=tag.id, spoken_language='en')
     page.refresh_rules()
-    qt_page.rules.refresh()
     settle()
     capture('rules-many')
     # 후보 확인 화면은 대기열을 비운 뒤 만든다.
@@ -335,40 +319,14 @@ try:
     if args.offscreen:
         settle()
         window.grab().save(str(args.output / 'web-confirm.png'))
-        box = QMessageBox(QMessageBox.Icon.Question, '기존 영상도 추가',
-            '기존 영상 300개도 대기열에 넣을까요?\n원어 자막이 있거나 이미 대기 중인 영상은 제외합니다.',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, window)
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        window.pages.setCurrentWidget(qt_page)
-        box.show()
-        settle()
-        window.grab().save(str(args.output / 'qt-confirm-page.png'))
-        box.grab().save(str(args.output / 'qt-confirm-dialog.png'))
-        # native modal은 부모 grab에 포함되지 않으므로 각각의 실제 위젯 캡처를 합친다.
-        qt_image = window.grab().toImage()
-        painter = QPainter(qt_image)
-        painter.drawPixmap((qt_image.width() - box.width()) // 2,
-                           (qt_image.height() - box.height()) // 2, box.grab())
-        painter.end()
-        qt_image.save(str(args.output / 'qt-confirm.png'))
-        pair = QImage(2200, 720, QImage.Format.Format_RGB32)
-        painter = QPainter(pair)
-        painter.drawImage(0, 0, qt_image)
-        painter.drawImage(1100, 0, QImage(str(args.output / 'web-confirm.png')))
-        painter.end()
-        pair.save(str(args.output / 'compare-confirm.png'))
-        box.close()
-        window.navigate_web_tab('queue')
     keys(Qt.Key.Key_Escape)
     click_text('처리 상태')
-    qt_page.tabs.setCurrentIndex(0)
     for video in videos:
         core.request_subtitles(video.id)
     visual_states = False
     page.refresh()
     settle()
     page.timer.stop()
-    qt_page.queue.timer.stop()
     query_samples = []
     for _ in range(40):
         start = time.perf_counter()
@@ -388,26 +346,9 @@ try:
     metrics['delta_bytes'] = len(payloads[-1].encode('utf-8'))
     assert len(json.loads(payloads[-1])['rows']) == 1
     assert json.loads(payloads[-1])['order'] is None
-    window.pages.setCurrentWidget(qt_page)
-    qt_page.queue.timer.stop()
-    qt_page.queue.refresh()
-    samples = []
-    for _ in range(40):
-        tick += 1
-        start = time.perf_counter()
-        qt_page.queue.refresh()
-        samples.append((time.perf_counter() - start) * 1000)
-    metrics['python_qt_ms'] = {'median': median(samples), 'max': max(samples)}
     # DB 비용을 뺀 표시 계층 비교도 같은 300개 DTO, 같은 변경으로 따로 측정한다.
     frozen = display_items()
     core.subtitle_queue_items = lambda: (replace(frozen[0], progress=(tick % 90) / 100), *frozen[1:])
-    samples = []
-    for _ in range(40):
-        tick += 1
-        start = time.perf_counter()
-        qt_page.queue.refresh()
-        samples.append((time.perf_counter() - start) * 1000)
-    metrics['presentation_qt_ms'] = {'median': median(samples), 'max': max(samples)}
     window.navigate_web_tab('queue')
     page.timer.stop()
     settle()

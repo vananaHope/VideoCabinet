@@ -1,9 +1,8 @@
 """라이브러리 데이터·작업 컨트롤러. 웹 뷰의 소유와 탐색은 셸에 맡긴다."""
 
 from PySide6.QtCore import Signal
-from .hidden_gems_ui import show_dismissed_dialog
-from .library_page import LibraryOperations
-from .library_ui import LibraryControls
+from .library_operations import LibraryOperations
+from .library_controls import LibraryControls
 from .web_library_data import snapshot_data, filter_ids
 from .web_library_bridge import LibraryBridge
 from .web_json import encode
@@ -15,7 +14,7 @@ class GemDialogs:
         self.page = page
 
     def show_dismissed(self):
-        show_dismissed_dialog(self.page, self.page.core, self.page.refresh)
+        self.page.host.controllers['folders'].open_section('dismissed')
 
 
 class WebLibraryPage(LibraryOperations, WebPageController):
@@ -68,13 +67,12 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.bridge.libraryChanged.emit(encode(self.payload()))
         self.refreshed.emit()
         if focus_gems is not None and self.is_active():
-            self.request_focus('gems' if focus_gems else 'grid')
+            self.request_focus('gems' if focus_gems and self.gems else 'grid')
 
     def apply_filters(self):
         self.visible_ids = filter_ids(self.cards, self.query, self.tag_id)
         if self.selected_id not in self.visible_ids:
             self.selected_id = next(iter(self.visible_ids), None)
-        self.window.library_count.setText(f'등록 영상 {len(self.cards)}개 · 표시 {len(self.visible_ids)}개')
 
     def return_from_playback(self, *, focus_gems=False):
         self.refresh(focus_gems=focus_gems)

@@ -71,7 +71,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   }
   const button = (label: string, action: string, disabled = false, variant: 'default' | 'outline' | 'destructive' = 'outline') =>
     <Button key={action} variant={variant} disabled={busy || disabled} onClick={() => void act(action, action === 'close' ? { accepted: !editable } : {})}>{label}</Button>
-  const editable = ['series', 'tag-rename', 'highlight', 'subtitles', 'line', 'range', 'translation'].includes(kind)
+  const editable = ['series', 'tag-rename', 'highlight', 'subtitles', 'line', 'range', 'translation', 'video-rename'].includes(kind)
   const disabledEdit = data.locked || !currentSelected
   const members = form.members.map(id => data.available.find(row => row.id === id)).filter(row => row !== undefined)
   const others = data.available.filter(row => !form.members.includes(row.id))
@@ -80,6 +80,8 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     if (index < 0 || target < 0 || target >= form.members.length) return
     const next = [...form.members]; [next[index], next[target]] = [next[target], next[index]]; update({ members: next })
   }
+  if (kind === 'video-exclude') return <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }}
+    title={data.confirm_title} description={data.confirmation} variant="destructive" onConfirm={() => void act('confirm')} />
   return <DialogFrame title={data.title} description={data.description} onClose={() => { if (!data.confirmation) void act('close') }} composing={composing} onSize={onSize} wide={['review', 'series', 'highlights'].includes(kind)}>
     <div ref={content} className="flex min-h-0 flex-col gap-4" onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
       onKeyDown={event => {
@@ -113,6 +115,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {(kind === 'highlight' || kind === 'line') && <label className="block space-y-2 text-sm">{kind === 'highlight' ? '메모' : '자막 텍스트'}<TextArea value={form.text} onChange={text => update({ text })} /></label>}
       {kind === 'subtitles' && <label className="block space-y-2 text-sm">원어<Input aria-label="원어" list="spoken-languages" value={form.choice} onChange={event => update({ choice: event.target.value })} /><datalist id="spoken-languages">{data.choices.map(row => <option key={row.id} value={row.title} />)}</datalist></label>}
       {kind === 'translation' && <Choice label="번역 CLI" rows={data.choices} value={form.choice} onChange={choice => update({ choice })} />}
+      {kind === 'video-rename' && <Input aria-label="영상 제목" value={form.name} onChange={event => update({ name: event.target.value })} />}
       {data.warning && <p role="status" className="whitespace-pre-wrap text-sm text-destructive">{data.warning}</p>}
       {error && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-destructive">{error}</p>}
     </div>

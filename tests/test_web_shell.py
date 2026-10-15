@@ -9,30 +9,28 @@ from PySide6.QtWidgets import QApplication
 from test_web_library_page import window_factory
 from test_web_library_data import core
 from my_video_manager.web_contract import CONTRACTS, TABS
-from my_video_manager.web_page_registry import NATIVE_PAGES
 
 
 def test_tab_routes_keep_one_web_view_and_native_numbering(window_factory):
     from PySide6.QtWebEngineWidgets import QWebEngineView
-    window = window_factory('1')
+    window = window_factory()
     page = window.web_host
     for index, (tab, _) in enumerate(TABS):
         window.navigate_web_tab(tab)
         route = page.routes[tab]
-        target = window.navigation_pages[route] if isinstance(route, int) else page
+        target = page
         assert window.pages.currentWidget() is target
         assert json.loads(page.bridge.shellSnapshot()) == {'tab': tab, 'status': ''}
-        assert not window.sidebar.isVisible()
+        assert window.pages.count() == 2
         assert not window.menuBar().isVisible()
         assert not window.statusBar().isVisible()
         assert len(window.findChildren(QWebEngineView)) == 1
-    window.return_to_web()
     assert page.active_tab == next(tab for tab, _ in reversed(TABS) if tab in page.controllers)
     assert window.pages.currentWidget() is page
 
 
 def test_global_web_keys_and_native_escape_return(window_factory):
-    window = window_factory('1')
+    window = window_factory()
     window.activateWindow()
     QTest.qWait(30)
     for index, (tab, _) in enumerate(TABS):
@@ -44,20 +42,11 @@ def test_global_web_keys_and_native_escape_return(window_factory):
     assert window.web_host.active_tab == next(tab for tab, _ in reversed(TABS) if tab in window.web_host.controllers)
 
 
-def test_qt_switch_keeps_six_original_destinations(window_factory):
-    window = window_factory('0')
-    assert len(window.navigation_pages) == 6
-    for index in range(6):
-        window.navigate(index)
-        assert window.pages.currentWidget() is window.navigation_pages[index]
-        assert window.sidebar.isVisible()
-        assert window.menuBar().isVisible()
-        assert window.statusBar().isVisible()
 
 
 @pytest.mark.parametrize('contract', CONTRACTS, ids=lambda contract: contract.name)
 def test_actual_qt_public_slots_and_signals_match_generator_contract(window_factory, contract):
-    bridge = window_factory('1').web_host.channel.registeredObjects()[contract.name]
+    bridge = window_factory().web_host.channel.registeredObjects()[contract.name]
     meta = bridge.metaObject()
     methods = {bytes(meta.method(i).name()).decode(): meta.method(i)
                for i in range(meta.methodOffset(), meta.methodCount())}
@@ -74,43 +63,19 @@ def test_actual_qt_public_slots_and_signals_match_generator_contract(window_fact
 
 
 def test_navigation_rejects_unknown_names_without_transition(window_factory):
-    window = window_factory('1')
+    window = window_factory()
     assert 'error' in json.loads(window.web_host.bridge.navigate('deleteLater'))
     QApplication.processEvents()
     assert window.pages.currentWidget() is window.web_host
 
 
-def test_native_search_playback_returns_to_same_tab_and_state(window_factory, core):
-    from test_library_return_ui import Player
-    window = window_factory('0')
-    window.player_factory = Player
-    window.navigate(2)
-    page = window.navigation_pages[2]
-    page.query.setText('Python')
-    window.play_video(core.videos()[0].id)
-    assert window.pages.currentWidget() is window.playback_page
-    window.back_to_list()
-    assert window.pages.currentWidget() is page
-    assert page.query.text() == 'Python'
 
 
-@pytest.mark.parametrize('native_tab', NATIVE_PAGES)
-def test_web_mode_qt_playback_returns_to_same_tab(window_factory, core, native_tab):
-    from test_library_return_ui import Player
-    window = window_factory('1')
-    window.player_factory = Player
-    route = window.web_host.routes[native_tab]
-    window.navigate_web_tab(native_tab)
-    window.play_video(core.videos()[0].id)
-    assert window.pages.currentWidget() is window.playback_page
-    window.back_to_list()
-    assert window.pages.currentWidget() is window.navigation_pages[route]
-    assert window.web_host.active_tab == native_tab
 
 
 def test_web_library_playback_restores_filter_and_selection(window_factory, core):
     from test_library_return_ui import Player
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = Player
     window.navigate_web_tab('library')
     library = window.library_page
@@ -153,28 +118,27 @@ def test_public_javascript_wrapper_hides_qobject_methods_and_signal_emit(contrac
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize('mode', ['0', '1'])
-def test_chrome_visibility_survives_fullscreen_exit_and_native_window_restore(window_factory, core, mode):
+def test_chrome_visibility_survives_fullscreen_exit_and_native_window_restore(window_factory, core):
     from test_library_return_ui import Player
-    window = window_factory(mode)
+    window = window_factory()
     window.player_factory = Player
     window.play(core.videos()[0].id)
     window.set_playback_fullscreen(True)
     assert not window.menuBar().isVisible()
     assert not window.statusBar().isVisible()
     window.set_playback_fullscreen(False)
-    assert window.menuBar().isVisible() == (mode == '0')
+    assert not window.menuBar().isVisible()
     window.set_playback_fullscreen(True)
     window.showNormal()  # changeEvent 경로도 숨김 정책을 유지한다.
     QApplication.processEvents()
-    assert window.menuBar().isVisible() == (mode == '0')
+    assert not window.menuBar().isVisible()
     window.back_to_list()
-    assert window.menuBar().isVisible() == (mode == '0')
-    assert window.statusBar().isVisible() == (mode == '0')
+    assert not window.menuBar().isVisible()
+    assert not window.statusBar().isVisible()
 
 
 def test_hidden_status_bar_delivers_notices_to_web(window_factory):
-    window = window_factory('1')
+    window = window_factory()
     changes = []
     window.web_host.bridge.shellStatusChanged.connect(changes.append)
     window.show_status('등록 작업 완료')
@@ -183,14 +147,3 @@ def test_hidden_status_bar_delivers_notices_to_web(window_factory):
     window.statusBar().clearMessage()
     assert changes == ['등록 작업 완료', '']
     assert json.loads(window.web_host.bridge.shellSnapshot())['status'] == ''
-
-
-@pytest.mark.parametrize('native_tab', NATIVE_PAGES)
-def test_hidden_status_bar_delivers_notices_to_native_fallback(window_factory, native_tab):
-    window = window_factory('1')
-    window.show_status('등록 작업 완료')
-    window.navigate_web_tab(native_tab)
-    assert window.web_notice.isVisible() and window.web_notice.text() == '등록 작업 완료'
-    assert not window.statusBar().isVisible()
-    window.statusBar().clearMessage()
-    assert not window.web_notice.isVisible()

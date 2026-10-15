@@ -59,7 +59,7 @@ class WebShellHost(QWidget):
         self.window, self.core = window, window.core
         self.controllers = {}
         self.routes = {}
-        self.active_tab = self.last_web_tab = initial_tab
+        self.active_tab = initial_tab
         self._playback_return_tab = initial_tab
         self._active_controller = None
         self._frontend_ready = False
@@ -112,9 +112,6 @@ class WebShellHost(QWidget):
         if controller.bridge is not None:
             self.channel.registerObject(controller.tab, controller.bridge)
 
-    def register_native(self, tab, index):
-        self._register_route(tab, index)
-
     def _register_route(self, tab, route):
         if tab in self.routes:
             raise ValueError(f'중복 웹 탭: {tab}')
@@ -134,8 +131,6 @@ class WebShellHost(QWidget):
         if tab not in self.routes:
             raise ValueError(f'없는 웹 탭: {tab}')
         self.active_tab = tab
-        if tab in self.controllers:
-            self.last_web_tab = tab
         self.sync_activation()
         self.bridge.shellChanged.emit(encode({'tab': tab}))
 
@@ -158,23 +153,13 @@ class WebShellHost(QWidget):
         self.window.pages.setCurrentWidget(self)
         self.controllers[self.active_tab].return_from_playback(focus_gems=focus_gems)
 
-    def native_page_shown(self, index):
-        for tab, route in self.routes.items():
-            if isinstance(route, int) and route == index:
-                self.set_tab(tab)
-                return
-
     def navigate(self, tab):
         route = self.routes[tab]
-        if isinstance(route, int):
-            self.set_tab(tab)
-            self.window.navigate(route)
-        else:
-            self.window.end_playback()
-            self.set_tab(tab)
-            self.window.pages.setCurrentWidget(self)
-            route.refresh()
-            self.focus_content()
+        self.window.end_playback()
+        self.set_tab(tab)
+        self.window.pages.setCurrentWidget(self)
+        route.refresh()
+        self.focus_content()
 
     def handle_key(self, event):
         return False  # 예약 키는 창, 나머지는 Chromium/React가 처리한다.

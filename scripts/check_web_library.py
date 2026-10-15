@@ -1,10 +1,9 @@
-"""Windows 실제 창에서 Qt/웹 시험판 비교. 원본 영상은 --source에서 복사해 사용한다.
+"""Windows 실제 창에서 웹 셸 검증과 측정. 원본 영상은 --source에서 복사해 사용한다.
 
 python scripts/check_web_library.py --prepare --count 24 --source <읽기 전용 폴더>
-python scripts/check_web_library.py --mode web --count 24 --verify --stay
-python scripts/check_web_library.py --mode web --verify-gems
+python scripts/check_web_library.py --count 24 --verify --stay
+python scripts/check_web_library.py --verify-gems
 python scripts/check_web_library.py --prepare --count 5000
-python scripts/check_web_library.py --mode qt --count 5000
 """
 import time
 STARTED = time.perf_counter()
@@ -23,7 +22,6 @@ ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('--offscreen', action='store_true', help='실제 데스크톱 대신 offscreen에서 화면 캡처')
 parser.add_argument('--no-screenshots', action='store_true', help='실창 입력 검사 중 캡처 생략')
-parser.add_argument('--mode', choices=['qt', 'web'], default='web')
 parser.add_argument('--count', type=int, default=24)
 parser.add_argument('--prepare', action='store_true')
 parser.add_argument('--source', type=Path)
@@ -37,22 +35,20 @@ parser.add_argument('--verify-gems', action='store_true', help='보석 0·1·4·
 parser.add_argument('--stay', action='store_true')
 args = parser.parse_args()
 if args.verify_gems:
-    if args.mode != 'web' or args.prepare or args.verify:
-        parser.error('--verify-gems는 --mode web에서 단독으로 사용하세요')
+    if args.prepare or args.verify:
+        parser.error('--verify-gems는 단독으로 사용하세요')
     args.count = 10
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 if args.offscreen:
     # 표시 표면 없는 Windows offscreen 캡처는 GPU 컨텍스트 대신 소프트웨어로 그린다.
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '') + ' --disable-gpu'
-os.environ['MVM_WEB_UI'] = '1' if args.mode == 'web' else '0'
 
 from PySide6.QtCore import Qt, QEventLoop, QTimer, QPoint, QPointF, QObject, QEvent
 from PySide6.QtGui import QColor, QImage, QPainter, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-if args.mode == 'web':
-    from my_video_manager.web_thumbnail import register_thumbnail_scheme
-    register_thumbnail_scheme()
+from my_video_manager.web_thumbnail import register_thumbnail_scheme
+register_thumbnail_scheme()
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.ui import MainWindow
 
@@ -126,7 +122,7 @@ if args.long_content and core.videos():
         core.add_video_tag(first.id, f'{index} 긴 태그 이름 ' + '태그' * 20)
 
 window = MainWindow(core)
-window.setWindowTitle(f'이슈 46 검증 · {args.mode} · {args.count}')
+window.setWindowTitle(f'이슈 46 검증 · web · {args.count}')
 window.resize(1100, 720)
 window.show()
 window.raise_()
@@ -185,25 +181,20 @@ def run_web_frames(script):
     assert completed, '웹 프레임 완료 알림 시간 초과'
 
 
-if args.mode == 'web':
-    # 시작 측정에도 폴링을 넣지 않는다. React의 첫 렌더 완료 슬롯이 Qt로 알린다.
-    startup_loop = QEventLoop()
-    host.frontend_loaded.connect(startup_loop.quit)
-    startup_timeout = QTimer()
-    startup_timeout.setSingleShot(True)
-    startup_timeout.timeout.connect(startup_loop.quit)
-    startup_timeout.start(20000)
-    if not host._frontend_ready:
-        startup_loop.exec()
-    startup_timeout.stop()
-    host.frontend_loaded.disconnect(startup_loop.quit)
-    assert host._frontend_ready, '첫 React 렌더 완료 시간 초과'
-    run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
-else:
-    app.processEvents()
-    assert page.grid.model().rowCount() == args.count
+startup_loop = QEventLoop()
+host.frontend_loaded.connect(startup_loop.quit)
+startup_timeout = QTimer()
+startup_timeout.setSingleShot(True)
+startup_timeout.timeout.connect(startup_loop.quit)
+startup_timeout.start(20000)
+if not host._frontend_ready:
+    startup_loop.exec()
+startup_timeout.stop()
+host.frontend_loaded.disconnect(startup_loop.quit)
+assert host._frontend_ready, '첫 React 렌더 완료 시간 초과'
+run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
 settle()
-if args.long_content and args.mode == 'web':
+if args.long_content:
     page.selected_id = first.id
     page.refresh()
     columns = int(js("document.getElementById('library-grid').getAttribute('aria-colcount')"))
@@ -221,18 +212,11 @@ def capture_window(name):
         window.grab().save(str(screens / name))
 
 
-capture_window(f'{args.mode}-{args.count}.png')
-metrics = {'mode': args.mode, 'count': args.count, 'startup_ms': round(startup, 2), 'checks': []}
+capture_window(f'web-{args.count}.png')
+metrics = {'mode': 'web', 'count': args.count, 'startup_ms': round(startup, 2), 'checks': []}
 
-if args.verify_shell and args.mode == 'qt':
-    for index, tab in enumerate(('library', 'reel', 'search', 'queue', 'folders', 'settings')):
-        window.navigate(index)
-        settle()
-        capture_window(f'qt-tab-{tab}-{args.count}.png')
-    window.navigate(0)
-    settle()
 
-if args.verify_shell and args.mode == 'web':
+if args.verify_shell:
     from my_video_manager.web_contract import TABS
 
     def shell_key(target, key, modifiers=Qt.KeyboardModifier.NoModifier):
@@ -245,7 +229,7 @@ if args.verify_shell and args.mode == 'web':
         QTest.keyClick(target, key, modifiers)
 
     assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
-    assert js("document.querySelector('[aria-label=\"라이브러리 등록·표시 개수\"]').textContent") == window.library_count.text()
+    assert js("document.querySelector('[aria-label=\"라이브러리 등록·표시 개수\"]').textContent") == f'등록 영상 {len(page.cards)}개 · 표시 {len(page.visible_ids)}개'
     window.show_status('검사 완료 · 웹 작업 알림 확인')
     wait_until(lambda: js("document.querySelector('[role=status][aria-label=\"작업 알림\"]')?.textContent") == '검사 완료 · 웹 작업 알림 확인')
     settle()  # DOM 커밋 뒤 Chromium paint까지 기다린다.
@@ -259,14 +243,9 @@ if args.verify_shell and args.mode == 'web':
         js(f"document.querySelectorAll('nav button')[{index}].click()")
         settle()
         assert host.active_tab == tab
-        route = host.routes[tab]
-        target = window.navigation_pages[route] if isinstance(route, int) else host
-        assert window.pages.currentWidget() is target
+        assert window.pages.currentWidget() is host
         assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
         capture_window(f'tab-{tab}-{args.count}.png')
-        if target is not host:
-            shell_key(window.focusWidget(), Qt.Key.Key_Escape)
-            assert window.pages.currentWidget() is host, (tab, window.isActiveWindow(), QApplication.activeModalWidget(), QApplication.activePopupWidget(), window.focusWidget())
         shell_key(host.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
         settle()
         assert host.active_tab == 'library'
@@ -276,8 +255,8 @@ if args.verify_shell and args.mode == 'web':
         shell_key(host.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
         settle()
         assert host.active_tab == tab, (tab, host.active_tab, window.isActiveWindow())
-    # Qt 페이지에서 다른 Qt 페이지/웹 페이지로 연속 이동한다.
-    for index in sorted(range(len(TABS)), key=lambda i: TABS[i][0] in host.controllers):
+    # 웹 탭 사이에서 예약 키를 연속 처리한다.
+    for index in range(len(TABS)):
         shell_key(window.focusWidget(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
         settle()
         assert host.active_tab == TABS[index][0]
@@ -288,8 +267,8 @@ if args.verify_shell and args.mode == 'web':
     assert not window.settings_menu.isVisible()
     window.navigate_web_tab('library')
     settle()
-    assert not window.sidebar.isVisible()
-    metrics['checks'].append('일곱 탭 클릭·Ctrl+1~7·Qt Esc 복귀·Alt+S')
+    assert window.pages.count() == 2
+    metrics['checks'].append('일곱 탭 클릭·Ctrl+1~7·Alt+S')
 
 
 def gem_layout():
@@ -316,7 +295,7 @@ def gem_layout():
     })()""")
 
 
-if args.mode == 'web' and core.videos():
+if core.videos():
     metrics['layout'] = gem_layout()
 
 
@@ -438,7 +417,7 @@ if args.verify_gems:
     app.processEvents()
     raise SystemExit()
 
-if args.verify and args.mode == 'web':
+if args.verify:
     assert js("document.querySelector('img')?.naturalWidth") > 0, '썸네일 스킴'
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
     metrics['checks'].append('시작 직후 격자 포커스 (명시적 focus_content 호출 없음)')
@@ -540,9 +519,9 @@ if args.verify and args.mode == 'web':
         QTest.qWait(80)
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
         route = host.routes[tab]
-        target = window.navigation_pages[route] if isinstance(route, int) else host
+        target = host
         wait_until(lambda: window.pages.currentWidget() is target)
-    window.navigate(0)
+    window.navigate_web_tab('library')
     page.focus_content()
     QTest.qWait(100)
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
@@ -598,21 +577,20 @@ if args.verify and args.mode == 'web':
             settle()
             returned = js_json("({id: document.getElementById('library-grid').getAttribute('aria-activedescendant'), top: document.getElementById('library-grid').scrollTop})")
             assert returned == {'id': before['id'], 'top': before['top']}, (tab, before, returned)
-        metrics['checks'].append('통계·Qt 모든 탭 왕복 뒤 라이브러리 선택·스크롤 복원')
+        metrics['checks'].append('모든 웹 탭 왕복 뒤 라이브러리 선택·스크롤 복원')
         # 더블클릭도 브리지를 거쳐 같은 네이티브 플레이어를 연다.
         js(f"document.getElementById('video-{playable.id}').dispatchEvent(new MouseEvent('dblclick', {{bubbles:true}}))")
         wait_until(lambda: window.pages.currentWidget() is window.playback_page)
         QTest.keyClick(window.surface, Qt.Key.Key_Escape)
         wait_until(lambda: window.pages.currentWidget() is host)
         metrics['checks'].append('카드 더블클릭 mpv 전환')
-    # 기존 Qt 대화상자를 실제 웹 작업 버튼으로 열고 취소한다.
-    for title, expected in (('태그 편집', 'TagEditor'), ('자막 만들기 / 원어 지정', 'QInputDialog'), ('자막 검수 / SRT 내보내기', 'ReviewDialog'), ('시리즈 편집', 'SeriesEditor'), ('제목 변경', 'QInputDialog')):
+    # 업무 대화상자를 실제 웹 작업 버튼으로 열고 같은 웹 호스트에서 취소한다.
+    for title, expected in (('태그 편집', 'tags'), ('자막 만들기 / 원어 지정', 'subtitles'), ('자막 검수 / SRT 내보내기', 'review'), ('시리즈 편집', 'series'), ('제목 변경', 'video-rename')):
         observed = []
         def close_dialog():
-            modal = QApplication.activeModalWidget()
-            if modal:
-                observed.append(type(modal).__name__)
-                modal.reject()
+            if host.dialogs.active:
+                observed.append(host.dialogs.stack[-1].kind)
+                host.dialogs.pop()
         closer = QTimer()
         closer.setInterval(20)
         closer.timeout.connect(close_dialog)
@@ -621,7 +599,7 @@ if args.verify and args.mode == 'web':
         wait_until(lambda: bool(observed) and not page.bridge.busy)
         closer.stop()
         assert expected in observed, (expected, observed)
-    metrics['checks'].append('태그·자막·검수·시리즈·제목 변경 Qt 대화상자 연결')
+    metrics['checks'].append('태그·자막·검수·시리즈·제목 변경 웹 대화상자 연결')
     if page.gem_ids:
         dismissed = page.gem_ids[0]
         previous_selection = page.selected_id
@@ -633,7 +611,7 @@ if args.verify and args.mode == 'web':
         page.refresh()
         metrics['checks'].append('관심 없음·되돌리기, 라이브러리 선택 보존')
 
-if args.verify_library and args.mode == 'web':
+if args.verify_library:
     layout = gem_layout()
     assert layout['buttons'] == layout['visibleButtons'] == 8, layout
     assert layout['visibleGems'] == min(4, len(page.gem_ids)), layout
@@ -718,11 +696,10 @@ if args.verify_library and args.mode == 'web':
     observed = []
 
     def edit_note():
-        modal = QApplication.activeModalWidget()
-        if modal and type(modal).__name__ == 'HighlightEditor':
-            observed.append(modal.highlight.id)
-            modal.note.setPlainText('웹에서 연 기존 편집기로 저장한 메모')
-            modal.save()
+        if host.dialogs.active and host.dialogs.stack[-1].kind == 'highlight':
+            frame = host.dialogs.stack[-1]
+            observed.append(frame.context['highlight'].id)
+            host.dialogs.act(frame.identifier, 'save', {**frame.values, 'text': '웹에서 연 기존 편집기로 저장한 메모'})
 
     closer = QTimer()
     closer.setInterval(20)
@@ -739,7 +716,7 @@ if args.verify_library and args.mode == 'web':
     settle()
 
 # 목록 갱신: Python 조회부터 다음 웹 프레임/Qt paint까지.
-if args.profile_refresh and args.mode == 'web':
+if args.profile_refresh:
     js("""(() => {
       window.__refreshParsing = [];
       const parse = JSON.parse;
@@ -761,69 +738,26 @@ for _ in range(5):
     start = time.perf_counter()
     window.refresh()
     refresh_python.append(round((time.perf_counter() - start) * 1000, 2))
-    if args.mode == 'web':
-        run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
-    else:
-        app.processEvents()
-        page.grid.repaint()
+    run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
     refresh.append(round((time.perf_counter() - start) * 1000, 2))
 metrics['refresh_ms'] = refresh
 metrics['refresh_python_ms'] = refresh_python
-if args.profile_refresh and args.mode == 'web':
+if args.profile_refresh:
     metrics['refresh_web_parsing'] = js_json('window.__refreshParsing')
 
-if args.mode == 'web':
-    run_web_frames("""
-      window.__scrollFrames = [];
-      const grid = document.getElementById('library-grid'); let previous; let index = 0;
-      function step(now) {
-        if (previous !== undefined) window.__scrollFrames.push(now - previous);
-        previous = now; grid.scrollTop = (index * 180) % Math.max(1, grid.scrollHeight - grid.clientHeight);
-        if (++index < 121) requestAnimationFrame(step); else done();
-      }
-      requestAnimationFrame(step);
-    """)
-    metrics['scroll_frame_ms'] = js_json('window.__scrollFrames')
-    metrics['rendered_cards'] = js("document.querySelectorAll('[role=gridcell]').length")
-    metrics['scroll_clock'] = 'Chromium requestAnimationFrame, 120 intervals, no polling'
-else:
-    frame_loop = QEventLoop()
-    paints = []
-
-    class PaintFrames(QObject):
-        def eventFilter(self, watched, event):
-            if event.type() == QEvent.Type.Paint:
-                paints.append(time.perf_counter())
-                if len(paints) >= 121:
-                    frame_loop.quit()
-            return False
-
-    observer = PaintFrames()
-    page.grid.viewport().installEventFilter(observer)
-    # QWidget에는 rAF가 없다. 비교 대상 Chromium과 같은 60Hz로 update를 요청하되 타이머 간격이
-    # 아닌 실제 viewport paint 간격을 기록한다. 두 값 모두 화면 표시 완료 시각은 아니다.
-    refresh_hz = 60
-    metrics['screen_refresh_hz'] = window.screen().refreshRate()
-    tick = 0
-    started = time.perf_counter()
-    timer = QTimer()
-    timer.setSingleShot(True)
-    timer.setTimerType(Qt.TimerType.PreciseTimer)
-
-    def frame():
-        global tick
-        page.grid.verticalScrollBar().setValue((tick * 180) % max(1, page.grid.verticalScrollBar().maximum()))
-        page.grid.viewport().update()
-        tick += 1
-        timer.start(max(1, round((started + tick / refresh_hz - time.perf_counter()) * 1000)))
-
-    timer.timeout.connect(frame)
-    timer.start(0)
-    frame_loop.exec()
-    timer.stop()
-    page.grid.viewport().removeEventFilter(observer)
-    metrics['scroll_frame_ms'] = [(b - a) * 1000 for a, b in zip(paints, paints[1:])][:120]
-    metrics['scroll_clock'] = f'QWidget viewport Paint, 120 intervals, update at {refresh_hz} Hz'
+run_web_frames("""
+  window.__scrollFrames = [];
+  const grid = document.getElementById('library-grid'); let previous; let index = 0;
+  function step(now) {
+    if (previous !== undefined) window.__scrollFrames.push(now - previous);
+    previous = now; grid.scrollTop = (index * 180) % Math.max(1, grid.scrollHeight - grid.clientHeight);
+    if (++index < 121) requestAnimationFrame(step); else done();
+  }
+  requestAnimationFrame(step);
+""")
+metrics['scroll_frame_ms'] = js_json('window.__scrollFrames')
+metrics['rendered_cards'] = js("document.querySelectorAll('[role=gridcell]').length")
+metrics['scroll_clock'] = 'Chromium requestAnimationFrame, 120 intervals, no polling'
 
 # 작업 관리자 세부 정보의 작업 집합(메모리)와 같은 WorkingSet64를 프로세스 트리에서 합산한다.
 memory_script = f"$all = Get-CimInstance Win32_Process; $ids = @({os.getpid()}); do {{ $next = @($all | Where-Object {{ $_.ParentProcessId -in $ids -and $_.ProcessId -notin $ids }} | ForEach-Object {{ $_.ProcessId }}); $ids += $next }} while ($next.Count); Get-Process -Id $ids -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,WorkingSet64,PrivateMemorySize64 | ConvertTo-Json -Compress"
@@ -836,20 +770,17 @@ processes = [p for p in processes if p['ProcessName'] in ('python', 'pythonw', '
 metrics['processes'] = processes
 metrics['working_set_mib'] = round(sum(p['WorkingSet64'] for p in processes) / 2**20, 2)
 metrics['private_commit_mib'] = round(sum(p['PrivateMemorySize64'] for p in processes) / 2**20, 2)
-out = screens / f'{args.mode}-{args.count}{"-verify" if args.verify else ""}.json'
+out = screens / f'web-{args.count}{"-verify" if args.verify else ""}.json'
 out.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps({
-    'mode': args.mode, 'count': args.count, 'startup_ms': metrics['startup_ms'],
+    'mode': 'web', 'count': args.count, 'startup_ms': metrics['startup_ms'],
     'refresh_median_ms': median(metrics['refresh_ms']),
     'scroll_frame_median_ms': median(metrics['scroll_frame_ms']),
     'working_set_mib': metrics['working_set_mib'], 'checks': metrics['checks'],
     'report': str(out),
 }, ensure_ascii=False), flush=True)
 if args.stay:
-    if args.mode == 'web':
-        js("document.getElementById('library-grid').scrollTop = 0")
-    else:
-        page.grid.verticalScrollBar().setValue(0)
+    js("document.getElementById('library-grid').scrollTop = 0")
     app.exec()
 else:
     window.tray.quit()

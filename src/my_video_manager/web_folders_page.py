@@ -106,6 +106,12 @@ class WebFoldersPage(WebPageController):
     def activated(self):
         self.refresh()
 
+    def open_section(self, section):
+        if section not in ('folders', 'excluded', 'dismissed'):
+            raise ValueError('없는 폴더 관리 구역입니다.')
+        self.window.navigate_web_tab('folders')
+        self.host.request_focus('folders-' + section)
+
     def report_scan(self, text):
         self.report = text
         self.refresh()

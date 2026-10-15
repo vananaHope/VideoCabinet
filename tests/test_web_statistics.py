@@ -26,7 +26,7 @@ def state(page):
 
 def test_statistics_channel_periods_and_playback_return(window_factory, core):
     from test_library_return_ui import Player
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = Player
     window.navigate_web_tab('statistics')
     page = window.web_host.controllers['statistics']
@@ -62,7 +62,7 @@ def test_statistics_late_result_is_discarded_and_ui_can_keep_working(window_fact
         return original(days)
 
     monkeypatch.setattr(core, 'statistics_dashboard', slow)
-    window = window_factory('1')
+    window = window_factory()
     window.navigate_web_tab('statistics')
     page = window.web_host.controllers['statistics']
     wait_for(started.is_set)
@@ -93,7 +93,7 @@ def test_transient_activation_cancels_before_query_and_errors_can_retry(window_f
         raise ValueError('통계 읽기 실패')
 
     monkeypatch.setattr(core, 'statistics_dashboard', fail)
-    window = window_factory('1')
+    window = window_factory()
     window.navigate_web_tab('statistics')
     window.navigate_web_tab('library')
     QTest.qWait(150)
@@ -110,7 +110,7 @@ def test_transient_activation_cancels_before_query_and_errors_can_retry(window_f
 
 
 def test_viewing_end_refreshes_visible_statistics_without_tab_switch(window_factory, core):
-    window = window_factory('1')
+    window = window_factory()
     window.navigate_web_tab('statistics')
     page = window.web_host.controllers['statistics']
     wait_for(lambda: state(page)['result'] is not None)
@@ -122,7 +122,7 @@ def test_viewing_end_refreshes_visible_statistics_without_tab_switch(window_fact
 
 
 def test_refresh_keeps_last_result_until_replacement_and_after_error(window_factory, core, monkeypatch):
-    window = window_factory('1')
+    window = window_factory()
     window.navigate_web_tab('statistics')
     page = window.web_host.controllers['statistics']
     wait_for(lambda: state(page)['result'] is not None)
@@ -204,7 +204,7 @@ shiboken6.delete(app)
 '''.replace('FAIL', repr(fail)), encoding='utf-8')
     result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
                             cwd=Path(__file__).resolve().parents[1],
-                            env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen', 'MVM_WEB_UI': '1',
+                            env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen',
                                  'QTWEBENGINE_CHROMIUM_FLAGS': '--disable-gpu'}, timeout=30)
     assert result.returncode == 0, result.stderr
     assert 'Traceback' not in result.stderr and 'Signal source has been deleted' not in result.stderr

@@ -65,7 +65,7 @@ def example_page(monkeypatch):
 
 
 def test_new_page_registers_its_bridge_refresh_and_focus_without_host_changes(window_factory, example_page):
-    window = window_factory('1')
+    window = window_factory()
     host = window.web_host
     loaded = QSignalSpy(host.view.loadFinished)
     if host.engine_page.isLoading():
@@ -93,9 +93,9 @@ def test_new_page_registers_its_bridge_refresh_and_focus_without_host_changes(wi
 @pytest.mark.parametrize('change', ['missing', 'unknown', 'duplicate'])
 def test_incomplete_or_duplicate_routes_fail_at_start(window_factory, change):
     from my_video_manager.web_shell import WebShellHost
-    window = window_factory('0')
+    window = window_factory()
     host = WebShellHost(window, initial_tab='library')
-    routes = dict(web_page_registry.NATIVE_PAGES)
+    routes = {}
     if change == 'unknown':
         routes['typo'] = 2
     elif change == 'duplicate':
@@ -104,14 +104,14 @@ def test_incomplete_or_duplicate_routes_fail_at_start(window_factory, change):
         for factory in web_page_registry.WEB_PAGES:
             factory(host)
         for tab, index in routes.items():
-            host.register_native(tab, index)
+            host._register_route(tab, index)
         if change == 'missing':
             host.routes.pop(next(iter(host.routes)))
         host.start()
 
 
 def test_unregistered_bridge_contract_fails_at_start(window_factory, monkeypatch):
-    window = window_factory('1')
+    window = window_factory()
     monkeypatch.setattr(web_shell, 'CONTRACTS', (*CONTRACTS, BridgeContract('example', 'ExampleBridge')))
     with pytest.raises(ValueError, match='브리지 계약과 채널 등록부'):
         window.web_host.start()
@@ -119,7 +119,7 @@ def test_unregistered_bridge_contract_fails_at_start(window_factory, monkeypatch
 
 def test_virtual_page_lifecycle_and_playback_return(window_factory, example_page, core, monkeypatch):
     from test_library_return_ui import Player
-    window = window_factory('1')
+    window = window_factory()
     window.player_factory = Player
     host = window.web_host
     page = host.controllers['example']
@@ -156,21 +156,11 @@ def test_virtual_page_lifecycle_and_playback_return(window_factory, example_page
     assert core.playback.session is None  # 복귀 activated는 시청 종료 뒤 호출한다.
 
 
-@pytest.mark.parametrize('native_tab', web_page_registry.NATIVE_PAGES)
-def test_virtual_page_deactivates_for_qt_and_activates_on_return(window_factory, example_page, native_tab):
-    window = window_factory('1')
-    window.navigate_web_tab('example')
-    page = window.web_host.controllers['example']
-    window.navigate_web_tab(native_tab)
-    assert not page.is_active()
-    window.return_to_web()
-    assert window.web_host.active_tab == 'example'
-    assert page.events == [('activated', True), ('deactivated', True), ('activated', True)]
 
 
 @pytest.mark.parametrize('shell_first', [True, False])
 def test_frontend_loaded_fires_once_per_load_with_multiple_pages(window_factory, example_page, shell_first):
-    host = window_factory('1').web_host
+    host = window_factory().web_host
     loaded = QSignalSpy(host.view.loadFinished)
     if host.engine_page.isLoading():
         assert loaded.wait(5000)
@@ -211,11 +201,7 @@ def test_frontend_registry_matches_all_tabs_and_qt_fallbacks():
     routes = json.loads(result.stdout)
     assert all(routes.values())  # null 자리표시를 두지 않는다.
     assert set(routes) == {page.tab for page in web_page_registry.WEB_PAGES}
-    assert set(routes).isdisjoint(web_page_registry.NATIVE_PAGES)
-    assert set(routes) | set(web_page_registry.NATIVE_PAGES) == {tab for tab, _ in TABS}
-    assert web_page_registry.NATIVE_PAGES == {
-        tab: index for tab, index in web_page_registry.QT_PAGE_INDEX.items() if tab not in routes
-    }
+    assert set(routes) == {tab for tab, _ in TABS}
 
 
 def test_connection_returns_only_public_page_wrappers():

@@ -116,7 +116,7 @@ def test_same_video_add_delete_preserves_scroll_and_surviving_selection(panel):
     assert widget.list.verticalScrollBar().value() == min(scroll, widget.list.verticalScrollBar().maximum())
 
 
-def test_video_change_resets_even_when_new_nearest_is_at_end(panel):
+def test_video_change_follows_new_nearest_at_end_without_selecting(panel):
     widget, clock, highlights = panel
     widget.list.setCurrentRow(40)
     widget.list.scrollToBottom()
@@ -124,11 +124,23 @@ def test_video_change_resets_even_when_new_nearest_is_at_end(panel):
     clock.now += HIGHLIGHT_FOLLOW_IDLE_SECONDS
     widget.show_highlights(other, 59, video_id=2)
     QApplication.processEvents()
-    assert widget.list.verticalScrollBar().value() == 0
+    assert visible(widget, 59)
     assert widget.list.currentItem() is None
     # 이전 영상의 사용자 조작은 새 영상의 이후 따라가기를 막지 않는다.
     widget.show_highlights(other, 58, video_id=2)
     assert visible(widget, 58)
+
+
+@pytest.mark.parametrize('recent_interaction', [False, True])
+def test_show_panel_follows_hidden_position_change_unless_recently_touched(panel, recent_interaction):
+    widget, clock, highlights = panel
+    if recent_interaction:
+        widget.list.setCurrentRow(0)
+    widget.hide()
+    widget.show_highlights(highlights, 50, video_id=1)
+    widget.show()
+    QApplication.processEvents()
+    assert visible(widget, 50) is not recent_interaction
 
 
 def test_data_refresh_does_not_select_focused_row_or_delay_follow(panel):

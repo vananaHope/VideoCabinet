@@ -2,7 +2,7 @@
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QMessageBox
 
-from .reel_ui import ReelControls
+from .reel_controls import ReelControls
 from .web_contract import REEL
 from .web_json import encode
 from .web_page import WebPageController
@@ -35,7 +35,6 @@ class WebReelControls(ReelControls):
         self.window._return_to_gems = False
 
     def refresh_guidance(self):
-        super().refresh_guidance()
         self.window.web_host.controllers['reel'].refresh_guidance()
 
 
