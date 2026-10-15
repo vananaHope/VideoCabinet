@@ -141,7 +141,10 @@ def test_core_with_fake_cli_process_uses_safe_arguments_utf8_and_temp_directory(
     core, _, _, _, reopen = setup
     monkeypatch.setenv("OPENAI_API_KEY", "do-not-use-api-billing")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "do-not-use-api-billing")
-    adapter = fake_cli(tmp_path, SUCCESS_SCRIPT, cli)
+    # CLI 자식은 Windows에서 낮은 우선순위로 실행된다. xdist 부하에서
+    # 시작/import가 늦어져도 성공 계약을 검사하도록 30초를 허용한다.
+    # 시간 초과 동작은 아래 별도 테스트의 timeout=0.2로 검증한다.
+    adapter = fake_cli(tmp_path, SUCCESS_SCRIPT, cli, timeout=30)
     core = reopen(adapter)
     core.set_translation_cli(cli)
     video = core.videos()[0]
