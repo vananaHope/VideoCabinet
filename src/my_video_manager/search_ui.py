@@ -1,10 +1,9 @@
 """검색 입력과 결과 선택. 조회와 재생 규칙은 AppCore가 담당한다."""
 
-from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from html import escape
 
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal, QTextBoundaryFinder
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -13,7 +12,9 @@ from PySide6.QtWidgets import (
 
 from .highlight_ui import timestamp
 from .key_display import display_key
-from .search import search_key
+from .search import SOURCE_LABELS
+from .search_matching import match_spans
+from .search_preparation import SearchPreparation
 from .dialog_ui import space_layout
 from .empty_state import EmptyState
 from .theme import ACCENT, BORDER, MUTED_TEXT, TEXT, hint_label, page_title
@@ -21,39 +22,15 @@ from .theme import ACCENT, BORDER, MUTED_TEXT, TEXT, hint_label, page_title
 EMPTY_QUERY_HINT = "제목, 파일 이름, 태그, 메모, 원어·번역 자막을 한 번에 찾습니다."
 
 
-SOURCE_LABELS = {"title": "제목", "filename": "파일 이름", "tag": "태그", "note": "메모",
-                 "transcript": "원어 자막", "translation": "번역 자막"}
-
-
 def highlighted_text(text, query):
-    """검색과 같은 정규화로 찾되 원문 표기·공백을 보존해 그린다."""
-    needle = search_key(query)
-    if not needle:
-        return escape(text)
-    # Qt 경계는 UTF-16 단위다. 결합 문자·한글 자모를 한 묶음으로 정규화한다.
-    encoded = text.encode("utf-16-le")
-    finder = QTextBoundaryFinder(QTextBoundaryFinder.BoundaryType.Grapheme, text)
-    normalized, positions = "", []
-    start = 0
-    while (end := finder.toNextBoundary()) != -1:
-        cluster = encoded[start * 2:end * 2].decode("utf-16-le")
-        key = search_key(cluster)
-        normalized += key
-        positions.extend([(start, end)] * len(key))
-        start = end
-    spans, offset = [], 0
-    while (index := normalized.find(needle, offset)) >= 0:
-        spans.append((positions[index][0], positions[index + len(needle) - 1][1]))
-        offset = index + len(needle)
+    """공유 일치 구간을 Qt HTML로 그리며 원문 표기·공백을 보존한다."""
     parts, previous = [], 0
-    for start, end in spans:
-        if start < previous:  # ß → ss처럼 같은 원문 문자가 여러 번 대응할 수 있다.
-            continue
-        parts.append(escape(encoded[previous * 2:start * 2].decode("utf-16-le")))
+    for start, end in match_spans(text, query):
+        parts.append(escape(text[previous:start]))
         parts.append(f'<span style="color:{ACCENT}; font-weight:600">'
-                     + escape(encoded[start * 2:end * 2].decode("utf-16-le")) + '</span>')
+                     + escape(text[start:end]) + '</span>')
         previous = end
-    parts.append(escape(encoded[previous * 2:].decode("utf-16-le")))
+    parts.append(escape(text[previous:]))
     return "".join(parts)
 
 
@@ -123,32 +100,6 @@ class SearchResultDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         width = self.item_width()
         return QSize(width, int(self.document(index, width).size().height()) + 24)
-
-
-class SearchPreparation(QObject):
-    """화면이 먼저 표시된 뒤 코어의 색인 준비를 작업자에서 실행한다."""
-    def __init__(self, core, parent=None):
-        super().__init__(parent)
-        self.core = core
-        self.future = None
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="search-index")
-        executor = self.executor
-        # 창이 닫혀도 진행 중인 트랜잭션은 마친다. 작업자는 Qt 객체에 접근하지 않는다.
-        self.destroyed.connect(lambda: executor.shutdown(wait=False))
-        self.start_timer = QTimer(self)
-        self.start_timer.setSingleShot(True)
-        self.start_timer.timeout.connect(self.start)
-        self.start_timer.start(0)
-
-    def start(self):
-        if self.future is None and not self.core.search_index_ready:
-            self.future = self.executor.submit(self.core.prepare_search)
-
-    def ready(self):
-        self.start()
-        if self.future is not None and self.future.done():
-            self.future.result()  # 준비 오류는 검색 창에서 표시한다.
-        return self.core.search_index_ready
 
 
 class SearchPage(QWidget):

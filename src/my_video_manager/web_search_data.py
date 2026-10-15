@@ -1,10 +1,8 @@
 """검색 결과의 원문과 정규화 일치 구간을 웹에 전달한다."""
 from typing import TypedDict
 
-from PySide6.QtCore import QTextBoundaryFinder
-
-from .search import search_key
-from .search_ui import SOURCE_LABELS
+from .search import SOURCE_LABELS
+from .search_matching import match_spans
 
 
 class SearchTextData(TypedDict):
@@ -28,30 +26,16 @@ class SearchData(TypedDict):
     state: str
     truncated: bool
     error: str
+    limit: int
 
 
 def matched_parts(text, query) -> list[SearchTextData]:
-    needle = search_key(query)
-    if not needle:
-        return [dict(text=text, matched=False)]
-    encoded = text.encode('utf-16-le')
-    finder = QTextBoundaryFinder(QTextBoundaryFinder.BoundaryType.Grapheme, text)
-    normalized, positions, start = '', [], 0
-    while (end := finder.toNextBoundary()) != -1:
-        key = search_key(encoded[start * 2:end * 2].decode('utf-16-le'))
-        normalized += key
-        positions.extend([(start, end)] * len(key))
-        start = end
-    parts, previous, offset = [], 0, 0
-    while (index := normalized.find(needle, offset)) >= 0:
-        start, end = positions[index][0], positions[index + len(needle) - 1][1]
-        offset = index + len(needle)
-        if start < previous:
-            continue
-        parts.append(dict(text=encoded[previous * 2:start * 2].decode('utf-16-le'), matched=False))
-        parts.append(dict(text=encoded[start * 2:end * 2].decode('utf-16-le'), matched=True))
+    parts, previous = [], 0
+    for start, end in match_spans(text, query):
+        parts.append(dict(text=text[previous:start], matched=False))
+        parts.append(dict(text=text[start:end], matched=True))
         previous = end
-    parts.append(dict(text=encoded[previous * 2:].decode('utf-16-le'), matched=False))
+    parts.append(dict(text=text[previous:], matched=False))
     return parts
 
 

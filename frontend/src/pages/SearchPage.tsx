@@ -89,6 +89,6 @@ export default function SearchPage() {
           <p className="whitespace-pre-wrap wrap-anywhere text-sm"><MatchedText parts={result.text} /></p></div>
       </ResultRow>) : state !== "pending" && <EmptyState title={empty[0]} description={empty[1]} />}
     </div>
-    <p role="status" className="text-sm text-muted-foreground">{state === "pending" ? "검색 중…" : state === "preparing" ? "검색 색인 준비 중…" : !query.trim() ? "검색어를 입력하세요." : `검색 결과 ${results.length}개`}{!pending && data?.truncated && " · 최대 500개까지 표시합니다. 결과가 많습니다. 더 길게 입력하세요."}</p>
+    <p role="status" className="text-sm text-muted-foreground">{state === "pending" ? "검색 중…" : state === "preparing" ? "검색 색인 준비 중…" : state === "error" ? `검색 실패: ${data?.error}` : !query.trim() ? "검색어를 입력하세요." : `검색 결과 ${results.length}개`}{!pending && data?.truncated && ` · 최대 ${data.limit}개까지 표시합니다. 결과가 많습니다. 더 길게 입력하세요.`}</p>
   </main>
 }

@@ -1,5 +1,6 @@
 """웹 모아보기 목록과 기존 ReelControls의 연결."""
 from PySide6.QtCore import QObject, QTimer
+from PySide6.QtWidgets import QMessageBox
 
 from .reel_ui import ReelControls
 from .web_contract import REEL
@@ -9,7 +10,23 @@ from .web_reel_data import entries_data, guidance
 
 
 class WebReelControls(ReelControls):
-    """재생은 그대로 두고 목록 복귀 목적지만 웹으로 바꾼다."""
+    """웹 태그를 코어로 넘기고, 엔진 전환은 기존 sync에 맡긴다."""
+    def start(self, highlight_id=None, *, tag_id=None):
+        page = self.window.web_host.controllers['reel']
+        page.status = ''
+        try:
+            self.window.end_playback()
+            self.core.start_reel(tag_id, highlight_id)
+            self.sync()
+        except Exception as error:
+            self.open()
+            QMessageBox.warning(self.window, '모아보기 재생 실패', str(error))
+
+    def sync(self):
+        if self.shown is not None and self.core.reel_playback is None:
+            self.window.web_host.controllers['reel'].status = '모아보기를 마쳤습니다. 다시 재생할 하이라이트를 고르세요.'
+        super().sync()
+
     def open(self):
         self.window.navigate_web_tab('reel')
         self.window._return_to_gems = False
@@ -41,7 +58,7 @@ class ReelBridge(QObject):
     @REEL.slot('refresh')
     def refresh(self):
         self.page.refresh()
-        return self.snapshot()
+        return encode({'ok': True})
 
     @REEL.slot('filter')
     def filter(self, tag_id):
@@ -69,10 +86,8 @@ class ReelBridge(QObject):
     def perform_play(self, highlight_id):
         try:
             controls = self.page.window.reel
-            controls.refresh()
-            controls.filter.setCurrentIndex(max(0, controls.filter.findData(self.page.tag_id or None)))
             self.page.host.remember_playback_tab()
-            controls.start(highlight_id or None)
+            controls.start(highlight_id or None, tag_id=self.page.tag_id or None)
         except (ValueError, OSError, RuntimeError) as error:
             self.error.emit(str(error))
         finally:
@@ -87,6 +102,7 @@ class WebReelPage(WebPageController):
         super().__init__(host)
         self.tag_id, self.selected_id = 0, None
         self.entries, self.tags = [], []
+        self.status = ''
         self.bridge = ReelBridge(self)
         self.focus_requested = self.bridge.focusRequested
         host.register_page(self)
@@ -94,7 +110,8 @@ class WebReelPage(WebPageController):
     def payload(self):
         title, description = guidance(self.core, self.tag_id)
         return dict(entries=self.entries, tags=self.tags, tagId=self.tag_id,
-                    selectedId=self.selected_id, emptyTitle=title, emptyDescription=description)
+                    selectedId=self.selected_id, emptyTitle=title, emptyDescription=description,
+                    status=self.status)
 
     def refresh(self):
         self.tags = [dict(id=t.id, name=t.name) for t in self.core.tags()]
@@ -104,9 +121,6 @@ class WebReelPage(WebPageController):
         if self.selected_id not in {e['id'] for e in self.entries}:
             self.selected_id = self.entries[0]['id'] if self.entries else None
         self.refresh_guidance()
-
-    def activated(self):
-        self.refresh()
 
     def refresh_guidance(self):
         self.bridge.changed.emit(encode(self.payload()))

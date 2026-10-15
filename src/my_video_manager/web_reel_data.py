@@ -27,6 +27,7 @@ class ReelData(TypedDict):
     selectedId: int | None
     emptyTitle: str
     emptyDescription: str
+    status: str
 
 
 def guidance(core, tag_id):

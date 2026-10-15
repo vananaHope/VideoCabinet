@@ -1,7 +1,8 @@
 """검색 상태는 컨트롤러에 보존하고 색인 준비만 기존 작업자에 맡긴다."""
 from PySide6.QtCore import QObject, QTimer
 
-from .search_ui import SearchPreparation
+from .search_preparation import SearchPreparation
+from .search import SEARCH_LIMIT
 from .web_contract import SEARCH
 from .web_json import encode
 from .web_page import WebPageController
@@ -34,7 +35,7 @@ class SearchBridge(QObject):
         self.page.selected_index = -1
         self.page.dirty = True
         self.page.refresh()
-        return self.snapshot()
+        return encode({'ok': True})
 
     @SEARCH.slot('select')
     def select(self, index):
@@ -83,7 +84,7 @@ class WebSearchPage(WebPageController):
     def payload(self):
         return dict(query=self.query, results=[result_data(r, self.query) for r in self.results],
                     selectedIndex=self.selected_index, state=self.state,
-                    truncated=self.truncated, error=self.error)
+                    truncated=self.truncated, error=self.error, limit=SEARCH_LIMIT)
 
     def refresh(self):
         if not self.dirty:

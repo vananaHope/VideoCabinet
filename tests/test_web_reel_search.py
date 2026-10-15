@@ -12,6 +12,7 @@ from test_reel import mark
 from my_video_manager.core import Command, CommandType
 from my_video_manager.search import SearchResponse, SearchResult
 from my_video_manager.web_search_data import matched_parts
+from my_video_manager.search_matching import match_spans
 
 
 class ReelPlayer(Player):
@@ -24,6 +25,55 @@ class ReelPlayer(Player):
 
 def snapshot(page):
     return json.loads(page.bridge.snapshot())
+
+
+def test_reel_play_uses_web_filter_without_populating_hidden_qt_list(window_factory, core):
+    video = core.videos()[0]
+    mark(core, video, 10, 15)
+    selected = mark(core, video, 30, 35)
+    tag = core.add_highlight_tag(selected.id, '선택 태그')
+    window = window_factory('1')
+    window.player_factory = ReelPlayer
+    window.navigate_web_tab('reel')
+    page = window.web_host.controllers['reel']
+    page.bridge.filter(tag.id)
+    page.bridge.play(0)
+    QApplication.processEvents()
+    assert core.reel_playback.entry.highlight.id == selected.id
+    assert window.reel.list.count() == 0
+
+
+def test_reel_navigation_and_playback_return_read_entries_once(window_factory, core, monkeypatch):
+    mark(core, core.videos()[0], 10, 15)
+    window = window_factory('1')
+    window.player_factory = ReelPlayer
+    calls = []
+    original = core.reel_entries
+    monkeypatch.setattr(core, 'reel_entries', lambda *args: (calls.append(args), original(*args))[1])
+    window.navigate_web_tab('reel')
+    assert len(calls) == 1
+    window.web_host.controllers['reel'].bridge.play(0)
+    QApplication.processEvents()
+    calls.clear()
+    window.back_to_list()
+    assert len(calls) == 1
+    window.play_video(core.videos()[0].id)
+    calls.clear()
+    window.back_to_list()
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('tab,action,args', [('reel', 'refresh', ()), ('reel', 'filter', (0,)), ('search', 'find', ('Python',))])
+def test_result_changes_have_one_data_message_and_small_ack(window_factory, core, tab, action, args):
+    core.prepare_search()
+    window = window_factory('1')
+    window.navigate_web_tab(tab)
+    page = window.web_host.controllers[tab]
+    changes = []
+    page.bridge.changed.connect(changes.append)
+    assert json.loads(getattr(page.bridge, action)(*args)) == {'ok': True}
+    assert len(changes) == 1
+    assert json.loads(changes[0]) == snapshot(page)
 
 
 def test_reel_filter_selection_missing_and_current_keys(window_factory, core):
@@ -46,7 +96,8 @@ def test_reel_filter_selection_missing_and_current_keys(window_factory, core):
     page.bridge.select(h2.id)
     page.bridge.refresh()
     assert snapshot(page)['selectedId'] == h2.id
-    assert [e['id'] for e in json.loads(page.bridge.filter(tag.id))['entries']] == [h2.id]
+    page.bridge.filter(tag.id)
+    assert [e['id'] for e in snapshot(page)['entries']] == [h2.id]
     assert 'error' in json.loads(page.bridge.play(h1.id))
     for location in second.locations:
         location.path.unlink()
@@ -87,9 +138,11 @@ def test_reel_reuses_playback_auto_advance_repeat_and_records_only_revisit(windo
     assert window.pages.currentWidget() is window.web_host
     assert window.web_host.active_tab == 'reel'
     assert all(e['lastRevisited'] for e in snapshot(page)['entries'])
+    assert snapshot(page)['status'] == '모아보기를 마쳤습니다. 다시 재생할 하이라이트를 고르세요.'
     assert core.viewings(video.id) == ()
     page.bridge.play(second.id)
     QApplication.processEvents()
+    assert snapshot(page)['status'] == ''
     assert core.reel_playback.entry.highlight.id == second.id
     window.back_to_list()
     assert snapshot(page)['selectedId'] == second.id
@@ -105,7 +158,8 @@ def test_search_scene_return_keeps_query_results_selection_and_playlist(window_f
     window.player_factory = Player
     window.show_search()
     page = window.web_host.controllers['search']
-    data = json.loads(page.bridge.find('Python'))
+    page.bridge.find('Python')
+    data = snapshot(page)
     index = next(i for i, r in enumerate(data['results']) if r['start'] == 12.125)
     page.bridge.select(index)
     expected = snapshot(page)
@@ -126,10 +180,13 @@ def test_search_preparing_empty_no_results_limit_and_missing(window_factory, cor
     window = window_factory('1')
     window.show_search()
     page = window.web_host.controllers['search']
-    assert json.loads(page.bridge.find(''))['state'] == 'empty'
-    assert json.loads(page.bridge.find('없는낱말'))['state'] == 'no-results'
+    page.bridge.find('')
+    assert snapshot(page)['state'] == 'empty'
+    page.bridge.find('없는낱말')
+    assert snapshot(page)['state'] == 'no-results'
     page.preparation = SimpleNamespace(ready=lambda: False)
-    assert json.loads(page.bridge.find('장면'))['state'] == 'preparing'
+    page.bridge.find('장면')
+    assert snapshot(page)['state'] == 'preparing'
     assert page.timer.isActive()
     window.navigate_web_tab('library')
     assert not page.timer.isActive()
@@ -139,6 +196,7 @@ def test_search_preparing_empty_no_results_limit_and_missing(window_factory, cor
     window.show_search()
     data = snapshot(page)
     assert len(data['results']) == 500 and data['truncated']
+    assert data['limit'] == 500
     assert 'error' in json.loads(page.bridge.play(0))
     assert core.playback.session is None
     assert 'error' in json.loads(page.bridge.select(500))
@@ -153,3 +211,26 @@ def test_web_search_highlight_preserves_normalized_match_and_literal_markup(text
     parts = matched_parts(text, query)
     assert ''.join(p['text'] for p in parts) == text
     assert [p['text'] for p in parts if p['matched']] == [match]
+
+
+@pytest.mark.parametrize('text,query,expected', [
+    ('😀 <장면>', '장면', [(3, 5)]),
+    ('Straße', 's', [(0, 1), (4, 5)]),
+    ('가나', '가나', [(0, 4)]),
+    ('e\u0301 & <Ｅ>', 'é', [(0, 2)]),
+    ('👩\u200d💻 장면 장 면', '장면', [(4, 6), (7, 10)]),
+    ('한글', ' ', []),
+])
+def test_shared_match_spans_are_original_slices_and_qt_html_stays_equivalent(text, query, expected):
+    from html import escape
+    from my_video_manager.search_ui import highlighted_text
+    from my_video_manager.theme import ACCENT
+
+    assert match_spans(text, query) == expected
+    previous, html = 0, []
+    for start, end in expected:
+        html.extend((escape(text[previous:start]),
+                     f'<span style="color:{ACCENT}; font-weight:600">{escape(text[start:end])}</span>'))
+        previous = end
+    html.append(escape(text[previous:]))
+    assert highlighted_text(text, query) == ''.join(html)

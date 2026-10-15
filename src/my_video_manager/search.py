@@ -9,6 +9,8 @@ import unicodedata
 
 SearchSource = Literal["title", "filename", "tag", "note", "transcript", "translation"]
 SEARCH_LIMIT = 500
+SOURCE_LABELS = {"title": "제목", "filename": "파일 이름", "tag": "태그", "note": "메모",
+                 "transcript": "원어 자막", "translation": "번역 자막"}
 BULK_NORMALIZATION_THRESHOLD = 10_000
 
 CONTENT_UPDATE_TRIGGER = """CREATE TRIGGER IF NOT EXISTS search_content_update

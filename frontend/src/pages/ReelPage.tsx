@@ -58,17 +58,17 @@ export default function ReelPage() {
       className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
       {!entries.length ? <EmptyState title={data?.emptyTitle ?? "불러오는 중…"} description={data?.emptyDescription ?? ""} /> : entries.map((entry, index) => <ResultRow key={entry.id} id={`reel-${entry.id}`} selected={entry.id === selected?.id}
         onClick={() => { select(index); document.getElementById("reel-list")?.focus({ preventScroll: true }) }} onDoubleClick={() => { if (entry.playable) play(entry.id) }}>
-        <div className="flex aspect-video w-32 shrink-0 items-center justify-center self-start overflow-hidden rounded-md bg-muted">{entry.thumbnail ? <img src={entry.thumbnail} alt="" className="h-full w-full object-cover" /> : <Film className="size-8 text-muted-foreground" />}</div>
+        <div className="relative flex aspect-video w-32 shrink-0 items-center justify-center self-start overflow-hidden rounded-md bg-muted"><Film aria-hidden="true" className="absolute size-8 text-muted-foreground" />{entry.thumbnail && <img src={entry.thumbnail} alt="" loading="lazy" onError={event => { event.currentTarget.hidden = true }} className="relative h-full w-full object-cover" />}</div>
         <div className="min-w-0 flex-1 space-y-2">
           <p className="wrap-anywhere font-semibold">{entry.title}</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs"><span className="text-highlight tabular-nums">{timestamp(entry.start)}{entry.end === null ? " · 지점" : ` — ${timestamp(entry.end)}`}</span><span className="text-muted-foreground">마지막 복습: {entry.lastRevisited ?? "아직 없음"}</span></div>
           {!entry.playable && <p className="text-xs text-muted-foreground">{entry.missing ? "파일 없음 — 재생 불가" : "길이 0인 지점"} · 차례 재생에서 건너뜀</p>}
-          {entry.note && <p className="whitespace-pre-wrap wrap-anywhere text-sm">{entry.note}</p>}
-          {!!entry.tags.length && <div className="flex flex-wrap gap-1">{entry.tags.map(tag => <span key={tag.id} className="max-w-full rounded-md bg-secondary px-2 py-1 text-xs wrap-anywhere text-secondary-foreground">{tag.name}</span>)}</div>}
+          {entry.note && <p className="line-clamp-3 whitespace-pre-wrap wrap-anywhere text-sm">{entry.note}</p>}
+          {!!entry.tags.length && <div aria-label="하이라이트 태그" className="flex flex-wrap items-center gap-1"><span className="text-xs text-muted-foreground">태그:</span>{entry.tags.map(tag => <span key={tag.id} className="max-w-full rounded-md border border-border bg-secondary px-2 py-1 text-xs wrap-anywhere text-secondary-foreground">{tag.name}</span>)}</div>}
         </div>
       </ResultRow>)}
     </div>
     <div className="flex flex-wrap items-center gap-3"><Button disabled={!entries.some(e => e.playable)} onClick={() => play(0)}>처음부터 차례 재생</Button><Button variant="outline" disabled={!selected?.playable} onClick={() => selected && play(selected.id)}>선택한 하이라이트부터 재생</Button><span className="text-xs text-muted-foreground">↑/↓ 선택 · Enter 재생</span></div>
-    <p role="status" className="text-xs text-muted-foreground">하이라이트 {entries.length}개 · 영상 제목 → 영상 안 시각 순 · 파일 없음·길이 0인 지점은 건너뜁니다. 새 항목은 ‘목록 갱신’으로 불러옵니다.</p>
+    <p role="status" className="text-xs text-muted-foreground">{data?.status || `하이라이트 ${entries.length}개 · 영상 제목 → 영상 안 시각 순 · 파일 없음·길이 0인 지점은 건너뜁니다. 새 항목은 ‘목록 갱신’으로 불러옵니다.`}</p>
   </main>
 }

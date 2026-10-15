@@ -122,7 +122,7 @@ def make_window(mode, core):
     return window
 
 
-def capture_pair(core, label, tab, text='', preparing=False):
+def capture_pair(core, label, tab, text='', preparing=False, failed=False, completed=False):
     if args.no_screenshots:
         return
     pictures = []
@@ -134,9 +134,15 @@ def capture_pair(core, label, tab, text='', preparing=False):
                 page = window.web_host.controllers['search']
                 if preparing:
                     page.preparation = SimpleNamespace(ready=lambda: False)
+                if failed:
+                    def fail():
+                        raise RuntimeError('검증용 색인 오류')
+                    page.preparation = SimpleNamespace(ready=fail)
                 page.bridge.find(text)
                 query(window, text)
-                if preparing:
+                if failed:
+                    wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent === '검색 실패: 검증용 색인 오류'"))
+                elif preparing:
                     wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('색인 준비 중')"))
                 else:
                     expected = len(core.search(text).results)
@@ -150,8 +156,21 @@ def capture_pair(core, label, tab, text='', preparing=False):
                 page = window.navigation_pages[2]
                 if preparing:
                     page.preparation = SimpleNamespace(ready=lambda: False)
+                if failed:
+                    def fail():
+                        raise RuntimeError('검증용 색인 오류')
+                    page.preparation = SimpleNamespace(ready=fail)
                 page.query.setText(text)
                 page.refresh()
+        if completed:
+            last = core.reel_entries()[-1].highlight
+            core.start_reel(highlight_id=last.id)
+            window.reel.shown = core.reel_playback
+            core.playback.report(core.reel_playback.end)
+            core.advance_reel_if_due()
+            window.reel.sync()
+            if mode == 'web':
+                wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"하이라이트 모아보기\"] [role=\"status\"]').textContent.includes('모아보기를 마쳤습니다')"))
         settle(500)
         picture = window.grab().toImage()
         assert picture.width() == 1100 and picture.height() == 720
@@ -183,6 +202,7 @@ def screenshots():
     capture_pair(core, 'search-empty', 'search')
     capture_pair(core, 'search-none', 'search', '없는검색어')
     capture_pair(core, 'search-preparing', 'search', '장면', preparing=True)
+    capture_pair(core, 'search-error', 'search', '장면', failed=True)
     first = mark(core, video, 2, 4)
     mark(core, video, 6, 8, '다시 볼 장면')
     tag = core.add_highlight_tag(first.id, '복습')
@@ -192,6 +212,7 @@ def screenshots():
     core.playback.end()
     capture_pair(core, 'reel-few', 'reel')
     capture_pair(core, 'search-few', 'search', '장면')
+    capture_pair(core, 'reel-completed', 'reel', completed=True)
     core.update_highlight(first.id, start=2, end=4, note=('긴 메모와 줄바꿈\n' + '공백없는아주긴메모' * 30))
     core.rename_video(video.id, '긴 영상 제목 ' + 'LongTitle' * 20)
     long_tag = core.add_highlight_tag(first.id, '공백없는태그' * 8)
@@ -274,6 +295,8 @@ def verify():
         assert window.web_host.active_tab == 'reel'
         assert core.last_highlight_revisited_at(second.id) is not None
         assert core.viewings(video.id) == before
+        wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"하이라이트 모아보기\"] [role=\"status\"]').textContent.includes('모아보기를 마쳤습니다')"))
+        assert window.reel.list.count() == 0
         checks.append('모아보기 키보드 버튼 접근·실제 mpv 반복·자동 전환·복습 기록·시청 비간섭·웹 복귀')
         key(window, Qt.Key.Key_Escape)
         wait_until(lambda: window.web_host.active_tab == 'library')

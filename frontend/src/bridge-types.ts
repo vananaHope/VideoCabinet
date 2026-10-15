@@ -212,6 +212,7 @@ export interface ReelData {
   selectedId: number | null
   emptyTitle: string
   emptyDescription: string
+  status: string
 }
 
 export interface ReelBridge {
@@ -260,6 +261,7 @@ export interface SearchData {
   state: string
   truncated: boolean
   error: string
+  limit: number
 }
 
 export interface SearchBridge {
