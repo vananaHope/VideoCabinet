@@ -13,6 +13,8 @@ import pytest
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.media import parse_ffprobe_result
 from test_library import NOW, Media, records, record, Transcriber, video_file
+from legacy_schema import replace_with_frozen
+from my_video_manager.library import LIBRARY_DB_VERSION
 
 
 class ResolutionMedia(Media):
@@ -26,19 +28,11 @@ def open_core(database, media=None):
     return AppCore(database=database, media=media or ResolutionMedia(), clock=lambda: NOW, transcriber=Transcriber())
 
 
-def downgrade_v2(database):
-    with closing(sqlite3.connect(database)) as db, db:
-        db.execute('DROP INDEX videos_resolution_pending')
-        for column in ('width', 'height', 'resolution_checked'):
-            db.execute(f'ALTER TABLE videos DROP COLUMN {column}')
-        db.execute('PRAGMA user_version=2')
-
-
 def legacy(tmp_path, count=2, media=None):
     core = open_core(tmp_path / 'data/library.sqlite3', media)
     for i in range(count):
         core.add_file(video_file(tmp_path / 'videos', f'{i}.mkv', str(i).encode()))
-    downgrade_v2(core.database)
+    replace_with_frozen(core.database, 2)
     return open_core(core.database, media)
 
 
@@ -112,7 +106,7 @@ def test_v2_migration_backs_up_before_ddl_and_preserves_all_existing_columns(tmp
     core = open_core(tmp_path / 'data/library.sqlite3')
     core.add_file(video_file(tmp_path / 'videos'))
     record(core, core.videos()[0].id)
-    downgrade_v2(core.database)
+    replace_with_frozen(core.database, 2)
     with closing(sqlite3.connect(core.database)) as db:
         tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
         columns = {table: ','.join(row[1] for row in db.execute(f'PRAGMA table_info({table})')) for table in tables}
@@ -124,11 +118,11 @@ def test_v2_migration_backs_up_before_ddl_and_preserves_all_existing_columns(tmp
         name = next(name for name in source.namelist() if name.endswith('.sqlite3'))
         saved = tmp_path / 'saved.sqlite3'
         saved.write_bytes(source.read(name))
-    for database, version in ((saved, 2), (core.database, 3)):
+    for database, version in ((saved, 2), (core.database, LIBRARY_DB_VERSION)):
         with closing(sqlite3.connect(database)) as db:
             assert db.execute('PRAGMA user_version').fetchone()[0] == version
             assert {table: db.execute(f'SELECT {columns[table]} FROM {table}').fetchall() for table in tables} == before
-            assert ('width' in [r[1] for r in db.execute('PRAGMA table_info(videos)')]) == (version == 3)
+            assert ('width' in [r[1] for r in db.execute('PRAGMA table_info(videos)')]) == (version >= 3)
     open_core(core.database)
     assert upgraded.automatic_backups() == (archive,)
     import my_video_manager.library as library
@@ -263,7 +257,7 @@ def test_busy_database_yields_and_retries(tmp_path, lock):
 def test_v2_backup_failure_prevents_ddl(tmp_path, monkeypatch):
     core = open_core(tmp_path / 'library.sqlite3')
     core.add_file(video_file(tmp_path / 'videos'))
-    downgrade_v2(core.database)
+    replace_with_frozen(core.database, 2)
     original = core.database.read_bytes()
     import my_video_manager.backup as backup
     def fail(*args):

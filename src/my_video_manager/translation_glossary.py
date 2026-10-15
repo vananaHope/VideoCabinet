@@ -37,3 +37,18 @@ class Glossary:
             if source in text:
                 entries[source] = entries.pop(source)
         return Glossary(tuple(entries.values())[-GLOSSARY_LIMIT:])
+
+
+class GlossaryStore:
+    """진행 저장 트랜잭션을 빌려 쓰는 작업 단위 저장소. 완료·삭제는 FK로 정리한다."""
+
+    @staticmethod
+    def load(db, queue_id):
+        return Glossary(tuple(GlossaryEntry(*row) for row in db.execute(
+            'SELECT source, target FROM translation_glossary WHERE queue_id=? ORDER BY ordinal', (queue_id,))))
+
+    @staticmethod
+    def save(db, queue_id, glossary):
+        db.execute('DELETE FROM translation_glossary WHERE queue_id=?', (queue_id,))
+        db.executemany('INSERT INTO translation_glossary VALUES (?, ?, ?, ?)',
+                       [(queue_id, entry.source, entry.target, i) for i, entry in enumerate(glossary.entries)])

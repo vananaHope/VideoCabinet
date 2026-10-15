@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from .subtitles import TranscriptLine
 from .translation_models import DEFAULT_PROVIDER, provider
-from .translation_glossary import Glossary, GlossaryEntry
+from .translation_glossary import GlossaryStore, GlossaryEntry
 
 
 CONTEXT_LINES = 10
@@ -151,7 +151,7 @@ class Translations:
         self._cached_transcript = None
         self._activity = Lock()
         self._protected_lines = protected_lines or (lambda db: set())
-        self._glossaries = {}
+        self._glossaries = GlossaryStore()
         self._batch_progress = {}
         with connect() as db:
             db.executescript("""
@@ -297,10 +297,13 @@ class Translations:
                 retained.update({line_id: None for line_id in selected})
                 attempts = list(db.execute("SELECT cli, attempts FROM translation_limit_attempts WHERE queue_id = ?",
                                            (old["id"],))) if old and preserve_state else []
+                glossary = self._glossaries.load(db, old['id']) if old else None
                 db.execute("DELETE FROM translation_queue WHERE video_id = ?", (video_id,))
                 queue_id = uuid4().hex
                 db.execute("INSERT INTO translation_queue(id, video_id, transcript_id, requested_at) VALUES (?, ?, ?, ?)",
                            (queue_id, video_id, transcript.id, self._clock().isoformat()))
+                if glossary is not None:
+                    self._glossaries.save(db, queue_id, glossary)
                 if old and preserve_state:
                     # 새 ID를 실행하는 작업자는 아직 없다. 옛 실행 결과는 ID 검사로 버린다.
                     state = "queued" if old["state"] == "translating" else old["state"]
@@ -533,7 +536,6 @@ class Translations:
 
     def _prune_progress(self, db):
         live = {r[0] for r in db.execute('SELECT id FROM translation_queue')}
-        self._glossaries = {key: value for key, value in self._glossaries.items() if key in live}
         self._batch_progress = {key: value for key, value in self._batch_progress.items() if key[0] in live}
 
     def process_next(self):
@@ -568,7 +570,7 @@ class Translations:
                 return None  # 요청 또는 원어 세대가 읽는 도중 교체됐다.
             with self._connect() as db:
                 context = self._context(db, transcript, lines[0].id, pending.id)
-            glossary = self._glossaries.get(pending.id, Glossary())
+                glossary = self._glossaries.load(db, pending.id)
             with self._activity:
                 with self._connect() as db:
                     if not db.execute("UPDATE translation_queue SET state = 'translating' WHERE id = ?", (pending.id,)).rowcount:
@@ -622,6 +624,7 @@ class Translations:
                     db.executemany("INSERT OR REPLACE INTO translation_target_providers "
                                    "SELECT queue_id, line_id, ? FROM translation_targets WHERE queue_id=? AND line_id=?",
                                    [(cli, pending.id, line.id) for line in result])
+                    self._glossaries.save(db, pending.id, glossary.updated(lines[:len(result)], result.glossary))
                     done = not db.execute("SELECT 1 FROM translation_targets WHERE queue_id = ? AND text IS NULL",
                                           (pending.id,)).fetchone()
                     if done:
@@ -638,7 +641,6 @@ class Translations:
                         if self._order:
                             self._order.finish(db, pending.video_id)
                 self._batch_progress[(pending.id, cli)].succeeded(self._batch_size or provider(cli).batch_size)
-                self._glossaries[pending.id] = glossary.updated(lines[:len(result)], result.glossary)
                 with self._connect() as db:
                     self._prune_progress(db)
                 return entry

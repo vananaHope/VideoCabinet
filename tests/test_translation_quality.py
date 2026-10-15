@@ -223,3 +223,137 @@ def test_minimum_size_exhaustion_precedes_fallback(quality, server):
     assert [len(lines) for lines, _ in adapter.calls] == [120, 60, 30, 15, 10, 10, 10]
     assert len(calls[0]['targets']) == 100
     assert result.completed_lines == 100 and '형식 오류 재시도 소진' in result.notice
+
+
+@pytest.mark.parametrize('kind', ['usage_limit', 'other'])
+def test_glossary_survives_restart_and_failed_retry(quality, kind):
+    create, adapter, clock = quality
+    core = create(40, batch_size=12)
+    video = core.videos()[0].id
+    source(core, video)
+    core.process_next_translation()
+    adapter.action = lambda *args: (_ for _ in ()).throw(TranslationError(kind, 'failure'))
+    core.process_next_translation()
+    core = create(40, batch_size=12)
+    if kind == 'usage_limit':
+        clock[0] += timedelta(minutes=15)
+    else:
+        core.request_translation(video)
+    adapter.action = None
+    assert core.process_next_translation().completed_lines == 24
+    lines, kwargs = adapter.calls[-1]
+    assert kwargs['glossary'] == (GlossaryEntry('Jon', '존'),)
+    assert lines[0].text == 'Jon line 12'
+    assert all(l.translation is not None for l in kwargs['context'])
+
+
+@pytest.mark.parametrize('finish', ['complete', 'remove', 'regenerate'])
+def test_glossary_removed_with_job_and_never_leaks_into_new_job(quality, finish):
+    create, adapter, _ = quality
+    core = create(25, batch_size=12)
+    video = core.videos()[0].id
+    source(core, video)
+    core.process_next_translation()
+    if finish == 'complete':
+        while core.translation_ready():
+            core.process_next_translation()
+        core.request_translation(video)
+    elif finish == 'remove':
+        core.remove_from_subtitle_queue(video)
+        core.request_translation(video)
+    else:
+        source(core, video)
+    core.process_next_translation()
+    assert adapter.calls[-1][1]['glossary'] == ()
+
+
+def test_request_replacement_keeps_committed_glossary_but_not_stale_result(quality):
+    create, adapter, _ = quality
+    core = create(50, batch_size=12)
+    video = core.videos()[0].id
+    transcript = source(core, video)
+    core.process_next_translation()
+
+    def edit_during_response(lines, kwargs):
+        core.edit_transcript_line(video, transcript.lines[30].id, 'new')
+        return TranslationResponse(tuple(TranslatedLine(l.id, 'stale') for l in lines),
+                                   (GlossaryEntry('stale', '낡음'),))
+
+    adapter.action = edit_during_response
+    core.process_next_translation()
+    assert core.translation_queue()[0].completed_lines == 12
+    adapter.action = None
+    core.process_next_translation()
+    assert adapter.calls[-1][1]['glossary'] == (GlossaryEntry('Jon', '존'),)
+
+
+def test_progress_and_glossary_rollback_together(quality):
+    from contextlib import closing
+    import sqlite3
+    create, adapter, _ = quality
+    core = create(50, batch_size=12)
+    video = core.videos()[0].id
+    source(core, video)
+    core.process_next_translation()
+    # 성공 줄 저장 뒤 용어집 쓰기가 실패해도 부분 진행을 커밋하지 않는다.
+    with closing(sqlite3.connect(core.database)) as db:
+        db.execute("CREATE TRIGGER fail_glossary BEFORE INSERT ON translation_glossary "
+                   "BEGIN SELECT RAISE(ABORT, 'injected write failure'); END")
+    result = core.process_next_translation()
+    assert result.state == 'failed' and result.completed_lines == 12
+    with closing(sqlite3.connect(core.database)) as db:
+        db.execute('DROP TRIGGER fail_glossary')
+    core = create(50, batch_size=12)
+    core.request_translation(video)
+    assert core.process_next_translation().completed_lines == 24
+    assert adapter.calls[-1][1]['glossary'] == (GlossaryEntry('Jon', '존'),)
+
+
+def test_repeated_format_failures_shrink_and_recover_in_steps(quality):
+    create, adapter, _ = quality
+    core = create(500)
+    source(core, core.videos()[0].id)
+    def action(lines, kwargs):
+        if len(adapter.calls) <= 4:
+            raise TranslationError('format', 'bad')
+    adapter.action = action
+    for _ in range(10):
+        core.process_next_translation()
+    assert [len(lines) for lines, _ in adapter.calls] == [120, 60, 30, 15, 10, 10, 10, 20, 20, 20, 40, 40, 40, 80]
+
+
+def test_tail_shrinks_actual_size_and_new_job_uses_default(quality):
+    create, adapter, _ = quality
+    core = create(23)
+    video = core.videos()[0].id
+    source(core, video)
+    def action(lines, kwargs):
+        if len(adapter.calls) == 1:
+            raise TranslationError('format', 'bad tail')
+    adapter.action = action
+    core.process_next_translation()
+    assert [len(lines) for lines, _ in adapter.calls] == [23, 11]
+    while core.translation_ready():
+        core.process_next_translation()
+    assert [len(lines) for lines, _ in adapter.calls] == [23, 11, 11, 1]
+    core.request_translation(video)
+    core.process_next_translation()
+    assert len(adapter.calls[-1][0]) == 23
+
+
+def test_hold_breaks_consecutive_successes_without_resetting_reduced_size(quality):
+    create, adapter, clock = quality
+    core = create()
+    source(core, core.videos()[0].id)
+    def action(lines, kwargs):
+        if len(adapter.calls) == 1:
+            raise TranslationError('format', 'bad')
+        if len(adapter.calls) == 4:
+            raise TranslationError('usage_limit', 'limit')
+    adapter.action = action
+    for _ in range(3):
+        core.process_next_translation()
+    clock[0] += timedelta(minutes=15)
+    for _ in range(4):
+        core.process_next_translation()
+    assert [len(lines) for lines, _ in adapter.calls] == [120, 60, 60, 60, 60, 60, 60, 120]
