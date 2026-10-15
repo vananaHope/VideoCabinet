@@ -58,6 +58,20 @@ export interface GemData {
   reason: string
 }
 
+export interface ExternalSubtitleTrackData {
+  language: string | null
+  languageLabel: string
+  languageClass: string
+  lineCount: number
+}
+
+export interface ExternalSubtitleFileData {
+  id: number
+  name: string
+  warning: string | null
+  subtitles: Array<ExternalSubtitleTrackData>
+}
+
 export interface DetailsData {
   has_transcript: boolean
   spoken_language: string | null
@@ -66,6 +80,7 @@ export interface DetailsData {
   subtitle_state: string | null
   translation_state: string | null
   highlight_count: number
+  externalSubtitles: Array<ExternalSubtitleFileData>
 }
 
 export interface HighlightData {
@@ -249,6 +264,8 @@ export interface SearchResultData {
   videoId: number
   title: Array<SearchTextData>
   source: string
+  language: string | null
+  languageLabel: string | null
   text: Array<SearchTextData>
   start: number | null
   missing: boolean

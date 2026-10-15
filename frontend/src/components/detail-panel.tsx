@@ -2,6 +2,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { Button } from "@/components/ui/button"
 import { EmptyState, Tabs } from "@/components/page-parts"
 import { HighlightPanel, type HighlightSnapshot } from "@/components/highlight-panel"
+import { ExternalSubtitleList } from "@/components/external-subtitle-list"
 import { Thumbnail, duration, viewing } from "@/components/video-card"
 import type { VideoData, DetailsData } from "@/bridge-types"
 import { actions, lockedDuringScan, type Action } from "@/bridge"
@@ -45,6 +46,7 @@ export function DetailPanel({ video, details, highlights, revision, tab, onTabCh
           <p>{details.translated_lines ? `번역: ${details.translated_lines}/${details.original_lines}줄` : "번역 자막 없음"}</p>
           <p>대기열: {[details.subtitle_state && `원어 ${queueLabels[details.subtitle_state] || details.subtitle_state}`, details.translation_state && `번역 ${queueLabels[details.translation_state] || details.translation_state}`].filter(Boolean).join(" · ") || "없음"}</p>
           <p>하이라이트 {details.highlight_count}개</p>
+          <ExternalSubtitleList files={details.externalSubtitles} />
         </>}
       </div>
       </>}

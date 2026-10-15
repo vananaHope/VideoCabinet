@@ -62,7 +62,7 @@ export default function SearchPage() {
   const empty = state === "preparing" ? ["검색 색인을 준비하고 있습니다", "처음 한 번만 걸립니다. 준비가 끝나면 입력한 검색어로 바로 찾습니다."]
     : state === "no-results" ? ["검색 결과가 없습니다", "다른 낱말로 찾거나 더 짧게 입력해 보세요."]
     : state === "error" ? ["검색하지 못했습니다", data?.error ?? ""]
-    : ["찾을 내용을 입력하세요", "제목, 파일 이름, 태그, 메모, 원어·번역 자막을 한 번에 찾습니다."]
+    : ["찾을 내용을 입력하세요", "제목, 파일 이름, 태그, 메모, 원어·번역·외부 자막을 한 번에 찾습니다."]
   return <main aria-label="검색" className="flex h-full flex-col gap-3 p-4">
     <PageHeader title="검색" />
     <SearchInput id="search-query" aria-label="검색어" placeholder="제목 · 파일 이름 · 태그 · 메모 · 자막 내용" value={query}
@@ -85,7 +85,7 @@ export default function SearchPage() {
       className="min-h-0 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
       {results.length ? results.map((result, index) => <ResultRow key={index} id={`search-result-${index}`} selected={index === data?.selectedIndex} onClick={() => { select(index); document.getElementById("search-results")?.focus({ preventScroll: true }); play(index) }}>
         <div className="min-w-0 flex-1 space-y-1"><p className="wrap-anywhere font-semibold"><MatchedText parts={result.title} /></p>
-          <div className="flex items-center gap-3"><StatusBadge>{result.source}</StatusBadge>{result.start !== null && <span className="text-xs text-highlight tabular-nums">{timestamp(result.start)}</span>}{result.missing && <span className="text-xs text-muted-foreground">파일 없음</span>}</div>
+          <div className="flex flex-wrap items-center gap-3"><StatusBadge variant={result.languageLabel !== null ? "outline" : undefined}>{result.source}</StatusBadge>{result.languageLabel !== null && <StatusBadge variant="outline">{result.languageLabel}</StatusBadge>}{result.start !== null && <span className="text-xs text-highlight tabular-nums">{timestamp(result.start)}</span>}{result.missing && <span className="text-xs text-muted-foreground">파일 없음</span>}</div>
           <p className="whitespace-pre-wrap wrap-anywhere text-sm"><MatchedText parts={result.text} /></p></div>
       </ResultRow>) : state !== "pending" && <EmptyState title={empty[0]} description={empty[1]} />}
     </div>

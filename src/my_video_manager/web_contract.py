@@ -96,6 +96,7 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
     Constant('actions', tuple(MENU_ACTIONS.items())),
     Constant('scanLockedActions', SCAN_LOCKED_ACTIONS, 'readonly Action[]'),
 ), data_types=(web_library_data.TagData, web_library_data.VideoData, web_library_data.GemData,
+               web_library_data.ExternalSubtitleTrackData, web_library_data.ExternalSubtitleFileData,
                web_library_data.DetailsData, web_library_data.HighlightData, web_library_data.LibraryData))
 
 REEL = BridgeContract(name='reel', interface='ReelBridge', slots={

@@ -627,3 +627,41 @@ def test_skipped_block_warning_counts_multiple_blocks(library):
     file, = core.external_subtitles(core.videos()[0].id)
     assert file.warning == "외부 자막: 2개 블록을 건너뜀"
     assert core.search("정상").results
+
+
+def test_summary_matches_files_without_loading_cue_text(library):
+    core, video = library
+    video.with_suffix('.smi').write_text(
+        '<SYNC Start=1000><P Class=KRCC>한국어<P Class=ENCC>English', encoding='utf-8')
+    video.with_suffix('.srt').write_text(srt() + '\n잘못된 블록', encoding='utf-8')
+    video.with_suffix('.broken.vtt').write_text('WEBVTT\n\n잘못된 파일', encoding='utf-8')
+    core.add_file(video)
+    video_id = core.videos()[0].id
+    files = core.external_subtitles(video_id)
+    summaries = core.external_subtitle_summaries(video_id)
+    assert len(summaries) == 3
+    for summary, file in zip(summaries, files):
+        assert (summary.id, summary.name, summary.warning) == (file.id, file.path.name, file.warning)
+        assert [(s.language, s.language_class, s.line_count) for s in summary.subtitles] == [
+            (s.language, s.language_class, len(s.lines)) for s in file.subtitles]
+        assert all(not hasattr(s, 'lines') for s in summary.subtitles)
+    video.with_suffix('.srt').unlink()
+    core.scan()
+    assert len(core.external_subtitle_summaries(video_id)) == 2
+    with pytest.raises(ValueError, match='영상을 찾을 수 없습니다'):
+        core.external_subtitle_summaries(-1)
+
+
+@pytest.mark.parametrize('content,message', [
+    (b'\xff\xfeX', '문자 인코딩이 올바르지 않습니다'),
+    (b'<![x <SYNC Start=1000><P>bad', '자막 형식을 해석하지 못했습니다'),
+    (b'<SYNC Start=' + b'9' * 312 + b'><P>bad', '자막 형식을 해석하지 못했습니다'),
+])
+def test_parser_exception_warning_is_readable_korean(library, content, message):
+    core, video = library
+    video.with_suffix('.smi').write_bytes(content)
+    result = core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert message in file.warning
+    assert any(message in issue.message for issue in result.issues)
+    assert file.subtitles == ()

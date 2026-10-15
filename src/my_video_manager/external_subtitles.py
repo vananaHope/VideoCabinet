@@ -45,6 +45,39 @@ class ExternalSubtitleFile:
     subtitles: tuple[ExternalSubtitle, ...]
 
 
+@dataclass(frozen=True)
+class ExternalSubtitleTrackSummary:
+    language: str | None
+    language_class: str
+    line_count: int
+
+
+@dataclass(frozen=True)
+class ExternalSubtitleFileSummary:
+    id: int
+    name: str
+    warning: str | None
+    subtitles: tuple[ExternalSubtitleTrackSummary, ...]
+
+
+class _ReadError(ValueError):
+    """파서에서 사용자를 위해 작성한 읽기 실패 문구."""
+
+
+def _read_error_message(error):
+    if isinstance(error, _ReadError):
+        return str(error)
+    if isinstance(error, UnicodeError):
+        return "자막의 문자 인코딩이 올바르지 않습니다. UTF-8, UTF-16, CP949/EUC-KR 파일인지 확인해 주세요."
+    if isinstance(error, PermissionError):
+        return "자막 파일을 읽을 권한이 없습니다. 파일의 접근 권한을 확인해 주세요."
+    if isinstance(error, FileNotFoundError):
+        return "자막 파일을 찾을 수 없습니다. 다시 검사해 주세요."
+    if isinstance(error, OSError):
+        return "자막 파일을 읽지 못했습니다. 파일과 저장 장치 상태를 확인해 주세요."
+    return "자막 형식을 해석하지 못했습니다. 파일 내용과 자막 시각을 확인해 주세요."
+
+
 def _language(value):
     return next((LANGUAGES[token] for token in re.split(r"[^a-z]+", value.casefold())
                  if token in LANGUAGES), None)
@@ -67,7 +100,7 @@ def _decode(data):
             return data.decode(encoding), encoding
         except UnicodeDecodeError:
             pass
-    raise ValueError("지원 인코딩(UTF-8, UTF-16, CP949/EUC-KR)으로 읽을 수 없습니다.")
+    raise _ReadError("지원 인코딩(UTF-8, UTF-16, CP949/EUC-KR)으로 읽을 수 없습니다.")
 
 
 def _plain(value):
@@ -186,7 +219,7 @@ def _sami(text, language, duration):
     parser.close()
     parser._sync()
     if not parser.syncs:
-        raise ValueError("SMI SYNC 시각을 찾을 수 없습니다.")
+        raise _ReadError("SMI SYNC 시각을 찾을 수 없습니다.")
     declared = {}
     for name, body in re.findall(r"\.([\w-]+)\s*\{([^}]+)\}", text):
         match = re.search(r"\blang\s*:\s*([\w-]+)", body, re.I)
@@ -246,6 +279,27 @@ class ExternalSubtitles:
                 result.append(ExternalSubtitleFile(file["id"], video_id, Path(file["path"]),
                                                    file["encoding"], file["warning"], tuple(tracks)))
             return tuple(result)
+
+    def summaries(self, video_id):
+        """선택 영상의 파일·언어별 줄 수만 조회하며 자막 본문은 읽지 않는다."""
+        with self._connect() as db:
+            db.execute("BEGIN")
+            if not db.execute("SELECT 1 FROM videos WHERE id=?", (video_id,)).fetchone():
+                raise ValueError("영상을 찾을 수 없습니다.")
+            rows = db.execute("""SELECT f.id, f.path, f.warning, s.id AS track_id,
+                s.language, s.language_class, count(l.id) AS line_count
+                FROM external_subtitle_files f
+                LEFT JOIN external_subtitles s ON s.file_id=f.id
+                LEFT JOIN external_subtitle_lines l ON l.subtitle_id=s.id
+                WHERE f.video_id=? GROUP BY f.id, s.id ORDER BY f.path, s.id""", (video_id,))
+            files = {}
+            for row in rows:
+                file = files.setdefault(row["id"], (row, []))
+                if row["track_id"] is not None:
+                    file[1].append(ExternalSubtitleTrackSummary(
+                        row["language"], row["language_class"], row["line_count"]))
+            return tuple(ExternalSubtitleFileSummary(row["id"], Path(row["path"]).name,
+                         row["warning"], tuple(tracks)) for row, tracks in files.values())
 
     def refresh(self, video_ids=None):
         """한 검사에서 디렉터리별 목록을 한 번만 읽고 크기·mtime이 바뀐 파일만 파싱한다."""
@@ -308,20 +362,20 @@ class ExternalSubtitles:
                         continue
                     text, encoding = _decode(path.read_bytes())
                     if "\x00" in text:
-                        raise ValueError("자막에 NUL 문자가 있습니다.")
+                        raise _ReadError("자막에 NUL 문자가 있습니다.")
                     tracks, skipped = (_sami(text, language, duration) if path.suffix.casefold() == ".smi"
                                        else _timed_text(text, language))
                     if not any(track.lines for track in tracks):
-                        raise ValueError("읽을 수 있는 자막 줄이 없습니다.")
+                        raise _ReadError("읽을 수 있는 자막 줄이 없습니다.")
                     if skipped:
                         warning = f"외부 자막: {skipped}개 블록을 건너뜀"
                     after = path.stat()
                     if (after.st_size, after.st_mtime_ns) != (size, mtime):
-                        raise ValueError("검사 중 자막 파일이 변경되었습니다. 다시 검사해 주세요.")
+                        raise _ReadError("검사 중 자막 파일이 변경되었습니다. 다시 검사해 주세요.")
                 except CancelledError:
                     raise
                 except Exception as error:
-                    warning = f"외부 자막: {error}"
+                    warning = f"외부 자막: {_read_error_message(error)}"
                     tracks = ()
                 if warning:
                     warnings.append((path, warning))
