@@ -55,7 +55,7 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 
 기본값은 기존 Qt 화면입니다. 아래 환경 변수로 단일 웹 뷰의 위쪽 탭 셸을 켭니다.
 웹 탭은 라이브러리 `Ctrl+1`, 모아보기 `Ctrl+2`, 검색 `Ctrl+3`, 자막 대기열 `Ctrl+4`,
-통계 `Ctrl+5`(준비 중), 폴더 관리 `Ctrl+6`, 설정 `Ctrl+7`입니다.
+통계 `Ctrl+5`(웹 UI), 폴더 관리 `Ctrl+6`, 설정 `Ctrl+7`입니다.
 미전환 페이지는 기존 Qt 화면으로 열리며 돌아가기 버튼·Esc·페이지 단축키로 돌아옵니다.
 `Alt+S` 설정 메뉴와 네이티브 mpv 재생은 유지됩니다. 웹을 끄면 기존 Qt 번호를 그대로 씁니다.
 
@@ -399,11 +399,53 @@ Enter를 누르거나 카드를 한 번 클릭하면 바로 재생합니다. 보
 `library_snapshot().video_statistics`에도 같은 ID별 수치가 들어 있습니다. 스냅샷은
 시청 상태와 수치를 한 번의 시청 조회·순회로 함께 계산하므로 카드에서 별도 API를 다시 부를 필요가 없습니다.
 저장 시 이미 병합한 구간은 그대로 합산하고, 행과 진행 중 시청을 확보한 뒤 읽기 트랜잭션을
-닫고 파싱합니다. 기간 통계는 SELECT 5회이며 한 집계 안에서 로컬 날짜 변환을 분 단위로 공유합니다.
+닫고 파싱합니다. 기간 통계는 SELECT 5회이며 필요한 날짜의 로컬 자정 경계를 한 번 만들고
+시작 시각을 `bisect`로 찾습니다. 범위에서 이틀 이상 먼 ISO 날짜는 시간대 변환 없이 건너뜁니다.
 반환 dataclass의 시간 단위는 초, 날짜·시각은 ISO 문자열이며
 `dataclasses.asdict()` 후 JSON으로 직렬화할 수 있습니다. 순수 계산은 `statistics.py`의
 `viewing_statistics(viewings, videos, days, today, tz, settings)`와
-`video_viewing_statistics(viewings, video_ids, settings)`에 있습니다. 화면은 후속 이슈 범위입니다.
+`video_viewing_statistics(viewings, video_ids, settings)`에 있습니다.
+
+### 웹 시청 통계
+
+`MVM_WEB_UI=1`에서 **통계 (`Ctrl+5`)**를 엽니다. 7·30·90·365일 기간 선택은
+숫자 카드·일별 차트·많이 본 영상·요일별/시간대별 활동에 함께 적용됩니다.
+`Tab`/`Shift+Tab`으로 기간·구역·지표·영상 목록을 이동하고 `Space` 또는 `Enter`로 선택합니다.
+차트는 방향키로 날짜/요일/시간대의 툴팁을 읽을 수 있습니다. 상위 영상은 기존 mpv 재생으로 연결하고
+`Esc`로 돌아오면 선택한 기간을 유지하며 다시 계산합니다. 제외·파일 없음 영상은 상태를 표시합니다.
+
+정보 밀도를 줄이기 위해 **시청 활동 / 라이브러리 현황**으로 나눴습니다.
+라이브러리 총량·관리 현황·길이/형식 분포는 기간과 무관하며 제외 영상을 뺍니다.
+누적 시청 시간만 기존 시청 통계 규칙에 따라 제외 영상의 과거 기록도 포함합니다.
+요일·시간대는 시작 로컬 시각에 전량 배정하고, 자정이나 정시를 넘어도 나누지 않습니다.
+영상 총 용량은 위치가 여러 개인 영상의 유효한 저장 크기를 한 번만 합산합니다.
+크기를 모르면 알려진 용량과 **용량 미확인 N개**를 함께 표시합니다. 디스크를 다시 읽지는 않습니다.
+한국어 자막은 원어 `ko` 또는 상세 화면에서 제공하는 확정/현재 요청의 부분 번역 줄 기준입니다.
+재생 이력 없음은 틀어보기 포함 일반 재생과 완료된 복습 기록이 모두 없는 영상입니다.
+태그 있는 영상은 영상에 직접 태그가 붙은 경우를 셉니다.
+
+`AppCore.statistics_dashboard(days, *, tz=None)`가 기존 `ViewingStatistics`와
+요일/시간대 배열, `LibraryInventory`를 한 읽기 스냅샷에서 반환합니다.
+영상 수와 무관하게 SELECT 8회이며 시청 기록은 한 번만 순회합니다.
+`web_statistics_page.py`는 활성화/시청 종료 때 100ms 뒤 작업자에서 계산하고,
+연속 요청을 합치며 오래된 응답을 폐기합니다. 비활성화 시 시작 전 계산은 취소합니다.
+`web_contract.py`의 `STATISTICS`에 dataclass를 등록하며 생성기는 가변 길이 tuple을
+TypeScript 배열, 고정 길이 tuple을 TypeScript tuple로 확장합니다. 기존 TypedDict 출력은 유지합니다.
+차트는 shadcn Chart 합성 구조와 정확히 고정한 `recharts@3.10.1`을 쓰며 색은 기존 토큰을 사용합니다.
+
+```powershell
+.venv/Scripts/python scripts/generate_web_types.py --check
+$env:QTWEBENGINE_CHROMIUM_FLAGS='--disable-gpu' # Windows offscreen WebEngine 검증
+.venv/Scripts/python -m pytest -q
+.venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 0 --empty-library
+.venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 0
+.venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 8
+.venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 50000
+```
+
+1100×720의 기간 4개·지표 2개 및 요일/시간대·현황 화면을 `.local/screens-52/`에 저장합니다.
+`--verify`는 실제 창에서 키보드 선택과 실제 mpv 재생·복귀를 검사하며 화면 캡처는 하지 않습니다.
+여러 작업자가 공유하는 데스크톱에서는 반드시 관리자에게 지정받은 `desktop_lock.py run` 안에서 실행합니다.
 
 ### 원어 자막
 
@@ -720,7 +762,7 @@ Qt·웹의 일치 강조는 `search_matching.py`의 `match_spans`를 공유하�
 
 호스트·생성기·`App.tsx`·`bridge.ts`·`ui.py`는 새 페이지 때문에 고칠 필요가 없습니다.
 채널 이름은 `TABS`의 `library`, `reel`, `search`, `queue`, `statistics`, `folders`, `settings`와 같고,
-공통 객체만 `shell`입니다. 통계의 준비 중 화면도 같은 등록부를 사용합니다.
+공통 객체만 `shell`입니다. 통계 페이지도 같은 등록부를 사용합니다.
 `tests/test_web_generator.py`는 예시 계약을 앞·중간·뒤에 추가해도 기존 페이지 출력이 그대로인지,
 `tests/test_web_pages.py`는 새 컨트롤러의 브리지·갱신·포커스 연결과 양쪽 등록부 일치를 확인합니다.
 탭 누락·중복은 Qt 시작 또는 테스트에서 실패합니다. 웹 등록부 오타는 typecheck가, Python 등록부와의 누락·불일치는 계약 테스트가 검출합니다.

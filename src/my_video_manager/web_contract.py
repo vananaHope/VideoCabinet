@@ -7,6 +7,9 @@ from typing import Mapping
 from . import web_library_data, web_shell_data
 from . import web_queue_data
 from . import web_reel_data, web_search_data
+from . import web_statistics_data
+from .statistics import DailyViewingStatistics, TopViewedVideo, LibraryStatistics, ViewingStatistics
+from .statistics import DistributionBucket, LibraryInventory, StatisticsDashboard
 
 TABS = (
     ('library', '라이브러리'), ('reel', '모아보기'), ('search', '검색'),
@@ -107,6 +110,14 @@ SEARCH = BridgeContract(name='search', interface='SearchBridge', slots={
 }, signals={'changed': str, 'focusRequested': str, 'error': str},
     data_types=(web_search_data.SearchTextData, web_search_data.SearchResultData, web_search_data.SearchData))
 
+STATISTICS = BridgeContract(name='statistics', interface='StatisticsBridge', slots={
+    'ready': (), 'snapshot': (), 'setPeriod': (Argument('days', int, 'number'),),
+    'playVideo': (Argument('videoId', int, 'number'),),
+}, signals={'statisticsChanged': str, 'statisticsFocusRequested': str},
+    data_types=(DailyViewingStatistics, TopViewedVideo, LibraryStatistics, ViewingStatistics,
+                DistributionBucket, LibraryInventory, StatisticsDashboard,
+                web_statistics_data.StatisticsData))
+
 # 새 페이지는 독립 묶음을 선언한 뒤 여기에 한 줄 등록한다.
 QUEUE = BridgeContract(name='queue', interface='QueueBridge', slots={
     'ready': (), 'snapshot': (), 'rulesSnapshot': (),
@@ -127,4 +138,5 @@ CONTRACTS = (
     QUEUE,
     REEL,
     SEARCH,
+    STATISTICS,
 )

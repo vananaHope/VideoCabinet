@@ -26,6 +26,7 @@ from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, Subtit
 from .review import Review, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
 from .statistics import StatisticsReader, VideoViewingStatistics, ViewingStatistics
+from .statistics import StatisticsDashboard
 
 
 class CommandType(str, Enum):
@@ -658,6 +659,10 @@ class AppCore:
         전체 기간을 일괄 조회하며 마지막 시청 시각에는 틀어보기도 포함한다.
         """
         return StatisticsReader(self._connect, self._clock, self._viewings).video_map()
+
+    def statistics_dashboard(self, days: int, *, tz: tzinfo | None = None) -> StatisticsDashboard:
+        """기간 통계·요일/시간대 활동과 현재 라이브러리 총량을 한 스냅샷으로 조회한다."""
+        return StatisticsReader(self._connect, self._clock, self._viewings).dashboard(days, tz=tz)
 
     def resume_start(self, video_id: int) -> float:
         point = self.viewing_status(video_id).resume_point
