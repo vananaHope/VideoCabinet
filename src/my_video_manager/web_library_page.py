@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import Signal
 from .hidden_gems_ui import show_dismissed_dialog
-from .library_page import LibraryOperations
+from .library_operations import LibraryOperations
 from .library_ui import LibraryControls
 from .web_library_data import snapshot_data, filter_ids
 from .web_library_bridge import LibraryBridge

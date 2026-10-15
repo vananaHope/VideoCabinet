@@ -6,8 +6,8 @@ from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QS
 
 from .adapters import MpvPlayer
 from .core import AppCore, CommandType
-from .subtitle_ui import SubtitleControls
-from .translation_ui import TranslationControls
+from .subtitle_controls import SubtitleControls
+from .translation_controls import TranslationControls
 from .highlight_ui import HighlightList
 from .reel_ui import ReelControls
 from .key_settings_ui import SettingsDialog

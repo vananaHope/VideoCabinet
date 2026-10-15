@@ -7,7 +7,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 
 from .key_bindings import KeyBindings, RESERVED_KEYS, normalize_key
 from .key_display import display_keys
-from .key_settings_ui import key_name
+from .qt_keys import key_name
 from .web_contract import SETTINGS
 from .web_json import encode
 from .web_page import WebPageController

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 from .core import CommandType
 from .highlight_ui import HighlightProgress, PlaybackHighlights, timestamp
 from .key_display import display_keys
-from .key_settings_ui import key_name
+from .qt_keys import key_name
 from .playback_help import PlaybackHelp
 from .theme import playback_stylesheet, playback_font
 
