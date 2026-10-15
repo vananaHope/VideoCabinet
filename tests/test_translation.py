@@ -33,7 +33,7 @@ class Translator:
         self.prefix = "번역"
         self.response = None
 
-    def translate(self, lines, language, *, cli, cancellation, model="", effort=""):
+    def translate(self, lines, language, *, cli, cancellation, model="", effort="", context=(), glossary=()):
         self.calls.append((lines, language, cli))
         if self.error:
             raise self.error
@@ -447,7 +447,7 @@ def test_cancel_and_abnormal_exit_resume_at_last_committed_batch(setup):
     started = Event()
 
     class Cancellable(Translator):
-        def translate(self, lines, language, *, cli, cancellation, model="", effort=""):
+        def translate(self, lines, language, *, cli, cancellation, model="", effort="", context=(), glossary=()):
             started.set()
             assert cancellation.wait(5)
             raise TranslationCancelled

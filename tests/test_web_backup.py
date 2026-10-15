@@ -90,23 +90,23 @@ def test_picker_cancel_releases_busy_without_files(window_factory, core, monkeyp
     assert not core.backup_inventory().pending
 
 
-def test_v2_migration_backup_is_listed_previewed_and_scheduled_in_v3(window_factory, core):
+def test_v2_migration_backup_is_listed_previewed_and_scheduled_in_current_version(window_factory, core):
     from test_backup import open_core
-    from test_resolution import downgrade_v2
+    from legacy_schema import replace_with_frozen
 
-    downgrade_v2(core.database)
+    replace_with_frozen(core.database, 2)
     upgraded = open_core(core.database)
     saved, = upgraded.automatic_backups()
     with zipfile.ZipFile(saved) as archive:
         assert json.loads(archive.read('manifest.json'))['reason'] == 'before_migration'
     bridge = bridge_for(window_factory())
     result = action(bridge, 'refresh')
-    assert result['dbVersion'] == 3
+    assert result['dbVersion'] == LIBRARY_DB_VERSION
     assert result['automatic'][0]['reason'] == 'DB 버전 올리기 전'
     result = action(bridge, 'preview', str(saved))
     assert result['preview']['db_version'] == 2
     assert result['preview']['version_message'] == (
-        '이 백업은 DB 버전 2입니다. 다시 시작하면 현재 버전 3에 맞춰 바꾼 뒤 복원합니다. '
+        f'이 백업은 DB 버전 2입니다. 다시 시작하면 현재 버전 {LIBRARY_DB_VERSION}에 맞춰 바꾼 뒤 복원합니다. '
         '복원 전 지금 라이브러리는 자동 백업으로 남습니다.')
     assert result['preview']['video_count'] == len(upgraded.videos())
     before = upgraded.videos()

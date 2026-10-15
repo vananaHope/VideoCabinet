@@ -85,6 +85,7 @@ class TranslationProvider:
     label: str
     models: tuple[TranslationModelChoice, ...]
     external_notice: str
+    batch_size: int
 
     @property
     def default_model(self):
@@ -96,12 +97,12 @@ CLI_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 PROVIDERS = (
     TranslationProvider("codex", "Codex (CLI)", (
         TranslationModelChoice("codex", "gpt-5.6-terra", "GPT-5.6 Terra", True, reasoning_efforts=CLI_EFFORTS),
-    ), "Codex를 고르면 자막 텍스트가 OpenAI 서버로 전송됩니다. CLI 설치와 구독 로그인이 필요합니다."),
+    ), "Codex를 고르면 자막 텍스트가 OpenAI 서버로 전송됩니다. CLI 설치와 구독 로그인이 필요합니다.", 120),
     TranslationProvider("claude", "Claude (CLI)", (
         TranslationModelChoice("claude", "claude-sonnet-5-5", "Claude Sonnet 5.5", True, reasoning_efforts=CLI_EFFORTS),
-    ), "Claude를 고르면 자막 텍스트가 Anthropic 서버로 전송됩니다. CLI 설치와 구독 로그인이 필요합니다."),
+    ), "Claude를 고르면 자막 텍스트가 Anthropic 서버로 전송됩니다. CLI 설치와 구독 로그인이 필요합니다.", 120),
     TranslationProvider("opencode_go", "OpenCode Go (API)", MODEL_CHOICES,
-        "OpenCode Go를 고르면 자막 텍스트가 OpenCode 서버로 전송됩니다. 자막 번역은 공식 허용이 확인되지 않아 계정 제한 위험이 있습니다."),
+        "OpenCode Go를 고르면 자막 텍스트가 OpenCode 서버로 전송됩니다. 자막 번역은 공식 허용이 확인되지 않아 계정 제한 위험이 있습니다.", 100),
 )
 DEFAULT_PROVIDER = PROVIDERS[0].id
 TRANSLATION_CHOICES = tuple((p.id, p.label) for p in PROVIDERS)

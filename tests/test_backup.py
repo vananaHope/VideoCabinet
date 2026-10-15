@@ -24,7 +24,7 @@ from my_video_manager.backup import (
     create_automatic_backup, create_backup, inspect_backup, request_backup_restore,
 )
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
-from my_video_manager.library import migrate_library
+from my_video_manager.library import migrate_library, LIBRARY_DB_VERSION
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.translation import TranslatedLine
 
@@ -234,7 +234,7 @@ def test_round_trip_all_public_user_data_and_unsaved_viewing(core, tmp_path, thu
     archive = tmp_path / "backup.zip"
     result = core.create_backup(archive, include_thumbnails=thumbnails)
     assert result.metadata.video_count == 3
-    assert result.metadata.db_version == 3
+    assert result.metadata.db_version == LIBRARY_DB_VERSION
     assert result.metadata.includes_thumbnails == thumbnails
     assert result.snapshot_seconds >= result.max_step_seconds >= 0
     assert core.inspect_backup(archive) == result.metadata
@@ -485,7 +485,7 @@ def test_old_backup_is_migrated_before_replacement(core, tmp_path, old_version):
     assert reopened.video_tags(42)[0].name == "옛 태그"
     assert reopened.transcript(42).lines[0].text == "old words"
     assert reopened.viewing_status(42).finished
-    assert reopened.inspect_backup(reopened.create_backup(tmp_path / "new.zip").path).db_version == 3
+    assert reopened.inspect_backup(reopened.create_backup(tmp_path / "new.zip").path).db_version == LIBRARY_DB_VERSION
 
 
 def test_automatic_retention_keeps_latest_five_and_never_removes_manual_zip(core):
@@ -495,15 +495,15 @@ def test_automatic_retention_keeps_latest_five_and_never_removes_manual_zip(core
     results = [create_automatic_backup(core.database) for _ in range(AUTO_BACKUP_KEEP + 2)]
     assert core.automatic_backups() == tuple(result.path for result in reversed(results[-AUTO_BACKUP_KEEP:]))
     assert manual.exists()
-    assert all(core.inspect_backup(path).db_version == 3 for path in core.automatic_backups())
+    assert all(core.inspect_backup(path).db_version == LIBRARY_DB_VERSION for path in core.automatic_backups())
 
 
 def test_v2_backup_restores_records_and_upgrades_before_reopening(core, tmp_path):
-    from test_resolution import downgrade_v2
+    from legacy_schema import replace_with_frozen
 
     video = core.videos()[0]
     core.add_video_tag(video.id, 'v2 기록')
-    downgrade_v2(core.database)
+    replace_with_frozen(core.database, 2)
     archive = create_backup(core.database, tmp_path / 'v2.zip').path
     upgraded = open_core(core.database)
     upgraded.rename_video(video.id, 'v3에서 바꾼 제목')
@@ -513,32 +513,32 @@ def test_v2_backup_restores_records_and_upgrades_before_reopening(core, tmp_path
 
     result = apply(core.database)
     assert result.status == 'applied' and result.metadata.db_version == 2
-    # 시작 경로는 임시 DB의 이전이 성공해야 교체한다. AppCore를 열기 전부터 v3다.
+    # 시작 경로는 임시 DB의 이전이 성공해야 교체한다. AppCore를 열기 전부터 현재 버전이다.
     with closing(sqlite3.connect(core.database)) as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 3
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION
     reopened = open_core(core.database)
     assert reopened.video(video.id).title == video.title
     assert reopened.video_tags(video.id)[0].name == 'v2 기록'
     assert reopened.video(video.id).width is None
     assert reopened.statistics_dashboard(30).inventory.resolution_pending_count == len(reopened.videos())
     assert reopened.pending_backup_restore() is None
-    assert inspect_backup(result.safety_backup).db_version == 3
+    assert inspect_backup(result.safety_backup).db_version == LIBRARY_DB_VERSION
 
 
 def test_fake_next_migration_backs_up_before_ddl_and_survives_rollback(core):
     # 다음 버전의 실패하는 가짜 이전으로 공개 연결 지점을 검증한다.
     with closing(sqlite3.connect(core.database)) as db:
-        saved = backup_before_migration(db, 4)
-        assert saved.metadata.db_version == 3
+        saved = backup_before_migration(db, LIBRARY_DB_VERSION + 1)
+        assert saved.metadata.db_version == LIBRARY_DB_VERSION
         with zipfile.ZipFile(saved.path) as archive:
             assert json.loads(archive.read('manifest.json'))['reason'] == 'before_migration'
         with pytest.raises(RuntimeError), db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("ALTER TABLE videos ADD COLUMN fake_migration TEXT")
-            db.execute("PRAGMA user_version=4")
+            db.execute(f"PRAGMA user_version={LIBRARY_DB_VERSION + 1}")
             raise RuntimeError("fake migration failure")
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
-    assert core.inspect_backup(saved.path).db_version == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == LIBRARY_DB_VERSION
+    assert core.inspect_backup(saved.path).db_version == LIBRARY_DB_VERSION
     assert open_core(core.database).videos() == core.videos()
     with closing(sqlite3.connect(core.database)) as db:
         assert backup_before_migration(db, 2) is None

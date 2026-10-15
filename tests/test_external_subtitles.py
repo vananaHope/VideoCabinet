@@ -234,8 +234,9 @@ def test_external_and_generated_subtitles_are_independent_and_searchable(library
     assert results[0].language is None
     assert len(core.transcript(video_id).lines) == 1
     assert core.subtitle_queue() == ()
+    from my_video_manager.library import LIBRARY_DB_VERSION
     with sqlite3.connect(core.database) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == LIBRARY_DB_VERSION
 
 
 def test_external_search_short_query_limit_and_exclusion(library):

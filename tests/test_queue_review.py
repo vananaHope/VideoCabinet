@@ -126,7 +126,7 @@ def test_held_translation_cancel_retains_state_and_retry_time(translation_setup)
     time[0] += timedelta(minutes=16)
     entered = Event()
 
-    def cancel(lines, language, *, cli, cancellation, model="", effort=""):
+    def cancel(lines, language, *, cli, cancellation, model="", effort="", context=(), glossary=()):
         entered.set()
         assert cancellation.wait(5)
         raise TranslationCancelled

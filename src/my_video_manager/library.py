@@ -88,7 +88,7 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 3
+LIBRARY_DB_VERSION = 4
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
@@ -124,6 +124,12 @@ def migrate_library(db, *, before_upgrade=None) -> None:
         db.execute("ALTER TABLE videos ADD COLUMN resolution_checked INTEGER NOT NULL DEFAULT 0")
         db.execute("CREATE INDEX videos_resolution_pending ON videos(id) WHERE resolution_checked=0")
         db.execute("PRAGMA user_version = 3")
+    if version < 4:
+        db.execute("""CREATE TABLE translation_glossary (
+            queue_id TEXT NOT NULL REFERENCES translation_queue(id) ON DELETE CASCADE,
+            source TEXT NOT NULL, target TEXT NOT NULL, ordinal INTEGER NOT NULL,
+            PRIMARY KEY(queue_id, source))""")
+        db.execute("PRAGMA user_version = 4")
 
 
 class Library:
