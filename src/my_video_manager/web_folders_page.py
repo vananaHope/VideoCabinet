@@ -117,4 +117,5 @@ class WebFoldersPage(WebPageController):
                     report=self.report)
 
     def refresh(self):
-        self.bridge.foldersChanged.emit(encode(self.payload()))
+        if self.is_active():
+            self.bridge.foldersChanged.emit(encode(self.payload()))

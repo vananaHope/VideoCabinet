@@ -5,7 +5,7 @@ import sqlite3
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 
-from .key_bindings import KeyBindings, normalize_key
+from .key_bindings import KeyBindings, RESERVED_KEYS, normalize_key
 from .key_display import display_keys
 from .key_settings_ui import key_name
 from .web_contract import SETTINGS
@@ -113,6 +113,7 @@ class WebSettingsPage(WebPageController):
         super().__init__(host)
         self.library = host.controllers['library']
         self.capture_command = None
+        self.last_payload = None
         self.bridge = SettingsBridge(self)
         self.focus_requested = self.bridge.settingsFocusRequested
         self.library.refreshed.connect(self.refresh)
@@ -135,9 +136,16 @@ class WebSettingsPage(WebPageController):
                     failedTranslations=sum(entry.state == 'failed' for entry in queue))
 
     def refresh(self):
-        self.bridge.settingsChanged.emit(encode(self.payload()))
+        if not self.is_active():
+            return
+        payload = encode(self.payload())
+        if payload != self.last_payload:
+            self.last_payload = payload
+            self.bridge.settingsChanged.emit(payload)
 
     def activated(self):
+        # 비활성 동안 바뀐 값은 탭 진입의 refresh에서 반드시 보낸다.
+        self.last_payload = None
         self.timer.start()
 
     def deactivated(self):
@@ -146,7 +154,7 @@ class WebSettingsPage(WebPageController):
 
     def cancel_capture(self):
         if self.capture_command is not None:
-            result = dict(command=self.capture_command, key='', display='', cancelled=True, error='')
+            result = dict(command=self.capture_command, key='', display='', cancelled=True, error='', continuing=False)
             self.capture_command = None
             self.bridge.keyCaptured.emit(encode(result))
 
@@ -156,13 +164,18 @@ class WebSettingsPage(WebPageController):
         if key == 'Esc':
             self.cancel_capture()
             return encode({'ok': True})
-        result = dict(command=self.capture_command, key='', display='', cancelled=False, error='')
+        result = dict(command=self.capture_command, key='', display='', cancelled=False, error='', continuing=False)
         try:
             result['key'] = normalize_key(key)
             result['display'] = display_keys((result['key'],))
         except ValueError as error:
-            result['error'] = str(error)
-        self.capture_command = None
+            if key.casefold() in {reserved.casefold() for reserved in RESERVED_KEYS}:
+                result['error'] = str(error)
+            else:
+                result['error'] = '지원하는 키를 누르세요. 문자·숫자·방향키·기능키와 Ctrl/Alt/Shift 조합을 사용할 수 있습니다. Esc로 취소합니다.'
+                result['continuing'] = True
+        if not result['continuing']:
+            self.capture_command = None
         self.bridge.keyCaptured.emit(encode(result))
         return encode({'ok': True})
 
@@ -179,5 +192,7 @@ class WebSettingsPage(WebPageController):
                     self.cancel_capture()
                 elif name := key_name(event):
                     self.capture(name)
+                else:
+                    self.capture('')
             return True
         return False

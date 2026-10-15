@@ -1,10 +1,11 @@
 """공개 브리지 → 코어/Qt 흐름: 검사 잠금, 복원, 키 저장과 즉시 표시."""
 import json
 import threading
+import time
 from datetime import datetime, timezone
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog
 
@@ -23,7 +24,25 @@ def draft(bridge):
 
 
 def tick():
-    QTest.qWait(30)
+    # QTest.qWait는 WebEngine/검사 작업자와 함께 실행할 때 Qt 내부에서
+    # 대기한 채 돌아오지 않을 수 있다. 실행 중 이벤트 루프로 완료 신호를 받는다.
+    loop = QEventLoop()
+    QTimer.singleShot(30, loop.quit)
+    loop.exec()
+
+
+def wait_for_scan(window, bridge=None):
+    deadline = time.monotonic() + 30
+    try:
+        while window.worker is not None or (bridge is not None and bridge.busy):
+            assert time.monotonic() < deadline, '검사 완료 대기 시간 초과'
+            tick()
+    finally:
+        # 실패해도 유한한 테스트 작업자를 먼저 회수한다. tray.quit의 확인창으로
+        # 넘어가면 offscreen 전체 테스트가 영구 대기하므로 종료 신호까지 처리한다.
+        if window.worker is not None:
+            window.worker.wait()
+            QApplication.processEvents()
 
 
 def test_restore_lists_and_folder_removal_preserve_video(window_factory, core, tmp_path):
@@ -67,10 +86,7 @@ def test_native_file_and_folder_pickers_and_tag_entry(window_factory, core, tmp_
     monkeypatch.setattr(window.library_page, 'manage_tags', lambda: calls.append('tags'))
     for action in ('addFolder', 'addFile', 'manageTags'):
         assert json.loads(bridge.action(action, ''))['ok']
-        for _ in range(100):
-            tick()
-            if window.worker is None and not bridge.busy:
-                break
+        wait_for_scan(window, bridge)
         assert window.worker is None
     assert calls == ['folder', 'file', 'tags']
     assert core.watched_folders()[0].path == folder.resolve()
@@ -101,10 +117,7 @@ def test_scan_locks_mutations_but_allows_dismissed_restore_and_reports(window_fa
         assert not core.dismissed_videos()
     finally:
         finished.set()
-        for _ in range(100):
-            tick()
-            if window.worker is None:
-                break
+        wait_for_scan(window)
     state = json.loads(api['folders'].snapshot())
     assert not state['scanning'] and '영상 0개 등록' in state['report']
 
@@ -130,6 +143,7 @@ def test_key_save_updates_playback_f1_empty_reel_and_restart(window_factory, cor
     proposed['toggle_pause:0'] = ['P']
     assert 'error' not in json.loads(bridge.saveKeys(json.dumps(proposed)))
     assert 'N로 지점' in window.reel.empty.text()
+    assert 'N로 지점' in json.loads(bridges(window)['reel'].snapshot())['emptyDescription']
     assert core.command_for_key('N').kind == CommandType.POINT_HIGHLIGHT
     assert core.command_for_key('Insert') is None
     window.play_video(core.videos()[0].id)
@@ -184,6 +198,7 @@ def test_qt_capture_precedes_shell_keys(window_factory, key, modifier):
     tick()
     assert window.web_host.active_tab == 'settings'
     assert not window.settings_menu.isVisible()
+    captured = [result for result in captured if not result['continuing']]
     assert len(captured) == 1
     if key == Qt.Key.Key_Escape:
         assert captured[0]['cancelled']
@@ -221,3 +236,72 @@ def test_translation_and_quit_use_current_entry_points(window_factory, core, mon
     bridge.action('quit')
     tick()
     assert calls == ['translation', 'quit']
+
+
+@pytest.mark.parametrize('fullscreen', [False, True])
+def test_web_playback_alt_s_preserves_session_and_focus(window_factory, core, fullscreen):
+    window = window_factory('1')
+    window.player_factory = Player
+    window.play_video(core.videos()[0].id)
+    window.activateWindow()
+    tick()
+    if fullscreen:
+        QTest.keyClick(window.surface, Qt.Key.Key_Apostrophe)
+    session = core.playback.session
+    player = window.player
+    QTest.keyClick(window.surface, Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+    assert QApplication.activePopupWidget() is window.settings_menu
+    assert core.playback.session is session and window.player is player
+    assert window.pages.currentWidget() is window.playback_page
+    assert window.isFullScreen() is fullscreen
+    QTest.keyClick(window.settings_menu, Qt.Key.Key_Escape)
+    QApplication.processEvents()
+    assert not window.settings_menu.isVisible()
+    # offscreen은 숨은 QMenu를 활성 창으로 남긴다. 실창 검사는 hasFocus도 확인한다.
+    assert window.focusWidget() is window.surface
+    assert core.playback.session is session and window.player is player
+    assert window.isFullScreen() is fullscreen
+
+
+def test_unsupported_key_keeps_capture_until_supported_input(window_factory):
+    window = window_factory('1')
+    window.navigate_web_tab('settings')
+    window.activateWindow()
+    tick()
+    bridge = bridges(window)['settings']
+    results = []
+    bridge.keyCaptured.connect(lambda raw: results.append(json.loads(raw)))
+    bridge.beginCapture('point_highlight:0')
+    QTest.keyClick(window.web_host.view.focusProxy(), Qt.Key.Key_MediaPlay)
+    assert results[-1]['continuing']
+    assert '지원하는 키를 누르세요' in results[-1]['error']
+    bridge.captureKey('Unidentified')
+    assert results[-1]['continuing']
+    QTest.keyClick(window.web_host.view.focusProxy(), Qt.Key.Key_Up)
+    assert results[-1]['key'] == 'Up' and results[-1]['display'] == '↑'
+    assert not results[-1]['continuing']
+    bridge.beginCapture('point_highlight:0')
+    bridge.captureKey('Alt+s')
+    assert not results[-1]['continuing']
+    assert '예약 키' in results[-1]['error']
+
+
+def test_inactive_refresh_skips_payload_and_timer_only_emits_changes(window_factory, core, monkeypatch):
+    window = window_factory('1')
+    pages = window.web_host.controllers
+    for name in ('folders', 'settings'):
+        with monkeypatch.context() as patch:
+            patch.setattr(pages[name], 'payload', lambda: pytest.fail('비활성 payload 생성'))
+            window.library_page.refreshed.emit()
+    window.navigate_web_tab('settings')
+    changes = []
+    pages['settings'].bridge.settingsChanged.connect(changes.append)
+    for _ in range(3):
+        pages['settings'].timer.timeout.emit()
+    assert not changes
+    core.set_translation_cli('claude')
+    pages['settings'].timer.timeout.emit()
+    assert len(changes) == 1
+    assert json.loads(changes[0])['translationCli'] == 'claude'
+    pages['settings'].timer.timeout.emit()
+    assert len(changes) == 1

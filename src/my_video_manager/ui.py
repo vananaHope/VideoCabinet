@@ -131,7 +131,10 @@ class MainWindow(QMainWindow):
             return
         self.playback_page.close_help()
         if self.web_ui:
-            self.navigate_web_tab('settings')
+            if self.pages.currentWidget() is self.playback_page:
+                self.web_host.popup_settings_menu()
+            else:
+                self.navigate_web_tab('settings')
         else:
             self.settings_menu.popup(self.mapToGlobal(QPoint(12, 12)))
 
@@ -364,7 +367,10 @@ class MainWindow(QMainWindow):
                 return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
                 if self.web_ui:
-                    self.navigate_web_tab('settings')
+                    if self.pages.currentWidget() is self.playback_page:
+                        self.web_host.popup_settings_menu()
+                    else:
+                        self.navigate_web_tab('settings')
                 else:
                     self.settings_menu.popup(self.menuBar().mapToGlobal(self.menuBar().actionGeometry(
                         self.settings_menu.menuAction()).bottomLeft()))

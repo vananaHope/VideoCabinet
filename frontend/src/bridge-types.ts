@@ -503,6 +503,7 @@ export interface CapturedKeyData {
   display: string
   cancelled: boolean
   error: string
+  continuing: boolean
 }
 
 export type SettingsAction = "translation" | "quit"

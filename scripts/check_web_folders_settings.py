@@ -227,7 +227,26 @@ try:
     core.dismiss_video(second.id)
     window.refresh()
     click('[data-tab="excluded"]')
+    assert '파일 없음' not in content('[aria-label="폴더 관리"]')
+    # 제외 항목이 실제로 파일 없음일 때만 그 상태를 표시한다.
+    missing_folder = workspace / '파일 없는 제외 영상'
+    missing_folder.mkdir()
+    missing_path = missing_folder / '다시 연결할 영상.mkv'
+    missing_path.write_bytes(b'missing excluded')
+    core.add_watched_folder(missing_folder)
+    core.add_file(missing_path)
+    missing_video = next(v for v in core.videos() if v.title == missing_path.stem)
+    core.exclude_video(missing_video.id)
+    core.remove_watched_folder(missing_folder)
+    window.refresh()
+    if qt_window:
+        qt_window.refresh()
+    settle()
+    assert content('[aria-label="폴더 관리"]').count('파일 없음') == 1
     capture('folders-excluded', qt_window)
+    core.restore_video(missing_video.id)
+    window.refresh()
+    settle()
     assert button('되돌리기')
     wait(lambda: not core.excluded_videos())
     click('[data-tab="dismissed"]')
@@ -291,6 +310,10 @@ try:
     wait(lambda: not js('!!document.querySelector("[role=dialog]")'))
     assert host.active_tab == 'settings'
     assert 'Ctrl+7' in content('[aria-label="키 배치 편집"] [role="alert"]')
+    begin()
+    js('document.dispatchEvent(new KeyboardEvent("keydown", {key:"s", altKey:true, bubbles:true, cancelable:true}))')
+    wait(lambda: not js('!!document.querySelector("[role=dialog]")'))
+    assert 'Alt+S' in content('[aria-label="키 배치 편집"] [role="alert"]')
     for code, modifiers in (*((Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier) for index in range(7)),
                              (Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier),
                              (Qt.Key.Key_F1, Qt.KeyboardModifier.NoModifier)):
@@ -300,6 +323,29 @@ try:
         assert '예약 키' in content('[aria-label="키 배치 편집"]')
         wait(lambda: not js('!!document.querySelector("[role=dialog]")'))
     checks.append('실제 포커스 키 캡처: Ctrl+1~7, Alt+S, F1, Esc 및 조합 중 무시')
+    begin()
+    key(Qt.Key.Key_MediaPlay)
+    assert '지원하는 키를 누르세요' in content('[role="dialog"]')
+    js('document.dispatchEvent(new KeyboardEvent("keydown", {key:"Unidentified", bubbles:true, cancelable:true}))')
+    settle()
+    assert '지원하는 키를 누르세요' in content('[role="dialog"]')
+    key(Qt.Key.Key_Up)
+    row_selector = '[data-command="point_highlight:0"]'
+    row_text = lambda: js(f'document.querySelector({json.dumps(row_selector)}).closest("tr").textContent')
+    assert '↑' in row_text() and 'Insert' in row_text()
+    assert '적용하지 않은 변경 1건' in content('[aria-label="키 배치 편집"]')
+    navigate('folders')
+    navigate('settings')
+    assert '↑' in row_text()
+    begin('range_highlight:0')
+    key(Qt.Key.Key_Comma)
+    assert ', (쉼표)' in content('[aria-label="키 배치 편집"]')
+    assert '적용하지 않은 변경 2건' in content('[aria-label="키 배치 편집"]')
+    capture('keys-draft', keys_dialog)
+    assert button('변경 취소')
+    assert not js('document.querySelector("tr[data-changed=true]") !== null')
+    assert core.command_for_key('Insert').kind == CommandType.POINT_HIGHLIGHT
+    checks.append('초안 표시·건수·탭 왕복 유지·전체 취소·Python 키 이름·미지원 키 캡처 유지')
     begin()
     key(Qt.Key.Key_Return)
     assert '같은 키를 사용' in content('[aria-label="키 배치 편집"]')
@@ -312,7 +358,10 @@ try:
     assert core.command_for_key('N').kind == CommandType.POINT_HIGHLIGHT
     assert 'N로 지점' in window.reel.empty.text()
     assert js('document.activeElement.dataset.command') == 'point_highlight:0', js('document.activeElement.outerHTML')[:600]
-    checks.append('충돌 경고·저장 차단·웹 적용·빈 모아보기 안내 즉시 반영')
+    navigate('reel')
+    assert 'N로 지점' in content('[aria-label="하이라이트 모아보기"]')
+    navigate('settings')
+    checks.append('충돌 경고·저장 차단·웹 적용·Qt 및 웹 빈 모아보기 안내 즉시 반영')
     category('general')
     assert button('완전 종료')
     wait(lambda: js('!!document.querySelector("[role=alertdialog]")'))
@@ -331,6 +380,22 @@ try:
     window.play_video(first.id)
     window.activateWindow()
     settle()
+    session = core.playback.session
+    player = window.player
+    for fullscreen in (False, True):
+        if fullscreen:
+            key(Qt.Key.Key_Apostrophe)
+        key(Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+        assert QApplication.activePopupWidget() is window.settings_menu
+        assert core.playback.session is session and window.player is player
+        assert window.isFullScreen() is fullscreen
+        QTest.keyClick(window.settings_menu, Qt.Key.Key_Escape)
+        settle()
+        assert not window.settings_menu.isVisible()
+        assert (window.focusWidget() is window.surface) if args.offscreen else window.surface.hasFocus()
+        assert core.playback.session is session and window.player is player
+    key(Qt.Key.Key_Escape)
+    checks.append('일반·전체 화면 재생 중 Alt+S 메뉴·동일 세션 유지·닫은 뒤 재생 포커스')
     key(Qt.Key.Key_N)
     assert core.highlights(first.id), '웹에서 바꾼 실제 재생 키가 적용되지 않았습니다'
     key(Qt.Key.Key_F1)

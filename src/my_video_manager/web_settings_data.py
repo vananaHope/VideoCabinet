@@ -26,3 +26,4 @@ class CapturedKeyData(TypedDict):
     display: str
     cancelled: bool
     error: str
+    continuing: bool
