@@ -38,7 +38,7 @@ class HTTP:
             return HTTPResponse(self.status, {'Retry-After': '120'}, b'{"error":"quota_exceeded"}')
         if method == 'GET':
             return HTTPResponse(200, {}, b'{"data":[{"id":"custom-model"}]}')
-        if payload.get('max_tokens') == 1:
+        if payload.get('max_tokens') == 16:
             return HTTPResponse(200, {}, json.dumps(completion()).encode())
         prompt = payload['messages'][0]['content']
         targets = json.JSONDecoder().raw_decode(prompt.split('SUBTITLE_DATA_JSON:\n')[1])[0]['targets']
@@ -253,7 +253,7 @@ def test_local_server_key_check_and_known_effort_payload(server):
     adapter.translate(LINES, 'en')
     assert json.loads(server.requests[-1][2])['reasoning_effort'] == 'high'
     assert adapter.check_key().status == 'valid'
-    assert json.loads(server.requests[-1][2])['max_tokens'] == 1
+    assert json.loads(server.requests[-1][2])['max_tokens'] == 16
     assert server.requests[0][1]['X-Opencode-Session'] != server.requests[1][1]['X-Opencode-Session']
 
 
@@ -310,7 +310,7 @@ def test_retranslation_keeps_old_visible_provider_until_atomic_commit(connected)
     assert {provenance[l.id] for l in transcript.lines[1:]} == {'opencode_go'}
 
 
-@pytest.mark.parametrize('status,expected', [(401, '키 또는 접근 권한'), (503, '요청에 실패')])
+@pytest.mark.parametrize('status,expected', [(401, '키 또는 접근 권한'), (503, '서버가 일시적으로')])
 def test_primary_go_error_preserves_safe_provider_specific_message(connected, status, expected):
     core, http, _, store, _, _ = connected
     store.save('key')
@@ -318,11 +318,12 @@ def test_primary_go_error_preserves_safe_provider_specific_message(connected, st
     source(core, core.videos()[0].id)
     # 한도 응답이 아닌 실제 실패를 주입한다.
     def fail(*args, **kwargs):
-        return HTTPResponse(status, {}, b'{"error":"server secret"}')
+        return HTTPResponse(status, {}, b'{"error":"server diagnostic sk-private-token"}')
     http.request = fail
     result = core.process_next_translation()
     assert result.state == 'failed' and result.retry_at is None
-    assert expected in result.error and 'server secret' not in result.error_detail
+    assert expected in result.error and 'sk-private-token' not in result.error_detail
+    assert f'HTTP {status}: server diagnostic' in result.error_detail
 
 
 @pytest.mark.parametrize('identifier', ['codex', 'claude', 'opencode_go'])
@@ -394,3 +395,14 @@ def test_fallback_uses_go_model_from_job_start_and_backoff_keeps_notice(connecte
     assert '사용량 한도' in result.notice  # 이미 보류된 CLI를 건너뛴 작업도 원인을 남긴다.
     assert http.requests[-1][3]['model'] == 'next-go-model'
     assert len(cli.calls) == 2
+
+@pytest.mark.parametrize('status', [400, 402, 404, 500])
+def test_go_failure_diagnostics_survive_queue_storage(connected, status):
+    core, http, _, store, _, _ = connected
+    store.save('fake-key')
+    save(core, 'opencode_go')
+    http.status = status
+    source(core, core.videos()[0].id)
+    result = core.process_next_translation()
+    assert f'HTTP {status}' in result.error_detail
+    assert result.error == result.error_detail

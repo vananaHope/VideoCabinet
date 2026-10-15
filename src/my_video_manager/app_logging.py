@@ -19,7 +19,9 @@ def safe_detail(detail):
     detail = re.sub(r'https?://[^\s<>\"\']+',
                     lambda match: re.sub(r'(https?://)[^/]*@', r'\1[가림]@',
                                          re.split(r'[?#]', match[0], maxsplit=1)[0]), str(detail))
-    detail = re.sub(r'\bhf_[A-Za-z0-9]+\b', '[가림]', detail)
+    detail = re.sub(r'\b(?:hf_|sk-)[A-Za-z0-9_-]+', '[가림]', detail)
+    detail = re.sub(r'''(?i)(authorization["']?\s*[:=]\s*["']?)[^\r\n,"'<>}]+''',
+                    r'\1[가림]', detail)
     detail = re.sub(r'''(?i)((?:authorization|token|api[\s_-]*key|password|secret)["']?\s*[:=]\s*["']?(?:bearer\s+)?|\bbearer\s+)[^\s,;"'<>}]+''',
                     r'\1[가림]', detail)
     home = str(Path.home())
