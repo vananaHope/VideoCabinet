@@ -107,7 +107,9 @@ class Search:
         insert = f"""INSERT INTO search_subtitle_lines(source, line_id, text)
             VALUES('{source}', new.{identifier}, new.text)
             ON CONFLICT(source, line_id) DO UPDATE SET text=excluded.text, normalized=NULL;"""
-        delete = f"DELETE FROM search_subtitle_lines WHERE source='{source}' AND line_id=old.{identifier};"
+        # line_id is TEXT even for integer external IDs; matching affinity keeps
+        # SQLite on the (source, line_id) index for all three subtitle sources.
+        delete = f"DELETE FROM search_subtitle_lines WHERE source='{source}' AND line_id=CAST(old.{identifier} AS TEXT);"
         for event, body in (("INSERT", insert), ("DELETE", delete), ("UPDATE", delete + insert)):
             trigger_event = "UPDATE OF text" if event == "UPDATE" else event
             db.execute(f"""CREATE TRIGGER search_{source}_{event.lower()}

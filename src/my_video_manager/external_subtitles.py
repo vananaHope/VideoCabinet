@@ -51,6 +51,7 @@ def _language(value):
 
 def _decode(data):
     # BOM을 우선한다. BOM 없는 UTF-16은 ASCII 타임코드의 NUL 바이트로 판별한다.
+    # 짧은 CP949의 유효 UTF-8 바이트나 NUL 위치가 치우친 UTF-16은 오판할 수 있다.
     if data.startswith(b"\xef\xbb\xbf"):
         return data.decode("utf-8-sig"), "utf-8-sig"
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
@@ -88,21 +89,31 @@ def _seconds(value):
 
 def _timed_text(text, language):
     lines = []
-    for block in re.split(r"\n\s*\n", text.replace("\r\n", "\n").replace("\r", "\n").strip()):
+    skipped = 0
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    # Some VTT writers omit the blank line after the header.
+    text = re.sub(r"^WEBVTT[^\n]*(?:\n|$)", "", text).lstrip()
+    for block in re.split(r"\n\s*\n", text):
         rows = block.splitlines()
         if not rows or re.match(r"^(WEBVTT|NOTE|STYLE|REGION)(?:\s|$)", rows[0]):
             continue
         index = 0 if _CUE.match(rows[0]) else 1
         match = _CUE.match(rows[index]) if index < len(rows) else None
         if not match:
-            raise ValueError("자막 큐의 시작·끝 시각을 읽을 수 없습니다.")
-        start, end = map(_seconds, match.groups())
+            skipped += 1
+            continue
+        try:
+            start, end = map(_seconds, match.groups())
+        except ValueError:
+            skipped += 1
+            continue
         if end <= start:
-            raise ValueError("자막 끝 시각은 시작 시각보다 뒤여야 합니다.")
+            skipped += 1
+            continue
         value = _plain("\n".join(rows[index + 1:]))
         if value:
             lines.append(ExternalSubtitleLine(start, end, value))
-    return (ExternalSubtitle(language, "", tuple(lines)),)
+    return (ExternalSubtitle(language, "", tuple(lines)),), skipped
 
 
 class _Sami(HTMLParser):
@@ -116,6 +127,7 @@ class _Sami(HTMLParser):
         self.parts = []
         self.in_paragraph = False
         self.hidden = 0
+        self.skipped = 0
 
     def _paragraph(self):
         if self.in_paragraph:
@@ -138,10 +150,12 @@ class _Sami(HTMLParser):
             self.hidden += 1
         elif not self.hidden and tag == "sync":
             self._sync()
-            value = attrs.get("start", "")
+            value = attrs.get("start") or ""
             if not re.fullmatch(r"\d+", value):
-                raise ValueError("SMI SYNC 시작 시각을 읽을 수 없습니다.")
-            self.start = int(value) / 1000
+                self.skipped += 1
+                self.start = None
+            else:
+                self.start = int(value) / 1000
         elif not self.hidden and tag == "p":
             self._paragraph()
             self.language_class = (attrs.get("class") or "").casefold()
@@ -172,18 +186,26 @@ def _sami(text, language, duration):
         match = re.search(r"\blang\s*:\s*([\w-]+)", body, re.I)
         if match:
             declared[name.casefold()] = _language(match[1])
-    tracks = {}
-    for index, (start, paragraphs) in enumerate(parser.syncs):
-        end = (parser.syncs[index + 1][0] if index + 1 < len(parser.syncs)
-               else duration if math.isfinite(duration) and duration > 0 else start + 5)
-        if index + 1 < len(parser.syncs) and end < start:
-            raise ValueError("SMI SYNC 시각 순서가 잘못되었습니다.")
+    histories = {}
+    skipped = parser.skipped
+    for start, paragraphs in parser.syncs:
+        # A P-less SYNC closes every active class; a blank P closes only its class.
+        paragraphs = paragraphs or dict.fromkeys(histories, "")
+        if any(histories.get(name) and start < histories[name][-1][0] for name in paragraphs):
+            skipped += 1
+            continue
         for name, value in paragraphs.items():
-            track = tracks.setdefault(name, [])
+            histories.setdefault(name, []).append((start, value))
+    tracks = {}
+    for name, syncs in histories.items():
+        track = tracks.setdefault(name, [])
+        for index, (start, value) in enumerate(syncs):
+            end = (syncs[index + 1][0] if index + 1 < len(syncs)
+                   else duration if math.isfinite(duration) and duration > 0 else start + 5)
             if value and end > start:
                 track.append(ExternalSubtitleLine(start, end, value))
     return tuple(ExternalSubtitle(declared.get(name) or _language(name) or language, name, tuple(lines))
-                 for name, lines in tracks.items())
+                 for name, lines in tracks.items()), skipped
 
 
 class ExternalSubtitles:
@@ -224,16 +246,21 @@ class ExternalSubtitles:
         with self._connect() as db:
             locations = db.execute("""SELECT l.video_id, l.path, v.duration FROM locations l
                 JOIN videos v ON v.id=l.video_id""").fetchall()
-            old = db.execute("SELECT * FROM external_subtitle_files").fetchall()
+            old = db.execute("""SELECT f.*, EXISTS(SELECT 1 FROM external_subtitles s WHERE s.file_id=f.id)
+                AS has_tracks FROM external_subtitle_files f""").fetchall()
             if video_ids is not None:
-                locations = [row for row in locations if row["video_id"] in video_ids]
-                old = [row for row in old if row["video_id"] in video_ids]
+                # Registering a longer name can take a sidecar away from another
+                # video in this directory. Reconcile all its registered siblings.
+                affected = {Path(row["path"]).parent for row in (*locations, *old) if row["video_id"] in video_ids}
+                locations = [row for row in locations if Path(row["path"]).parent in affected]
+                old = [row for row in old if Path(row["path"]).parent in affected]
             previous = {(row["video_id"], row["path"]): row for row in old}
             directories = {}
             found = {}
             warnings = []
             unavailable = set()
-            for location in locations:
+            owners = {}
+            for location in sorted(locations, key=lambda row: len(Path(row["path"]).stem), reverse=True):
                 path = Path(location["path"])
                 if path.parent not in directories:
                     try:
@@ -254,6 +281,12 @@ class ExternalSubtitles:
                 for name, candidate in islice(candidates, index, None):
                     if not name.startswith(stem):
                         break
+                    remainder = candidate.stem[len(path.stem):]
+                    if remainder and remainder[0] not in "._- [(":
+                        continue
+                    if owners.get(candidate, len(stem)) > len(stem):
+                        continue
+                    owners[candidate] = len(stem)
                     found[(location["video_id"], str(candidate))] = (candidate, _language(candidate.stem[len(path.stem):]),
                                                                     location["duration"])
             for key, (path, language, duration) in found.items():
@@ -263,19 +296,27 @@ class ExternalSubtitles:
                 try:
                     info = path.stat()
                     size, mtime = info.st_size, info.st_mtime_ns
-                    if saved and (saved["size"], saved["mtime_ns"]) == (size, mtime) and not saved["warning"]:
+                    if saved and (saved["size"], saved["mtime_ns"]) == (size, mtime) and (not saved["warning"] or saved["has_tracks"]):
+                        if saved["warning"]:
+                            warnings.append((path, saved["warning"]))
                         continue
                     text, encoding = _decode(path.read_bytes())
                     if "\x00" in text:
                         raise ValueError("자막에 NUL 문자가 있습니다.")
-                    tracks = _sami(text, language, duration) if path.suffix.casefold() == ".smi" else _timed_text(text, language)
+                    tracks, skipped = (_sami(text, language, duration) if path.suffix.casefold() == ".smi"
+                                       else _timed_text(text, language))
+                    if not any(track.lines for track in tracks):
+                        raise ValueError("읽을 수 있는 자막 줄이 없습니다.")
+                    if skipped:
+                        warning = f"외부 자막: {skipped}개 블록을 건너뜀"
                     after = path.stat()
                     if (after.st_size, after.st_mtime_ns) != (size, mtime):
                         raise ValueError("검사 중 자막 파일이 변경되었습니다. 다시 검사해 주세요.")
                 except (OSError, ValueError) as error:
                     warning = f"외부 자막: {error}"
-                    warnings.append((path, warning))
                     tracks = ()
+                if warning:
+                    warnings.append((path, warning))
                 if saved:
                     file_id = saved["id"]
                     db.execute("DELETE FROM external_subtitles WHERE file_id=?", (file_id,))
@@ -290,7 +331,11 @@ class ExternalSubtitles:
                                           (file_id, track.language, track.language_class)).lastrowid
                     db.executemany("INSERT INTO external_subtitle_lines(subtitle_id, start, end, text) VALUES (?, ?, ?, ?)",
                                    [(track_id, line.start, line.end, line.text) for line in track.lines])
+                # File signature, warning, tracks and search rows commit together.
+                # No write transaction spans reading/parsing the next file.
+                db.commit()
             for key, row in previous.items():
                 if key not in found and Path(row["path"]).parent not in unavailable:
                     db.execute("DELETE FROM external_subtitle_files WHERE id=?", (row["id"],))
+                    db.commit()
             return tuple(warnings)

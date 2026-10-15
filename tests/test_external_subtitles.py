@@ -116,7 +116,8 @@ def test_smi_last_sync_at_video_end_is_not_a_line(library):
     video.with_suffix(".smi").write_text('<SYNC Start=120000><P Class=KRCC>영상 밖', encoding="utf-8")
     core.add_file(video)
     file, = core.external_subtitles(core.videos()[0].id)
-    assert file.subtitles[0].lines == ()
+    assert file.subtitles == ()
+    assert file.warning
     assert not core.search("영상밖").results
 
 
@@ -404,8 +405,184 @@ def test_cp949_extended_hangul_and_smi_class_alias(library):
     assert core.search("Hello").results[0].language == "en"
 
 
-def test_filename_prefix_is_literal_and_not_a_word_boundary(library):
+def test_filename_prefix_requires_a_separator(library):
     core, video = library
     (video.parent / "lesson2.en.srt").write_text(srt(), encoding="utf-8")
     core.add_file(video)
+    assert not core.search("체중이동").results
+
+
+@pytest.mark.parametrize("separator", [".", "_", "-", " ", "[", "("])
+def test_filename_prefix_accepts_each_separator(library, separator):
+    core, video = library
+    (video.parent / f"lesson{separator}en.srt").write_text(srt(), encoding="utf-8")
+    core.add_file(video)
     assert core.search("체중이동").results[0].language == "en"
+
+
+def test_episode_number_and_longest_stem_ownership_on_registration_and_scan(library):
+    core, video = library
+    short = video.with_name("Show.mkv")
+    first = video.with_name("Show E1.mkv")
+    tenth = video.with_name("Show E10.mkv")
+    for path in (short, first, tenth):
+        path.write_bytes(path.name.encode())
+    tenth.with_suffix(".ko.srt").write_text(srt("열 번째"), encoding="utf-8")
+    first.with_suffix(".en.srt").write_text(srt("첫 번째"), encoding="utf-8")
+    core.add_file(short)
+    core.add_file(first)
+    core.add_file(tenth)
+    for scan in (False, True):
+        if scan:
+            core.scan()
+        videos = {item.title: item.id for item in core.videos()}
+        assert core.external_subtitles(videos["Show"]) == ()
+        assert core.search("첫번째").results[0].video_id == videos["Show E1"]
+        result, = core.search("열번째").results
+        assert result.video_id == videos["Show E10"]
+
+
+@pytest.mark.parametrize("english_start", [1000, 1500])
+@pytest.mark.parametrize("closing", ["<SYNC Start=3000><P Class=KRCC>&nbsp;<SYNC Start=4000><P Class=ENCC>&nbsp;",
+                                     "<SYNC Start=3000>"])
+def test_smi_next_sync_is_per_language(library, english_start, closing):
+    core, video = library
+    video.with_suffix(".smi").write_bytes((
+        f'<SYNC Start=1000><P Class=KRCC>안녕하세요<SYNC Start={english_start}><P Class=ENCC>Hello'
+        + closing).encode("cp949"))
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning is None
+    tracks = {track.language: track.lines for track in file.subtitles}
+    assert (tracks["ko"][0].start, tracks["ko"][0].end) == (1, 3)
+    assert (tracks["en"][0].start, tracks["en"][0].end) == (english_start / 1000, 4 if "ENCC" in closing else 3)
+    assert core.search("안녕하세요").results[0].language == "ko"
+
+
+@pytest.mark.parametrize("bad", [
+    "2\n00:00:20,000 --> 00:00:20,000\n버릴 줄",
+    "끝 잔여 블록",
+    "2\n00:00:20,50 --> 00:00:21,000\n버릴 줄",
+    "큐 글자 사이의 빈 줄 뒤 텍스트",
+])
+def test_malformed_srt_block_preserves_good_cues_and_warning(library, bad, monkeypatch):
+    core, video = library
+    sidecar = video.with_suffix(".srt")
+    sidecar.write_text(srt("정상 줄") + "\n" + bad + "\n\n" + srt("다음 정상 줄"), encoding="utf-8")
+    result = core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning == "외부 자막: 1개 블록을 건너뜀"
+    assert len(file.subtitles[0].lines) == 2
+    assert any("1개 블록" in issue.message for issue in result.issues)
+    assert len(core.search("정상줄").results) == 2
+    original = Path.read_bytes
+    def no_reread(path):
+        assert path != sidecar, "서명이 같은 부분 성공 파일을 다시 읽으면 안 됩니다."
+        return original(path)
+    monkeypatch.setattr(Path, "read_bytes", no_reread)
+    core.scan()
+    assert core.external_subtitles(file.video_id)[0].warning == file.warning
+
+
+@pytest.mark.parametrize("bad", ["<SYNC Start=500>", "<SYNC Start=1000ms>", "<SYNC>"])
+def test_malformed_smi_block_preserves_good_syncs(library, bad):
+    core, video = library
+    video.with_suffix(".smi").write_text(
+        '<SYNC Start=1000><P Class=KRCC>정상 줄' + bad + '<P Class=KRCC>버릴 줄'
+        '<SYNC Start=3000><P Class=KRCC>&nbsp;<SYNC Start=4000><P Class=KRCC>다음 정상 줄', encoding="utf-8")
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning == "외부 자막: 1개 블록을 건너뜀"
+    assert [(line.start, line.end) for line in file.subtitles[0].lines] == [(1, 3), (4, 120)]
+    assert not core.search("버릴줄").results
+    assert len(core.search("정상줄").results) == 2
+
+
+def test_vtt_without_blank_line_after_header(library):
+    core, video = library
+    video.with_suffix(".vtt").write_text("WEBVTT\n00:01.000 --> 00:02.000\nHello", encoding="utf-8")
+    core.add_file(video)
+    assert core.search("Hello").results[0].start == 1
+
+
+def test_import_commits_complete_files_and_resumes_after_interruption(library, monkeypatch):
+    core, video = library
+    first = video.with_suffix(".a.srt")
+    second = video.with_suffix(".b.srt")
+    core.add_file(video)
+    video_id = core.videos()[0].id
+    first.write_text(srt("첫 파일"), encoding="utf-8")
+    second.write_text(srt("둘째 파일"), encoding="utf-8")
+    original = Path.read_bytes
+    def interrupt(path):
+        if path == second:
+            # Another connection can read and write while the next file is parsed.
+            with sqlite3.connect(core.database, timeout=.05) as db:
+                assert db.execute("SELECT count(*) FROM external_subtitle_files").fetchone()[0] == 1
+                db.execute("UPDATE videos SET title=title WHERE id=?", (video_id,))
+            raise RuntimeError("검사 중단")
+        return original(path)
+    monkeypatch.setattr(Path, "read_bytes", interrupt)
+    with pytest.raises(RuntimeError, match="검사 중단"):
+        core.scan()
+    assert len(core.external_subtitles(video_id)) == 1
+    assert core.search("첫파일").results
+    monkeypatch.setattr(Path, "read_bytes", original)
+    core = make_core(video.parent.parent)
+    core.scan()
+    assert len(core.external_subtitles(video_id)) == 2
+    assert core.search("둘째파일").results
+
+
+@pytest.mark.parametrize("operation", ["DELETE", "UPDATE"])
+def test_small_subtitle_change_does_not_scan_all_search_rows(library, operation):
+    core, video = library
+    video.with_suffix(".large.srt").write_text("\n".join(srt("대량 자막") for _ in range(30_000)), encoding="utf-8")
+    small = video.with_suffix(".small.srt")
+    small.write_text("\n".join(srt("작은 자막") for _ in range(100)), encoding="utf-8")
+    core.add_file(video)
+    core.prepare_search()
+    # Instruction count is stable across machine speeds and detects a trigger
+    # scanning 30,000 search rows once for each of the 100 changed lines.
+    steps = 0
+    def progress():
+        nonlocal steps
+        steps += 1000
+        return steps > 200_000
+    with sqlite3.connect(core.database) as db:
+        track_id = db.execute("""SELECT s.id FROM external_subtitles s
+            JOIN external_subtitle_files f ON f.id=s.file_id WHERE f.path=?""", (str(small),)).fetchone()[0]
+        db.set_progress_handler(progress, 1000)
+        if operation == "DELETE":
+            db.execute("DELETE FROM external_subtitle_lines WHERE subtitle_id=?", (track_id,))
+        else:
+            db.execute("UPDATE external_subtitle_lines SET text='바뀐 자막' WHERE subtitle_id=?", (track_id,))
+        db.set_progress_handler(None, 0)
+    assert not core.search("작은자막").results
+    assert len(core.search("바뀐자막").results) == (100 if operation == "UPDATE" else 0)
+    assert core.search("대량자막").results
+
+
+@pytest.mark.parametrize("suffix,content", [
+    (".srt", "1\n00:00:01,000 --> 00:00:01,000\n버릴 줄"),
+    (".vtt", "WEBVTT\n\n끝 잔여 블록"),
+    (".smi", "<SYNC Start=1000ms><P Class=KRCC>버릴 줄"),
+])
+def test_no_recovered_lines_is_a_file_failure(library, suffix, content):
+    core, video = library
+    video.with_suffix(suffix).write_text(content, encoding="utf-8")
+    result = core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning
+    assert file.subtitles == ()
+    assert any(issue.failed for issue in result.issues)
+    assert not core.search("버릴줄").results
+
+
+def test_skipped_block_warning_counts_multiple_blocks(library):
+    core, video = library
+    video.with_suffix(".vtt").write_text("WEBVTT\n" + srt("정상") + "\n잔여 하나\n\n잔여 둘", encoding="utf-8")
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning == "외부 자막: 2개 블록을 건너뜀"
+    assert core.search("정상").results
