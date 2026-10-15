@@ -21,6 +21,14 @@ from my_video_manager.review_ui import ReviewDialog
 from my_video_manager.web_dialogs_models import DialogModel
 
 
+def wait_for(predicate):
+    for _ in range(300):
+        if predicate():
+            return
+        QTest.qWait(20)
+    assert predicate()
+
+
 def state(dialogs):
     return json.loads(dialogs.bridge.snapshot())['dialog']
 
@@ -96,6 +104,7 @@ def test_highlight_precision_and_nested_tags(window_factory, core):
     core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
     highlight = core.highlights(video.id)[0]
     def check():
+        assert state(dialogs)['rows'][0]['title'] == '00:00:01.235 (지점)'
         act(dialogs, 'tags', selected=str(highlight.id))
         act(dialogs, 'add', name='장면')
         act(dialogs, 'close')
@@ -105,6 +114,24 @@ def test_highlight_precision_and_nested_tags(window_factory, core):
         assert core.highlights(video.id)[0].start == highlight.start
         assert core.highlight_tags(highlight.id)[0].name == '장면'
     within(lambda: HighlightList(core, video.id, 100, window).exec(), dialogs, check)
+
+
+def test_highlight_empty_input_is_rejected_and_changed_time_rounds(window_factory, core):
+    window = window_factory('1')
+    video = core.videos()[0]
+    from my_video_manager.core import Command, CommandType
+    core.playback.start(video.id, 0)
+    core.playback.report(1.234567)
+    core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
+    highlight = core.highlights(video.id)[0]
+    dialogs = window.web_host.dialogs
+    def check():
+        payload = {**state(dialogs)['values'], 'start': ''}
+        assert 'error' in json.loads(dialogs.bridge.act(state(dialogs)['id'], 'save', json.dumps(payload)))
+        assert core.highlights(video.id)[0].start == highlight.start
+        act(dialogs, 'save', **{**payload, 'start': '2.34567'})
+        assert core.highlights(video.id)[0].start == 2.346
+    within(lambda: HighlightEditor(core, highlight, 100, window).exec(), dialogs, check)
 
 
 @pytest.mark.parametrize('kind', ['tag-manager', 'translation', 'subtitles'])
@@ -128,25 +155,81 @@ def test_dialog_blocks_reserved_navigation_keys(window_factory, core):
         QTest.keyClick(window.web_host.view, Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
         assert window.web_host.active_tab == 'library'
         assert not window.settings_menu.isVisible()
+        window.navigate_web_tab('settings')
+        window.show_fullscreen_settings_menu()
+        assert window.web_host.active_tab == 'library'
+        assert not window.settings_menu.isVisible()
     within(lambda: TagManager(core, window).exec(), dialogs, check)
+
+
+def test_modal_keys_reach_other_qt_consumers(window_factory, core):
+    from PySide6.QtCore import QObject
+    from PySide6.QtWidgets import QLineEdit
+    window = window_factory('1')
+    received = []
+    class Capture(QObject):
+        def eventFilter(self, watched, event):
+            if event.type() == QEvent.Type.KeyPress:
+                received.append(event.key())
+            return False
+    capture = Capture(window)
+    field = QLineEdit(window)
+    field.installEventFilter(capture)
+    def check():
+        QTest.keyClick(field, Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyClick(field, Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+        assert Qt.Key.Key_2 in received and Qt.Key.Key_S in received
+        assert window.web_host.active_tab == 'library'
+    within(lambda: TagManager(core, window).exec(), window.web_host.dialogs, check)
+
+
+@pytest.mark.parametrize('after_detach', [False, True], ids=['A-late-callback', 'B-open-container'])
+def test_shell_return_always_reattaches_live_dialog(window_factory, core, after_detach):
+    window = window_factory('1')
+    host, dialogs = window.web_host, window.web_host.dialogs
+    def check():
+        window.pages.setCurrentWidget(window.playback_page)
+        if after_detach:
+            wait_for(lambda: dialogs.container is not None)
+            assert host.view.parent() is dialogs.container
+        window.pages.setCurrentWidget(host)
+        QTest.qWait(300)
+        assert dialogs.active
+        assert dialogs.container is None
+        assert host.view.parent() is host
+    within(lambda: TagManager(core, window).exec(), dialogs, check)
+
+
+def test_dialog_snapshot_failure_cleans_run_and_allows_retry(window_factory, monkeypatch):
+    window = window_factory('1')
+    dialogs = window.web_host.dialogs
+    with monkeypatch.context() as patch:
+        def fail(self):
+            raise ValueError('스냅샷 실패')
+        patch.setattr(DialogModel, 'snapshot', fail)
+        with pytest.raises(ValueError, match='스냅샷 실패'):
+            dialogs.run('tag-manager')
+    assert not dialogs.active and dialogs.loop is None and not dialogs.timer.isActive()
+    assert dialogs.container is None
+    within(lambda: dialogs.run('tag-manager'), dialogs, lambda: act(dialogs, 'close'))
 
 
 def test_common_modal_gate_clears_on_navigation_reload_and_playback(window_factory):
     window = window_factory('1')
     host = window.web_host
-    host.bridge.modalState(True)
+    host.dialogs.bridge.modalState(1)
     window.activateWindow()
     QTest.keyClick(host.view, Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
     assert host.active_tab == 'library'
     host.navigate('statistics')
     assert not host.dialogs.web_modal
-    host.bridge.modalState(True)
+    host.dialogs.bridge.modalState(1)
     host.view.loadStarted.emit()
     assert not host.dialogs.web_modal
-    host.bridge.modalState(True)
+    host.dialogs.bridge.modalState(1)
     window.pages.setCurrentWidget(window.playback_page)
     assert not host.dialogs.web_modal
-    host.bridge.modalState(True)  # 숨은 웹에서 늦게 온 상태는 차단을 되살리지 않는다.
+    host.dialogs.bridge.modalState(1)  # 숨은 웹에서 늦게 온 상태는 차단을 되살리지 않는다.
     assert not host.dialogs.web_modal
 
 
@@ -197,6 +280,44 @@ def test_review_protected_translation_confirmation_and_queue_lock(review_window)
         act(dialogs, 'edit-translation', selected=line.original.id)
         error = json.loads(dialogs.bridge.act(state(dialogs)['id'], 'save', json.dumps({'text': '금지'})))
         assert 'error' in error
+    within(lambda: ReviewDialog(core, video_id, window.review_jump, window.review_changed, window).exec(), dialogs, check)
+
+
+def test_review_failed_player_returns_to_shell_with_live_dialog(review_window):
+    window, core, video_id = review_window
+    host, dialogs = window.web_host, window.web_host.dialogs
+    class BrokenPlayer:
+        def play(self, *args, **kwargs):
+            raise RuntimeError('mpv 시작 실패')
+        def close(self):
+            pass
+        def position(self):
+            return 0
+        def take_positions(self):
+            return []
+        def take_eof(self):
+            return False
+    window.player_factory = lambda _: BrokenPlayer()
+    def check():
+        response = json.loads(dialogs.bridge.act(state(dialogs)['id'], 'jump', json.dumps({'selected': core.review_lines(video_id)[0].original.id})))
+        assert response['error'] == 'mpv 시작 실패'
+        QTest.qWait(300)
+        assert window.pages.currentWidget() is host
+        assert host.view.parent() is host and dialogs.container is None and dialogs.active
+    within(lambda: ReviewDialog(core, video_id, window.review_jump, window.review_changed, window).exec(), dialogs, check)
+
+
+def test_locked_review_can_replace_range_with_full_regeneration(review_window, setup):
+    window, core, video_id = review_window
+    core.request_subtitle_range(video_id, 0, 1)
+    dialogs = window.web_host.dialogs
+    def check():
+        assert state(dialogs)['locked']
+        warning = act(dialogs, 'regenerate')
+        assert warning['confirmation'] and warning['confirm_destructive']
+        act(dialogs, 'confirm')
+        core.process_next_subtitle()
+        assert 'start' not in setup[2].calls[-1] and 'duration' not in setup[2].calls[-1]
     within(lambda: ReviewDialog(core, video_id, window.review_jump, window.review_changed, window).exec(), dialogs, check)
 
 

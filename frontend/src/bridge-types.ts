@@ -13,7 +13,6 @@ export interface ShellBridge {
   ready: (reply: Reply) => void
   shellSnapshot: (reply: Reply) => void
   navigate: (tab: Tab, reply: Reply) => void
-  modalState: (open: boolean, reply: Reply) => void
   shellChanged: Signal<string>
   shellStatusChanged: Signal<string>
   shellFocusRequested: Signal<string>
@@ -23,7 +22,6 @@ export function publicShellBridge(raw: ShellBridge): ShellBridge {
     ready: raw.ready.bind(raw),
     shellSnapshot: raw.shellSnapshot.bind(raw),
     navigate: raw.navigate.bind(raw),
-    modalState: raw.modalState.bind(raw),
     shellChanged: Object.freeze({ connect: raw.shellChanged.connect.bind(raw.shellChanged), disconnect: raw.shellChanged.disconnect.bind(raw.shellChanged) }),
     shellStatusChanged: Object.freeze({ connect: raw.shellStatusChanged.connect.bind(raw.shellStatusChanged), disconnect: raw.shellStatusChanged.disconnect.bind(raw.shellStatusChanged) }),
     shellFocusRequested: Object.freeze({ connect: raw.shellFocusRequested.connect.bind(raw.shellFocusRequested), disconnect: raw.shellFocusRequested.disconnect.bind(raw.shellFocusRequested) }),
@@ -416,6 +414,8 @@ export interface DialogData {
   locked: boolean
   warning: string
   confirmation: string
+  confirm_title: string
+  confirm_destructive: boolean
 }
 
 export interface DialogSnapshot {
@@ -424,6 +424,8 @@ export interface DialogSnapshot {
 
 export interface DialogsBridge {
   snapshot: (reply: Reply) => void
+  modalState: (open: number, reply: Reply) => void
+  contentSize: (id: string, width: number, height: number, reply: Reply) => void
   act: (id: string, action: string, payload: string, reply: Reply) => void
   candidates: (prefix: string, reply: Reply) => void
   dialogsChanged: Signal<string>
@@ -431,6 +433,8 @@ export interface DialogsBridge {
 export function publicDialogsBridge(raw: DialogsBridge): DialogsBridge {
   return Object.freeze({
     snapshot: raw.snapshot.bind(raw),
+    modalState: raw.modalState.bind(raw),
+    contentSize: raw.contentSize.bind(raw),
     act: raw.act.bind(raw),
     candidates: raw.candidates.bind(raw),
     dialogsChanged: Object.freeze({ connect: raw.dialogsChanged.connect.bind(raw.dialogsChanged), disconnect: raw.dialogsChanged.disconnect.bind(raw.dialogsChanged) }),

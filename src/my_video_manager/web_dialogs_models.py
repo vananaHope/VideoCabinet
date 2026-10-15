@@ -1,5 +1,6 @@
 """웹 대화상자의 표시/명령 어댑터. 모든 저장 정책은 AppCore 공개 API를 따른다."""
 from uuid import uuid4
+from math import isfinite
 
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 from .review import ReviewConfirmationRequired
@@ -21,6 +22,8 @@ class DialogModel:
         self.identifier = uuid4().hex
         self.values = values()
         self.confirmation = ''
+        self.confirm_title = ''
+        self.confirm_destructive = False
         self.pending = None
         self.message = ''
         if kind == 'highlight':
@@ -48,7 +51,7 @@ class DialogModel:
         c, ctx, kind = self.core, self.context, self.kind
         data = dict(id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], available=[],
                     choices=[], values=self.values.copy(), maximum=0.0, locked=False, warning='',
-                    confirmation=self.confirmation)
+                    confirmation=self.confirmation, confirm_title=self.confirm_title, confirm_destructive=self.confirm_destructive)
         if kind == 'tags':
             highlight = ctx.get('highlight_id')
             tags = c.highlight_tags(highlight) if highlight is not None else c.video_tags(ctx['video_id'])
@@ -66,8 +69,9 @@ class DialogModel:
                         choices=[row('', '새 시리즈'), *[row(s.id, s.name) for s in series]],
                         available=[row(v.id, v.title, '파일 없음' if v.missing else '') for v in c.videos() if v.id not in assigned])
         elif kind == 'highlights':
+            from .highlight_ui import timestamp
             data.update(description='더블클릭 또는 Enter로 시각·메모 편집', rows=[
-                row(h.id, f'{h.start:.3f}' + (f' – {h.end:.3f}초' if h.end is not None else '초 · 지점'),
+                row(h.id, timestamp(h.start) + (f' – {timestamp(h.end)}' if h.end is not None else ' (지점)'),
                     h.note.text if h.note else '메모 없음', ', '.join(t.name for t in c.highlight_tags(h.id)), h.start, h.end)
                 for h in c.highlights(ctx['video_id'])])
         elif kind == 'highlight':
@@ -107,8 +111,19 @@ class DialogModel:
         data['warning'] = data['warning'] or self.message
         return data
 
-    def confirm(self, message, callback):
+    @staticmethod
+    def time_value(value):
+        try:
+            number = float(value)
+        except (ValueError, TypeError):
+            raise ValueError('시작과 끝 시각을 입력하세요.') from None
+        if not isfinite(number):
+            raise ValueError('올바른 시각을 입력하세요.')
+        return round(number, 3)
+
+    def confirm(self, message, callback, *, title='자막 검수', destructive=False):
         self.confirmation, self.pending = message, callback
+        self.confirm_title, self.confirm_destructive = title, destructive
 
     def push(self, kind, **context):
         self.owner.push(kind, **context)
@@ -150,7 +165,7 @@ class DialogModel:
             if action == 'rename':
                 self.push('tag-rename', tag=tag)
             elif action == 'delete':
-                self.confirm(f'‘{tag.name}’ 태그를 모든 영상·하이라이트에서 삭제할까요?', lambda: c.delete_tag(tag.id))
+                self.confirm(f'‘{tag.name}’ 태그를 모든 영상·하이라이트에서 삭제할까요?', lambda: c.delete_tag(tag.id), title='태그 삭제', destructive=True)
             else:
                 raise ValueError('지원하지 않는 태그 작업입니다.')
         elif kind == 'tag-rename' and action == 'save':
@@ -184,8 +199,8 @@ class DialogModel:
                 raise ValueError('지원하지 않는 하이라이트 작업입니다.')
         elif kind == 'highlight' and action == 'save':
             h = ctx['highlight']
-            start = resolve_time_input(h.start, self.values['start'], float(data['start']))
-            end = resolve_time_input(h.end, self.values['end'], float(data['end'])) if data['range'] else None
+            start = resolve_time_input(h.start, self.values['start'], self.time_value(data['start']))
+            end = resolve_time_input(h.end, self.values['end'], self.time_value(data['end'])) if data['range'] else None
             c.update_highlight(h.id, start=start, end=end, note=data['text'])
             self.owner.pop(accepted=True)
         elif kind == 'subtitles' and action == 'save':
@@ -195,7 +210,7 @@ class DialogModel:
                 self.owner.window.subtitles.video_changed.emit(ctx['video_id'])
                 self.owner.pop(accepted=True)
             if c.transcript(ctx['video_id']):
-                self.confirm(c.subtitle_regeneration_warning(ctx['video_id']), request)
+                self.confirm(c.subtitle_regeneration_warning(ctx['video_id']), request, title='원어 자막 다시 생성', destructive=True)
             else:
                 request()
         elif kind == 'review':
@@ -214,7 +229,7 @@ class DialogModel:
                 def regenerate():
                     transcript = c.transcript(ctx['video_id'])
                     c.request_subtitles(ctx['video_id'], transcript.spoken_language if transcript and transcript.language_specified else None)
-                self.confirm(c.subtitle_regeneration_warning(ctx['video_id']), regenerate)
+                self.confirm(c.subtitle_regeneration_warning(ctx['video_id']), regenerate, destructive=True)
             elif action in ('export-original', 'export-translation'):
                 translated = action == 'export-translation'
                 export = c.subtitle_export(ctx['video_id'], translated=translated)
@@ -236,12 +251,12 @@ class DialogModel:
             try:
                 edit()
             except ReviewConfirmationRequired as warning:
-                self.confirm(str(warning), lambda: edit(True))
+                self.confirm(str(warning), lambda: edit(True), destructive=True)
         elif kind == 'range':
             if action == 'bounds':
-                self.values.update(start=float(data['start']), end=float(data['end']))
+                self.values.update(start=self.time_value(data['start']), end=self.time_value(data['end']))
             elif action == 'save':
-                c.request_subtitle_range(ctx['video_id'], float(data['start']), float(data['end']))
+                c.request_subtitle_range(ctx['video_id'], self.time_value(data['start']), self.time_value(data['end']))
                 self.owner.pop(accepted=True)
             else:
                 raise ValueError('지원하지 않는 구간 작업입니다.')

@@ -72,8 +72,7 @@ class BridgeContract:
 
 SHELL = BridgeContract(
     name='shell', interface='ShellBridge',
-    slots={'ready': (), 'shellSnapshot': (), 'navigate': (Argument('tab', str, 'Tab'),),
-           'modalState': (Argument('open', bool, 'boolean'),)},
+    slots={'ready': (), 'shellSnapshot': (), 'navigate': (Argument('tab', str, 'Tab'),)},
     signals={'shellChanged': str, 'shellStatusChanged': str, 'shellFocusRequested': str},
     aliases=(TypeAlias('Tab', tuple(name for name, _ in TABS)),),
     constants=(Constant('tabs', TABS),),
@@ -136,6 +135,8 @@ QUEUE = BridgeContract(name='queue', interface='QueueBridge', slots={
 DIALOGS = BridgeContract(
     name='dialogs', interface='DialogsBridge',
     slots={'snapshot': (),
+           'modalState': (Argument('open', int, 'number'),),
+           'contentSize': (Argument('id', str, 'string'), Argument('width', int, 'number'), Argument('height', int, 'number')),
            'act': (Argument('id', str, 'string'), Argument('action', str, 'string'), Argument('payload', str, 'string')),
            'candidates': (Argument('prefix', str, 'string'),)},
     signals={'dialogsChanged': str},

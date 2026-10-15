@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { connectBridge, request } from '@/bridge'
 import type { DialogData, DialogSnapshot, DialogsBridge, DialogValues } from '@/bridge-types'
 import { Button } from '@/components/ui/button'
@@ -7,7 +7,8 @@ import { ConfirmDialog } from '@/components/page-parts'
 import { Choice, DialogFrame, DialogList, TextArea } from './dialog-parts'
 import { TagEntry } from './TagEntry'
 
-type Draft = { form: DialogValues; selected: string; member: string; available: string; scroll: number[] }
+type FormValues = Omit<DialogValues, 'start' | 'end'> & { start: number | string; end: number | string }
+type Draft = { form: FormValues; selected: string; member: string; available: string; scroll: number[] }
 
 export default function DialogsLayer() {
   const [bridge, setBridge] = useState<DialogsBridge | null>(null)
@@ -31,8 +32,9 @@ export default function DialogsLayer() {
 }
 
 function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: DialogData; drafts: Map<string, Draft> }) {
+  const onSize = useCallback((width: number, height: number) => { void request(reply => bridge.contentSize(data.id, width, height, reply)) }, [bridge, data.id])
   const saved = drafts.get(data.id)
-  const [form, setForm] = useState<DialogValues>(saved?.form ?? data.values)
+  const [form, setForm] = useState<FormValues>(saved?.form ?? data.values)
   const [selected, setSelected] = useState(saved?.selected ?? data.rows[0]?.id ?? '')
   const [member, setMember] = useState(saved?.member ?? form.members[0] ?? '')
   const [available, setAvailable] = useState(saved?.available ?? data.available.find(row => !form.members.includes(row.id))?.id ?? '')
@@ -57,7 +59,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     }, 100)
     return () => clearTimeout(timer)
   }, [bridge, data.id, kind, form.start, form.end])
-  const update = (patch: Partial<DialogValues>) => setForm(previous => ({ ...previous, ...patch }))
+  const update = (patch: Partial<FormValues>) => setForm(previous => ({ ...previous, ...patch }))
   async function act(action: string, payload: object = {}) {
     if (busyRef.current) return false
     busyRef.current = true; setBusy(true); setError('')
@@ -78,7 +80,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     if (index < 0 || target < 0 || target >= form.members.length) return
     const next = [...form.members]; [next[index], next[target]] = [next[target], next[index]]; update({ members: next })
   }
-  return <DialogFrame title={data.title} description={data.description} onClose={() => { if (!data.confirmation) void act('close') }} composing={composing}>
+  return <DialogFrame title={data.title} description={data.description} onClose={() => { if (!data.confirmation) void act('close') }} composing={composing} onSize={onSize} wide={['review', 'series', 'highlights'].includes(kind)}>
     <div ref={content} className="min-h-0 space-y-4" onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
       onKeyDown={event => {
         if (editable && event.target instanceof HTMLInputElement && event.target.type !== 'checkbox'
@@ -103,26 +105,26 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {kind === 'tag-rename' && <Input aria-label="새 이름" value={form.name} onChange={event => update({ name: event.target.value })} />}
       {(kind === 'highlight' || kind === 'range') && <div className="grid grid-cols-2 gap-3">
         <label className="space-y-2 text-sm">시작(초)<Input type="number" min={0} max={data.maximum} step={0.001} aria-label="시작(초)" value={form.start}
-          onChange={event => update({ start: Number(event.target.value) })} /></label>
+          onChange={event => update({ start: event.target.value })} onBlur={() => { if (form.start !== '') update({ start: Number(Number(form.start).toFixed(3)) }) }} /></label>
         <label className="space-y-2 text-sm">끝(초)<Input type="number" min={0} max={data.maximum} step={0.001} aria-label="끝(초)" value={form.end} disabled={kind === 'highlight' && !form.range}
-          onChange={event => update({ end: Number(event.target.value) })} /></label>
+          onChange={event => update({ end: event.target.value })} onBlur={() => { if (form.end !== '') update({ end: Number(Number(form.end).toFixed(3)) }) }} /></label>
         {kind === 'highlight' && <label className="col-span-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={form.range} onChange={event => update({ range: event.target.checked })} />구간 하이라이트</label>}
       </div>}
       {(kind === 'highlight' || kind === 'line') && <label className="block space-y-2 text-sm">{kind === 'highlight' ? '메모' : '자막 텍스트'}<TextArea value={form.text} onChange={text => update({ text })} /></label>}
       {kind === 'subtitles' && <label className="block space-y-2 text-sm">원어<Input aria-label="원어" list="spoken-languages" value={form.choice} onChange={event => update({ choice: event.target.value })} /><datalist id="spoken-languages">{data.choices.map(row => <option key={row.id} value={row.title} />)}</datalist></label>}
       {kind === 'translation' && <Choice label="번역 CLI" rows={data.choices} value={form.choice} onChange={choice => update({ choice })} />}
       {data.warning && <p role="status" className="whitespace-pre-wrap text-sm text-destructive">{data.warning}</p>}
-      {error && <p role="alert" className="whitespace-pre-wrap break-all text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-destructive">{error}</p>}
     </div>
     <footer className="flex flex-wrap justify-end gap-2">
       {kind === 'tags' && <>{button('선택한 태그 떼기', 'remove', !currentSelected)}{button('모든 태그 관리', 'manage')}</>}
       {kind === 'tag-manager' && <>{button('이름 변경', 'rename', !currentSelected, 'default')}{button('태그 삭제', 'delete', !currentSelected, 'destructive')}</>}
       {kind === 'highlights' && <>{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</>}
-      {kind === 'review' && <>{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button('번역 줄 수정', 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', data.locked, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button('번역 SRT 저장', 'export-translation', !data.rows.length)}</>}
+      {kind === 'review' && <>{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button('번역 줄 수정', 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button('번역 SRT 저장', 'export-translation', !data.rows.length)}</>}
       {button(editable ? '취소' : '닫기', 'close')}
       {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'translation' ? '확인' : '저장', 'save', data.locked || kind === 'range' && !!data.warning, kind === 'range' ? 'destructive' : 'default')}
     </footer>
-    <ConfirmDialog open={!!data.confirmation} onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.title} description={data.confirmation}
-      variant="destructive" onConfirm={() => void act('confirm')} />
+    <ConfirmDialog open={!!data.confirmation} onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.confirm_title} description={data.confirmation}
+      variant={data.confirm_destructive ? 'destructive' : 'default'} onConfirm={() => void act('confirm')} />
   </DialogFrame>
 }

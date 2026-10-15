@@ -121,10 +121,14 @@ class MainWindow(QMainWindow):
         # 트레이의 showNormal 등 창 바깥 경로도 실제 창 상태와 표시를 맞춘다.
         if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "playback_page"):
             self.fullscreen_settings_shortcut.setEnabled(self.isFullScreen())
+            if self.web_ui:
+                self.web_host.dialogs.sync_shortcut()
             self.menuBar().setVisible(not self.isFullScreen() and not self.web_ui)
             self.playback_page.set_fullscreen(self.isFullScreen())
 
     def show_fullscreen_settings_menu(self):
+        if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
+            return
         self.playback_page.close_help()
         if self.web_ui:
             self.web_host.popup_settings_menu()
@@ -151,6 +155,8 @@ class MainWindow(QMainWindow):
             (self.sidebar.settings if index == 5 else self.sidebar.list).setFocus()
 
     def navigate_web_tab(self, tab):
+        if self.web_host.dialogs.blocks_shell_actions:
+            return
         self.web_host.navigate(tab)
 
     def return_to_web(self):
@@ -336,7 +342,7 @@ class MainWindow(QMainWindow):
             self.player.set_subtitle(self.core.playback_subtitle(video_id))
 
     def eventFilter(self, watched, event):
-        if self.web_ui and (self.web_host.dialogs.active or self.web_host.dialogs.web_modal):
+        if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
             return super().eventFilter(watched, event)
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()
                 or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):

@@ -1,14 +1,27 @@
 import { cva } from 'class-variance-authority'
 import { Dialog } from 'radix-ui'
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { DialogRow } from '@/bridge-types'
+import './dialogs.css'
 
-export function DialogFrame({ title, description, children, onClose, composing }: { title: string; description: string; children: ReactNode; onClose: () => void; composing: { current: boolean } }) {
+export function DialogFrame({ title, description, children, onClose, composing, onSize, wide }: { title: string; description: string; children: ReactNode; onClose: () => void; composing: { current: boolean }; onSize: (width: number, height: number) => void; wide: boolean }) {
+  const [content, setContent] = useState<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!content) return
+    const observer = new ResizeObserver(() => {
+      const rect = content.getBoundingClientRect()
+      if (rect) onSize(Math.ceil(rect.width), Math.ceil(rect.height))
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [content, onSize])
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal>
-    <Dialog.Overlay className="fixed inset-0 z-40 bg-background/80" />
-    <Dialog.Content className="fixed inset-4 z-40 m-auto flex h-fit max-h-full w-auto max-w-4xl flex-col gap-4 overflow-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"
+    <Dialog.Overlay data-dialog-overlay className="fixed inset-0 z-40 bg-background/80" />
+    <Dialog.Content ref={setContent} data-dialog-frame data-wide={wide} className="fixed inset-4 z-40 m-auto flex h-fit flex-col gap-4 overflow-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"
       onInteractOutside={event => event.preventDefault()}
-      onEscapeKeyDown={event => { if (composing.current) event.preventDefault() }}>
+      onEscapeKeyDown={event => {
+        if (composing.current || content?.querySelector('[role="combobox"][aria-expanded="true"]')) event.preventDefault()
+      }}>
       <header className="space-y-2"><Dialog.Title className="text-xl font-semibold">{title}</Dialog.Title>
         <Dialog.Description className="text-sm text-muted-foreground">{description || '입력한 내용을 확인한 뒤 저장하세요.'}</Dialog.Description></header>
       {children}
@@ -47,9 +60,9 @@ export function DialogList({ label, rows, selected, onSelect, onActivate, review
         onDoubleClick={() => { if (!clickActivates) onActivate?.(row.id) }}>
         {review ? <div className="grid grid-cols-2 gap-3">
           <span className="col-span-2 font-mono text-xs tabular-nums">{row.start.toFixed(3)}–{row.end?.toFixed(3)}초 · {row.status}</span>
-          <p className="whitespace-pre-wrap break-all">{row.title}</p><p className="whitespace-pre-wrap break-all text-muted-foreground">{row.detail}</p>
-        </div> : <><p className={highlights ? marker({ range: row.end !== null }) : 'break-all font-medium'}>{row.title}</p>
-          {row.detail && <p className="line-clamp-3 whitespace-pre-wrap break-all text-muted-foreground" title={row.detail}>{row.detail}</p>}
+          <p className="whitespace-pre-wrap break-words">{row.title}</p><p className="whitespace-pre-wrap break-words text-muted-foreground">{row.detail}</p>
+        </div> : <><p className={highlights ? marker({ range: row.end !== null }) : 'break-words font-medium'}>{row.title}</p>
+          {row.detail && <p className="line-clamp-3 whitespace-pre-wrap break-words text-muted-foreground" title={row.detail}>{row.detail}</p>}
           {row.status && <p className="truncate text-xs text-muted-foreground" title={row.status}>{row.status}</p>}</>}
       </div>)}
     </div>

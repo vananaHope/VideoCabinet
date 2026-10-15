@@ -1,0 +1,16 @@
+[data-dialog-frame] {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+[data-dialog-frame][data-wide="true"] { width: min(896px, calc(100vw - 32px)); }
+html[data-dialog-container="true"] [data-dialog-overlay] { background: var(--background); }
+html[data-dialog-container="true"] [data-dialog-frame] {
+  inset: 0;
+  margin: 0;
+  width: min(640px, var(--dialog-max-width));
+  max-height: var(--dialog-max-height);
+  border-radius: 0;
+}
+html[data-dialog-container="true"] [data-dialog-frame][data-wide="true"] {
+  width: min(896px, var(--dialog-max-width));
+}

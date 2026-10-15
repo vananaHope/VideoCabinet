@@ -51,7 +51,8 @@ if args.offscreen:
     for filename in ('malgun.ttf', 'malgunbd.ttf'):
         assert QFontDatabase.addApplicationFont(str(Path(os.environ['WINDIR']) / 'Fonts' / filename)) >= 0
 args.output.mkdir(parents=True, exist_ok=True)
-directory = Path(tempfile.mkdtemp(prefix='dialogs-', dir=args.output))
+temporary = tempfile.TemporaryDirectory(prefix='dialogs-', dir=args.output)
+directory = Path(temporary.name)
 
 
 class Media:
@@ -156,7 +157,7 @@ def capture(name, widget=window):
 
 
 def click(text):
-    assert js(f"(() => {{ const e = Array.from(document.querySelectorAll('[role=dialog] button, [role=alertdialog] button')).find(e => e.textContent === {json.dumps(text)}); if (!e || e.disabled) return false; e.click(); return true; }})()"), text
+    wait(lambda: js(f"(() => {{ const e = Array.from(document.querySelectorAll('[role=dialog] button, [role=alertdialog] button')).find(e => e.textContent === {json.dumps(text)}); if (!e || e.disabled) return false; e.click(); return true; }})()"))
     settle()
 
 
@@ -362,6 +363,11 @@ try:
             QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
             wait(lambda: len(core.video_tags(video.id)) == original + 1)
             input_value('태그 이름', '00')
+            wait(lambda: js("!!document.getElementById('tag-candidates')"))
+            QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Escape)
+            settle()
+            assert current()['kind'] == 'tags' and not js("!!document.getElementById('tag-candidates')")
+            input_value('태그 이름', '00')
             QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
             wait(lambda: any(tag.name == '00' for tag in core.video_tags(video.id)))
             input_value('태그 이름', '01')
@@ -402,17 +408,57 @@ try:
         review_context = dict(video_id=video.id, jump=window.review_jump, changed=window.review_changed)
         web_modal('review', review_context, review_checks, lambda: ReviewDialog(core, **review_context, parent=window).exec())
         core.request_subtitle_range(video.id, 0, .5)
-        web_modal('review', review_context, lambda: capture('review-locked'))
+        def locked_check():
+            capture('review-locked')
+            click('전체 다시 생성')
+            assert js("!!document.querySelector('[role=alertdialog]')")
+            click('취소')
+        web_modal('review', review_context, locked_check)
         core.process_next_subtitle()
 
-        # 셸의 임의 모달을 감지하는지 확인한다(페이지 코드를 수정하지 않는다).
-        js("const modal = document.createElement('div'); modal.id = 'modal-probe'; modal.setAttribute('role','alertdialog'); modal.setAttribute('data-state','open'); modal.textContent='모달 검사'; document.body.append(modal)")
-        wait(lambda: dialogs.web_modal)
-        QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
-        assert host.active_tab == 'library'
-        js("document.getElementById('modal-probe').remove()")
-        wait(lambda: not dialogs.web_modal)
-        metrics['checks'].append('공용 모달 감지·차단·해제')
+        # 제품과 같은 실제 Radix/ConfirmDialog를 별도 검사 번들로 띄운다.
+        subprocess.run(['npm.cmd', 'exec', 'vite', 'build', '--', '--config', 'checks/vite.config.ts'], cwd=ROOT / 'frontend', check=True)
+        js((ROOT / '.local/dialog-fixture/probe.js').read_text(encoding='utf-8'))
+        for kind, expected in (('popover', False), ('nonmodal', False), ('dialog', True), ('confirm', True)):
+            js(f'window.dialogProbe({json.dumps(kind)})')
+            settle()
+            assert dialogs.web_modal == expected, kind
+            if expected:
+                js("window.probeKeys = []; document.addEventListener('keydown', e => window.probeKeys.push(e.key), {capture:true})")
+                QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
+                QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
+                settle()
+                assert host.active_tab == 'library' and not window.settings_menu.isVisible()
+                keys = js('JSON.stringify(window.probeKeys)')
+                assert '2' in keys and 's' in keys.lower(), keys
+            js("window.dialogProbe('close')")
+            wait(lambda: not dialogs.web_modal)
+        metrics['checks'].append('실제 ConfirmDialog·modal Dialog 차단 / nonmodal Dialog·Popover 허용 / 키 이벤트 전달')
+
+        if args.offscreen:
+            js("document.getElementById('library-grid').scrollTop = 600")
+            settle()
+            before = js("JSON.stringify([document.getElementById('library-grid').scrollTop, document.getElementById('library-grid').clientWidth, document.getElementById('library-grid').clientHeight])")
+            selected_before = host.controllers['library'].selected_id
+            window.pages.setCurrentWidget(window.playback_page)
+            for kind, context in (('translation', {}), ('review', review_context)):
+                def container_check(kind=kind):
+                    wait(lambda: dialogs.container is not None)
+                    settle(300)
+                    container = dialogs.container
+                    rect = json.loads(js("JSON.stringify([Math.ceil(document.querySelector('[data-dialog-frame]').getBoundingClientRect().width), Math.ceil(document.querySelector('[data-dialog-frame]').getBoundingClientRect().height)])"))
+                    assert [container.width(), container.height()] == rect, (container.width(), container.height(), rect, dialogs.content_size)
+                    assert container.width() <= window.width() and container.height() <= window.height()
+                    assert js("getComputedStyle(document.getElementById('root')).visibility") == 'hidden'
+                    assert js("JSON.stringify([document.getElementById('library-grid').scrollTop, document.getElementById('library-grid').clientWidth, document.getElementById('library-grid').clientHeight])") == before, (before, js("JSON.stringify([document.getElementById('library-grid').scrollTop, document.getElementById('library-grid').clientWidth, document.getElementById('library-grid').clientHeight])"))
+                    metrics.setdefault('container_sizes', {})[kind] = rect
+                    capture(f'container-{kind}', container)
+                web_modal(kind, context, container_check)
+            window.pages.setCurrentWidget(host)
+            settle(300)
+            assert js("JSON.stringify([document.getElementById('library-grid').scrollTop, document.getElementById('library-grid').clientWidth, document.getElementById('library-grid').clientHeight])") == before, (before, js("JSON.stringify([document.getElementById('library-grid').scrollTop, document.getElementById('library-grid').clientWidth, document.getElementById('library-grid').clientHeight])"))
+            assert host.controllers['library'].selected_id == selected_before
+            metrics['checks'].append('내용 크기 컨테이너 grab·숨은 페이지 가상화 크기/스크롤/선택 보존')
 
         if args.real:
             if args.windows_ime:
@@ -477,3 +523,5 @@ finally:
     window.tray.quit()
     window.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    temporary.cleanup()

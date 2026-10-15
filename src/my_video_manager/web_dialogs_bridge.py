@@ -19,6 +19,18 @@ class DialogsBridge(QObject):
     def snapshot(self):
         return encode(self.dialogs.snapshot())
 
+    @DIALOGS.slot('modalState')
+    def modalState(self, opened):
+        self.dialogs.web_modal = bool(opened) and self.dialogs.host.isVisible()
+        self.dialogs.sync_shortcut()
+        return encode({'ok': True})
+
+    @DIALOGS.slot('contentSize')
+    def contentSize(self, identifier, width, height):
+        if self.dialogs.active and self.dialogs.stack[-1].identifier == identifier and width > 0 and height > 0:
+            self.dialogs.resize_container(width, height)
+        return encode({'ok': True})
+
     @DIALOGS.slot('candidates')
     def candidates(self, prefix):
         try:

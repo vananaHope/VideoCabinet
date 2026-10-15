@@ -47,7 +47,7 @@ class PlaybackHelp(QWidget):
                         for i in range(split))
         c = PLAYBACK_COLORS
         legend = " &nbsp; ".join(f"<span style='color:{color}'>■ {label}</span>" for color, label in (
-            (c['highlight'], "지점"), (c['status-success'], "구간"), (c['highlight-open'], "열린 구간")))
+            (c['highlight'], "지점"), (c['highlight-range'], "구간"), (c['highlight-open'], "열린 구간")))
         self.text.setText("<b>키 안내 · " + ("하이라이트 모아보기" if reel else "일반 재생")
                           + "</b><br>F1 켜기 / 끄기 · Esc 안내 닫기"
                           + "<table>" + table + "</table><br>" + legend

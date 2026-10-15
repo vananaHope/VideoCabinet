@@ -34,6 +34,8 @@ class DialogData(TypedDict):
     locked: bool
     warning: str
     confirmation: str
+    confirm_title: str
+    confirm_destructive: bool
 
 
 class DialogSnapshot(TypedDict):

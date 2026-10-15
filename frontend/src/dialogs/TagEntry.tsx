@@ -43,7 +43,7 @@ export function TagEntry({ bridge, add, composing }: { bridge: DialogsBridge; ad
   </div>
     {open && rows.length > 0 && <div id="tag-candidates" role="listbox" aria-label="태그 자동 완성" className="max-h-32 overflow-auto rounded-md border bg-popover">
       {rows.map((row, index) => <div key={row.id} id={`tag-candidate-${index}`} role="option" aria-selected={index === candidate}
-        className="cursor-default break-all px-3 py-2 text-sm hover:bg-accent aria-selected:bg-accent" onMouseDown={event => event.preventDefault()} onClick={() => void submit(row.title)}>{row.title}</div>)}
+        className="cursor-default break-words px-3 py-2 text-sm hover:bg-accent aria-selected:bg-accent" onMouseDown={event => event.preventDefault()} onClick={() => void submit(row.title)}>{row.title}</div>)}
     </div>}
   </div>
 }
