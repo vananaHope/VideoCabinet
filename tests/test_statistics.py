@@ -12,7 +12,7 @@ import pytest
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.statistics import StatisticsVideo, video_viewing_statistics, viewing_statistics
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
-from my_video_manager.viewing import (Viewing, ViewingKind, ViewingRecord, ViewingSettings,
+from my_video_manager.viewing import (Viewing, ViewingKind, ViewingRecord, ViewingSettings, ViewingStatus,
                                      summarize_viewings, viewing_status)
 
 
@@ -313,7 +313,7 @@ def test_library_snapshot_includes_statistics_with_one_viewing_query(library, mo
     finished_ratio=0.8, abandoned_ratio=0.1, favorite_count=3)])
 def test_combined_summary_matches_original_status_and_statistics_for_every_video(settings):
     # 분류 경계·같은 시작 시각·ID와 역순인 updated_at·마지막 위치 없는 시청을 섞는다.
-    # 기간 없는 기존 viewing_status와 독립적으로 센 수치를 대조한다.
+    # 통합 전 상태 계산을 독립 기준으로 남겨 두 경로가 같은 결함을 공유해도 잡는다.
     grouped = {vid: [] for vid in range(1, 51)}
     seconds = [0, 4.999, 5, 9.999, 10, 79.999, 80, 89.999, 90, 100]
     records = []
@@ -328,7 +328,16 @@ def test_combined_summary_matches_original_status_and_statistics_for_every_video
     # 순서를 바꿔도 마지막 정지 위치는 가장 큰 ID에서 가져와야 한다.
     summary = summarize_viewings(reversed(records), grouped, settings)
     for vid, rows in grouped.items():
-        expected = viewing_status(tuple(rows), settings)
+        finished_count = sum(row.classify(settings) == ViewingKind.FINISHED for row in rows)
+        finished = finished_count > 0
+        abandoned = not finished and any(row.classify(settings) == ViewingKind.ABANDONED for row in rows)
+        last = max((row for row in rows if row.last_position is not None), key=lambda row: row.id, default=None)
+        point = last.last_position if abandoned and last is not None else None
+        expected = ViewingStatus(
+            finished, abandoned, finished_count >= settings.favorite_count, finished_count,
+            point, point / last.duration * 100 if point is not None else None,
+            max((row.updated_at for row in rows), default=None))
+        assert viewing_status(tuple(rows), settings) == expected
         assert summary.statuses[vid] == expected
         counted = [row for row in rows if row.classify(settings) != ViewingKind.GLANCE]
         stats = summary.statistics[vid]
