@@ -1,3 +1,5 @@
+from wait_helpers import CHILD_READY_TIMEOUT
+
 from contextlib import closing, contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -121,7 +123,7 @@ else:
         probe.write_bytes(b'ok')
         probe.unlink()
         completed = subprocess.run([sys.executable, '-c', script, str(database), str(archive),
-                                    str(directory), operation], capture_output=True, timeout=10)
+                                    str(directory), operation], capture_output=True, timeout=CHILD_READY_TIMEOUT)
         assert completed.returncode == 0, completed.stderr.decode(errors='replace')
     finally:
         subprocess.run(['icacls', str(directory), '/remove:d', user], check=True, capture_output=True)

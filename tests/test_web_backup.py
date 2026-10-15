@@ -1,4 +1,6 @@
 """공개 설정 브리지와 AppCore로 백업 화면의 작업·예약·실패 수명을 확인한다."""
+from wait_helpers import UI_READY_TIMEOUT
+
 import errno
 import json
 from pathlib import Path
@@ -33,7 +35,7 @@ def tick():
 
 
 def wait(bridge):
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + UI_READY_TIMEOUT
     while state(bridge)['busy']:
         assert time.monotonic() < deadline
         tick()

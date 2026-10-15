@@ -1,4 +1,6 @@
 """공개 브리지 → 코어/Qt 흐름: 검사 잠금, 복원, 키 저장과 즉시 표시."""
+from wait_helpers import UI_READY_TIMEOUT
+
 import json
 import threading
 import time
@@ -66,7 +68,7 @@ def tick():
 
 
 def wait_for_scan(window, bridge=None):
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + UI_READY_TIMEOUT
     try:
         while window.worker is not None or (bridge is not None and bridge.busy):
             assert time.monotonic() < deadline, '검사 완료 대기 시간 초과'

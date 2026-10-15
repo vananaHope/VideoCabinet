@@ -1,3 +1,5 @@
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import subprocess
 import sys
 
@@ -12,5 +14,5 @@ assert ModelPolicy('unknown').training is None
 assert not any(name in sys.modules for name in (
     'my_video_manager.opencode_go', 'my_video_manager.translation_cli',
     'my_video_manager.translation', 'my_video_manager.secret_store'))
-"""], capture_output=True, text=True, timeout=10)
+"""], capture_output=True, text=True, timeout=CHILD_READY_TIMEOUT)
     assert result.returncode == 0, result.stderr

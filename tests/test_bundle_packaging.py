@@ -1,4 +1,6 @@
 """설치 입력의 출처 검증·실패 복구와 배포 필수 자산 계약."""
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import ast
 import hashlib
 import importlib
@@ -107,13 +109,13 @@ bundle.prepare(Path(sys.argv[3]), cache, '7z')
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE) for i in range(2)]
     try:
         for process in processes:
-            out, err = process.communicate(timeout=30)
+            out, err = process.communicate(timeout=CHILD_READY_TIMEOUT)
             assert process.returncode == 0, (out, err)
     finally:
         for process in processes:
             if process.poll() is None:
                 process.kill()
-            process.wait(timeout=30)
+            process.wait(timeout=CHILD_READY_TIMEOUT)
     assert (cache / 'downloads').read_bytes() == b'x'
     for i in range(2):
         assert (tmp_path / str(i) / 'ffprobe.exe').read_bytes() == b'executable'
@@ -203,7 +205,7 @@ entry=sys.argv[1]
 sys.argv=[entry, 'transcription']
 runpy.run_path(entry, run_name='__main__')
 '''
-    result = subprocess.run([sys.executable, '-c', code, str(entry)], capture_output=True, timeout=30,
+    result = subprocess.run([sys.executable, '-c', code, str(entry)], capture_output=True, timeout=CHILD_READY_TIMEOUT,
                             env={**os.environ, 'PYTHONIOENCODING': 'cp1252'})
     assert result.returncode == 0
     assert json.loads(result.stdout.decode('utf-8')) == {'text': '한국어 자막'}
@@ -235,7 +237,7 @@ sys.argv = [entry]
 sys.stdout = sys.stderr = None
 runpy.run_path(entry, run_name='__main__')
 """
-    result = subprocess.run([sys.executable, '-c', code, str(entry)], capture_output=True, timeout=30)
+    result = subprocess.run([sys.executable, '-c', code, str(entry)], capture_output=True, timeout=CHILD_READY_TIMEOUT)
     assert result.returncode == 0, result.stderr
     assert result.stdout == result.stderr == b''
 

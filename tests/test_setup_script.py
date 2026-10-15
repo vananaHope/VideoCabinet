@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(not POWERSHELL, reason="Windows PowerShell 필�
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/setup.ps1"
 
 
-def run_setup(tmp_path, *, fast=True, missing="", uv_install="present"):
+def run_setup(tmp_path, *, fast=True, missing="", uv_install="present", seven_zip_install="present"):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "frontend").mkdir()
     shutil.copyfile(SCRIPT, tmp_path / "scripts/setup.ps1")
@@ -24,15 +24,16 @@ def run_setup(tmp_path, *, fast=True, missing="", uv_install="present"):
 $ErrorActionPreference = 'Stop'
 $global:Calls = [System.Collections.Generic.List[string]]::new()
 $global:UvAvailable = 'UV_INSTALL' -eq 'present'
+$global:SevenZipAvailable = 'SEVEN_ZIP_INSTALL' -eq 'present'
 function global:Get-Command {
     param([string]$Name, $ErrorAction)
     if ($Name -eq 'uv' -and -not $global:UvAvailable) { return $null }
-    if ($Name -eq '7z' -and 'MISSING_TOOL' -eq '7z') { return $null }
+    if ($Name -eq '7z' -and ('MISSING_TOOL' -eq '7z' -or -not $global:SevenZipAvailable -or 'SEVEN_ZIP_INSTALL' -eq 'file')) { return $null }
     Microsoft.PowerShell.Core\Get-Command $Name -ErrorAction SilentlyContinue
 }
 function global:Test-Path {
     param([string]$Path)
-    if ($Path -like '*7-Zip/7z.exe' -and 'MISSING_TOOL' -eq '7z') { return $false }
+    if ($Path -like '*7-Zip/7z.exe') { return $global:SevenZipAvailable -and 'MISSING_TOOL' -ne '7z' }
     Microsoft.PowerShell.Management\Test-Path $Path
 }
 function global:python {
@@ -50,6 +51,11 @@ function global:ffmpeg {}
 function global:7z {}
 function global:winget {
     $global:Calls.Add("winget $args")
+    if ($args -contains '7zip.7zip') {
+        $global:SevenZipAvailable = 'SEVEN_ZIP_INSTALL' -ne 'missing'
+        $global:LASTEXITCODE = 17
+        return
+    }
     if ($args -notcontains 'astral-sh.uv' -or 'UV_INSTALL' -eq 'present') {
         throw '요청하지 않은 도구 설치'
     }
@@ -72,7 +78,8 @@ try {
     $global:Calls | ConvertTo-Json | Set-Content -Encoding UTF8 "$PSScriptRoot/calls.json"
 }
 '''.replace("FAST_FLAG", "$true" if fast else "$false")
-       .replace("MISSING_TOOL", missing).replace("UV_INSTALL", uv_install), encoding="utf-8-sig")
+       .replace("MISSING_TOOL", missing).replace("UV_INSTALL", uv_install)
+       .replace("SEVEN_ZIP_INSTALL", seven_zip_install), encoding="utf-8-sig")
     result = subprocess.run([POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
                             capture_output=True, timeout=CHILD_READY_TIMEOUT)
     calls = json.loads((tmp_path / "calls.json").read_text(encoding="utf-8-sig"))
@@ -119,3 +126,13 @@ def test_uv_install_uses_executable_instead_of_winget_exit_code(tmp_path, uv_ins
     if uv_install == "broken":
         assert "uv check failed" in error
     assert any(call.startswith("uv pip install") for call in calls) is (uv_install == "installed")
+
+
+@pytest.mark.parametrize("installation", ["command", "file", "missing"])
+def test_seven_zip_install_checks_executable_after_nonzero_winget(tmp_path, installation):
+    result, calls, error = run_setup(tmp_path, fast=False, seven_zip_install=installation)
+    assert sum(call.startswith("winget install --id 7zip.7zip") for call in calls) == 1
+    assert (result.returncode == 0) is (installation != "missing"), error
+    assert ("venv scripts/install_libmpv.py" in calls) is (installation != "missing")
+    if installation == "missing":
+        assert "7-Zip을 찾을 수 없습니다" in error

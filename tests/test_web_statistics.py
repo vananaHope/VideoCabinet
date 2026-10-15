@@ -197,13 +197,13 @@ window.navigate_web_tab('statistics')
 timer = QTimer()
 timer.timeout.connect(lambda: window.tray.quit() if started.is_set() else None)
 timer.start(20)
-QTimer.singleShot(10000, app.quit)
+QTimer.singleShot(CHILD_QUIT_MS, app.quit)
 app.exec()
 assert started.is_set()
 # QApplication 파괴가 진행되는 동안 작업자가 정상/오류 결과를 마친다.
 import shiboken6
 shiboken6.delete(app)
-'''.replace('FAIL', repr(fail)), encoding='utf-8')
+'''.replace('FAIL', repr(fail)).replace('CHILD_QUIT_MS', str(int(CHILD_READY_TIMEOUT * 900))), encoding='utf-8')
     result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
                             cwd=Path(__file__).resolve().parents[1],
                             env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen',

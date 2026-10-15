@@ -265,6 +265,10 @@ def test_general_notice_expires_and_does_not_change_fullscreen_bar(window):
     page = window.playback_page
     window.statusBar().showMessage("자막 대기열에 추가했습니다")
     assert page.message_label.isVisible()
+    # 만료 시간 계약은 부하와 무관하게 검사하고, 실제 만료는 조건으로 기다린다.
+    assert page.notice_timer.interval() == 5000
+    assert page.notice_timer.isSingleShot()
+    assert page.notice_timer.isActive()
     wait_for(lambda: not page.message_label.isVisible())
     assert not page.message_label.isVisible()
     assert page.message_label.text() == ""

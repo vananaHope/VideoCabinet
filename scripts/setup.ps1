@@ -68,7 +68,11 @@ if (-not (Get-Command 7z -ErrorAction SilentlyContinue) -and -not (Test-Path "$e
         throw '7-Zip이 없습니다. scripts/setup.ps1을 -Worktree 없이 먼저 실행하세요.'
     }
     winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-    Confirm-Exit '7-Zip'
+    # winget 종료 코드보다 설치된 실행 파일을 기준으로 판정한다.
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+    if (-not (Get-Command 7z -ErrorAction SilentlyContinue) -and -not (Test-Path "$env:ProgramFiles/7-Zip/7z.exe")) {
+        throw '7-Zip을 찾을 수 없습니다. 새 터미널에서 scripts/setup.ps1을 다시 실행하세요.'
+    }
 }
 & .venv/Scripts/python.exe scripts/install_libmpv.py
 Confirm-Exit 'libmpv'
