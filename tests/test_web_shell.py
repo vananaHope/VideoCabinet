@@ -11,6 +11,87 @@ from test_web_library_data import core
 from my_video_manager.web_contract import CONTRACTS, TABS
 
 
+def wait_frontend_ready(host, tab):
+    for _ in range(200):
+        if host._frontend_ready and tab in host._ready_pages:
+            return
+        QTest.qWait(50)
+    pytest.fail(f'{tab} 프런트엔드 준비 시간 초과')
+
+
+@pytest.mark.parametrize('tab', ['library', 'search', 'settings'])
+@pytest.mark.parametrize('from_gems', [False, True])
+def test_tray_playback_restore_requests_library_focus(window_factory, core, monkeypatch, tab, from_gems):
+    from PySide6.QtWidgets import QSystemTrayIcon
+    from test_library_return_ui import Player
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    video = core.videos()[0]
+    if from_gems:
+        core.playback.start(video.id, 0)
+        core.playback.report(40)
+        core.playback.end()
+    window = window_factory()
+    window.player_factory = Player
+    host = window.web_host
+    wait_frontend_ready(host, 'library')
+    window.navigate_web_tab(tab)
+    wait_frontend_ready(host, tab)
+    requests = []
+    window.library_page.bridge.libraryFocusRequested.connect(
+        lambda target: requests.append((host.active_tab, target)))
+    window.play_video(video.id, start=0, from_gems=from_gems)
+    if from_gems:
+        window.player.positions.append((40, False))
+    window.close()
+    assert host._pending_focus == 'grid'
+    assert requests == []
+    window.tray.open()
+    assert requests == [('library', 'grid')] + ([('library', 'gems')] if from_gems else [])
+    assert host._pending_focus is None
+
+
+def test_tray_playback_before_frontend_ready_replaces_search_focus(window_factory, core, monkeypatch):
+    from PySide6.QtWidgets import QSystemTrayIcon
+    from test_library_return_ui import Player
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    window.player_factory = Player
+    host = window.web_host
+    host.frontend_loading()
+    window.navigate_web_tab('search')
+    assert host._pending_focus == 'search-content'
+    window.play(core.videos()[0].id)
+    window.close()
+    assert host.active_tab == 'library'
+    assert host._pending_focus == 'grid'
+    window.tray.open()
+    assert host._pending_focus == 'grid'
+
+
+@pytest.mark.parametrize('tab', ['library', 'queue'])
+def test_tray_show_queue_refreshes_hidden_changes_immediately(window_factory, core, monkeypatch, tab):
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    window.subtitles.timer.stop()
+    window.navigate_web_tab(tab)
+    queue = window.web_host.controllers['queue']
+    changes = []
+    queue.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+    window.close()
+    video = core.videos()[0]
+    core.request_subtitles(video.id)
+    assert changes == []
+    window.tray.show_queue()
+    # 이벤트 루프나 500ms 타이머를 기다리지 않고 새 행을 전달한다.
+    assert len(changes) == 1
+    assert changes[0]['order'] == [video.id]
+    assert [row['videoId'] for row in changes[0]['rows']] == [video.id]
+
+
 @pytest.mark.parametrize('tab', [tab for tab, _ in TABS])
 @pytest.mark.parametrize('destination', ['restore', 'queue', 'playback', 'fullscreen'])
 def test_tray_restore_activates_only_destination(window_factory, core, monkeypatch, tab, destination):
@@ -70,6 +151,7 @@ def test_tray_restore_preserves_library_filter_and_selection(window_factory, mon
     monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
     window = window_factory()
     library = window.library_page
+    wait_frontend_ready(window.web_host, 'library')
     library.bridge.filter('Python', 0)
     selected = library.visible_ids[-1]
     library.bridge.select(selected)
@@ -80,6 +162,7 @@ def test_tray_restore_preserves_library_filter_and_selection(window_factory, mon
     assert library.query == 'Python'
     assert library.selected_video_id() == selected
     assert focus_requests == []
+    assert window.web_host._pending_focus is None
 
 
 def test_tray_restore_preserves_rendered_settings_category_and_scroll(window_factory, monkeypatch):

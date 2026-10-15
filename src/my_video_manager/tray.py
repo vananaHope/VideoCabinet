@@ -41,6 +41,7 @@ class TrayControls(QObject):
     def show_queue(self):
         self.window.navigate_web_tab('queue')
         self.open()
+        self.window.web_host.controllers['queue'].refresh()
 
     def notify_completion(self):
         counts = self.core.take_subtitle_queue_completion()
@@ -92,6 +93,7 @@ class TrayControls(QObject):
             window.hide()
             if was_playing:
                 window.web_host.set_tab('library')
+                window.web_host.focus_content()
             window.pages.setCurrentIndex(0)
             event.ignore()
             if self.core.acknowledge_tray_notice():
