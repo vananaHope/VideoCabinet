@@ -196,16 +196,22 @@ class Search:
                     LEFT JOIN transcripts t ON t.id=l.transcript_id
                     LEFT JOIN external_subtitle_lines e ON c.source='external' AND e.id=c.line_id
                     LEFT JOIN external_subtitles s ON s.id=e.subtitle_id
-                    LEFT JOIN external_subtitle_files f ON f.id=s.file_id
-                    ORDER BY CASE WHEN t.spoken_language='ko' AND c.source='translation' THEN 0 ELSE 1 END""", (value,)):
-                source = row['source']
+                    LEFT JOIN external_subtitle_files f ON f.id=s.file_id""", (value,)):
+                source, text = row['source'], row['text']
                 task = translation_task(row['spoken_language'])
                 if task.kind == 'refinement' and source in ('transcript', 'translation'):
                     if row['line_id'] in seen_korean_lines:
                         continue
                     seen_korean_lines.add(row['line_id'])
-                    if source == 'translation':
+                    if source == 'transcript':
+                        # 같은 ID만 조회해 첫 일치 위치에서 다듬은 행을 고른다.
+                        # 전체 후보 정렬 없이 상한+1개에서 읽기를 끝낼 수 있다.
+                        refined = db.execute('SELECT text FROM translation_lines WHERE line_id=?',
+                                             (row['line_id'],)).fetchone()
+                        if refined is not None and key in search_key(refined['text']):
+                            source, text = task.kind, refined['text']
+                    else:
                         source = task.kind
-                if add(row["video_id"], source, row["text"], row["start"], row["language"]):
+                if add(row["video_id"], source, text, row["start"], row["language"]):
                     break
         return response()

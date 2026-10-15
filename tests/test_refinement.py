@@ -392,3 +392,41 @@ def test_refinement_fallback_notice_and_progress_survive_restart(connected):
     providers = core.translation_line_providers(vid)
     assert [providers[l.id] for l in transcript.lines] == ['codex'] * 2 + ['opencode_go'] * 3
     assert len(http.requests) == 2
+
+
+@pytest.mark.parametrize('query', ['한빛', '한 빛 공통'])
+def test_search_prefers_matching_refinement_once_in_time_order(refinement, query):
+    core, transcriber, _, _, _ = refinement
+    vid = core.videos()[0].id
+    transcriber.result = TranscriberResult('ko', tuple(
+        TranscriptSegment(i, i + 1, f'한빛 공통 원어 {i}') for i in range(4)))
+    original = source(core, vid)
+    finish(core)
+    # 원어/결과 양쪽 일치, 원어만 일치, 결과만 일치, 다듬은 결과 없음.
+    core.edit_translation_line(vid, original.lines[0].id, '한 빛 공통 다듬음')
+    core.edit_translation_line(vid, original.lines[1].id, '다른 결과')
+    core.edit_transcript_line(vid, original.lines[2].id, '다른 원어')
+    core.edit_translation_line(vid, original.lines[2].id, '한빛 공통 결과만')
+    with sqlite3.connect(core.database) as db:
+        db.execute('DELETE FROM translation_lines WHERE line_id=?', (original.lines[3].id,))
+    results = core.search(query).results
+    assert [(r.start, r.source, r.text) for r in results] == [
+        (0, 'refinement', '한 빛 공통 다듬음'),
+        (1, 'transcript', '한빛 공통 원어 1'),
+        (2, 'refinement', '한빛 공통 결과만'),
+        (3, 'transcript', '한빛 공통 원어 3'),
+    ]
+
+
+def test_search_limit_counts_unique_refined_lines(refinement):
+    core, transcriber, _, _, _ = refinement
+    vid = core.videos()[0].id
+    transcriber.result = TranscriberResult('ko', tuple(
+        TranscriptSegment(i, i + 1, f'대량일치 원어 {i}') for i in range(501)))
+    original = source(core, vid)
+    with sqlite3.connect(core.database) as db:
+        db.executemany('INSERT INTO translation_lines VALUES (?,?)',
+                       [(line.id, f'대량일치 다듬음 {i}') for i, line in enumerate(original.lines)])
+    result = core.search('대량일치')
+    assert result.truncated
+    assert [(r.start, r.source) for r in result.results] == [(i, 'refinement') for i in range(500)]
