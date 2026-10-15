@@ -155,8 +155,6 @@ class MainWindow(QMainWindow):
             (self.sidebar.settings if index == 5 else self.sidebar.list).setFocus()
 
     def navigate_web_tab(self, tab):
-        if self.web_host.dialogs.blocks_shell_actions:
-            return
         self.web_host.navigate(tab)
 
     def return_to_web(self):
@@ -342,13 +340,13 @@ class MainWindow(QMainWindow):
             self.player.set_subtitle(self.core.playback_subtitle(video_id))
 
     def eventFilter(self, watched, event):
-        if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
-            return super().eventFilter(watched, event)
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()
                 or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):
             return super().eventFilter(watched, event)
         if (event.modifiers() == Qt.KeyboardModifier.ControlModifier
                 and Qt.Key.Key_1 <= event.key() <= (Qt.Key.Key_7 if self.web_ui else Qt.Key.Key_6)):
+            if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
+                return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
                 if self.web_ui:
                     from .web_contract import TABS
@@ -357,6 +355,8 @@ class MainWindow(QMainWindow):
                     self.navigate(event.key() - Qt.Key.Key_1)
             return True
         if event.modifiers() == Qt.KeyboardModifier.AltModifier and event.key() == Qt.Key.Key_S:
+            if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
+                return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
                 if self.web_ui:
                     self.web_host.popup_settings_menu()

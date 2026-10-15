@@ -155,11 +155,30 @@ def test_dialog_blocks_reserved_navigation_keys(window_factory, core):
         QTest.keyClick(window.web_host.view, Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
         assert window.web_host.active_tab == 'library'
         assert not window.settings_menu.isVisible()
-        window.navigate_web_tab('settings')
         window.show_fullscreen_settings_menu()
         assert window.web_host.active_tab == 'library'
         assert not window.settings_menu.isVisible()
     within(lambda: TagManager(core, window).exec(), dialogs, check)
+
+
+@pytest.mark.parametrize('target', ['reel', 'queue', 'search'], ids=['H-reel-completed', 'tray-show-queue', 'show-search'])
+def test_program_navigation_keeps_dialog_as_shell_overlay(window_factory, core, target):
+    window = window_factory('1')
+    host, dialogs = window.web_host, window.web_host.dialogs
+    navigate = {'reel': window.reel.open, 'queue': window.tray.show_queue, 'search': window.show_search}[target]
+    window.pages.setCurrentWidget(window.playback_page)
+    def check():
+        wait_for(lambda: dialogs.container is not None)
+        assert host.view.parent() is dialogs.container
+        identifier = state(dialogs)['id']
+        navigate()
+        QTest.qWait(300)
+        assert window.pages.currentWidget() is host
+        assert host.active_tab == target
+        assert dialogs.container is None and host.view.parent() is host
+        assert dialogs.active and state(dialogs)['id'] == identifier
+    within(lambda: TagManager(core, window).exec(), dialogs, check)
+    assert window.pages.currentWidget() is host and host.active_tab == target
 
 
 def test_modal_keys_reach_other_qt_consumers(window_factory, core):
