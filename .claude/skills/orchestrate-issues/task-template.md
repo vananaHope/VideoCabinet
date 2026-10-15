@@ -11,7 +11,7 @@
 
 - `gh issue view <n> --comments` : 완료 기준 체크리스트와, 앞선 이슈에서 넘어온 지적(댓글). 이것이 기준이다.
 - `gh issue view 1` : 전체 스펙. 특히 "Implementation Decisions", "Testing Decisions".
-- `AGENTS.md`, `CONTEXT.md`(용어집), `docs/adr/`, `README.md`(환경 준비·실행)
+- `AGENTS.md`, `CONTEXT.md`(용어집), `docs/adr/`, `README.md`(요약), `docs/development.md`(환경 준비·테스트·빌드 상세)
 
 ## Target
 
