@@ -14,7 +14,9 @@ import time
 from .translation import TranslatedLine, TranslationCancelled, TranslationError, validate_translation
 
 # 선택 화면은 이 목록을 표시한다. CLI가 늘어도 Qt/웹 화면을 고칠 필요가 없다.
-TRANSLATION_CLI_CHOICES = (('codex', 'codex'), ('claude', 'claude'))
+from .translation_models import TRANSLATION_CHOICES
+
+TRANSLATION_CLI_CHOICES = TRANSLATION_CHOICES
 
 
 TRANSLATION_INSTRUCTIONS = """Translate subtitle data into natural Korean. You are only a translator.
@@ -57,6 +59,9 @@ def parse_translation_response(output, lines):
 def classify_cli_failure(output: str) -> str:
     """실패 진단만 전달한다. 성공한 번역 텍스트는 한도 판정에 넣지 않는다."""
     lowered = output.lower()
+    if re.search(r"(?:model|reasoning.effort|effort).{0,100}(?:not found|not available|not supported|unsupported|invalid|does not exist|not have access)|"
+                 r"(?:unknown|invalid|unsupported|unavailable).{0,40}(?:model|effort)|model_not_found", lowered):
+        return "configuration"
     subscription_limit = r"(?:usage|session|weekly|daily|monthly(?: spend)?|\d+[ -]hour|opus|sonnet|workspace credit)"
     if re.search(r"usage[_ -]limit|rate[_ -]limit|quota[_ -](?:exceeded|exhausted)|"
                  rf"(?:hit|reached|exceeded) (?:your |the )?{subscription_limit} limit\b|"
@@ -103,7 +108,7 @@ class SubscriptionCLITranslator:
         self.commands = commands
         self.timeout = timeout
 
-    def translate(self, lines, spoken_language, *, cli="codex", cancellation=None):
+    def translate(self, lines, spoken_language, *, cli="codex", cancellation=None, model="", effort=""):
         cancellation = cancellation if cancellation is not None else Event()
         if cancellation.is_set():
             raise TranslationCancelled
@@ -137,6 +142,16 @@ class SubscriptionCLITranslator:
                              "--disable-slash-commands", "--no-session-persistence",
                              "--output-format", "json", "--json-schema", json.dumps(schema),
                              "--system-prompt-file", str(instructions_path)]
+            if model:
+                if cli == "codex":
+                    arguments[-1:-1] = ["-m", model]
+                else:
+                    arguments.extend(["--model", model])
+            if effort:
+                if cli == "codex":
+                    arguments[-1:-1] = ["-c", "model_reasoning_effort=" + effort]
+                else:
+                    arguments.extend(["--effort", effort])
             output, error, code = self._run(arguments, directory, translation_prompt(lines, spoken_language), cancellation)
             if code:
                 detail = cli_failure_detail(cli, output, error)

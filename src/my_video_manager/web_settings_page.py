@@ -138,7 +138,7 @@ class WebSettingsPage(WebPageController):
                     keys=list(row.keys), defaults=list(row.default_keys), display=display_keys(row.keys),
                     defaultDisplay=display_keys(row.default_keys)) for row in self.core.key_bindings()],
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,
-                    translationCli=self.core.translation_cli,
+                    translationCli=self.core.translation_cli, translation=self.core.translation_settings(),
                     heldTranslations=sum(entry.state == 'held' for entry in queue),
                     failedTranslations=sum(entry.state == 'failed' for entry in queue))
 

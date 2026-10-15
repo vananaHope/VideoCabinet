@@ -1,5 +1,6 @@
-"""번역 자막, 묶음 진행 저장, 보류와 재시도. CLI 호출 중 DB 잠금은 없다."""
+"""번역 자막, 묶음 진행 저장, 보류와 재시도. 외부 호출 중 DB 잠금은 없다."""
 
+import json
 from dataclasses import dataclass
 from contextlib import nullcontext
 from datetime import datetime, timedelta
@@ -8,6 +9,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from .subtitles import TranscriptLine
+from .translation_models import DEFAULT_PROVIDER, provider
 
 
 class TranslationCancelled(Exception):
@@ -22,6 +24,11 @@ class TranslationError(RuntimeError):
             "usage_limit_repeated": "사용량 한도가 3회 반복되어 자동 재시도를 멈췄습니다. 한도 확인 후 직접 재시도하세요.",
             "authentication": "번역 CLI 로그인이 필요합니다.",
             "missing_cli": "번역 CLI가 없습니다. 선택한 CLI를 설치하거나 설정을 바꾸세요.",
+            "configuration": "모델을 쓸 수 없음: 모델 이름 또는 추론 강도를 확인하세요.",
+            "missing_key": "OpenCode Go 키가 등록되지 않았습니다.",
+            "connection": "OpenCode Go에 연결하지 못했습니다.",
+            "key_storage": "OpenCode Go 저장된 키를 읽지 못했습니다.",
+            "request_rejected": "OpenCode Go가 요청을 거부했습니다.",
             "format": "번역 응답의 줄 ID 또는 형식이 올바르지 않습니다.",
             "timeout": "번역 CLI 응답 시간이 초과되었습니다.",
         }.get(kind, "번역에 실패했습니다. 자세한 내용을 확인하세요."))
@@ -35,7 +42,7 @@ class TranslatedLine:
 
 class Translator(Protocol):
     def translate(self, lines: tuple[TranscriptLine, ...], spoken_language: str, *,
-                  cli: str, cancellation: Event) -> tuple[TranslatedLine, ...]: ...
+                  cli: str, cancellation: Event, model: str = "", effort: str = "") -> tuple[TranslatedLine, ...]: ...
 
 
 def validate_translation(lines, result) -> tuple[TranslatedLine, ...]:
@@ -76,11 +83,12 @@ class TranslationQueueEntry:
     retry_at: datetime | None
     error: str | None
     error_detail: str | None
+    notice: str = ""
 
 
 class Translations:
     def __init__(self, connect, clock, subtitles, settings, translator, *, batch_size=30,
-                 retry_delay=timedelta(minutes=15), format_attempts=3, order=None, protected_lines=None):
+                 retry_delay=timedelta(minutes=15), format_attempts=3, order=None, protected_lines=None, options=None):
         if batch_size < 1 or format_attempts < 1 or retry_delay.total_seconds() <= 0:
             raise ValueError("번역 묶음 크기, 재시도 횟수와 보류 시간은 양수여야 합니다.")
         self._connect, self._clock = connect, clock
@@ -88,6 +96,7 @@ class Translations:
         self._batch_size, self._retry_delay, self._format_attempts = batch_size, retry_delay, format_attempts
         self._processing, self._cancellation = Lock(), Event()
         self._order = order
+        self._options = options
         self._active_video = None
         self._active_cancellation = None
         self._cached_request = None
@@ -126,6 +135,30 @@ class Translations:
                     attempts INTEGER NOT NULL,
                     PRIMARY KEY(queue_id, cli)
                 );
+                CREATE TABLE IF NOT EXISTS translation_line_providers (
+                    line_id TEXT PRIMARY KEY REFERENCES transcript_lines(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS translation_target_providers (
+                    queue_id TEXT NOT NULL,
+                    line_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    PRIMARY KEY(queue_id, line_id),
+                    FOREIGN KEY(queue_id, line_id) REFERENCES translation_targets(queue_id, line_id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS translation_routes (
+                    queue_id TEXT PRIMARY KEY REFERENCES translation_queue(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS translation_job_options (
+                    queue_id TEXT PRIMARY KEY REFERENCES translation_queue(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    selections TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS translation_fallback_notices (
+                    queue_id TEXT PRIMARY KEY REFERENCES translation_queue(id) ON DELETE CASCADE,
+                    message TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS translation_omissions (
                     transcript_id TEXT PRIMARY KEY REFERENCES transcripts(id) ON DELETE CASCADE
                 );
@@ -135,11 +168,10 @@ class Translations:
 
     @property
     def cli(self):
-        return self._settings.get("translation.cli", "codex")
+        return self._settings.get("translation.cli", DEFAULT_PROVIDER)
 
     def set_cli(self, cli):
-        if cli not in ("codex", "claude"):
-            raise ValueError("번역 CLI는 codex 또는 claude를 고르세요.")
+        provider(cli)
         self._settings.set("translation.cli", cli)
 
     def enqueue_eligible(self):
@@ -199,12 +231,19 @@ class Translations:
                 db.execute("UPDATE translation_queue SET state = 'queued', retry_at = NULL, "
                            "error_kind = NULL, error_detail = NULL WHERE id = ?", (old["id"],))
                 queue_id = old["id"]
+                db.execute("DELETE FROM translation_routes WHERE queue_id=?", (queue_id,))
+                db.execute("DELETE FROM translation_job_options WHERE queue_id=?", (queue_id,))
+                db.execute("DELETE FROM translation_fallback_notices WHERE queue_id=?", (queue_id,))
             else:
                 # 줄 단위 재요청은 기존 미완료 대상도 유지하되 새 ID로 진행 중 응답을 무효화한다.
                 retained = {}
+                provenance = []
                 if old:
                     retained = {r["line_id"]: r["text"] for r in db.execute(
                         "SELECT * FROM translation_targets WHERE queue_id = ?", (old["id"],))}
+                    provenance = [(r['line_id'], r['provider']) for r in db.execute(
+                        "SELECT line_id, provider FROM translation_target_providers WHERE queue_id = ?", (old['id'],))
+                        if r['line_id'] not in selected]
                 retained.update({line_id: None for line_id in selected})
                 attempts = list(db.execute("SELECT cli, attempts FROM translation_limit_attempts WHERE queue_id = ?",
                                            (old["id"],))) if old and preserve_state else []
@@ -222,6 +261,8 @@ class Translations:
                                    [(queue_id, r["cli"], r["attempts"]) for r in attempts])
                 db.executemany("INSERT INTO translation_targets VALUES (?, ?, ?)",
                                [(queue_id, line_id, text) for line_id, text in retained.items()])
+                db.executemany("INSERT INTO translation_target_providers VALUES (?, ?, ?)",
+                               [(queue_id, line_id, name) for line_id, name in provenance])
             return self._entry(db, db.execute("SELECT * FROM translation_queue WHERE id = ?", (queue_id,)).fetchone())
 
     def finish_ready(self, db, video_id):
@@ -236,6 +277,7 @@ class Translations:
                    if r["line_id"] not in protected]
         db.executemany("DELETE FROM translation_lines WHERE line_id = ?", [(id_,) for id_, _ in targets])
         db.executemany("INSERT INTO translation_lines VALUES (?, ?)", targets)
+        self._commit_providers(db, row[0])
         db.execute("DELETE FROM translation_queue WHERE id = ?", (row[0],))
         if self._order:
             self._order.finish(db, video_id)
@@ -245,9 +287,12 @@ class Translations:
         counts = db.execute("SELECT COUNT(text), COUNT(*) FROM translation_targets WHERE queue_id = ?",
                             (row["id"],)).fetchone()
         error = TranslationError(row["error_kind"], row["error_detail"]) if row["error_kind"] else None
+        if error and row['error_kind'] != 'usage_limit_repeated' and row['error_detail'] and row['error_detail'].startswith('OpenCode Go'):
+            error = row['error_detail']
+        notice = db.execute("SELECT message FROM translation_fallback_notices WHERE queue_id=?", (row["id"],)).fetchone()
         return TranslationQueueEntry(row["id"], row["video_id"], row["state"], counts[0], counts[1],
                                      datetime.fromisoformat(row["retry_at"]) if row["retry_at"] else None,
-                                     str(error) if error else None, row["error_detail"])
+                                     str(error) if error else None, row["error_detail"], notice[0] if notice else "")
 
     def queue(self):
         with self._connect() as db:
@@ -304,18 +349,100 @@ class Translations:
             if self._active_cancellation:
                 self._active_cancellation.set()
 
-    def ready(self, *, cli=None):
-        # 한도는 영상이 아닌 CLI 계정의 상태다. 재요청·원어 재생성으로 우회하지 않는다.
-        cli = self.cli if cli is None else cli
+    def line_providers(self, video_id):
         with self._connect() as db:
-            backoff = db.execute("SELECT retry_at FROM translation_cli_backoff WHERE cli = ?", (cli,)).fetchone()
-        if backoff and datetime.fromisoformat(backoff[0]) > self._clock():
-            return None
+            return {r['id']: r['provider'] for r in db.execute("""
+                SELECT l.id, CASE WHEN tr.line_id IS NOT NULL THEN saved.provider ELSE pending.provider END AS provider
+                FROM transcript_lines l JOIN transcripts t ON t.id=l.transcript_id
+                LEFT JOIN translation_lines tr ON tr.line_id=l.id
+                LEFT JOIN translation_line_providers saved ON saved.line_id=l.id
+                LEFT JOIN translation_target_providers pending ON pending.line_id=l.id
+                WHERE t.video_id=?
+            """, (video_id,))}
+
+    @staticmethod
+    def _commit_providers(db, queue_id):
+        db.execute("DELETE FROM translation_line_providers WHERE line_id IN "
+                   "(SELECT line_id FROM translation_targets WHERE queue_id=?)", (queue_id,))
+        db.execute("INSERT INTO translation_line_providers SELECT line_id, provider "
+                   "FROM translation_target_providers WHERE queue_id=?", (queue_id,))
+
+    def _route(self, db, queue_id, cli):
+        route = db.execute("SELECT provider FROM translation_routes WHERE queue_id=?", (queue_id,)).fetchone()
+        if route:
+            return route[0]
+        job = db.execute("SELECT provider FROM translation_job_options WHERE queue_id=?", (queue_id,)).fetchone()
+        return job[0] if job else cli
+
+    def _start_job(self, db, queue_id, cli):
+        if db.execute("SELECT 1 FROM translation_job_options WHERE queue_id=?", (queue_id,)).fetchone():
+            return
+        selections = {p: self._options.selection(p) for p in ('codex', 'claude', 'opencode_go')} if self._options else {}
+        db.execute("INSERT OR IGNORE INTO translation_job_options SELECT id, ?, ? FROM translation_queue WHERE id=?",
+                   (cli, json.dumps(selections), queue_id))
+
+    @staticmethod
+    def _fallback(db, queue_id, cli, kind):
+        reason = {'usage_limit': '사용량 한도', 'format': '형식 오류 재시도 소진',
+                  'authentication': 'CLI 로그인 필요', 'missing_cli': 'CLI 없음',
+                  'timeout': 'CLI 응답 시간 초과'}.get(kind, 'CLI 오류')
+        message = f"{provider(cli).label} {reason} → OpenCode Go로 이어서 번역"
+        db.execute("INSERT OR REPLACE INTO translation_routes VALUES (?, ?)", (queue_id, 'opencode_go'))
+        db.execute("INSERT OR REPLACE INTO translation_fallback_notices VALUES (?, ?)", (queue_id, message))
+
+    def _backoff(self, db, cli):
+        row = db.execute("SELECT retry_at FROM translation_cli_backoff WHERE cli=?", (cli,)).fetchone()
+        return datetime.fromisoformat(row[0]) if row and datetime.fromisoformat(row[0]) > self._clock() else None
+
+    def _can_fallback(self, cli):
+        return cli in ('codex', 'claude') and self._options is not None and self._options.fallback_enabled()
+
+    def ready(self, *, cli=None):
+        cli = self.cli if cli is None else cli
         blocked = {e.video_id for e in self._subtitles.queue() if e.state in ("queued", "transcribing")}
-        # 새로 진행할 영상이 반복 보류되는 영상 뒤에서 계속 기다리지 않게 한다.
         entries = sorted(self.queue(), key=lambda e: e.state == "held")
-        return next((e for e in entries if e.video_id not in blocked and
-                     e.state in ("queued", "held")), None)
+        with self._connect() as db:
+            routes = dict(db.execute('SELECT queue_id, provider FROM translation_job_options'))
+            routes.update(db.execute('SELECT queue_id, provider FROM translation_routes'))
+            backoffs = {r[0] for r in db.execute('SELECT cli, retry_at FROM translation_cli_backoff')
+                        if datetime.fromisoformat(r[1]) > self._clock()}
+        for entry in entries:
+            if entry.video_id in blocked or entry.state not in ('queued', 'held'):
+                continue
+            route = routes.get(entry.id, cli)
+            if route in backoffs and not (self._can_fallback(route) and 'opencode_go' not in backoffs):
+                continue
+            return entry
+        return None
+
+    def _translate_batch(self, lines, language, cli, cancellation, queue_id):
+        with self._connect() as db:
+            row = db.execute('SELECT selections FROM translation_job_options WHERE queue_id=?', (queue_id,)).fetchone()
+        if row is None:
+            raise TranslationCancelled
+        selected = json.loads(row[0]).get(cli, {})
+        if cli == 'opencode_go':
+            adapter = self._options.adapter(queue_id, selection=selected)
+            kwargs = {}
+        else:
+            adapter = self._translator
+            kwargs = dict(selected)
+            kwargs.pop('provider', None)
+        if adapter is None:
+            raise TranslationError('missing_cli', '번역 어댑터가 설정되지 않았습니다.')
+        for attempt in range(self._format_attempts):
+            if cancellation.is_set():
+                raise TranslationCancelled
+            try:
+                return validate_translation(lines, adapter.translate(lines, language, cli=cli,
+                                            cancellation=cancellation, **kwargs))
+            except TranslationError as error:
+                if error.kind != 'format' or attempt + 1 == self._format_attempts:
+                    raise
+            except TranslationCancelled:
+                raise
+            except Exception as error:
+                raise TranslationError('other', str(error)) from error
 
     def process_next(self):
         """한 번에 한 묶음. 성공한 묶음은 저장하고 전체/선택 줄 교체는 마지막에 원자적으로 한다."""
@@ -338,6 +465,11 @@ class Translations:
             with self._connect() as db:
                 ids = {r[0] for r in db.execute("SELECT line_id FROM translation_targets "
                                                "WHERE queue_id = ? AND text IS NULL", (pending.id,))}
+                self._start_job(db, pending.id, cli)
+                cli = self._route(db, pending.id, cli)
+                if self._backoff(db, cli) and self._can_fallback(cli):
+                    self._fallback(db, pending.id, cli, 'usage_limit')
+                    cli = 'opencode_go'
             lines = tuple(line for line in transcript.lines if line.id in ids)[:self._batch_size]
             if not lines:
                 return None  # 요청 또는 원어 세대가 읽는 도중 교체됐다.
@@ -350,18 +482,29 @@ class Translations:
                 if self._cancellation.is_set():
                     cancellation.set()
             try:
-                if self._translator is None:
-                    raise TranslationError("missing_cli", "번역 어댑터가 설정되지 않았습니다.")
-                for attempt in range(self._format_attempts):
+                try:
+                    result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation, pending.id)
+                except TranslationError as error:
                     if cancellation.is_set():
                         raise TranslationCancelled
-                    try:
-                        result = validate_translation(lines, self._translator.translate(
-                            lines, transcript.spoken_language, cli=cli, cancellation=cancellation))
-                        break
-                    except TranslationError as error:
-                        if error.kind != "format" or attempt + 1 == self._format_attempts:
-                            raise
+                    if error.kind not in ('usage_limit', 'other', 'authentication', 'missing_cli', 'timeout', 'format') or not self._can_fallback(cli):
+                        raise
+                    with self._connect() as db:
+                        db.execute('BEGIN IMMEDIATE')
+                        if error.kind == 'usage_limit':
+                            retry = getattr(error, 'retry_at', None) or self._clock() + self._retry_delay
+                            db.execute('INSERT OR REPLACE INTO translation_cli_backoff VALUES (?, ?)', (cli, retry.isoformat()))
+                        current = db.execute('SELECT 1 FROM translation_queue WHERE id=?', (pending.id,)).fetchone()
+                        if current:
+                            self._fallback(db, pending.id, cli, error.kind)
+                        backoff = self._backoff(db, 'opencode_go')
+                    if not current:
+                        raise TranslationCancelled
+                    cli = 'opencode_go'
+                    if backoff:
+                        from .opencode_go import OpenCodeGoError
+                        raise OpenCodeGoError('usage_limit', retry_at=backoff)
+                    result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation, pending.id)
                 if cancellation.is_set():
                     raise TranslationCancelled
                 with self._connect() as db:
@@ -378,6 +521,9 @@ class Translations:
                                (pending.id, cli))
                     db.executemany("UPDATE translation_targets SET text = ? WHERE queue_id = ? AND line_id = ?",
                                    [(line.text, pending.id, line.id) for line in result])
+                    db.executemany("INSERT OR REPLACE INTO translation_target_providers "
+                                   "SELECT queue_id, line_id, ? FROM translation_targets WHERE queue_id=? AND line_id=?",
+                                   [(cli, pending.id, line.id) for line in result])
                     done = not db.execute("SELECT 1 FROM translation_targets WHERE queue_id = ? AND text IS NULL",
                                           (pending.id,)).fetchone()
                     if done:
@@ -389,6 +535,7 @@ class Translations:
                                "error_detail = NULL WHERE id = ?", ("completed" if done else "queued", pending.id))
                     entry = self._entry(db, db.execute("SELECT * FROM translation_queue WHERE id = ?", (pending.id,)).fetchone())
                     if done:
+                        self._commit_providers(db, pending.id)
                         db.execute("DELETE FROM translation_queue WHERE id = ?", (pending.id,))
                         if self._order:
                             self._order.finish(db, pending.video_id)
@@ -401,7 +548,7 @@ class Translations:
             except Exception as error:
                 failure = error if isinstance(error, TranslationError) else TranslationError("other", str(error))
                 held = failure.kind == "usage_limit"
-                retry_at = self._clock() + self._retry_delay if held else None
+                retry_at = (getattr(failure, "retry_at", None) or self._clock() + self._retry_delay) if held else None
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
                     if held:

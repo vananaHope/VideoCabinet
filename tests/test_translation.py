@@ -33,7 +33,7 @@ class Translator:
         self.prefix = "번역"
         self.response = None
 
-    def translate(self, lines, language, *, cli, cancellation):
+    def translate(self, lines, language, *, cli, cancellation, model="", effort=""):
         self.calls.append((lines, language, cli))
         if self.error:
             raise self.error
@@ -162,7 +162,7 @@ def test_ineligible_transcripts_never_call_translator(setup, language, probabili
     assert not adapter.calls
 
 
-def test_cli_setting_defaults_persists_and_is_used_for_next_batch(setup):
+def test_cli_setting_defaults_persists_and_is_used_for_next_job(setup):
     core, _, adapter, _, reopen = setup
     assert core.translation_cli == "codex"
     source(core, core.videos()[0].id)
@@ -172,7 +172,7 @@ def test_cli_setting_defaults_persists_and_is_used_for_next_batch(setup):
     assert core.translation_cli == "claude"
     assert core.settings.get("translation.cli") == "claude"
     core.process_next_translation()
-    assert [call[2] for call in adapter.calls] == ["codex", "claude"]
+    assert [call[2] for call in adapter.calls] == ["codex", "codex"]
     with pytest.raises(ValueError):
         core.set_translation_cli("unknown")
     assert core.translation_cli == "claude"
@@ -221,6 +221,37 @@ def test_other_failures_require_explicit_retry_and_keep_completed_batches(setup,
     assert retry.completed_lines == 2
     finish(core)
     assert core.translation(video.id)
+
+
+@pytest.mark.parametrize("sensitive", [
+    "API_KEY=private-key-value",
+    '"access_token": "private-token-value"',
+    "Authorization: Bearer private-bearer-value",
+    "sk-private-key-value",
+    r"C:\Users\PrivateName\cli\config.json",
+    r"C:\Users\Private Name\cli\config.json",
+    '"C:\\Users\\Private Name\\cli\\config.json"',
+    "/home/private-name/.config/cli.json",
+    "/home/private name/.config/cli.json",
+    r"\\private-server\private-share\config.json",
+])
+def test_queue_failure_detail_is_readable_and_redacted_after_restart(setup, sensitive):
+    from my_video_manager.web_queue_data import row_data
+
+    core, _, adapter, _, reopen = setup
+    video = core.videos()[0]
+    source(core, video.id)
+    adapter.error = TranslationError("other", f"segfault in helper xyz; {sensitive}\nexit code 3")
+    assert core.process_next_translation().state == "failed"
+    for current in (core, reopen()):
+        entry, = current.subtitle_queue_items()
+        message = row_data(entry)["message"]
+        assert "segfault in helper xyz" in message
+        assert "exit code 3" in message
+        assert "번역에 실패" in message
+        assert sensitive not in message
+        assert "private" not in message.lower()
+        assert "[가림]" in message
 
 
 @pytest.mark.parametrize("response", [
@@ -416,7 +447,7 @@ def test_cancel_and_abnormal_exit_resume_at_last_committed_batch(setup):
     started = Event()
 
     class Cancellable(Translator):
-        def translate(self, lines, language, *, cli, cancellation):
+        def translate(self, lines, language, *, cli, cancellation, model="", effort=""):
             started.set()
             assert cancellation.wait(5)
             raise TranslationCancelled
@@ -465,6 +496,8 @@ def test_each_cli_keeps_its_own_usage_deadline_and_can_resume_held_video(setup):
     assert core.process_next_translation().state == "held"
     time[0] += timedelta(minutes=5)
     core.set_translation_cli("claude")
+    assert not core.translation_ready()  # 기존 작업은 시작할 때의 Codex를 유지한다.
+    core.request_translation(core.videos()[0].id)  # 직접 재시도는 새 설정으로 시작한다.
     assert core.translation_ready()
     assert core.process_next_translation().state == "held"
     assert [call[2] for call in adapter.calls] == ["codex", "claude"]
@@ -472,6 +505,8 @@ def test_each_cli_keeps_its_own_usage_deadline_and_can_resume_held_video(setup):
     time[0] += timedelta(minutes=10)
     assert not core.translation_ready()  # claude는 아직 5분 남았다.
     core.set_translation_cli("codex")
+    assert not core.translation_ready()
+    core.request_translation(core.videos()[0].id)
     assert core.translation_ready()
     adapter.error = None
     finish(core)
@@ -575,18 +610,17 @@ def test_successful_batch_resets_consecutive_usage_limit_count(setup):
     assert core.process_next_translation().state == "held"
 
 
-def test_repeated_usage_limit_count_is_separate_for_each_cli(setup):
+def test_setting_change_does_not_reset_running_job_usage_limit_count(setup):
     core, _, adapter, time, reopen = setup
     source(core, core.videos()[0].id)
     adapter.error = TranslationError("usage_limit", "usage_limit")
     for cli in ("codex", "claude"):
         core.set_translation_cli(cli)
-        for _ in range(2):
-            assert core.process_next_translation().state == "held"
-            time[0] += timedelta(minutes=15)
+        assert core.process_next_translation().state == "held"
+        time[0] += timedelta(minutes=15)
     core = reopen()
-    core.set_translation_cli("codex")
     assert core.process_next_translation().state == "failed"
+    assert [call[2] for call in adapter.calls] == ["codex"] * 3
 
 
 def test_usage_limit_from_replaced_request_still_holds_cli_without_stale_attempts(setup):

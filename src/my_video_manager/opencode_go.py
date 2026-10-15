@@ -20,11 +20,11 @@ from .secret_store import Secret
 from .translation import TranslationCancelled, TranslationError
 from .translation_cli import (classify_cli_failure, parse_translation_response,
                               translation_prompt, translation_schema)
-from .translation_models import ModelPolicy, TranslationModelChoice
+from .translation_models import (ModelPolicy, TranslationModelChoice, DEFAULT_MODEL,
+                                 MODEL_CHOICES, MODEL_POLICIES, CHAT_MODELS, NON_CHAT_MODELS)
 
 
 BASE_URL = "https://opencode.ai/inference/go/v1"
-DEFAULT_MODEL = "deepseek-v4.1-flash"
 def _user_agent():
     try:
         version = metadata.version("my-video-manager")
@@ -36,38 +36,6 @@ def _user_agent():
 USER_AGENT = _user_agent()
 
 
-# Go 문서에서 확인한 chat/completions 모델. 직접 입력 모델의 정책은 미확인으로 둔다.
-CHAT_MODELS = (
-    "deepseek-v4.1-flash", "deepseek-v4-pro", "glm-5.3-flash", "glm-5.3", "glm-5.2",
-    "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "longcat-2.0", "mimo-v2.6-flash",
-    "mimo-v2.6-pro", "mimo-v2.5", "mimo-v2.5-pro", "hy4-preview", "hy3", "space-bunny",
-    "longcat-2.5-preview-free", "step-5-preview-free", "cat-jam-free",
-)
-MODEL_POLICIES = tuple(ModelPolicy(
-    model_id, training=False, retention_days=30 if model_id == "cat-jam-free" else 0,
-    checked_on=date(2026, 10, 15),
-    valid_until=date(2026, 10, 31) if model_id.startswith("deepseek-") else None,
-    source="https://opencode.ai/docs/en/go/",
-) for model_id in CHAT_MODELS)
-
-
-MODEL_CHOICES = tuple(TranslationModelChoice(
-    provider="opencode_go", model_id=policy.model_id,
-    label={"deepseek-v4.1-flash": "DeepSeek V4.1 Flash", "deepseek-v4-pro": "DeepSeek V4 Pro"}.get(
-        policy.model_id, policy.model_id),
-    is_default=policy.model_id == DEFAULT_MODEL, policy=policy,
-    source=("https://github.com/ucx0204/CarrotMangaTranslator/blob/"
-            "721e709d3706f15ed1ef62270460d4b8ab5d5312/docs/custom-api-profiles-20261005.md"
-            if policy.model_id == DEFAULT_MODEL else policy.source),
-    # 참고 실측은 이 모델에만 있다. 다른 모델의 JSON 모드는 추측하지 않는다.
-    structured_output="json_object" if policy.model_id == DEFAULT_MODEL else None,
-) for policy in MODEL_POLICIES)
-
-NON_CHAT_MODELS = frozenset((
-    "grok-4.7", "grok-4.6", "gpt-6-luna", "gpt-5.6-luna", "claude-haiku-5-5",
-    "gemini-4-argon-contributor", "minimax-m3", "minimax-m2.7",
-    "muse-spark-1.3-contributor", "muse-spark-1.2-contributor", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-plus",
-))
 
 
 @dataclass(frozen=True)
@@ -301,7 +269,7 @@ class OpenCodeGoTranslator:
 
     def __init__(self, key_provider: Callable[[], Secret | None], *, session_id: str,
                  model: str = DEFAULT_MODEL, transport: HTTPTransport | None = None,
-                 timeout: float = 60, clock=None, choices=MODEL_CHOICES):
+                 timeout: float = 60, clock=None, choices=MODEL_CHOICES, effort=""):
         if not isinstance(session_id, str) or not session_id or not session_id.isascii() or any(
                 c.isspace() or ord(c) < 33 or ord(c) > 126 for c in session_id):
             raise ValueError("세션 ID는 공백 없는 ASCII 문자열이어야 합니다.")
@@ -314,6 +282,7 @@ class OpenCodeGoTranslator:
         self._key_provider, self.session_id, self.model = key_provider, session_id, model
         self._transport = transport if transport is not None else UrllibTransport()
         self._timeout = timeout
+        self.effort = effort
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._choices = {choice.model_id: choice for choice in choices if choice.provider == "opencode_go"}
 
@@ -419,7 +388,10 @@ class OpenCodeGoTranslator:
         prompt = translation_prompt(lines, spoken_language)
         prompt += "\nOUTPUT_JSON_SCHEMA:\n" + json.dumps(translation_schema(lines), ensure_ascii=False)
         prompt += '\nReturn a json object only. Example: {"lines": [{"id": "target id", "text": "번역"}]}.'
-        data = self._request("/chat/completions", self._model_payload(self.model, prompt),
+        extra = {}
+        if self.effort and self.effort in (self.model_choice().reasoning_efforts or ()):
+            extra["reasoning_effort"] = self.effort
+        data = self._request("/chat/completions", self._model_payload(self.model, prompt, **extra),
                              cancellation=cancellation)
         result = None
         try:
