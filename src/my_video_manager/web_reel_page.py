@@ -23,9 +23,12 @@ class WebReelControls(ReelControls):
             QMessageBox.warning(self.window, '모아보기 재생 실패', str(error))
 
     def sync(self):
-        if self.shown is not None and self.core.reel_playback is None:
-            self.window.web_host.controllers['reel'].status = '모아보기를 마쳤습니다. 다시 재생할 하이라이트를 고르세요.'
+        completed = self.shown is not None and self.core.reel_playback is None
         super().sync()
+        if completed:
+            page = self.window.web_host.controllers['reel']
+            page.status = '모아보기를 마쳤습니다. 다시 재생할 하이라이트를 고르세요.'
+            page.refresh_guidance()
 
     def open(self):
         self.window.navigate_web_tab('reel')
@@ -114,6 +117,7 @@ class WebReelPage(WebPageController):
                     status=self.status)
 
     def refresh(self):
+        self.status = ''
         self.tags = [dict(id=t.id, name=t.name) for t in self.core.tags()]
         if self.tag_id not in {t['id'] for t in self.tags}:
             self.tag_id = 0

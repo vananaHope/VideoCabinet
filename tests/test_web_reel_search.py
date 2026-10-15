@@ -149,6 +149,40 @@ def test_reel_reuses_playback_auto_advance_repeat_and_records_only_revisit(windo
     assert window.web_host.active_tab == 'reel'
 
 
+@pytest.mark.parametrize('action', ['refresh', 'filter', 'tab-return'])
+def test_reel_completion_status_clears_on_list_update(window_factory, core, action):
+    highlight = mark(core, core.videos()[0], 10, 15)
+    tag = core.add_highlight_tag(highlight.id, '복습')
+    window = window_factory('1')
+    window.player_factory = ReelPlayer
+    window.navigate_web_tab('reel')
+    page = window.web_host.controllers['reel']
+    page.bridge.play(0)
+    QApplication.processEvents()
+    changes = []
+    page.bridge.changed.connect(lambda value: changes.append(json.loads(value)))
+    core.playback.report(15)
+    core.advance_reel_if_due()
+    window.reel.sync()
+    completed = '모아보기를 마쳤습니다. 다시 재생할 하이라이트를 고르세요.'
+    assert snapshot(page)['status'] == completed
+    assert changes[-1]['status'] == completed
+    assert sum(change['status'] == completed for change in changes) == 1
+    window.reel.sync()
+    assert sum(change['status'] == completed for change in changes) == 1
+
+    if action == 'tab-return':
+        window.navigate_web_tab('library')
+        window.navigate_web_tab('reel')
+    elif action == 'filter':
+        page.bridge.filter(tag.id)
+    else:
+        page.bridge.refresh()
+    assert snapshot(page)['status'] == ''
+    assert changes[-1]['status'] == ''
+    assert len(snapshot(page)['entries']) == 1
+
+
 def test_search_scene_return_keeps_query_results_selection_and_playlist(window_factory, core):
     video = core.videos()[0]
     h = mark(core, video, 12.125)
