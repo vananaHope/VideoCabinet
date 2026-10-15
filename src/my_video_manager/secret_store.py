@@ -18,8 +18,10 @@ class Secret:
     __slots__ = ("_value",)
 
     def __init__(self, value: str):
-        if not isinstance(value, str) or not value.strip() or any(c.isspace() for c in value):
-            raise SecretStoreError("키는 공백 없는 문자열이어야 합니다.")
+        if isinstance(value, str):
+            value = value.strip()
+        if not isinstance(value, str) or not value or any(not 33 <= ord(c) <= 126 for c in value):
+            raise SecretStoreError("키는 공백 없는 출력 가능한 ASCII 문자(33~126)여야 합니다.")
         self._value = value
 
     def reveal(self) -> str:
@@ -86,10 +88,10 @@ class SecretStore:
         self._protector = protector if protector is not None else WindowsDPAPI()
 
     def save(self, key: Secret | str) -> None:
+        key = key if isinstance(key, Secret) else Secret(key)
         temporary = None
         failed = False
         try:
-            key = key if isinstance(key, Secret) else Secret(key)
             encrypted = self._protector.protect(key.reveal().encode("utf-8"))
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with NamedTemporaryFile(dir=self.path.parent, prefix=".key-", delete=False) as stream:

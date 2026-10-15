@@ -10,20 +10,28 @@ Codex·Claude는 기존 구독 CLI를 사용하고, OpenCode Go는 사용자가 
 [이용 약관](https://opencode.ai/legal/terms-of-service)의 사용 제한에는 서비스가 합리적으로 의도하지 않은 목적과
 프로그램을 통한 출력 추출에 대한 문구도 있다. 자막 번역에 대한 명시적 허용은 확인하지 못했다.
 2026-10-15 사용자는 이 위험과 계정 제한 가능성을 알고 감수하기로 결정했다.
-이는 제공자의 허용 확인을 뜻하지 않으며, 코딩 에이전트로 위장하지 않고 `my-video-manager/0.1.0` User-Agent를 보낸다.
-대화/번역 작업의 안정된 ID를 `x-opencode-session`에 전달한다. 후속 실행 연결은 같은 작업의 묶음·재시도에도 이 ID를 유지한다.
+이는 제공자의 허용 확인을 뜻하지 않으며, 코딩 에이전트로 위장하지 않고 `my-video-manager/<실제 앱 버전>` User-Agent를 보낸다.
+설치 메타데이터를 읽지 못하면 버전은 `0.1.0`으로 대체한다.
+번역 작업마다 고정 ID를 `x-opencode-session`에 전달한다. 같은 작업의 묶음·재시도는 같은 ID를 쓰며 키 확인은 매번 별도 ID를 쓴다.
+모델 목록 등 모델 요청이 아닌 통신에는 세션 헤더를 붙이지 않는다.
 
 ## 모델과 응답 계약
 
-- 기준 주소는 `https://opencode.ai/inference/go/v1`이고 확인된 `chat/completions` 모델만 지원한다.
+- 기준 주소는 `https://opencode.ai/inference/go/v1`이고 `chat/completions`만 호출한다. 확인된 다른 API 계열 모델은 거절한다.
+  목록 외 직접 입력 모델도 받되 정책 미확인으로 표시하며, 실제 호환성은 호출 결과로 확인한다. 예전 `/zen/go/v1`로 폴백하지 않는다.
 - 기본 모델은 사용자 지정 **`deepseek-v4.1-flash`**이다. 품질 시험으로 선정하지 않는다.
   Go 문서의 2026-10-15 정책은 학습 미사용·보존 0일이며, DeepSeek 무보존 계약은 매월 갱신되고 현재 2026-10-31까지다.
   기본 모델에도 다른 모델과 동일한 정책 표시/경고 규칙을 적용한다. 학습 사용·미확인·계약 만료는 경고 대상으로 반환한다.
   모델 ID, 학습 여부, 보존 기간, 확인일, 만료일, 출처를 데이터로 두고 후속 화면이 사용한다. 자동 정책 갱신은 없다.
 - [Inference API 문서](https://opencode.ai/v2/docs/console/api/inference)의 `Authorization: Bearer <token>`을 사용한다.
   실제 Go 키를 이용한 인증 검증은 아직 하지 않았다.
-- Go의 JSON Schema 강제 출력 지원은 공식 문서에서 확인되지 않았다. `translation_prompt`와 `translation_schema`를
-  프롬프트에 포함하고, `parse_translation_response`로 줄 ID 일대일 대응과 형식을 검증한다. 서버 전용 구조화 출력 옵션을 가정하지 않는다.
+- [참고 구현의 실측 기록](https://github.com/ucx0204/CarrotMangaTranslator/blob/721e709d3706f15ed1ef62270460d4b8ab5d5312/docs/custom-api-profiles-20261005.md)과
+  2026-10-15 사용자 결정에 따라 기본 모델은 정책 데이터의 `structured_output="json_object"`로 지정한다.
+  번역과 키 확인에 `response_format: {"type": "json_object"}`를 보내고 프롬프트에 소문자 `json` 안내와 예시를 포함한다.
+  `json_schema`는 보내지 않는다. 참고 프로젝트의 코드는 복사하지 않고 확인된 동작 사실만 사용했다.
+  `translation_prompt`와 `translation_schema`는 프롬프트에 포함하고, 응답 바깥 코드 펜스 한 겹만 벗긴 뒤
+  `parse_translation_response`로 줄 ID 일대일 대응과 형식을 검증한다. 앞뒤 설명이나 중첩 펜스는 형식 오류다.
+  400은 요청 거부로 반환하고 JSON 안내 누락/스키마 거부는 정제된 진단만 남긴다. 무조건 재시도하거나 모델·주소를 바꾸지 않는다.
 - 어댑터는 전달받은 남은 줄 묶음만 번역하고 자체 재시도를 하지 않는다. 형식 오류는 현재의 `format`, 한도는 `usage_limit`으로 반환한다.
   키 없음·인증 오류·연결 실패·저장소 오류는 구분하고 서버 원문/원래 예외를 오류 문구에 포함하지 않는다.
   `Retry-After`의 초/HTTP 날짜와 오류 객체의 시간대가 있는 `retry_at`/`reset_at`을 UTC 시각으로 제공한다.
@@ -32,12 +40,18 @@ Codex·Claude는 기존 구독 CLI를 사용하고, OpenCode Go는 사용자가 
   `check_key()`는 사용자가 명시적으로 요청할 때만 기본 유료 모델에 고정 문자열과 `max_tokens=1`을 보낸다.
   유효·키 없음·키 오류·한도·연결 실패·기타 결과를 구분하며 자동/주기적으로 호출하지 않는다.
 
+모델 선택 항목은 `TranslationModelChoice(provider, model_id, label, is_default, policy, source,
+reasoning_supported, structured_output)`로 둔다. `reasoning_supported`의 None/True/False는 미확인/지원/미지원을 뜻한다.
+`policy=None`인 CLI 직접 입력 항목에는 Go 개인정보 경고를 적용하지 않는다. Go 직접 입력은 값이 미확인인 `ModelPolicy`를 붙여 경고한다.
+개인정보 정책 출처와 모델 선택/구조화 출력 근거의 출처를 각각 보존한다. 실제 Codex·Claude 선택지와 공용 목록 통합은 연결 단계에서 한다.
+
 ## 키 저장
 
 키는 데이터 폴더의 `secrets/opencode-go.dpapi`에 Windows 사용자 범위 DPAPI 암호문으로 저장한다.
 `CryptProtectData`/`CryptUnprotectData`를 ctypes로 호출하며 머신 공용 플래그는 사용하지 않는다.
 설정과 DB에는 키를 넣지 않고, 암호화 후 임시 파일과 원자적 교체를 사용해 저장 실패 시 기존 키를 보존한다.
 저장/읽기/삭제와 끝 4자리 가린 표시를 제공하며 짧은 키는 전부 가린다. 키 객체의 str/repr과 오류는 평문을 숨긴다.
+붙여넣기의 앞뒤 공백·줄바꿈은 없애고 키 내부는 ASCII 33~126만 허용한다. 입력 오류와 암호화/파일 저장 오류는 다른 문구로 안내한다.
 이는 저장 데이터 보호이며 같은 Windows 계정의 프로세스나 실행 중 메모리까지 격리하는 수단은 아니다.
 다른 사용자/컴퓨터로 옮기거나 DPAPI 복호화가 불가능해지면 다시 등록한다. 평문 저장으로 폴백하지 않는다.
 
@@ -52,4 +66,9 @@ CLI 오류 또는 형식 오류 재시도 소진 등으로 멈추면 **남은 �
 선택지/설정 확장, 대기열 실행과 서버 재시도 시각 연결, 이어받기 상태 전이·줄별 방식 기록, 설정/대화상자와
 자막 외부 전송 안내는 #51·#53 병합 뒤 연결 단계에서 구현한다. `translation_cli.py`, `translation.py`, `translation_ui.py`는 수정하지 않는다.
 HTTP는 주입 가능하며 자동 테스트는 로컬 가짜 서버만 사용한다. 실제 키로 짧은 자막 확인은 후속 사람 확인으로 남긴다.
-동기 HTTP 중 취소는 응답 또는 제한 시간 뒤 관찰되며, 취소된 응답은 사용하지 않는다.
+HTTP transport는 취소 Event를 받으며 취소/전체 제한 시간 도달 시 소켓을 shutdown/close한다.
+호출자는 20ms 간격으로 취소를 감시하고 작업 스레드 정리 대기는 최대 100ms다. 기본 전체 제한은 60초,
+TCP 연결/TLS handshake는 10초, 응답 읽기는 30초다. 기존 180초 종료 대기를 줄이면서 짧은 자막 묶음의 응답 시간을 확보한다.
+Windows의 읽기 대기를 확실히 중단하도록 응답 reader는 50ms 단위로 취소를 확인하며, 이 짧은 timeout은 HTTP 파서에 전달하지 않는다.
+DNS 해석 자체는 OS가 소유하므로 즉시 중단할 수 없으나 호출자는 취소 즉시 반환하며 늦게 만들어진 소켓도 전송 전에 닫는다.
+실제 키 사람 확인에서는 기준 주소/Bearer 인증, JSON 모드 지원·응답 펜스 여부, `max_tokens=1`, 짧은 자막 결과를 확인한다.

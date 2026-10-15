@@ -68,7 +68,8 @@ def test_corrupt_encrypted_file_is_not_treated_as_missing(tmp_path):
     assert store.read().reveal() == KEY
 
 
-@pytest.mark.parametrize("key", ["", " ", "key\r\nAuthorization: injected", None, 123])
+@pytest.mark.parametrize("key", ["", " ", "key\r\nAuthorization: injected", None, 123,
+                               "키값-1234", "a\x00b", "a\x7fb", "a b"])
 def test_invalid_key_is_rejected_without_echo(key):
     with pytest.raises(SecretStoreError):
         Secret(key)
@@ -94,3 +95,19 @@ def test_atomic_replace_failure_preserves_key_and_cleans_encrypted_temp(tmp_path
     assert KEY not in repr(raised.value)
     assert store.path.read_bytes() == previous
     assert list(store.path.parent.iterdir()) == [store.path]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="실제 Windows 사용자 DPAPI")
+def test_pasted_key_is_trimmed_and_validation_message_is_preserved(tmp_path):
+    store = SecretStore(tmp_path)
+    store.save(" \r\n" + KEY + "\r\n\t")
+    assert store.read().reveal() == KEY
+    for value in ("한글키", "inside space", "a\x00b", "\r\n"):
+        with pytest.raises(SecretStoreError) as direct:
+            Secret(value)
+        with pytest.raises(SecretStoreError) as saved:
+            store.save(value)
+        assert str(saved.value) == str(direct.value)
+        assert "ASCII" in str(saved.value)
+        assert saved.value.__context__ is None
+        assert store.read().reveal() == KEY

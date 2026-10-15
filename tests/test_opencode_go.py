@@ -2,15 +2,18 @@ from dataclasses import replace
 from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-from threading import Event, Thread
+from threading import Event, Thread, enumerate as threads
 import sys
+import time
+import socket
+from importlib.metadata import version
 import traceback
 
 import pytest
 
 from my_video_manager.opencode_go import (
     BASE_URL, DEFAULT_MODEL, HTTPResponse, ModelPolicy, OpenCodeGoError,
-    OpenCodeGoTranslator, UrllibTransport, USER_AGENT,
+    OpenCodeGoTranslator, TranslationModelChoice, UrllibTransport, USER_AGENT,
 )
 from my_video_manager.secret_store import Secret, SecretStore
 from my_video_manager.subtitles import TranscriptLine
@@ -63,9 +66,10 @@ def test_remaining_batch_reuses_contract_headers_and_stable_session():
         assert payload["model"] == DEFAULT_MODEL
         prompt = payload["messages"][0]["content"]
         assert prompt.startswith(translation_prompt(LINES, "en"))
-        assert json.loads(prompt.split("OUTPUT_JSON_SCHEMA:\n")[1]) == translation_schema(LINES)
+        assert json.JSONDecoder().raw_decode(prompt.split("OUTPUT_JSON_SCHEMA:\n")[1])[0] == translation_schema(LINES)
         assert payload["stream"] is False
-        assert "response_format" not in payload  # 서버 지원을 가정하지 않는다.
+        assert payload["response_format"] == {"type": "json_object"}
+        assert "json" in prompt and "Example:" in prompt
     http.response = HTTPResponse(200, {}, json.dumps(completion(
         json.dumps({"lines": [{"id": "two", "text": "남은 줄"}]}))).encode())
     assert translator.translate(LINES[1:], "en")[0].id == "two"
@@ -76,7 +80,7 @@ def test_remaining_batch_reuses_contract_headers_and_stable_session():
     (429, {}, "usage_limit"), (401, {"error": KEY}, "authentication"),
     (403, {"error": "usage_limit " + KEY}, "authentication"),
     (402, {"error": {"code": "quota_exceeded"}}, "usage_limit"),
-    (503, {"error": KEY}, "other"), (400, {"error": "bad request " + KEY}, "other"),
+    (503, {"error": KEY}, "other"), (400, {"error": "bad request " + KEY}, "request_rejected"),
     (302, {}, "other"),
 ])
 def test_http_errors_are_safe_and_usage_limit_matches_queue(status, payload, kind, caplog):
@@ -143,13 +147,14 @@ def test_missing_key_connection_and_provider_errors_are_distinct():
 def test_models_filter_other_api_families_and_apply_updated_policy_to_default():
     rows = [{"id": model} for model in (DEFAULT_MODEL, "glm-5.2", "claude-haiku-5-5", "new-unknown", DEFAULT_MODEL)]
     translator = adapter(FakeHTTP({"data": rows}))
-    assert [model.id for model in translator.models()] == [DEFAULT_MODEL, "glm-5.2"]
+    assert [model.id for model in translator.models()] == [DEFAULT_MODEL, "glm-5.2", "new-unknown"]
     policy = translator.model_policy()
     assert policy.training is False and policy.retention_days == 0
     assert not policy.needs_warning(date(2026, 10, 31))
     assert policy.needs_warning(date(2026, 11, 1))
     changed = replace(policy, training=True)
-    models = adapter(FakeHTTP({"data": rows}), policies=(changed,)).models()
+    choice = replace(translator.model_choice(), policy=changed)
+    models = adapter(FakeHTTP({"data": rows}), choices=(choice,)).models()
     assert models[0].policy.needs_warning(date(2026, 10, 15))
     assert models[1].policy.needs_warning(date(2026, 10, 15))
     assert ModelPolicy("unknown").needs_warning(date.today())
@@ -171,8 +176,8 @@ def test_key_check_is_one_explicit_minimal_paid_model_request(status, expected):
     assert translator.check_key().status == expected
     assert len(http.calls) == 1
     assert json.loads(http.calls[0][2]["body"]) == {
-        "model": DEFAULT_MODEL, "messages": [{"role": "user", "content": "Reply OK."}],
-        "max_tokens": 1, "stream": False,
+        "model": DEFAULT_MODEL, "messages": [{"role": "user", "content": 'Return a json object. Example: {"ok": true}.'}],
+        "max_tokens": 1, "stream": False, "response_format": {"type": "json_object"},
     }
     assert adapter(FakeHTTP(error=OSError(KEY))).check_key().status == "connection"
     assert adapter(FakeHTTP({})).check_key().status == "other"
@@ -198,7 +203,7 @@ def test_cancel_before_and_after_request_and_empty_batch():
     assert adapter(http).translate((), "en") == () and not http.calls
 
 
-@pytest.mark.parametrize("model", ["claude-haiku-5-5", "gpt-6-luna", "unknown"])
+@pytest.mark.parametrize("model", ["claude-haiku-5-5", "gpt-6-luna"])
 def test_non_chat_models_rejected_without_network(model):
     with pytest.raises(ValueError):
         adapter(FakeHTTP(), model=model)
@@ -211,21 +216,35 @@ def server():
             self.server.requests.append((self.path, dict(self.headers), self.rfile.read(
                 int(self.headers.get("Content-Length", 0)))))
             status, headers, body = self.server.reply
+            if getattr(self.server, "delay", None) == "headers":
+                self.server.waiting.set()
+                self.server.release.wait(5)
             self.send_response(status)
             for name, value in headers.items():
                 self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
+            if getattr(self.server, "delay", None) == "body":
+                self.wfile.write(body[:1])
+                self.wfile.flush()
+                self.server.waiting.set()
+                self.server.release.wait(5)
+                body = body[1:]
+            try:
+                self.wfile.write(body)
+            except OSError:
+                pass
         do_GET = do_POST
         def log_message(self, *args):
             pass
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.requests = []
+    server.waiting, server.release = Event(), Event()
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         yield server
     finally:
+        server.release.set()
         server.shutdown()
         server.server_close()
         thread.join()
@@ -296,3 +315,166 @@ def test_model_response_and_key_check_objects_do_not_repr_sensitive_server_data(
     translator = adapter(http)
     assert KEY not in repr(translator.models()) + repr(translator) + repr(http.response)
     assert KEY not in repr(adapter(FakeHTTP({"error": KEY}, status=401)).check_key())
+
+
+@pytest.mark.parametrize("phase", ["headers", "body"])
+@pytest.mark.parametrize("operation", ["translate", "models", "check_key"])
+def test_cancellation_during_delayed_request_returns_in_under_one_second(server, phase, operation):
+    body = json.dumps(completion()).encode()
+    server.reply = 200, {"Content-Length": str(len(body))}, body
+    server.delay = phase
+    cancel, finished, errors = Event(), Event(), []
+    translator = adapter(LocalTransport(server.server_port))
+    def run():
+        try:
+            if operation == "translate":
+                translator.translate(LINES, "en", cli="opencode_go", cancellation=cancel)
+            else:
+                getattr(translator, operation)(cancellation=cancel)
+        except Exception as error:
+            errors.append(error)
+        finally:
+            finished.set()
+    thread = Thread(target=run, daemon=True)
+    thread.start()
+    assert server.waiting.wait(2)
+    started = time.monotonic()
+    cancel.set()
+    assert finished.wait(0.9), "취소 후 호출이 1초 이내 반환해야 한다"
+    assert time.monotonic() - started < 1
+    assert len(errors) == 1 and isinstance(errors[0], TranslationCancelled)
+    thread.join(0.1)
+    remaining = [thread for thread in threads() if thread.name == "opencode-go-http"]
+    assert not remaining, "".join(traceback.format_stack(sys._current_frames()[remaining[0].ident])[-5:])
+
+
+@pytest.mark.parametrize("wrap", [lambda text: text, lambda text: "```json\n" + text + "\n```",
+                                 lambda text: "\n```\r\n" + text + "\r\n```\n"])
+def test_exact_single_outer_fence_uses_existing_parser(wrap):
+    text = completion()["choices"][0]["message"]["content"]
+    assert adapter(FakeHTTP(completion(wrap(text)))).translate(LINES, "en", cli="ignored")[0].text == "안녕"
+
+
+@pytest.mark.parametrize("wrap", [lambda text: "설명\n```json\n" + text + "\n```",
+                                 lambda text: "```json\n" + text + "\n```\n설명",
+                                 lambda text: "```json\n```json\n" + text + "\n```\n```"])
+def test_explanations_and_nested_fences_remain_format_errors(wrap):
+    text = completion()["choices"][0]["message"]["content"]
+    with pytest.raises(OpenCodeGoError) as raised:
+        adapter(FakeHTTP(completion(wrap(text)))).translate(LINES, "en")
+    assert raised.value.kind == "format"
+
+
+def test_model_choice_represents_other_providers_unknown_policy_and_capabilities():
+    cli_choice = TranslationModelChoice("codex", "custom-model", "직접 입력")
+    assert cli_choice.policy is None and not cli_choice.needs_warning(date.today())
+    assert cli_choice.reasoning_supported is None and cli_choice.source is None
+    assert replace(cli_choice, reasoning_supported=True).reasoning_supported is True
+    assert replace(cli_choice, reasoning_supported=False).reasoning_supported is False
+    http = FakeHTTP()
+    translator = adapter(http, model="custom-model")
+    assert translator.model_choice().needs_warning(date.today())
+    translator.translate(LINES, "en")
+    payload = json.loads(http.calls[0][2]["body"])
+    assert payload["model"] == "custom-model" and "response_format" not in payload
+    default = adapter(http).model_choice()
+    assert default.provider == "opencode_go" and default.is_default and default.label == "DeepSeek V4.1 Flash"
+    assert default.source and default.policy.source
+    custom = replace(default, model_id="custom-json", is_default=False)
+    adapter(http, model="custom-json", choices=(custom,)).translate(LINES, "en")
+    assert json.loads(http.calls[-1][2]["body"])["response_format"] == {"type": "json_object"}
+
+
+def test_session_headers_are_scoped_to_model_requests_and_independent_key_checks():
+    http = FakeHTTP()
+    translator = adapter(http)
+    translator.translate(LINES, "en")
+    translator.translate(LINES, "en")
+    translator.check_key()
+    translator.check_key()
+    other = OpenCodeGoTranslator(lambda: Secret(KEY), session_id="another-job", transport=http)
+    other.translate(LINES, "en")
+    sessions = [call[2]["headers"]["x-opencode-session"] for call in http.calls]
+    assert sessions[0] == sessions[1]
+    assert len(set(sessions)) == 4
+    http.response = HTTPResponse(200, {}, b'{"data": []}')
+    translator.models()
+    assert "x-opencode-session" not in http.calls[-1][2]["headers"]
+    assert USER_AGENT == "my-video-manager/" + version("my-video-manager")
+
+
+@pytest.mark.parametrize("status,payload,kind,diagnostic", [
+    (400, {"error": "json_schema unsupported " + KEY}, "request_rejected", "JSON Schema"),
+    (400, {"error": "Prompt must contain the word 'json' " + KEY}, "request_rejected", "json 안내"),
+    (400, {"model": DEFAULT_MODEL}, "request_rejected", "요청을 거부"),
+    (402, {"error": "usage_limit reached " + KEY}, "usage_limit", "한도"),
+    (429, {"error": KEY}, "usage_limit", "한도"),
+])
+def test_local_server_request_rejections_and_limits_are_not_retried(server, status, payload, kind, diagnostic):
+    server.reply = status, {"Retry-After": "30"}, json.dumps(payload).encode()
+    with pytest.raises(OpenCodeGoError) as raised:
+        adapter(LocalTransport(server.server_port)).translate(LINES, "en")
+    assert raised.value.kind == kind and diagnostic in raised.value.detail
+    assert KEY not in raised.value.detail + repr(raised.value)
+    assert len(server.requests) == 1 and server.requests[0][0] == "/v1/chat/completions"
+    if kind == "usage_limit":
+        assert raised.value.retry_at == datetime(2026, 10, 15, 2, 0, 30, tzinfo=timezone.utc)
+
+
+def test_cancel_during_tls_handshake_closes_socket_without_sending_credentials():
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    listener.settimeout(3)
+    received, closed, finished, cancel = Event(), Event(), Event(), Event()
+    traffic, errors = [], []
+    def serve():
+        with listener.accept()[0] as peer:
+            peer.settimeout(3)
+            traffic.append(peer.recv(8192))  # ClientHello 뒤 서버 handshake 응답을 지연한다.
+            received.set()
+            try:
+                while peer.recv(8192):
+                    pass
+            except ConnectionResetError:
+                pass
+            closed.set()
+    server_thread = Thread(target=serve, daemon=True)
+    server_thread.start()
+    def request():
+        try:
+            UrllibTransport().request("POST", f"https://127.0.0.1:{listener.getsockname()[1]}/v1/test",
+                headers={"Authorization": "Bearer " + KEY}, body=b"subtitle", timeout=60, cancellation=cancel)
+        except Exception as error:
+            errors.append(error)
+        finally:
+            finished.set()
+    worker = Thread(target=request, daemon=True)
+    worker.start()
+    try:
+        assert received.wait(2)
+        started = time.monotonic()
+        cancel.set()
+        assert finished.wait(0.9)
+        assert time.monotonic() - started < 1
+        assert closed.wait(0.5)
+        assert isinstance(errors[0], TranslationCancelled)
+        assert KEY.encode() not in b"".join(traffic)
+        assert not any(thread.name == "opencode-go-http" for thread in threads())
+    finally:
+        cancel.set()
+        listener.close()
+        worker.join(1)
+        server_thread.join(1)
+
+
+@pytest.mark.parametrize("phase", ["headers", "body"])
+def test_delayed_server_respects_total_deadline_without_retries(server, phase):
+    server.reply = 200, {}, json.dumps(completion()).encode()
+    server.delay = phase
+    started = time.monotonic()
+    with pytest.raises(OpenCodeGoError) as raised:
+        adapter(LocalTransport(server.server_port), timeout=0.2).translate(LINES, "en")
+    assert raised.value.kind == "connection"
+    assert time.monotonic() - started < 1
+    assert len(server.requests) == 1
