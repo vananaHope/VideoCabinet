@@ -16,11 +16,14 @@ def generator():
 
 @pytest.mark.parametrize('menu_action', [True, False])
 def test_appending_action_keeps_explicit_menu_and_gem_membership(menu_action):
-    action = replace(LIBRARY.aliases[0], values=(*LIBRARY.aliases[0].values, 'newAction'))
-    menu, locked = LIBRARY.constants
+    action = next(alias for alias in LIBRARY.aliases if alias.name == 'Action')
+    action = replace(action, values=(*action.values, 'newAction'))
+    menu = next(constant for constant in LIBRARY.constants if constant.name == 'actions')
     if menu_action:
         menu = replace(menu, values=(*menu.values, ('newAction', '새 작업')))
-    library = replace(LIBRARY, aliases=(action,), constants=(menu, locked))
+    library = replace(LIBRARY,
+        aliases=tuple(action if alias.name == action.name else alias for alias in LIBRARY.aliases),
+        constants=tuple(menu if constant.name == menu.name else constant for constant in LIBRARY.constants))
     generated = generator()['render_types']((SHELL, library))
     menu_line = next(line for line in generated.splitlines() if line.startswith('export const actions = '))
     actual = dict(json.loads(menu_line.removeprefix('export const actions = ').removesuffix(' as const')))
