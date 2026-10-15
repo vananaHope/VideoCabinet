@@ -58,7 +58,9 @@ Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처�
 1. [task-template.md](task-template.md)를 채워 `.local/orchestration/issue-<n>/task.md`로 저장한다. 명세 파일은 Write 도구로 쓴다(셸 heredoc을 거친 python 스크립트로 만들면 한국어가 깨진다). 이슈의 범위 밖 항목(다른 이슈가 맡은 기능)을 명세에 구체적으로 적는다.
 2. Run이 없으면 만든다(이번 지휘 세션 전체에 Run 하나).
 3. `worker-start --spec "<명세>" --worktree new-top-level --name issue-<n>-<slug> --base-branch main --agent codex`로 시작한다.
-4. **입력이 실제로 제출됐는지 확인한다.** 작업자 화면을 읽어 `draft`에 `[Pasted Content ...]`가 남아 있으면 붙여넣기만 되고 제출되지 않은 것이다. 이때는 같은 명세를 다시 보내지 말고 `orca terminal send --terminal <handle> --enter`로 Enter만 보낸다. 특히 기존 터미널을 재사용할 때(`--terminal`) 잘 생긴다.
+4. **입력이 실제로 제출됐는지 확인한다.** `orca orchestration worker-read --dispatch <id> --source terminal --json`으로 작업자 화면을 읽는다. `draft`에 `[Pasted Content ...]`나 명세 일부가 남아 있으면 붙여넣기만 되고 제출되지 않은 것이다. 이때는 같은 명세를 다시 보내지 말고 `orca terminal send --terminal <handle> --enter`로 Enter만 보낸다.
+   - 특히 기존 터미널을 재사용할 때(`--terminal`) 잘 생긴다.
+   - `orca terminal read`의 결과에는 draft가 나오지 않으니 이 확인에 쓰지 않는다(2026-10-15 #65 수정이 이 때문에 멈춰 있었다).
 
 동시에 맡긴 이슈들이 같은 연결 지점(예: 재생 위치 보고)을 각자 만들 것 같으면, 관리자가 그 **공용 계약** 파일을 `.local/orchestration/`에 직접 써서 "내용 그대로 복사"하라고 모두에게 보낸다. 같은 내용의 파일은 병합 때 충돌하지 않는다. #4·#5·#7의 `playback.py`가 첫 사례다.
 
@@ -70,6 +72,8 @@ Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처�
 
 - **heartbeat**: ack하고 계속 기다린다. 사용자에게는 단계만 한 줄로 알린다.
 - **question**: 이슈, 스펙 #1, `CONTEXT.md`, ADR에 답이 있으면 답한다. 사용자만 정할 수 있는 결정이면 사용자에게 묻고, 받은 답을 전달한다.
+  - 답은 반드시 `orca orchestration reply --run <run> --id <질문 msg_id> --body "..."`로 보낸다.
+  - `send --to dispatch:...`로 보내면 작업자의 `ask`는 답을 받지 못하고 시간 초과된다.
 - **worker_done**: 4단계로 간다.
 
 메시지를 처리하기 전에는 ack하지 않는다.
@@ -91,7 +95,7 @@ Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처�
 고칠 것이 있으면 수정 명세를 쓴다. 명세에는 다음을 적는다.
 - 검토 보고서 경로
 - 고칠 지적 목록과 고치지 않을 지적 목록
-- "수정분 관련 테스트를 돌리고, 끝나면 전체 `pytest`를 한 번 돌린다"
+- "수정분 관련 테스트만 돌린다(전체 `pytest`는 생략)"
 
 **수정 작업자의 추론 강도** (사용자 결정, 2026-10-15: 시간과 Codex 한도 절약)
 - 기본은 같은 worktree에 **새 Codex 작업자를 추론 강도 `medium`으로** 띄운다: `worker-start --spec ... --worktree "id:..." --agent codex --model <Codex 설정의 model> --effort medium`. `--model`/`--effort`는 `--terminal`과 함께 쓸 수 없으므로 기존 터미널을 재사용하지 않는다. 수정 명세가 고칠 곳을 구체적으로 짚으므로 구현 맥락이 없어도 된다.
@@ -102,11 +106,11 @@ Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처�
 - 차단·중요 지적을 하나라도 고쳤으면, 수정이 끝난 뒤 같은 검토자 터미널에 재검토를 맡긴다(수정분 `git diff <이전 커밋>..HEAD`, 고친 지적의 재현 절차 재실행). 통과할 때까지 반복한다.
 - **사소한 지적만 고쳤으면 재검토 없이** 관리자가 직접 확인한다.
   - 수정 diff를 읽고, 지적마다 고쳐졌는지 판정한다.
-  - 관련 테스트를 돌리고, 구현자의 전체 `pytest` 결과를 확인한다.
+  - 관련 테스트만 돌린다.
   - 의심스러우면 그때만 재검토를 맡긴다.
   - 확인 결과를 `.local/orchestration/issue-<n>/minor-check-<k>.md`에 짧게 남긴다.
 
-**테스트 병렬 실행**: `pytest-xdist`가 dev 의존성에 들어온 뒤에는 모든 명세에서 전체 실행을 `pytest -n auto`로 하게 한다.
+**테스트 병렬 실행과 범위**: 모든 테스트는 `pytest -n auto`로 돌린다. 작업자는 관련 테스트만 돌리고, 전체 `pytest`는 관리자가 Release 직전 `main`에서 한 번 돌린다(사용자 결정, 2026-10-15: 속도 우선).
 
 **완료 기준**: 마지막 검토 결론이 "통과"이거나 사소 수정의 관리자 확인이 끝났고, 넘긴 지적은 모두 해당 이슈에 댓글로 남았다. 검토에서 새 유형의 지적이 두 번째로 나왔으면 [common-findings.md](common-findings.md)에 더했다.
 
