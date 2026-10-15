@@ -4,7 +4,7 @@ from dataclasses import asdict
 from typing import TypedDict
 from urllib.parse import urlsplit
 
-from .web_external_subtitle_data import language_label
+from .web_external_subtitle_data import subtitle_file_data
 
 
 class TagData(TypedDict):
@@ -55,6 +55,7 @@ class ExternalSubtitleTrackData(TypedDict):
 class ExternalSubtitleFileData(TypedDict):
     id: int
     name: str
+    folderLabel: str | None
     warning: str | None
     subtitles: list[ExternalSubtitleTrackData]
 
@@ -119,12 +120,8 @@ def filter_ids(videos: list[VideoData], query: str, tag_id: int | None) -> list[
 
 
 def details_data(details, external_subtitles=()) -> DetailsData:
-    return DetailsData(**asdict(details), externalSubtitles=[ExternalSubtitleFileData(
-        id=file.id, name=file.name, warning=file.warning,
-        subtitles=[ExternalSubtitleTrackData(language=track.language,
-            languageLabel=language_label(track.language), languageClass=track.language_class,
-            lineCount=track.line_count) for track in file.subtitles],
-    ) for file in external_subtitles])
+    return DetailsData(**asdict(details), externalSubtitles=[
+        subtitle_file_data(file) for file in external_subtitles])
 
 
 def thumbnail_video_id(url: str) -> int | None:

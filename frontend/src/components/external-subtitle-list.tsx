@@ -7,6 +7,7 @@ export function ExternalSubtitleList({ files }: { files: ExternalSubtitleFileDat
     {!files.length ? <p>가져온 외부 자막이 없습니다.</p> : <ul className="space-y-3">
       {files.map(file => <li key={file.id} className="min-w-0 space-y-1">
         <p title={file.name} className="truncate font-medium text-foreground">{file.name}</p>
+        {file.folderLabel && <p title={file.folderLabel} className="truncate text-muted-foreground">{file.folderLabel}</p>}
         {file.subtitles.length ? file.subtitles.map((track, index) => <div key={index} className="flex flex-wrap items-center gap-2">
           <StatusBadge>{track.languageLabel}</StatusBadge>
           <span>{track.lineCount}줄</span>

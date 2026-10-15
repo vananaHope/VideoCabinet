@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from concurrent.futures import CancelledError
 from asyncio import CancelledError as AsyncCancelledError
+import ctypes
 import os
 from pathlib import Path
 import sqlite3
@@ -392,11 +393,11 @@ def test_unreadable_directory_is_not_treated_as_missing(library, monkeypatch):
     core.add_file(video)
 
     def denied(path):
-        raise PermissionError("폴더 접근 거부")
+        raise PermissionError(13, "Permission denied", str(path))
 
     monkeypatch.setattr(os, "scandir", denied)
     result = core.scan()
-    assert any("폴더 접근 거부" in issue.message for issue in result.issues)
+    assert any("읽을 권한이 없습니다" in issue.message for issue in result.issues)
     assert core.search("체중이동").results
 
 
@@ -666,3 +667,104 @@ def test_parser_exception_warning_is_readable_korean(library, content, message):
     assert message in file.warning
     assert any(message in issue.message for issue in result.issues)
     assert file.subtitles == ()
+
+
+@pytest.mark.parametrize('error,detail', [
+    (OSError(5, '저장 장치 입출력 오류', 'C:/Users/private/subtitle.srt'), '저장 장치 입출력 오류'),
+    (PermissionError(13, 'Permission denied', 'C:/Users/private/subtitle.srt'), None),
+    (FileNotFoundError(2, 'No such file or directory', 'C:/Users/private/subtitle.srt'), None),
+    (OSError(5, 'Input/output error'), 'Input/output error'),
+    (OSError(5, '읽기 실패: ~/private/subtitle.srt'), '읽기 실패: [경로 생략]'),
+    (OSError(5, '읽기 실패: C:/Users/private/my folder/subtitle.srt'), '읽기 실패: [경로 생략]'),
+    (OSError(5, r'읽기 실패: \\server\private\subtitle.srt'), '읽기 실패: [경로 생략]'),
+    (OSError(5, '읽기 실패: /home/private/subtitle.srt'), '읽기 실패: [경로 생략]'),
+    (OSError('C:/Users/private/subtitle.srt'), 'OSError'),
+    (TypeError('C:/Users/private/subtitle.srt'), 'TypeError'),
+])
+def test_read_failure_preserves_cause_without_private_paths(library, monkeypatch, error, detail):
+    core, video = library
+    subtitle = video.with_suffix('.srt')
+    subtitle.write_text(srt(), encoding='utf-8')
+    original = Path.read_bytes
+
+    def read(path):
+        if path == subtitle:
+            raise error
+        return original(path)
+
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    result = core.add_file(video)
+    warning = core.external_subtitles(core.videos()[0].id)[0].warning
+    if detail is None:
+        assert '(원인:' not in warning
+    else:
+        assert f'(원인: {detail})' in warning
+    assert 'private' not in warning
+    assert any(issue.message == warning for issue in result.issues)
+
+
+def test_directory_failure_uses_same_safe_cause_message(library, monkeypatch):
+    core, video = library
+    core.add_file(video)
+    original = os.scandir
+
+    def scan(path):
+        if Path(path) == video.parent:
+            raise OSError(5, '저장 장치 오류', str(video.parent))
+        return original(path)
+
+    monkeypatch.setattr(os, 'scandir', scan)
+    result = core.scan()
+    issue, = [issue for issue in result.issues if issue.message.startswith('외부 자막:')]
+    assert '자막 폴더를 읽지 못했습니다. 폴더와 저장 장치 상태를 확인해 주세요.' in issue.message
+    assert '(원인: 저장 장치 오류)' in issue.message
+    assert str(video.parent) not in issue.message
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='실제 Windows FormatError 문구')
+@pytest.mark.parametrize('code', [5, 21, 23, 31, 32, 33, 995, 996, 997, 1117])
+@pytest.mark.parametrize('with_path', [False, True])
+def test_windows_read_failure_preserves_system_message(library, monkeypatch, code, with_path):
+    core, video = library
+    subtitle = video.with_suffix('.srt')
+    subtitle.write_text(srt(), encoding='utf-8')
+    original = Path.read_bytes
+    detail = ctypes.FormatError(code).strip()
+    error = OSError(None, detail + (' "C:/private/subtitle.srt"' if with_path else ''),
+                    str(subtitle), code)
+
+    def read(path):
+        if path == subtitle:
+            raise error
+        return original(path)
+
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    result = core.add_file(video)
+    warning = core.external_subtitles(core.videos()[0].id)[0].warning
+    assert detail in warning
+    assert 'private' not in warning
+    assert ('읽을 권한이 없습니다' in warning) == (code == 5)
+    if code != 5:
+        assert '자막 파일을 읽지 못했습니다. 파일과 저장 장치 상태를 확인해 주세요.' in warning
+    assert any(issue.message == warning for issue in result.issues)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='실제 Windows FormatError 문구')
+@pytest.mark.parametrize('code', [21, 23, 32, 1117])
+def test_windows_directory_device_failure_is_not_permission_failure(library, monkeypatch, code):
+    core, video = library
+    core.add_file(video)
+    original = os.scandir
+    detail = ctypes.FormatError(code).strip()
+
+    def scan(path):
+        if Path(path) == video.parent:
+            raise OSError(None, detail, str(path), code)
+        return original(path)
+
+    monkeypatch.setattr(os, 'scandir', scan)
+    result = core.scan()
+    issue, = [issue for issue in result.issues if issue.message.startswith('외부 자막:')]
+    assert '자막 폴더를 읽지 못했습니다. 폴더와 저장 장치 상태를 확인해 주세요.' in issue.message
+    assert detail in issue.message
+    assert str(video.parent) not in issue.message

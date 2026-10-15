@@ -68,6 +68,7 @@ export interface ExternalSubtitleTrackData {
 export interface ExternalSubtitleFileData {
   id: number
   name: string
+  folderLabel: string | null
   warning: string | null
   subtitles: Array<ExternalSubtitleTrackData>
 }
