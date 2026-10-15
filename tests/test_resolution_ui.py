@@ -25,6 +25,7 @@ def test_resolution_worker_pauses_for_playback_transcription_and_scan(window_fac
     controls.tick()
     wait_for(entered.is_set)
     core.playback.start(core.videos()[0].id, 0)
+    assert controls.cancellation.is_set()  # 작업자의 자연 종료가 취소 성공으로 보이지 않게 한다.
     wait_for(completed.is_set)
     wait_for(lambda: controls.future.done())
     controls.tick()

@@ -250,6 +250,7 @@ def test_probe_process_is_reaped_on_cancellation_or_timeout(tmp_path, monkeypatc
         return child
     monkeypatch.setattr(adapters.subprocess, 'Popen', sleeping_process)
     cancellation = Event()
+    started = perf_counter()
     if reason == 'timeout':
         times = iter((0, 16))
         monkeypatch.setattr(adapters.time, 'monotonic', lambda: next(times))
@@ -259,6 +260,7 @@ def test_probe_process_is_reaped_on_cancellation_or_timeout(tmp_path, monkeypatc
         cancellation.set()
         assert reader.read_resolution(tmp_path / 'slow.mkv', cancellation=cancellation) is None
     assert len(children) == 1 and children[0].poll() is not None
+    assert perf_counter() - started < 5  # 60초 자연 종료를 기다렸다면 정리 성공이 아니다.
 
 
 @pytest.mark.parametrize('short_side,label', [(1, 'SD'), (480, 'SD'), (576, 'SD'), (719, 'SD'),
