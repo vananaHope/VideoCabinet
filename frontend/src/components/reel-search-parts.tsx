@@ -2,7 +2,7 @@ import { cva } from "class-variance-authority"
 import type { ComponentProps, KeyboardEvent } from "react"
 import type { SearchTextData } from "@/bridge-types"
 
-const row = cva("flex min-w-0 gap-4 rounded-lg border p-4 text-left", { variants: { selected: { true: "border-ring bg-accent", false: "border-border bg-card hover:bg-muted" } } })
+const row = cva("flex min-w-0 gap-3 rounded-lg border p-3 text-left", { variants: { selected: { true: "border-ring bg-accent", false: "border-border bg-card hover:bg-muted" } } })
 export function ResultRow({ selected, ...props }: ComponentProps<"div"> & { selected: boolean }) {
   return <div {...props} role="option" aria-selected={selected} className={row({ selected })} />
 }

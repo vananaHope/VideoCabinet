@@ -11,6 +11,8 @@ html[data-dialog-container="true"] [data-dialog-frame] {
   max-height: var(--dialog-max-height);
   border-radius: 0;
 }
+/* 재생 중 컨테이너는 내용 크기에 맞춘다. 목록이 창 높이까지 자라 영상을 가리지 않게 상한을 둔다. */
+html[data-dialog-container="true"] [data-dialog-list] { max-height: var(--dialog-list-max-height); }
 html[data-dialog-container="true"] [data-dialog-frame][data-wide="true"] {
   width: min(896px, var(--dialog-max-width));
 }

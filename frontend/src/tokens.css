@@ -32,6 +32,7 @@
   --spacing: 0.25rem;
   --grid-row-height: 15.5rem;
   --grid-card-width: 14rem;
+  --dialog-list-max-height: 18rem;
 }
 @theme {
   --font-sans: "Malgun Gothic", sans-serif;

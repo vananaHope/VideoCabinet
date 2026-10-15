@@ -13,6 +13,9 @@ export function duration(seconds: number): string {
   if (total >= 60) return `${Math.floor(total / 60)}분 ${total % 60}초`
   return `${seconds.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}초`
 }
+// 최댓값이 2시간 이상일 때만 시간 단위로 그린다. 1~2시간을 시간으로 그리면 정수 눈금이 0/1/2뿐이라
+// 막대 대부분이 첫 눈금 아래에 몰린다. 분 단위로는 같은 범위가 0~120 사이 눈금 3~5개로 나뉜다.
+export function timeDivisor(maximum: number) { return maximum >= 7200 ? 3600 : maximum >= 60 ? 60 : 1 }
 // 눈금은 표시 단위에서 계산하고 툴팁은 원래 초의 정밀도를 유지한다.
 export function exactDuration(seconds: number): string {
   const milliseconds = Math.round(seconds * 1000)
@@ -23,7 +26,7 @@ export function exactDuration(seconds: number): string {
 }
 export function DailyChart({ daily, metric }: { daily: DailyViewingStatistics[]; metric: Metric }) {
   const maximum = Math.max(...daily.map(day => day[metric]), 0)
-  const divisor = metric === "viewing_count" ? 1 : maximum >= 3600 ? 3600 : maximum >= 60 ? 60 : 1
+  const divisor = metric === "viewing_count" ? 1 : timeDivisor(maximum)
   const unit = metric === "viewing_count" ? "회" : divisor === 3600 ? "시간" : divisor === 60 ? "분" : "초"
   const data = daily.map(day => ({ ...day, [metric]: day[metric] / divisor }))
   const format = (value: number) => metric === "watched_seconds" ? exactDuration(value * divisor) : `${value.toLocaleString()}회`
