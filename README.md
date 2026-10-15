@@ -25,7 +25,7 @@ powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
 FFmpeg가 없으면 winget의 `Gyan.FFmpeg` **9.0.2**를 설치하며,
 7-Zip이 없으면 `7zip.7zip` **26.04**를 설치합니다(관리자 권한 확인이 표시될 수 있습니다).
 FFmpeg를 이미 별도로 설치했다면 `-SkipFFmpeg`를 붙일 수 있습니다.
-마지막으로 libmpv를 준비하고 FFmpeg·CUDA를 확인한 뒤 pytest를 실행합니다.
+마지막으로 libmpv를 준비하고 FFmpeg·CUDA를 확인한 뒤 `pytest -n auto`로 테스트를 병렬 실행합니다.
 
 이미 도구가 설치된 PC의 새 worktree에서는 빠른 모드를 사용합니다.
 
@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File scripts/setup.ps1 -Worktree
 빠른 모드는 전체 pytest, 프런트 lint·타입 검사, FFmpeg·7-Zip의 winget 설치를 건너뜁니다.
 `npm ci`, `npm run build`, 브리지 타입 생성 검사(`--check`), WebEngine·FFmpeg·CUDA 확인은 유지합니다.
 FFmpeg/ffprobe나 7-Zip이 없으면 전체 모드를 먼저 실행하라는 안내와 함께 실패합니다.
-제출 전에는 별도로 전체 pytest와 프런트 lint·타입 검사를 실행하세요.
+제출 전에는 별도로 전체 `pytest -n auto`와 프런트 lint·타입 검사를 실행하세요.
 `-Worktree` 없이 실행하면 이 검사들을 모두 포함한 전체 준비 절차를 실행합니다.
 
 libmpv는 [mpv 공식 설치 안내](https://mpv.io/installation/)에 연결된
@@ -62,10 +62,14 @@ npm --prefix frontend run build
 winget install --id Gyan.FFmpeg --version 9.0.2 --exact --source winget --accept-package-agreements --accept-source-agreements
 winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-package-agreements --accept-source-agreements
 .venv/Scripts/python scripts/install_libmpv.py
-.venv/Scripts/python -m pytest
+.venv/Scripts/python -m pytest -n auto
 ```
 
-테스트는 `tests/conftest.py`가 `--disable-gpu`를 기본으로 켜며, 사용자가 지정한 `QTWEBENGINE_CHROMIUM_FLAGS` 값은 유지합니다.
+테스트는 각 작업자에서 `tests/conftest.py`가 `QT_QPA_PLATFORM=offscreen`과
+`QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu`를 기본으로 적용하며, 사용자가 지정한 값은 유지합니다.
+`-n auto`는 CPU 수에 맞춰 작업자를 만들고, 여러 작업이 같은 PC를 쓸 때는 `-n 2`처럼 수를 줄일 수 있습니다.
+직렬 실행은 `-n auto`를 빼고 `.venv/Scripts/python -m pytest`로 실행합니다.
+건너뛴 테스트와 이유까지 비교하려면 직렬·병렬 명령에 각각 `-rs`를 붙입니다.
 
 ## 설치 파일 만들기 (앞부분, #62)
 
@@ -596,7 +600,7 @@ TypeScript 배열, 고정 길이 tuple을 TypeScript tuple로 확장합니다. �
 ```powershell
 .venv/Scripts/python scripts/generate_web_types.py --check
 $env:QTWEBENGINE_CHROMIUM_FLAGS='--disable-gpu' # Windows offscreen WebEngine 검증
-.venv/Scripts/python -m pytest -q
+.venv/Scripts/python -m pytest -n auto -q
 .venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 0 --empty-library
 .venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 0
 .venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 8
@@ -1067,7 +1071,7 @@ OS가 자동화 키를 전달하지 않는 환경에서는 이 검사가 실패�
 태그별 영상은 제목·ID 순, 하이라이트는 영상 ID·시작 시각·ID 순입니다.
 
 ```powershell
-.venv/Scripts/python -m pytest -q
+.venv/Scripts/python -m pytest -n auto -q
 ```
 
 영상 지문은 `v1:파일크기:SHA256`입니다. 앞·중앙·뒤에서 각각 최대 64 KiB를 읽습니다.

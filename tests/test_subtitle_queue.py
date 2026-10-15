@@ -309,24 +309,32 @@ def test_progress_from_subprocess_reaches_core_public_queue(setup, tmp_path):
 
     core, _, (a, _) = setup
     child = tmp_path / "progress.py"
+    observed_signal = tmp_path / "progress-observed"
     child.write_text('''
-import json, os, time
+import json, os, sys, time
 from pathlib import Path
 Path(os.environ["MVM_TRANSCRIPTION_PROGRESS"]).write_text("40", encoding="ascii")
-time.sleep(1)
+while not Path(sys.argv[1]).exists():
+    time.sleep(.02)
 print(json.dumps({"spoken_language": "ko", "segments": []}))
 ''', encoding="utf-8")
-    core = reopen(core, FasterWhisperTranscriber(tmp_path / "models", command=(sys.executable, str(child))))
+    core = reopen(core, FasterWhisperTranscriber(
+        tmp_path / "models", command=(sys.executable, str(child), str(observed_signal))))
     core.request_subtitles(a.id)
     from time import monotonic, sleep
     with ThreadPoolExecutor() as pool:
         future = pool.submit(core.process_next_subtitle)
-        deadline = monotonic() + 5
+        # 고정 1초 노출은 xdist 부하에서 놓칠 수 있다. 공개 큐에서 실제
+        # 진행률을 관찰한 뒤 자식을 풀고, 실패해도 finally로 정리한다.
+        deadline = monotonic() + 30
         observed = False
-        while monotonic() < deadline and not future.done():
-            if any(i.state == "transcribing" and i.progress == .4 for i in core.subtitle_queue_items()):
-                observed = True
-                break
-            sleep(.02)
-        assert future.result(5).state == "completed"
+        try:
+            while monotonic() < deadline and not future.done():
+                if any(i.state == "transcribing" and i.progress == .4 for i in core.subtitle_queue_items()):
+                    observed = True
+                    break
+                sleep(.02)
+        finally:
+            observed_signal.touch()
+        assert future.result(30).state == "completed"
     assert observed

@@ -42,7 +42,8 @@ def act(dialogs, action, **payload):
 def within(entry, dialogs, callback):
     loaded = QSignalSpy(dialogs.host.view.loadFinished)
     if dialogs.host.engine_page.isLoading():
-        assert loaded.wait(10000)
+        # 여러 xdist 작업자의 WebEngine 초기 로드에 CPU 시간을 허용한다.
+        assert loaded.wait(30000)
     errors = []
     def run():
         try:
