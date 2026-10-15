@@ -10,6 +10,8 @@ import stat
 from threading import RLock
 from typing import Protocol
 
+from .external_subtitles import ExternalSubtitles
+
 
 @dataclass(frozen=True)
 class MediaInfo:
@@ -124,6 +126,7 @@ class Library:
         with connect() as db:
             migrate_library(db)
             db.execute("CREATE INDEX IF NOT EXISTS locations_video_id ON locations(video_id)")
+        self.external_subtitles = ExternalSubtitles(connect)
 
     def add_watched_folder(self, path: Path) -> WatchedFolder:
         path = Path(path).resolve()
@@ -294,7 +297,14 @@ class Library:
     def add_file(self, path: Path) -> ScanResult:
         with self._lock:
             path = Path(path).resolve()
-            return self._register(path)
+            with self._connect() as db:
+                affected = {row[0] for row in db.execute("SELECT video_id FROM locations WHERE path=?", (str(path),))}
+            result = self._register(path)
+            with self._connect() as db:
+                affected.update(row[0] for row in db.execute("SELECT video_id FROM locations WHERE path=?", (str(path),)))
+            warnings = self.external_subtitles.refresh(affected)
+            return ScanResult(result.added, result.issues + tuple(ScanIssue(*warning) for warning in warnings),
+                              reconnected=result.reconnected)
 
     def reconnect_video(self, video_id: int, path: Path) -> None:
         with self._lock:
@@ -326,7 +336,10 @@ class Library:
 
     def scan(self, *, on_registered=None) -> ScanResult:
         with self._lock:
-            return self._scan(on_registered=on_registered)
+            result = self._scan(on_registered=on_registered)
+            warnings = self.external_subtitles.refresh()
+            return ScanResult(result.added, result.issues + tuple(ScanIssue(*warning) for warning in warnings),
+                              reconnected=result.reconnected)
 
     def _scan(self, *, on_registered=None) -> ScanResult:
         added, issues = 0, []

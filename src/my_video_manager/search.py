@@ -7,10 +7,13 @@ from typing import Literal
 import unicodedata
 
 
-SearchSource = Literal["title", "filename", "tag", "note", "transcript", "translation"]
+SearchSource = Literal["title", "filename", "tag", "note", "transcript", "translation", "external"]
 SEARCH_LIMIT = 500
 SOURCE_LABELS = {"title": "제목", "filename": "파일 이름", "tag": "태그", "note": "메모",
-                 "transcript": "원어 자막", "translation": "번역 자막"}
+                 "transcript": "원어 자막", "translation": "번역 자막", "external": "외부 자막"}
+SUBTITLE_SOURCES = (("transcript", "transcript_lines", "id"),
+                    ("translation", "translation_lines", "line_id"),
+                    ("external", "external_subtitle_lines", "id"))
 BULK_NORMALIZATION_THRESHOLD = 10_000
 
 CONTENT_UPDATE_TRIGGER = """CREATE TRIGGER IF NOT EXISTS search_content_update
@@ -29,6 +32,7 @@ class SearchResult:
     text: str
     start: float | None = None
     missing: bool = False
+    language: str | None = None
 
 
 @dataclass(frozen=True)
@@ -63,8 +67,7 @@ class Search:
             if not self.ready:
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
-                    for source, table, identifier in (("transcript", "transcript_lines", "id"),
-                                                       ("translation", "translation_lines", "line_id")):
+                    for source, table, identifier in SUBTITLE_SOURCES:
                         self._backfill_source(db, source, table, identifier)
                     self._normalize_pending(db)
                 self._ready.set()
@@ -73,7 +76,7 @@ class Search:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             # 이전 검색 빌드의 함수 의존 트리거를 반드시 교체한다.
-            for source in ("transcript", "translation"):
+            for source, _, _ in SUBTITLE_SOURCES:
                 for event in ("insert", "delete", "update"):
                     db.execute(f"DROP TRIGGER IF EXISTS search_{source}_{event}")
             db.execute("DROP TABLE IF EXISTS subtitle_search")
@@ -95,8 +98,7 @@ class Search:
                 INSERT INTO subtitle_search_v2(subtitle_search_v2, rowid, normalized)
                 VALUES('delete', old.id, old.normalized); END""")
             db.execute(CONTENT_UPDATE_TRIGGER)
-            for source, table, identifier in (("transcript", "transcript_lines", "id"),
-                                               ("translation", "translation_lines", "line_id")):
+            for source, table, identifier in SUBTITLE_SOURCES:
                 self._install_source(db, source, table, identifier)
 
     @staticmethod
@@ -105,7 +107,9 @@ class Search:
         insert = f"""INSERT INTO search_subtitle_lines(source, line_id, text)
             VALUES('{source}', new.{identifier}, new.text)
             ON CONFLICT(source, line_id) DO UPDATE SET text=excluded.text, normalized=NULL;"""
-        delete = f"DELETE FROM search_subtitle_lines WHERE source='{source}' AND line_id=old.{identifier};"
+        # line_id is TEXT even for integer external IDs; matching affinity keeps
+        # SQLite on the (source, line_id) index for all three subtitle sources.
+        delete = f"DELETE FROM search_subtitle_lines WHERE source='{source}' AND line_id=CAST(old.{identifier} AS TEXT);"
         for event, body in (("INSERT", insert), ("DELETE", delete), ("UPDATE", delete + insert)):
             trigger_event = "UPDATE OF text" if event == "UPDATE" else event
             db.execute(f"""CREATE TRIGGER search_{source}_{event.lower()}
@@ -141,16 +145,16 @@ class Search:
         by_id = {video.id: video for video in videos}
         results = []
 
-        def add(video_id, source, text, start=None):
+        def add(video_id, source, text, start=None, language=None):
             video = by_id.get(video_id)
             if video is not None and key in search_key(text):
-                results.append(SearchResult(video_id, video.title, source, text, start, video.missing))
+                results.append(SearchResult(video_id, video.title, source, text, start, video.missing, language))
             return len(results) > SEARCH_LIMIT
 
         def response():
             selected = results[:SEARCH_LIMIT]
-            subtitles = [result for result in selected if result.source in ("transcript", "translation")]
-            other = [result for result in selected if result.source not in ("transcript", "translation")]
+            subtitles = [result for result in selected if result.source in ("transcript", "translation", "external")]
+            other = [result for result in selected if result.source not in ("transcript", "translation", "external")]
             subtitles.sort(key=lambda result: (result.video_id, result.start, result.source, result.text))
             return SearchResponse(tuple(other + subtitles), len(results) > SEARCH_LIMIT)
 
@@ -182,9 +186,14 @@ class Search:
                 candidates = """SELECT c.* FROM subtitle_search_v2 f
                     JOIN search_subtitle_lines c ON c.id=f.rowid WHERE subtitle_search_v2 MATCH ?"""
                 value = '"' + key.replace('"', '""') + '"'
-            for row in db.execute(f"""SELECT c.source, c.text, l.start, t.video_id
-                    FROM ({candidates}) c JOIN transcript_lines l ON l.id=c.line_id
-                    JOIN transcripts t ON t.id=l.transcript_id""", (value,)):
-                if add(row["video_id"], row["source"], row["text"], row["start"]):
+            for row in db.execute(f"""SELECT c.source, c.text, coalesce(l.start, e.start) AS start,
+                    coalesce(t.video_id, f.video_id) AS video_id, s.language
+                    FROM ({candidates}) c
+                    LEFT JOIN transcript_lines l ON c.source IN ('transcript', 'translation') AND l.id=c.line_id
+                    LEFT JOIN transcripts t ON t.id=l.transcript_id
+                    LEFT JOIN external_subtitle_lines e ON c.source='external' AND e.id=c.line_id
+                    LEFT JOIN external_subtitles s ON s.id=e.subtitle_id
+                    LEFT JOIN external_subtitle_files f ON f.id=s.file_id""", (value,)):
+                if add(row["video_id"], row["source"], row["text"], row["start"], row["language"]):
                     break
         return response()
