@@ -1,7 +1,15 @@
 """Inno에 넘기기 전 필수 자산과 CUDA 제외를 확인한다."""
 import argparse
+import json
 from pathlib import Path
+import subprocess
 
+from bundle_ffmpeg import EXECUTABLES, SHA256, URL, VERSION, digest
+
+
+MAX_BUNDLE_BYTES = 950_000_000  # MB (decimal), not MiB
+UNUSED_QT_PREFIXES = ("qt6quick3d", "qt63d", "qt6charts", "qt6graphs",
+                      "qt6multimedia", "qt6virtualkeyboard", "qt6pdf", "qt6location")
 
 def check_bundle(directory: Path):
     required = (
@@ -10,15 +18,41 @@ def check_bundle(directory: Path):
         'my_video_manager/build-version.txt', 'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe',
         'mpv/libmpv-2.dll', 'PySide6/QtWebEngineProcess.exe',
         'PySide6/resources/icudtl.dat', 'PySide6/resources/qtwebengine_resources.pak',
+        'PySide6/resources/qtwebengine_resources_100p.pak',
+        'PySide6/resources/qtwebengine_resources_200p.pak',
+        'PySide6/resources/v8_context_snapshot.bin',
+        'PySide6/translations/qtwebengine_locales/ko.pak',
+        'PySide6/translations/qtwebengine_locales/en-US.pak',
+        'PySide6/plugins/platforms/qwindows.dll', 'PySide6/opengl32sw.dll',
+        'ffmpeg/source.json', 'ffmpeg/LICENSE.txt', 'ffmpeg/README.txt',
+        'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt',
     )
     missing = [name for name in required if not (directory / name).is_file()]
-    if not list(directory.glob('PySide6/translations/qtwebengine_locales/*.pak')):
-        missing.append('Qt WebEngine locales')
     cuda = [str(path.relative_to(directory)) for path in directory.rglob('*.dll')
             if path.name.lower().startswith(('cublas', 'cudnn', 'nvblas', 'cudart', 'nvrtc', 'cusparse', 'cufft', 'curand'))]
-    if missing or cuda:
-        raise RuntimeError(f'설치판 자산 검사 실패: missing={missing}, CUDA={cuda}')
-    print('필수 자산·WebEngine 로캘 확인, CUDA DLL 없음')
+    unnecessary = [str(path.relative_to(directory)) for path in (directory / 'PySide6').rglob('*')
+                   if path.is_file() and (path.name.lower().startswith(UNUSED_QT_PREFIXES) or '.debug.' in path.name.lower() or 'qml' in path.parts
+                   or (path.parent.name == 'qtwebengine_locales' and path.name not in ('ko.pak', 'en-US.pak')))]
+    if missing or cuda or unnecessary:
+        raise RuntimeError(f'설치판 자산 검사 실패: missing={missing}, CUDA={cuda}, unnecessary={unnecessary}')
+    total_bytes = sum(path.stat().st_size for path in directory.rglob('*') if path.is_file())
+    if total_bytes > MAX_BUNDLE_BYTES:
+        raise RuntimeError(f'설치판 크기 상한 초과: {total_bytes} > {MAX_BUNDLE_BYTES} bytes')
+    print(f'설치판 합계: {total_bytes} bytes (상한 {MAX_BUNDLE_BYTES})')
+    manifest = json.loads((directory / 'ffmpeg/source.json').read_text(encoding='utf-8'))
+    if (manifest.get('version'), manifest.get('url'), manifest.get('sha256')) != (VERSION, URL, SHA256):
+        raise RuntimeError('FFmpeg 고정 출처·버전·SHA-256이 일치하지 않습니다.')
+    for name in EXECUTABLES:
+        executable = directory / 'ffmpeg' / name
+        if manifest.get('files', {}).get(name) != digest(executable):
+            raise RuntimeError(f'FFmpeg 실행 파일 SHA-256 불일치: {name}')
+        result = subprocess.run([str(executable.resolve()), '-version'], capture_output=True,
+                                text=True, encoding='utf-8', errors='replace', check=True, timeout=30)
+        first_line = result.stdout.splitlines()[0] if result.stdout else ''
+        if not first_line.startswith(f'{executable.stem} version {VERSION}-essentials_build-www.gyan.dev'):
+            raise RuntimeError(f'FFmpeg 버전 불일치: {first_line}')
+        print(first_line)
+    print('필수 자산·ko/en-US 로캘·FFmpeg 해시 확인, CUDA DLL·QML·debug 리소스 없음')
 
 
 if __name__ == '__main__':

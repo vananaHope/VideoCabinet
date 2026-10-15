@@ -1,0 +1,54 @@
+My Video Manager - Third-party notices
+
+FFmpeg 9.0.2 essentials (Gyan): GNU GPL version 3 or later.
+Copyright (c) the FFmpeg developers and the authors of its bundled libraries.
+License text: ffmpeg/LICENSE.txt. Build libraries and versions: ffmpeg/README.txt.
+Source: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+Build information and dependency sources: https://www.gyan.dev/ffmpeg/builds/
+Build distribution: https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2
+
+libmpv: shinchiro mpv-dev-x86_64-20261013-git-9d144e57b6.
+Copyright (c) the mpv, MPlayer, mplayer2 and dependency contributors.
+mpv defaults to GNU GPL version 2 or later; this distribution uses the GPL
+build, not an LGPL-only build. Linked dependencies can require GPL version 3;
+see the GPLv3 text in ffmpeg/LICENSE.txt and upstream Copyright/license files.
+The pinned binary archive contains headers and libraries, but no license file.
+Source: https://github.com/mpv-player/mpv/tree/9d144e57b6
+Licensing: https://github.com/mpv-player/mpv/blob/9d144e57b6/Copyright
+Build recipes and dependency sources: https://github.com/shinchiro/mpv-winbuild-cmake
+Binary distribution: https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261013
+
+Qt / PySide6 / Shiboken6 6.10.2: GNU LGPL version 3 (open-source distribution).
+Copyright (c) The Qt Company Ltd. and other contributors.
+LGPL text: licenses/LGPL-3.0.txt; its GPLv3 terms: ffmpeg/LICENSE.txt.
+Sources: https://download.qt.io/archive/qt/6.10/6.10.2/single/
+Qt for Python sources: https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.10.2-src/
+License notices: https://doc.qt.io/qtforpython-6/licenses.html
+Qt WebEngine includes Chromium and other separately licensed components:
+https://doc.qt.io/qt-6/qtwebengine-licensing.html
+The Qt shared libraries are distributed as separate replaceable DLL files.
+
+Other principal bundled components (copyright remains with their authors):
+Python: PSF License; https://www.python.org/downloads/source/
+python-mpv: GPLv2+ / LGPLv2.1+ as applicable to libmpv;
+  https://github.com/jaseg/python-mpv
+faster-whisper: MIT; https://github.com/SYSTRAN/faster-whisper
+CTranslate2: MIT; https://github.com/OpenNMT/CTranslate2
+Hugging Face Hub and tokenizers: Apache-2.0;
+  https://github.com/huggingface/huggingface_hub
+  https://github.com/huggingface/tokenizers
+ONNX Runtime: MIT; https://github.com/microsoft/onnxruntime
+NumPy: BSD-3-Clause; https://github.com/numpy/numpy
+PyAV: BSD-3-Clause (FFmpeg libraries carry their own licenses);
+  https://github.com/PyAV-Org/PyAV
+React / React DOM, Radix UI, Recharts, TanStack Virtual: MIT;
+  https://github.com/facebook/react
+  https://github.com/radix-ui/primitives
+  https://github.com/recharts/recharts
+  https://github.com/TanStack/virtual
+Lucide: ISC; https://github.com/lucide-icons/lucide
+PyInstaller bootloader: GPLv2+ with the bootloader distribution exception;
+  https://pyinstaller.org/en/stable/license.html
+
+CUDA libraries and Whisper models are not included in this installer.
+Their download sources and terms apply separately when subtitle preparation runs.

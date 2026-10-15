@@ -2,14 +2,13 @@
 import argparse
 import json
 from pathlib import Path
-import shutil
 import struct
 
 from PySide6.QtCore import QBuffer, QIODevice, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPolygon
 from PySide6.QtCore import QPoint
 
-from my_video_manager.adapters import executable
+from bundle_ffmpeg import prepare_bundle
 from my_video_manager.web_tokens import web_tokens
 
 
@@ -22,9 +21,7 @@ def main():
     target.mkdir(parents=True, exist_ok=True)
     (target / 'build-version.txt').write_text(args.version, encoding='utf-8')
     tools = target / 'ffmpeg'
-    tools.mkdir(exist_ok=True)
-    for name in ('ffmpeg', 'ffprobe'):
-        shutil.copy2(executable(name), tools / f'{name}.exe')
+    prepare_bundle(tools)
     # 기존 재생 삼각형 아이콘을 공유 색 토큰으로 그린다. ICO 안의 PNG는 Windows가 지원한다.
     colors = web_tokens()['colors']
     image = QImage(256, 256, QImage.Format.Format_ARGB32)
