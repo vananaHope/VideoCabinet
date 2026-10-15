@@ -14,8 +14,8 @@ from my_video_manager.ui import MainWindow
 
 
 @pytest.fixture
-def window_factory(core, monkeypatch):
-    app = QApplication.instance() or QApplication([])
+def window_factory(core, monkeypatch, qapp):
+    app = qapp
     windows = []
 
     def create(mode='1'):

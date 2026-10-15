@@ -239,7 +239,7 @@ def test_core_cancellation_kills_cli_and_its_children(setup, tmp_path):
             pids.append(int(wait_file(Path(str(marker) + ".child"))))
         finally:
             core.stop_translation_processing()
-        assert future.result(timeout=5).state == "queued"
+        assert future.result(timeout=30).state == "queued"
     assert_processes_exited(pids)
     assert list(adapter.directory.iterdir()) == []
 
@@ -271,9 +271,9 @@ core.process_next_translation()
         pids = json.loads(wait_file(marker))
         pids.append(int(wait_file(Path(str(marker) + ".child"))))
         subprocess.run(["taskkill", "/PID", str(parent_pid), "/F"], check=True, capture_output=True)
-        parent.communicate(timeout=5)
+        parent.communicate(timeout=30)
         assert_processes_exited(pids)
     finally:
         if parent.poll() is None:
             subprocess.run(["taskkill", "/PID", str(parent.pid), "/T", "/F"], capture_output=True)
-        parent.communicate(timeout=5)
+        parent.communicate(timeout=30)

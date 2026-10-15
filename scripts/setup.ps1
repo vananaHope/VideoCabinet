@@ -22,13 +22,15 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     # 2025-09-03 출시. 최초 설치만 고정하고 이미 설치된 uv는 유지한다.
     winget install --id astral-sh.uv --version 0.8.15 --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
-    Confirm-Exit 'uv install'
+    # 이미 설치됨 등 winget의 비영 종료 코드 대신 실제 uv 실행 파일을 확인한다.
     # winget의 사용자 PATH 변경을 현재 PowerShell에도 반영한다.
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         throw 'uv를 찾을 수 없습니다. 새 터미널에서 scripts/setup.ps1을 다시 실행하세요.'
     }
 }
+uv --version
+Confirm-Exit 'uv check'
 if (-not (Test-Path '.venv/Scripts/python.exe')) {
     $Python = python -c "import sys; print(sys.executable)"
     Confirm-Exit 'Python path'

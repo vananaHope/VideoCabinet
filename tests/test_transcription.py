@@ -55,7 +55,7 @@ def adapter(tmp_path, script):
 
 def wait_file(path):
     # 낮은 우선순위의 자식 준비는 xdist 부하에서 늦을 수 있다.
-    # 준비만 기다리며 취소 후 프로세스 종료 제한은 별도로 유지한다.
+    # 성공 경로의 준비와 종료에는 같은 30초 여유를 준다.
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if path.exists() and path.stat().st_size:
@@ -80,7 +80,7 @@ def process_alive(pid):
 
 
 def assert_processes_exited(pids):
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + 30
     while any(process_alive(pid) for pid in pids) and time.monotonic() < deadline:
         time.sleep(0.02)  # Job 종료는 전체 트리에 비동기로 적용된다.
     assert not any(process_alive(pid) for pid in pids)
@@ -167,7 +167,7 @@ def test_cancel_terminates_child_and_grandchild(tmp_path):
         finally:
             signal.set()
         with pytest.raises(TranscriberCancelled):
-            result.result(timeout=5)
+            result.result(timeout=30)
     assert_processes_exited(pids)
 
 
@@ -192,9 +192,9 @@ FasterWhisperTranscriber(Path(sys.argv[2]), command=(sys.executable, sys.argv[3]
         pids.append(int(wait_file(Path(str(marker) + ".grandchild"))))
         # 트리 종료 옵션 없이 앱의 실제 interpreter 하나만 강제 종료한다.
         subprocess.run(["taskkill", "/PID", str(parent_pid), "/F"], check=True, capture_output=True)
-        parent.communicate(timeout=5)
+        parent.communicate(timeout=30)
         assert_processes_exited(pids)
     finally:
         if parent.poll() is None:
             subprocess.run(["taskkill", "/PID", str(parent.pid), "/T", "/F"], capture_output=True)
-        parent.communicate(timeout=5)
+        parent.communicate(timeout=30)

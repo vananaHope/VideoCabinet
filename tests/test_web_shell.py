@@ -9,14 +9,11 @@ from PySide6.QtWidgets import QApplication
 from test_web_library_page import window_factory
 from test_web_library_data import core
 from my_video_manager.web_contract import CONTRACTS, TABS
+from qt_wait import wait_for
 
 
 def wait_frontend_ready(host, tab):
-    for _ in range(200):
-        if host._frontend_ready and tab in host._ready_pages:
-            return
-        QTest.qWait(50)
-    pytest.fail(f'{tab} 프런트엔드 준비 시간 초과')
+    wait_for(lambda: host._frontend_ready and tab in host._ready_pages)
 
 
 @pytest.mark.parametrize('tab', ['library', 'search', 'settings'])
@@ -185,20 +182,14 @@ def test_tray_restore_preserves_rendered_settings_category_and_scroll(window_fac
             loop.quit()
 
         host.engine_page.runJavaScript(source, received)
-        timer.start(10000)
+        timer.start(30000)
         loop.exec()
         timer.stop()
         assert results, 'JavaScript 응답 시간 초과'
         return results[0]
 
     def wait_js(source):
-        for _ in range(100):
-            if js(source):
-                return
-            loop = QEventLoop()
-            QTimer.singleShot(50, loop.quit)
-            loop.exec()
-        pytest.fail(source)
+        wait_for(lambda: js(source))
 
     window.navigate_web_tab('settings')
     wait_js('!!document.querySelector("[data-category=keys]")')
@@ -236,7 +227,7 @@ def test_tab_routes_keep_one_web_view_and_native_numbering(window_factory):
 def test_global_web_keys_and_native_escape_return(window_factory):
     window = window_factory()
     window.activateWindow()
-    QTest.qWait(30)
+    wait_for(window.isActiveWindow)
     for index, (tab, _) in enumerate(TABS):
         target = window.focusWidget() or window
         QTest.keyClick(target, Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)

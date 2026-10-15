@@ -7,12 +7,13 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
 from my_video_manager.ui import MainWindow
+from qt_wait import wait_for
 
 
 class Media:
@@ -60,8 +61,8 @@ class Player:
 
 
 @pytest.fixture(scope="module")
-def app():
-    return QApplication.instance() or QApplication([])
+def app(qapp):
+    return qapp
 
 
 @pytest.fixture
@@ -82,7 +83,9 @@ def window(tmp_path, app):
     yield window
     window.tray.quit()
     window.deleteLater()
-    app.processEvents()
+    # processEvents만으로는 DeferredDelete가 처리되지 않는다. WebEngine을
+    # QApplication/인터프리터 종료까지 남기지 않고 fixture 안에서 파괴한다.
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def key(window, key, modifiers=Qt.KeyboardModifier.NoModifier):
@@ -177,7 +180,7 @@ def test_fullscreen_temporary_bar_and_error_remain_visible(window):
     page.hide_temporary_bar()
     assert not page.bottom_bar.isVisible()
     QTest.mouseMove(window.surface, window.surface.rect().center())
-    QTest.qWait(200)
+    wait_for(page.bottom_bar.isVisible)
     assert page.bottom_bar.isVisible()
     page.show_error("재생 위치 확인 실패: 테스트")
     window.sync_position()
@@ -262,7 +265,7 @@ def test_general_notice_expires_and_does_not_change_fullscreen_bar(window):
     page = window.playback_page
     window.statusBar().showMessage("자막 대기열에 추가했습니다")
     assert page.message_label.isVisible()
-    QTest.qWait(5200)
+    wait_for(lambda: not page.message_label.isVisible())
     assert not page.message_label.isVisible()
     assert page.message_label.text() == ""
     key(window, Qt.Key.Key_Apostrophe)

@@ -19,14 +19,7 @@ from my_video_manager.web_dialogs_entries import SeriesEditor
 from my_video_manager.web_dialogs_entries import HighlightEditor, HighlightList
 from my_video_manager.web_dialogs_entries import ReviewDialog
 from my_video_manager.web_dialogs_models import DialogModel
-
-
-def wait_for(predicate):
-    for _ in range(300):
-        if predicate():
-            return
-        QTest.qWait(20)
-    assert predicate()
+from qt_wait import wait_for
 
 
 def state(dialogs):
@@ -43,7 +36,7 @@ def within(entry, dialogs, callback):
     loaded = QSignalSpy(dialogs.host.view.loadFinished)
     if dialogs.host.engine_page.isLoading():
         # 여러 xdist 작업자의 WebEngine 초기 로드에 CPU 시간을 허용한다.
-        assert loaded.wait(30000)
+        wait_for(lambda: loaded.count() > 0)
     errors = []
     def run():
         try:

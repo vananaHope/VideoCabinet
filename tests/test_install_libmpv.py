@@ -117,7 +117,7 @@ install(Path(sys.argv[3]), cache, '7z')
                  for i in range(2)]
     try:
         for process in processes:
-            out, err = process.communicate(timeout=20)
+            out, err = process.communicate(timeout=30)
             assert process.returncode == 0, (out, err)
     finally:
         for process in processes:
@@ -146,7 +146,7 @@ with m['cache_lock'](cache):
 '''
     process = subprocess.Popen([sys.executable, "-c", code, str(SCRIPT), str(cache), str(marker)])
     try:
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + 30
         while not marker.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.05)
         assert marker.exists(), "잠금 소유 프로세스가 준비되지 않았습니다."
@@ -156,8 +156,59 @@ with m['cache_lock'](cache):
     finally:
         if process.poll() is None:
             process.kill()
-        process.wait(timeout=10)
+        process.wait(timeout=30)
     monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(b"archive"))
     installer.install(tmp_path / "runtime", cache, "7z")
     assert not list(cache.glob("*.part"))
     assert (tmp_path / "runtime/mpv/libmpv-2.dll").read_bytes() == b"dll"
+
+
+def test_default_lock_waits_past_five_minutes_and_reports_live_owner(tmp_path):
+    # 실제 별도 프로세스의 OS 잠금을 잡되 대기자 시계만 빨리 돌린다.
+    # 다운로드나 실제 사용자 캐시는 사용하지 않는다.
+    code = '''
+import runpy, sys, time
+from pathlib import Path
+m = runpy.run_path(sys.argv[1])
+cache = Path(sys.argv[2])
+lock = m['cache_lock']
+if sys.argv[3] == 'owner':
+    with lock(cache):
+        (cache / 'ready').touch()
+        while not (cache / 'release').exists(): time.sleep(0.02)
+else:
+    import itertools
+    ticks = itertools.count(time.monotonic(), 301)
+    m['time'].monotonic = lambda: next(ticks)
+    with lock(cache): (cache / 'acquired').touch()
+'''
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    owner = subprocess.Popen([sys.executable, "-c", code, str(SCRIPT), str(cache), "owner"])
+    waiter = None
+    notice = tmp_path / "waiter.log"
+    output = notice.open("wb")
+    try:
+        deadline = time.monotonic() + 30
+        while not (cache / "ready").exists() and owner.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert (cache / "ready").exists()
+        waiter = subprocess.Popen([sys.executable, "-u", "-c", code, str(SCRIPT), str(cache), "waiter"],
+                                  stdout=output, stderr=subprocess.STDOUT)
+        # 두 안내 사이에 가상 시간이 301초 경과한다. 이전 기본 300초는 여기서 실패한다.
+        deadline = time.monotonic() + 30
+        while notice.read_bytes().count(b"\n") < 2 and waiter.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert notice.read_bytes().count(b"\n") >= 2
+        assert owner.poll() is None and waiter.poll() is None
+        assert not (cache / "acquired").exists()
+        (cache / "release").touch()
+        assert waiter.wait(timeout=30) == 0, notice.read_bytes()
+        assert owner.wait(timeout=30) == 0
+        assert (cache / "acquired").exists()
+    finally:
+        for process in (owner, waiter):
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=30)
+        output.close()

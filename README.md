@@ -25,6 +25,8 @@ powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
 FFmpeg가 없으면 winget의 `Gyan.FFmpeg` **9.0.2**를 설치하며,
 7-Zip이 없으면 `7zip.7zip` **26.04**를 설치합니다(관리자 권한 확인이 표시될 수 있습니다).
 FFmpeg를 이미 별도로 설치했다면 `-SkipFFmpeg`를 붙일 수 있습니다.
+winget 설치 후 기존 bash에서 `uv: command not found`가 나오면 IDE와 터미널을 다시 열어
+사용자 PATH를 반영하세요. PowerShell의 `Get-Command uv`로 위치를 확인할 수 있습니다.
 마지막으로 libmpv를 준비하고 FFmpeg·CUDA를 확인한 뒤 `pytest -n auto`로 테스트를 병렬 실행합니다.
 
 이미 도구가 설치된 PC의 새 worktree에서는 빠른 모드를 사용합니다.
@@ -46,6 +48,9 @@ libmpv는 [mpv 공식 설치 안내](https://mpv.io/installation/)에 연결된
 검증한 압축 파일은 `%LOCALAPPDATA%\my-video-manager\cache\libmpv\`에 보관합니다.
 재사용할 때도 SHA-256을 다시 검사하며 손상된 캐시는 버리고 다시 받습니다.
 프로세스 간 잠금과 임시 파일의 원자 교체로 동시 준비 및 다운로드 중단을 처리합니다.
+다른 프로세스가 캐시를 사용 중이면 30초마다 안내하며 잠금이 풀릴 때까지 기다립니다.
+이전 준비 도구가 남긴 `.runtime/mpv-dev-*.7z`는 더 이상 사용하지 않으므로 직접 삭제해도 됩니다.
+`.runtime/mpv/libmpv-2.dll`은 실행에 필요하므로 유지하세요.
 캐시는 worktree를 삭제해도 남으며, 각 worktree의 DLL은 `.runtime/mpv/libmpv-2.dll`에만 둡니다. 아카이브의 BCJ2 필터 때문에 7-Zip이 필요합니다.
 바이너리와 가상환경은 Git에서 제외합니다. 빌드 교체 시 URL과 SHA-256을 함께 갱신하세요.
 
@@ -654,8 +659,8 @@ TypeScript 배열, 고정 길이 tuple을 TypeScript tuple로 확장합니다. �
 
 ```powershell
 .venv/Scripts/python scripts/generate_web_types.py --check
-$env:QTWEBENGINE_CHROMIUM_FLAGS='--disable-gpu' # Windows offscreen WebEngine 검증
 .venv/Scripts/python -m pytest -n auto -q
+$env:QTWEBENGINE_CHROMIUM_FLAGS='--disable-gpu' # 아래 화면 검사 스크립트용. pytest에는 conftest.py가 적용
 .venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 0 --empty-library
 .venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 0
 .venv/Scripts/python scripts/check_web_statistics.py --offscreen --count 8
