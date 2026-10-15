@@ -11,3 +11,4 @@ dist/
 debug.log
 frontend/node_modules/
 src/my_video_manager/web/
+*.env
