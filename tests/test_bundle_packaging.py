@@ -7,6 +7,7 @@ import importlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -342,6 +343,16 @@ def licenses(monkeypatch):
     return importlib.import_module('bundle_licenses')
 
 
+def assert_no_build_machine_paths(directory):
+    for path in directory.rglob('*'):
+        if not path.is_file():
+            continue
+        content = path.read_text(encoding='utf-8')
+        assert not re.search(r'(?<![A-Za-z0-9])[A-Za-z]:[\\/]|/(?:home|Users)/|~[\\/]', content), path
+        assert str(Path.home()) not in content, path
+        assert Path.home().as_posix() not in content, path
+
+
 def test_python_licenses_follow_analysis_files_not_installed_requirements(licenses, tmp_path, monkeypatch):
     from importlib.metadata import PathDistribution
 
@@ -379,6 +390,9 @@ def test_python_licenses_follow_analysis_files_not_installed_requirements(licens
     notice = (target / 'no-text/NOTICE.txt').read_text()
     assert 'MIT' in notice and 'https://example.org/source' in notice and 'no LICENSE' in notice
     assert next(p for p in packages if p['name'] == 'no-text')['metadata_only']
+    assert_no_build_machine_paths(target)
+    runtime = next(p for p in packages if p['name'] == 'python')
+    assert runtime['files'][0]['source'] == 'sys.base_prefix/LICENSE.txt'
     # Rebuilds remove stale notices for packages no longer included by Analysis.
     licenses.python_licenses(entries[:1], target)
     assert not (target / 'native').exists()
@@ -409,6 +423,7 @@ def test_web_licenses_include_production_transitives_and_nested_packages(license
     assert sum(len(p['files']) for p in packages) == 5
     assert (target / 'node_modules/direct/LICENSE').read_bytes() == b'Copyright original\r\nMIT terms\r\n'
     assert not (target / 'node_modules/dev-only').exists()
+    assert_no_build_machine_paths(target)
 
 
 @pytest.mark.parametrize('failure', ['license', 'empty', 'package', 'version'])
@@ -489,3 +504,12 @@ def test_web_embedded_build_tools_are_collected(licenses, npm_tree, tmp_path, mo
     monkeypatch.setattr(licenses, 'WEB_BUNDLED_BUILD_TOOLS', {'node_modules/dev-only'})
     packages = licenses.web_licenses(npm_tree, tmp_path / 'out')
     assert 'dev-only' in {p['name'] for p in packages}
+
+
+def test_shipped_notices_have_no_build_machine_paths():
+    root = Path(__file__).resolve().parents[1] / 'installer'
+    assert_no_build_machine_paths(root / 'licenses')
+    content = (root / 'THIRD-PARTY-NOTICES.txt').read_text(encoding='utf-8')
+    assert not re.search(r'(?<![A-Za-z0-9])[A-Za-z]:[\\/]|/(?:home|Users)/|~[\\/]', content)
+    assert str(Path.home()) not in content
+    assert Path.home().as_posix() not in content

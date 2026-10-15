@@ -66,11 +66,13 @@ CPython: the build runtime version is recorded in licenses/python/manifest.json.
 License and Windows bundled OpenSSL, bzip2, libffi and other additional conditions:
 licenses/python/python/LICENSE.txt (copied unchanged from the build Python).
 
-CTranslate2 4.8.3 includes Intel OpenMP runtime (libiomp5md.dll).
+CTranslate2 4.8.3 includes an Intel distribution of the LLVM OpenMP-based
+runtime (libiomp5md.dll).
 Copyright (c) Intel Corporation. All rights reserved.
 Intel Simplified Software License and redistribution terms:
 https://www.intel.com/content/www/us/en/developer/articles/license/end-user-license-agreement.html
-Runtime source: https://github.com/llvm/llvm-project/tree/main/openmp
+Related upstream project (not the exact Intel binary build source):
+https://github.com/llvm/llvm-project/tree/main/openmp
 CTranslate2 and tokenizers originals: licenses/python/ctranslate2/LICENSE and
 licenses/python/tokenizers/LICENSE.
 

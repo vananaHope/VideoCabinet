@@ -127,7 +127,7 @@ def python_licenses(entries, destination):
     source = Path(sys.base_prefix, 'LICENSE.txt')
     record = copy_license(source, destination / 'python/LICENSE.txt', destination)
     packages.append({'name': 'python', 'version': sys.version, 'license': 'PSF-2.0',
-                     'files': [{**record, 'source': str(source)}], 'metadata_only': False})
+                     'files': [{**record, 'source': 'sys.base_prefix/LICENSE.txt'}], 'metadata_only': False})
     write_text(destination / 'manifest.json', json.dumps(packages, indent=2, ensure_ascii=False) + '\n')
     return packages
 
