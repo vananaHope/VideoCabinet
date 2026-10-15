@@ -45,6 +45,8 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 .venv/Scripts/python -m pytest
 ```
 
+테스트는 `tests/conftest.py`가 `--disable-gpu`를 기본으로 켜며, 사용자가 지정한 `QTWEBENGINE_CHROMIUM_FLAGS` 값은 유지합니다.
+
 ## 실행과 사용
 
 ```powershell
