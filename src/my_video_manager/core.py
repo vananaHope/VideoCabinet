@@ -165,6 +165,45 @@ class AppCore:
     def translation_cli(self) -> str:
         return self._translations.cli
 
+    def create_backup(self, destination: Path, *, include_thumbnails=False):
+        from .backup import create_backup
+        session = self.playback.session
+        active = tuple(viewing for viewing in self.viewings(session.video_id) if viewing.ended_at is None) if session else ()
+        return create_backup(self.database, destination, include_thumbnails=include_thumbnails,
+                             active_viewings=active)
+
+    def inspect_backup(self, archive: Path):
+        from .backup import inspect_backup
+        return inspect_backup(archive)
+
+    def request_backup_restore(self, archive: Path):
+        from .backup import request_backup_restore
+        result = request_backup_restore(self.database, archive)
+        self.set_backup_restore_startup_result(result)
+        return result
+
+    def pending_backup_restore(self):
+        from .backup import inspect_backup, pending_backup_restore_path
+        pending = pending_backup_restore_path(self.database)
+        return inspect_backup(pending) if pending.exists() else None
+
+    def cancel_backup_restore(self):
+        from .backup import cancel_backup_restore
+        cancel_backup_restore(self.database)
+        self.set_backup_restore_startup_result(None)
+
+    def set_backup_restore_startup_result(self, result):
+        """시작 경로가 받은 복원 결과를 화면에서 조회할 수 있게 보관한다."""
+        self._backup_restore_startup_result = result
+
+    def backup_restore_status(self):
+        """큰 ZIP을 다시 풀지 않고 이번 시작/예약의 결과와 실패 안내를 조회한다."""
+        return getattr(self, "_backup_restore_startup_result", None)
+
+    def automatic_backups(self):
+        from .backup import automatic_backups
+        return automatic_backups(self.database)
+
     def review_lines(self, video_id):
         return self._review.lines(video_id)
 

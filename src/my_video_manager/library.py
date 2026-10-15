@@ -82,11 +82,17 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-def migrate_library(db) -> None:
+LIBRARY_DB_VERSION = 2
+
+
+def migrate_library(db, *, before_upgrade=None) -> None:
     """다른 기능 테이블에는 손대지 않고 v1 라이브러리를 v2로 이전한다."""
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version > 2:
+    if version > LIBRARY_DB_VERSION:
         raise ValueError("더 최신 버전에서 만든 라이브러리입니다. 프로그램을 업데이트하세요.")
+    if version < LIBRARY_DB_VERSION:
+        from .backup import backup_before_migration
+        (before_upgrade or backup_before_migration)(db, LIBRARY_DB_VERSION)
     db.execute("BEGIN IMMEDIATE")
     if version == 0:
         db.execute("CREATE TABLE IF NOT EXISTS watched_folders (path TEXT PRIMARY KEY)")
