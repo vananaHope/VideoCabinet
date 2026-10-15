@@ -586,6 +586,8 @@ class Translations:
                 if error.shrinkable and progress.shrink(len(lines)):
                     attempt = 0
                     continue
+                if error.kind == 'response_timeout':
+                    raise
                 attempt += 1
                 if attempt >= self._format_attempts:
                     raise

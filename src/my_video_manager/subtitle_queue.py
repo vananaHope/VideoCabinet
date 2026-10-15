@@ -243,7 +243,7 @@ class SubtitleQueue:
             elif t:
                 detail = _display_error_detail(t.error_detail)
                 summary = t.error
-                if summary and detail and detail.startswith(summary):
+                if summary and t.error_detail and t.error_detail.startswith(summary):
                     summary = None
                 result.append(SubtitleQueueItem(video_id, title, t.state,
                                                t.completed_lines / max(1, t.total_lines),

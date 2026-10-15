@@ -13,7 +13,7 @@ from urllib.error import URLError
 import pytest
 
 from my_video_manager.opencode_go import (
-    BASE_URL, DEFAULT_MODEL, HTTPResponse, OpenCodeGoError,
+    BASE_URL, CHECK_TIMEOUT, DEFAULT_MODEL, HTTPResponse, OpenCodeGoError,
     OpenCodeGoTranslator, UrllibTransport, USER_AGENT,
 )
 from my_video_manager.translation_models import ModelPolicy, TranslationModelChoice
@@ -86,10 +86,17 @@ def test_translation_defaults_allow_ten_minutes_but_checks_stay_short():
     assert UrllibTransport().read_timeout == 600
     assert UrllibTransport().connect_timeout == 10
     translator.check_key()
-    assert 0 < http.calls[-1][2]["timeout"] <= 60
+    assert http.calls[-1][2]["timeout"] == CHECK_TIMEOUT == 30
     http.response = HTTPResponse(200, {}, b'{"data":[]}')
     translator.models()
-    assert 0 < http.calls[-1][2]["timeout"] <= 60
+    assert http.calls[-1][2]["timeout"] == CHECK_TIMEOUT == 30
+    short_http = FakeHTTP()
+    short_translator = adapter(short_http, timeout=5)
+    short_translator.check_key()
+    assert short_http.calls[-1][2]["timeout"] == 5
+    short_http.response = HTTPResponse(200, {}, b'{"data":[]}')
+    short_translator.models()
+    assert short_http.calls[-1][2]["timeout"] == 5
 
 
 @pytest.mark.parametrize("failure", [TimeoutError(KEY), socket.timeout(KEY), URLError(TimeoutError(KEY))])
