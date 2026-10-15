@@ -1,6 +1,8 @@
 """WebChannel 공개 슬롯의 선택·필터·작업 허용 범위와 오류 응답."""
 import json
 import os
+from pathlib import Path
+import sqlite3
 from types import SimpleNamespace
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -112,7 +114,8 @@ def test_duplicate_file_names_and_same_language_tracks_are_distinguishable(bridg
         core.add_file(copy)
         copies.append(copy)
     files = json.loads(bridge.details(video.id))['externalSubtitles']
-    assert {f['name'] for f in files} == {f'{p.with_suffix(".smi").name} · {p.parent.name}' for p in copies}
+    assert {f['name'] for f in files} == {path.with_suffix('.smi').name}
+    assert {f['folderLabel'] for f in files} == {'원본', '복사본'}
     for file in files:
         assert [(t['languageLabel'], t['languageClass']) for t in file['subtitles']] == [
             ('한국어', 'KRCC'), ('한국어', 'COMMENT'), ('영어', '')]
@@ -219,3 +222,44 @@ def test_highlight_edit_opens_existing_editor_and_refreshes_details(bridge, monk
     app.processEvents()
     assert json.loads(bridge.highlights(page.selected_id))[0]['note'] == '수정한 메모'
     assert refreshed == [page.selected_id] and not bridge.busy
+
+
+@pytest.mark.parametrize('folders,expected', [
+    (('원본/영화', '백업/영화', '기타'), ('원본/영화', '백업/영화', '기타')),
+    (('원본/한국/영화', '백업/한국/영화', '기타/외국/영화'),
+     ('원본/한국/영화', '백업/한국/영화', '외국/영화')),
+])
+def test_mirror_copies_use_minimal_parent_suffix(bridge, folders, expected):
+    bridge, page, app = bridge
+    core = page.core
+    video = core.videos()[0]
+    path = video.locations[0].path
+    for folder in folders:
+        copy = path.parent / folder / path.name
+        copy.parent.mkdir(parents=True)
+        copy.write_bytes(path.read_bytes())
+        copy.with_suffix('.srt').write_text('1\n00:00:01,000 --> 00:00:02,000\n대사', encoding='utf-8')
+        core.add_file(copy)
+    files = json.loads(bridge.details(video.id))['externalSubtitles']
+    assert {f['folderLabel'] for f in files} == {str(Path(p)) for p in expected}
+    assert {f['name'] for f in files} == {path.with_suffix('.srt').name}
+    assert all(summary.name == path.with_suffix('.srt').name
+               for summary in core.external_subtitle_summaries(video.id))
+    assert str(path.parent) not in json.dumps(files)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows 드라이브 및 UNC anchor')
+@pytest.mark.parametrize('parents', [('D:/', 'E:/'), ('//server/one/', '//server/two/'),
+                                    ('D:/영화', 'E:/영화')])
+def test_root_copies_keep_drive_or_share_anchor(bridge, parents):
+    bridge, page, app = bridge
+    core = page.core
+    video = core.videos()[0]
+    # 루트에 파일을 쓰지 않고 이미 수집된 파일 경로를 재현한다.
+    with sqlite3.connect(core.database) as db:
+        for parent in parents:
+            db.execute("INSERT INTO external_subtitle_files(video_id,path,size,mtime_ns) VALUES(?,?,0,0)",
+                       (video.id, str(Path(parent) / 'lesson.srt')))
+    files = json.loads(bridge.details(video.id))['externalSubtitles']
+    assert {f['folderLabel'] for f in files} == {str(Path(p)) for p in parents}
+    assert {f['name'] for f in files} == {'lesson.srt'}

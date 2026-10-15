@@ -4,6 +4,7 @@ from bisect import bisect_left
 from collections import Counter
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
+import errno
 from html import unescape
 from html.parser import HTMLParser
 from itertools import islice
@@ -14,6 +15,7 @@ import re
 
 
 EXTENSIONS = {".srt", ".vtt", ".smi"}
+WARNING_PREFIX = "외부 자막: "
 LANGUAGES = {
     "ko": "ko", "kor": "ko", "korean": "ko", "krcc": "ko",
     "en": "en", "eng": "en", "english": "en", "encc": "en",
@@ -59,6 +61,7 @@ class ExternalSubtitleFileSummary:
     name: str
     warning: str | None
     subtitles: tuple[ExternalSubtitleTrackSummary, ...]
+    parent_parts: tuple[str, ...] = ()
 
 
 class _ReadError(ValueError):
@@ -72,18 +75,22 @@ def _read_error_message(error, *, folder=False):
         return "자막의 문자 인코딩이 올바르지 않습니다. UTF-8, UTF-16, CP949/EUC-KR 파일인지 확인해 주세요."
     if isinstance(error, OSError):
         target = "자막 폴더를" if folder else "자막 파일을"
-        if isinstance(error, PermissionError):
+        winerror = getattr(error, "winerror", None)
+        if isinstance(error, PermissionError) and winerror in (None, 5):
             message = f"{target} 읽을 권한이 없습니다. 접근 권한을 확인해 주세요."
         elif isinstance(error, FileNotFoundError):
             message = f"{target} 찾을 수 없습니다. 다시 검사해 주세요."
         else:
-            message = f"{target} 읽지 못했습니다. 파일과 저장 장치 상태를 확인해 주세요."
+            subject = "폴더" if folder else "파일"
+            message = f"{target} 읽지 못했습니다. {subject}와 저장 장치 상태를 확인해 주세요."
+        if winerror is None and error.errno in (errno.EACCES, errno.ENOENT):
+            return message
         # str(error)는 filename을 포함한다. strerror에도 경로를 넣는 공급자가 있어 가린다.
         detail = error.strerror or type(error).__name__
         for filename in (error.filename, error.filename2):
-            if filename:
+            if isinstance(filename, (str, bytes, os.PathLike)) and filename:
                 detail = detail.replace(os.fsdecode(filename), "[경로 생략]")
-        detail = re.sub(r'''(?:[A-Za-z]:[\\/]|\\\\|/)[^\r\n"'<>]*''', "[경로 생략]", detail)
+        detail = re.sub(r'''(?:[A-Za-z]:[\\/]|\\\\|(?<![\w.])(?:~/|/)(?=[\w.]))[^\r\n"'<>]*''', "[경로 생략]", detail)
         return f"{message} (원인: {detail})"
     return ("자막 형식을 해석하지 못했습니다. 파일 내용과 자막 시각을 확인해 주세요. "
             f"(원인: {type(error).__name__})")
@@ -309,11 +316,23 @@ class ExternalSubtitles:
                 if row["track_id"] is not None:
                     file[1].append(ExternalSubtitleTrackSummary(
                         row["language"], row["language_class"], row["line_count"]))
-            names = Counter(Path(row["path"]).name.casefold() for row, _ in files.values())
+            paths = {id: Path(row["path"]) for id, (row, _) in files.items()}
+            names = Counter(path.name.casefold() for path in paths.values())
+            tails = {id: path.parent.parts[-1:] if names[path.name.casefold()] > 1 else ()
+                     for id, path in paths.items()}
+            while True:
+                counts = Counter((paths[id].name.casefold(), tuple(p.casefold() for p in parts))
+                                 for id, parts in tails.items())
+                collisions = [id for id, parts in tails.items() if parts and
+                              counts[paths[id].name.casefold(), tuple(p.casefold() for p in parts)] > 1
+                              and len(parts) < len(paths[id].parent.parts)]
+                if not collisions:
+                    break
+                for id in collisions:
+                    tails[id] = paths[id].parent.parts[-len(tails[id]) - 1:]
             return tuple(ExternalSubtitleFileSummary(row["id"],
-                         (f"{Path(row['path']).name} · {Path(row['path']).parent.name}"
-                          if names[Path(row["path"]).name.casefold()] > 1 else Path(row["path"]).name),
-                         row["warning"], tuple(tracks)) for row, tracks in files.values())
+                         paths[row["id"]].name, row["warning"], tuple(tracks), tails[row["id"]])
+                         for row, tracks in files.values())
 
     def refresh(self, video_ids=None):
         """한 검사에서 디렉터리별 목록을 한 번만 읽고 크기·mtime이 바뀐 파일만 파싱한다."""
@@ -347,7 +366,7 @@ class ExternalSubtitles:
                         directories[path.parent] = []
                     except OSError as error:
                         unavailable.add(path.parent)
-                        warnings.append((path.parent, f"외부 자막: {_read_error_message(error, folder=True)}"))
+                        warnings.append((path.parent, f"{WARNING_PREFIX}{_read_error_message(error, folder=True)}"))
                         directories[path.parent] = []
                 candidates = directories[path.parent]
                 stem = path.stem.casefold()
@@ -382,14 +401,14 @@ class ExternalSubtitles:
                     if not any(track.lines for track in tracks):
                         raise _ReadError("읽을 수 있는 자막 줄이 없습니다.")
                     if skipped:
-                        warning = f"외부 자막: {skipped}개 블록을 건너뜀"
+                        warning = f"{WARNING_PREFIX}{skipped}개 블록을 건너뜀"
                     after = path.stat()
                     if (after.st_size, after.st_mtime_ns) != (size, mtime):
                         raise _ReadError("검사 중 자막 파일이 변경되었습니다. 다시 검사해 주세요.")
                 except CancelledError:
                     raise
                 except Exception as error:
-                    warning = f"외부 자막: {_read_error_message(error)}"
+                    warning = f"{WARNING_PREFIX}{_read_error_message(error)}"
                     tracks = ()
                 if warning:
                     warnings.append((path, warning))

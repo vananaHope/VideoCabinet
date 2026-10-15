@@ -4,11 +4,13 @@ python scripts/check_web_external_subtitles.py --offscreen
 desktop_lock.py run --owner issue-66 -- python scripts/check_web_external_subtitles.py --verify
 """
 import argparse
+import ctypes
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import subprocess
+import sqlite3
 import tempfile
 import time
 from unittest.mock import patch
@@ -130,8 +132,8 @@ class Translator:
 
 core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=directory / 'library.sqlite3',
                transcriber=Transcriber(), translator=Translator())
-path = directory / '원본' / '영상.mp4'
-path.parent.mkdir()
+path = directory / '원본' / '영화' / '영상.mp4'
+path.parent.mkdir(parents=True)
 if args.verify:
     subprocess.run([executable('ffmpeg'), '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
                     '-i', 'testsrc2=size=160x90:rate=8', '-t', '60', '-c:v', 'libx264',
@@ -179,8 +181,8 @@ try:
     capture('detail-smi-multiple-tracks')
     smi.write_bytes(original_smi)
 
-    copy = directory / '복사본' / path.name
-    copy.parent.mkdir()
+    copy = directory / '복사본' / '영화' / path.name
+    copy.parent.mkdir(parents=True)
     copy.write_bytes(path.read_bytes())
     copy.with_suffix('.smi').write_bytes(original_smi)
     core.add_file(copy)
@@ -188,10 +190,26 @@ try:
     window.refresh()
     wait(lambda: read(f"{section}.querySelectorAll('li').length === 3"))
     titles = read(f"[...{section}.querySelectorAll('p[title]')].map(e => e.title)")
-    assert f'{smi.name} · 복사본' in titles and f'{smi.name} · 원본' in titles
-    capture('detail-duplicate-names')
+    assert str(Path('복사본/영화')) in titles and str(Path('원본/영화')) in titles
+    js(f"[...{section}.querySelectorAll('li')].find(e => e.querySelectorAll('p[title]').length === 2).scrollIntoView({{block: 'start'}})")
+    capture('detail-mirror-copies')
     copy.with_suffix('.smi').unlink()
     core.scan()
+
+    if os.name == 'nt':
+        with sqlite3.connect(core.database) as db:
+            for root in ('D:/', 'E:/', '//server/share/'):
+                db.execute("INSERT INTO external_subtitle_files(video_id,path,size,mtime_ns) VALUES(?,?,0,0)",
+                           (video.id, str(Path(root) / 'root.srt')))
+        window.refresh()
+        wait(lambda: read(f"{section}.textContent.includes('root.srt')"))
+        titles = read(f"[...{section}.querySelectorAll('p[title]')].map(e => e.title)")
+        assert all(str(Path(root)) in titles for root in ('D:/', 'E:/', '//server/share/'))
+        js(f'{section}.scrollIntoView({{block: "start"}})')
+        js(f"[...{section}.querySelectorAll('li')].find(e => e.textContent.includes('root.srt')).scrollIntoView({{block: 'start'}})")
+        capture('detail-root-copies')
+        with sqlite3.connect(core.database) as db:
+            db.execute("DELETE FROM external_subtitle_files WHERE video_id=? AND path LIKE '%root.srt'", (video.id,))
 
     path.with_suffix('.broken.vtt').write_bytes(b'\xff\xfeX')
     partial = path.with_suffix('.ja.srt')
@@ -206,19 +224,20 @@ try:
 
     failed = path.with_suffix('.cause.srt')
     failed.write_text(cue(), encoding='utf-8')
+    cause = ctypes.FormatError(1117).strip() if os.name == 'nt' else 'Input/output error'
     read_bytes = Path.read_bytes
     def fail_read(file):
         if file == failed:
-            raise OSError(5, '저장 장치 입출력 오류', str(failed))
+            raise OSError(5, cause, str(failed))
         return read_bytes(file)
     with patch.object(Path, 'read_bytes', fail_read):
         result = core.scan()
-    assert any('(원인: 저장 장치 입출력 오류)' in issue.message for issue in result.issues)
+    assert any(f'(원인: {cause})' in issue.message for issue in result.issues)
     window.refresh()
-    wait(lambda: read(f"{section}.textContent.includes('(원인: 저장 장치 입출력 오류)')"))
+    wait(lambda: read(f"{section}.textContent.includes({json.dumps(cause)})"))
     assert not read(f"{section}.textContent.includes('외부 자막:')")
     js(f"[...{section}.querySelectorAll('li')].find(e => e.textContent.includes('(원인:')).scrollIntoView({{block: 'start'}})")
-    capture('detail-warning-cause')
+    capture('detail-warning-io-cause')
     failed.unlink()
     core.scan()
 
@@ -231,6 +250,18 @@ try:
     long_title = read(f"[...{section}.querySelectorAll('p[title]')].find(e => e.title.includes('LongFileName')).title")
     assert long_title == long_file.name
     capture('detail-long-name')
+    long_copy = copy.with_name(long_file.name)
+    long_copy.write_bytes(long_file.read_bytes())
+    core.scan()
+    window.refresh()
+    wait(lambda: read(f"{section}.querySelectorAll('li').length === 6"))
+    js(f"[...{section}.querySelectorAll('li')].find(e => e.textContent.includes('LongFileName')).scrollIntoView({{block: 'start'}})")
+    folders = read(f"[...{section}.querySelectorAll('li')].filter(e => e.textContent.includes('LongFileName')).map(e => e.querySelectorAll('p[title]')[1].title)")
+    assert set(folders) == {str(Path('원본/영화')), str(Path('복사본/영화'))}
+    assert read(f"[...{section}.querySelectorAll('li')].filter(e => e.textContent.includes('LongFileName')).every(e => {{const [name, folder] = e.querySelectorAll('p[title]'); return folder.getBoundingClientRect().top >= name.getBoundingClientRect().bottom && folder.scrollWidth <= folder.clientWidth;}})")
+    capture('detail-long-name-copies')
+    long_copy.unlink()
+    core.scan()
 
     for index in range(25):
         path.with_suffix(f'.extra{index:02d}.en.srt').write_text(cue('추가 자막'), encoding='utf-8')

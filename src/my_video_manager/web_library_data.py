@@ -55,6 +55,7 @@ class ExternalSubtitleTrackData(TypedDict):
 class ExternalSubtitleFileData(TypedDict):
     id: int
     name: str
+    folderLabel: str | None
     warning: str | None
     subtitles: list[ExternalSubtitleTrackData]
 
