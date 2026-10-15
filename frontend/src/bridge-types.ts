@@ -122,13 +122,84 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
   })
 }
 
+export interface QueueRowData {
+  videoId: number
+  title: string
+  state: string
+  progress: number
+  message: string
+}
+
+export interface QueueCountData {
+  state: string
+  label: string
+  count: number
+}
+
+export interface QueueDeltaData {
+  rows: Array<QueueRowData>
+  removed: Array<number>
+  order: Array<number> | null
+  counts: Array<QueueCountData> | null
+}
+
+export interface QueueTargetData {
+  key: string
+  label: string
+}
+
+export interface QueueRuleData {
+  id: number
+  target: string
+  label: string
+  language: string
+}
+
+export interface QueueRulesData {
+  targets: Array<QueueTargetData>
+  rules: Array<QueueRuleData>
+}
+
+export type QueueAction = "promote" | "remove" | "retryFailed" | "retryHeld"
+export const queueStates = [["queued", "대기"], ["transcribing", "받아쓰는 중"], ["translating", "번역 중"], ["held", "보류"], ["completed", "완료"], ["failed", "실패"]] as const
+export interface QueueBridge {
+  ready: (reply: Reply) => void
+  snapshot: (reply: Reply) => void
+  rulesSnapshot: (reply: Reply) => void
+  action: (name: QueueAction, videoId: number, reply: Reply) => void
+  candidates: (target: string, reply: Reply) => void
+  saveRule: (target: string, language: string, includeExisting: boolean, reply: Reply) => void
+  removeRule: (ruleId: number, reply: Reply) => void
+  queueChanged: Signal<string>
+  rulesChanged: Signal<string>
+  queueFocusRequested: Signal<string>
+  queueDeactivated: Signal<string>
+}
+export function publicQueueBridge(raw: QueueBridge): QueueBridge {
+  return Object.freeze({
+    ready: raw.ready.bind(raw),
+    snapshot: raw.snapshot.bind(raw),
+    rulesSnapshot: raw.rulesSnapshot.bind(raw),
+    action: raw.action.bind(raw),
+    candidates: raw.candidates.bind(raw),
+    saveRule: raw.saveRule.bind(raw),
+    removeRule: raw.removeRule.bind(raw),
+    queueChanged: Object.freeze({ connect: raw.queueChanged.connect.bind(raw.queueChanged), disconnect: raw.queueChanged.disconnect.bind(raw.queueChanged) }),
+    rulesChanged: Object.freeze({ connect: raw.rulesChanged.connect.bind(raw.rulesChanged), disconnect: raw.rulesChanged.disconnect.bind(raw.rulesChanged) }),
+    queueFocusRequested: Object.freeze({ connect: raw.queueFocusRequested.connect.bind(raw.queueFocusRequested), disconnect: raw.queueFocusRequested.disconnect.bind(raw.queueFocusRequested) }),
+    queueDeactivated: Object.freeze({ connect: raw.queueDeactivated.connect.bind(raw.queueDeactivated), disconnect: raw.queueDeactivated.disconnect.bind(raw.queueDeactivated) }),
+  })
+}
+
 export interface Bridges {
   readonly shell: ShellBridge
   readonly library: LibraryBridge
+  readonly queue: QueueBridge
 }
 export function publicBridges(raw: Bridges): Bridges {
   return Object.freeze({
     shell: publicShellBridge(raw.shell),
     library: publicLibraryBridge(raw.library),
+    queue: publicQueueBridge(raw.queue),
   })
 }
