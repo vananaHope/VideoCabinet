@@ -87,7 +87,8 @@ if '--output-last-message' in args:
 else:
     print(json.dumps({'structured_output': result}))
 '''.replace('CAPTURE', repr(str(capture)))
-    adapter = fake_cli(tmp_path, script, cli=identifier)
+    # xdist 부하에서 저우선순위 자식의 시작을 기다린다. 시간 초과 계약은 timeout=0.2로 따로 검증한다.
+    adapter = fake_cli(tmp_path, script, cli=identifier, timeout=30)
     core = reopen(adapter)
     if model is None:
         core.set_translation_cli(identifier)
@@ -114,13 +115,15 @@ else:
                                     'Invalid value for --effort', 'reasoning_effort is not supported'])
 def test_cli_configuration_error_is_failed_not_held(connected, tmp_path, message):
     *_, reopen = connected
-    adapter = fake_cli(tmp_path, f'import sys\nprint({message!r}, file=sys.stderr)\nsys.exit(1)')
+    # 시간 초과 대신 실제 구성 오류 응답을 판정하도록 xdist 자식 시작에 30초를 허용한다.
+    adapter = fake_cli(tmp_path, f'import sys\nprint({message!r}, file=sys.stderr)\nsys.exit(1)', timeout=30)
     core = reopen(adapter)
     save(core, key_action='replace', key='test-key')
     source(core, core.videos()[0].id)
     result = core.process_next_translation()
     assert result.state == 'failed' and result.retry_at is None
     assert '모델을 쓸 수 없음' in result.error
+    assert message in result.error_detail
     assert not connected[1].requests
     assert not result.notice
 
