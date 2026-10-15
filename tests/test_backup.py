@@ -499,11 +499,11 @@ def test_automatic_retention_keeps_latest_five_and_never_removes_manual_zip(core
 
 
 def test_v2_backup_restores_records_and_upgrades_before_reopening(core, tmp_path):
-    from test_resolution import downgrade_v2
+    from legacy_schema import replace_with_frozen
 
     video = core.videos()[0]
     core.add_video_tag(video.id, 'v2 기록')
-    downgrade_v2(core.database)
+    replace_with_frozen(core.database, 2)
     archive = create_backup(core.database, tmp_path / 'v2.zip').path
     upgraded = open_core(core.database)
     upgraded.rename_video(video.id, 'v3에서 바꾼 제목')
@@ -513,16 +513,16 @@ def test_v2_backup_restores_records_and_upgrades_before_reopening(core, tmp_path
 
     result = apply(core.database)
     assert result.status == 'applied' and result.metadata.db_version == 2
-    # 시작 경로는 임시 DB의 이전이 성공해야 교체한다. AppCore를 열기 전부터 v3다.
+    # 시작 경로는 임시 DB의 이전이 성공해야 교체한다. AppCore를 열기 전부터 현재 버전이다.
     with closing(sqlite3.connect(core.database)) as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 3
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION
     reopened = open_core(core.database)
     assert reopened.video(video.id).title == video.title
     assert reopened.video_tags(video.id)[0].name == 'v2 기록'
     assert reopened.video(video.id).width is None
     assert reopened.statistics_dashboard(30).inventory.resolution_pending_count == len(reopened.videos())
     assert reopened.pending_backup_restore() is None
-    assert inspect_backup(result.safety_backup).db_version == 3
+    assert inspect_backup(result.safety_backup).db_version == LIBRARY_DB_VERSION
 
 
 def test_fake_next_migration_backs_up_before_ddl_and_survives_rollback(core):
