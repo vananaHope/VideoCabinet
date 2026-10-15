@@ -3,10 +3,11 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, QTimer, QUrl
+from PySide6.QtCore import QObject, QStandardPaths, QThread, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog
 
+from .backup import backup_error_message
 from .web_json import encode
 
 
@@ -19,7 +20,7 @@ class BackupWorker(QThread):
         try:
             self.result = self.operation()
         except Exception as error:
-            self.error = str(error)
+            self.error = backup_error_message(error)
 
 
 class BackupControls(QObject):
@@ -79,7 +80,8 @@ class BackupControls(QObject):
         try:
             if name == 'create':
                 path, _ = QFileDialog.getSaveFileName(self.page.window, '백업 만들기',
-                    f'library-backup-{datetime.now():%Y%m%d-%H%M%S}.zip', '라이브러리 백업 (*.zip)')
+                    str(Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation) or Path.home()) /
+                        f'library-backup-{datetime.now():%Y%m%d-%H%M%S}.zip'), '라이브러리 백업 (*.zip)')
                 if not path:
                     self.finish()
                     return
@@ -137,13 +139,13 @@ class BackupControls(QObject):
                     try:
                         inventory = self.core.backup_inventory()
                     except Exception as error:
-                        warning = '작업은 완료했지만 자동 백업 목록을 읽지 못했습니다. 새로고침하세요. ' + str(error)
+                        warning = '작업은 완료했지만 자동 백업 목록을 읽지 못했습니다. 새로고침하세요. ' + backup_error_message(error)
                 return result, inventory, warning
             self.worker = BackupWorker(run, self)
             self.worker.finished.connect(self.completed)
             self.worker.start()
         except Exception as error:
-            self.finish(str(error))
+            self.finish(backup_error_message(error))
 
     def completed(self):
         worker, self.worker = self.worker, None
@@ -170,7 +172,7 @@ class BackupControls(QObject):
                 self.inventory(inventory)
             self.finish(warning or None)
         except Exception as error:
-            self.finish(str(error))
+            self.finish(backup_error_message(error))
         finally:
             worker.deleteLater()
 

@@ -6,7 +6,7 @@ from PySide6.QtCore import QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout
 
-from .backup import apply_pending_backup_restore, cancel_backup_restore, pending_backup_restore_path
+from .backup import backup_error_message, apply_pending_backup_restore, cancel_backup_restore, pending_backup_restore_path
 
 
 class BackupRecoveryDialog(QDialog):
@@ -19,7 +19,9 @@ class BackupRecoveryDialog(QDialog):
         title = QLabel('현재 라이브러리를 열 수 없습니다')
         title.setWordWrap(True)
         layout.addWidget(title)
-        self.message = QLabel((result.error_message or '') + '\n' + result.guidance + '\n\n시작 오류: ' + str(error))
+        guidance = ((result.error_message or '') + '\n' + result.guidance if result is not None else
+                    '예약된 백업 복원이 없습니다. 현재 라이브러리를 열 수 없는 원인을 해결한 뒤 다시 시도하세요.')
+        self.message = QLabel(guidance + '\n\n시작 오류: ' + backup_error_message(error))
         self.message.setWordWrap(True)
         self.message.setTextFormat(Qt.TextFormat.PlainText)
         self.message.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -47,7 +49,7 @@ class BackupRecoveryDialog(QDialog):
         try:
             cancel_backup_restore(self.database)
         except OSError as error:
-            QMessageBox.warning(self, '예약 취소 실패', str(error))
+            QMessageBox.warning(self, '예약 취소 실패', backup_error_message(error))
             return
         self.cancel.setEnabled(False)
         self.message.setText('백업 복원 예약을 취소했습니다. 현재 데이터와 보존 사본은 그대로 남아 있습니다.\n'
@@ -72,7 +74,7 @@ def open_with_backup_recovery(database, instance, create_core):
                 previous_failure = result
             if previous_failure is None:
                 raise
-            dialog = BackupRecoveryDialog(database, previous_failure, error)
+            dialog = BackupRecoveryDialog(database, result, error)
             retry = dialog.exec() == QDialog.DialogCode.Accepted
             dialog.deleteLater()
             if retry:

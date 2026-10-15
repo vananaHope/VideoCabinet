@@ -3,6 +3,8 @@
 python scripts/check_web_backup.py --offscreen [--startup deferred]
 """
 import argparse
+import atexit
+import zipfile
 from datetime import datetime, timezone
 import json
 import os
@@ -68,7 +70,9 @@ if args.offscreen:
     for name in ('malgun.ttf', 'malgunbd.ttf'):
         QFontDatabase.addApplicationFont(str(Path(os.environ['WINDIR']) / 'Fonts' / name))
 args.output.mkdir(parents=True, exist_ok=True)
-workspace = Path(tempfile.mkdtemp(prefix='backup-screen-', dir=ROOT / '.local'))
+temporary = tempfile.TemporaryDirectory(prefix='backup-screen-')
+atexit.register(temporary.cleanup)
+workspace = Path(temporary.name)
 core = AppCore(database=workspace / 'data.sqlite3', media=Media(), clock=lambda: datetime.now(timezone.utc))
 if args.startup == 'recovery':
     import errno
@@ -316,12 +320,21 @@ try:
         capture('backup-cancelled')
         checks.append('예약 취소 즉시 반영과 현재 데이터 유지')
         for index in range(5):
-            create_automatic_backup(core.database, reason='before_migration' if index % 2 else 'before_restore')
+            automatic = create_automatic_backup(core.database, reason='before_migration' if index % 2 else 'before_restore')
+        with zipfile.ZipFile(automatic.path) as bundle:
+            contents = {name: bundle.read(name) for name in bundle.namelist()}
+        manifest = json.loads(contents['manifest.json'])
+        manifest.pop('reason')
+        contents['manifest.json'] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(automatic.path, 'w') as bundle:
+            for name, value in contents.items():
+                bundle.writestr(name, value)
         assert button('새로고침')
         finished()
         js('document.querySelector("[aria-label=\\"자동 백업\\"]").scrollIntoView({block:"end"})')
         capture('backup-many')
         assert len(backup_state()['automatic']) == 5
+        assert '상세 이유 기록 없음' in content('[aria-label="자동 백업"]')
         assert 'DB 형식 변경 전' in content('[aria-label="자동 백업"]')
         assert button('복원 미리보기')
         finished()
@@ -342,4 +355,3 @@ finally:
     window.tray.quit()
     window.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-

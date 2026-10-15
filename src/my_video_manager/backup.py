@@ -63,11 +63,23 @@ def _storage_error(error):
         return error
     if getattr(error, "errno", None) == errno.ENOSPC or getattr(error, "winerror", None) == 112:
         return BackupStorageError(errno.ENOSPC, "백업 공간이 부족합니다. 저장 공간을 확보한 뒤 다시 시도하세요.", "disk_full")
-    if isinstance(error, PermissionError) or getattr(error, "errno", None) in (errno.EACCES, errno.EBUSY):
+    if getattr(error, "winerror", None) in (32, 33) or getattr(error, "errno", None) == errno.EBUSY:
         return BackupStorageError(errno.EACCES, "백업 복원 파일 또는 DB가 사용 중이거나 접근할 수 없습니다. "
                                   "파일을 사용하는 프로그램을 닫고 접근 권한을 확인하세요.", "file_in_use")
+    if isinstance(error, PermissionError) or getattr(error, "errno", None) in (errno.EACCES, errno.EPERM):
+        return BackupStorageError(errno.EACCES, "백업 파일 또는 폴더에 접근할 권한이 없습니다. "
+                                  "읽기 전용 설정과 접근 권한을 확인하세요.", "file_in_use")
     return BackupStorageError(getattr(error, "errno", None),
                               "백업 저장 장치에 접근할 수 없습니다. 연결과 쓰기 권한을 확인하세요.", "storage_error")
+
+
+def backup_error_message(error):
+    """백업 화면에서 내부 임시 경로와 OS 오류 접두사를 노출하지 않는다."""
+    if isinstance(error, BackupBusyError):
+        return str(error)
+    if isinstance(error, OSError):
+        return _storage_error(error).strerror
+    return str(error)
 
 
 @dataclass(frozen=True)

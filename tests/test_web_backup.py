@@ -1,4 +1,5 @@
 """공개 설정 브리지와 AppCore로 백업 화면의 작업·예약·실패 수명을 확인한다."""
+import errno
 import json
 from pathlib import Path
 import sqlite3
@@ -7,7 +8,7 @@ import time
 import zipfile
 
 import pytest
-from PySide6.QtCore import QEventLoop, Qt, QTimer
+from PySide6.QtCore import QEventLoop, QStandardPaths, Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -67,6 +68,7 @@ def test_native_pickers_preview_schedule_cancel_keep_current_records(window_fact
     assert result['preview']['db_version'] == LIBRARY_DB_VERSION
     assert result['preview']['created_at'] and result['preview']['app_version']
     assert saved[0][1] == '백업 만들기' and opened[0][1] == '백업 복원 파일 선택'
+    assert Path(saved[0][2]).parent == Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation))
     assert not core.pending_backup_restore()
     result = action(bridge, 'schedule')
     assert result['pending'] and result['preview'] is None
@@ -87,7 +89,7 @@ def test_picker_cancel_releases_busy_without_files(window_factory, core, monkeyp
     assert not core.backup_inventory().pending
 
 
-@pytest.mark.parametrize('error', [BackupBusyError(3, 'source_changed'), PermissionError('쓰기 권한 확인'), OSError('공간 부족')])
+@pytest.mark.parametrize('error', [BackupBusyError(3, 'source_changed')])
 def test_failed_worker_releases_busy_preserves_error_on_reentry_and_allows_retry(window_factory, core, tmp_path, monkeypatch, error):
     window = window_factory()
     bridge = bridge_for(window)
@@ -360,3 +362,53 @@ def test_restart_uses_existing_safe_shutdown_and_aborted_shutdown_does_not_resta
     assert window.tray.quitting and app.property('backupRestartRequested')
     assert core.backup_inventory().pending
     app.setProperty('backupRestartRequested', False)
+
+
+@pytest.mark.parametrize('operation', ['create', 'schedule', 'cancel', 'refresh', 'choose'])
+@pytest.mark.parametrize('code, phrase', [(errno.EACCES, '권한'), (errno.ENOSPC, '공간'),
+                                         (errno.EBUSY, '사용 중'), (errno.ENOENT, '저장 장치'),
+                                         (32, '사용 중'), (33, '사용 중'), (112, '공간')])
+def test_os_errors_have_actionable_messages_without_internal_paths(window_factory, core, tmp_path, monkeypatch, operation, code, phrase):
+    archive = core.create_backup(tmp_path / 'source.zip').path
+    bridge = bridge_for(window_factory())
+    monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *args: (str(archive), ''))
+    monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *args: (str(archive), ''))
+    if operation == 'schedule':
+        action(bridge, 'choose')
+    def fail(*args, **kwargs):
+        error = OSError(code, 'raw OS failure', str(tmp_path / '.backup-private' / 'backup.zip'))
+        if code in (32, 33, 112):
+            error.winerror = code
+        raise error
+    if operation == 'choose':
+        from my_video_manager.web_backup import BackupControls
+        monkeypatch.setattr(BackupControls, 'stamp', fail)
+    else:
+        method = {'create': 'create_backup', 'schedule': 'request_backup_restore',
+                  'cancel': 'cancel_backup_restore', 'refresh': 'backup_inventory'}[operation]
+        monkeypatch.setattr(core, method, fail)
+    result = action(bridge, operation)
+    assert phrase in result['failure']
+    assert not result['busy']
+    assert all(raw not in result['failure'] for raw in ('[Errno', '[WinError', '.backup-', 'raw OS'))
+
+
+@pytest.mark.parametrize('next_status', [None, 'applied', 'rejected'])
+def test_recovery_retry_shows_current_result_after_initial_failure(core, monkeypatch, next_status):
+    from my_video_manager import backup_recovery as recovery
+    failure = BackupRestoreResult(None, False, status='deferred', error_message='지난 실패', guidance='지난 예약 안내')
+    current = (BackupRestoreResult(None, False, status=next_status, error_message='이번 결과', guidance='이번 안내')
+               if next_status else None)
+    results = iter([failure, current])
+    monkeypatch.setattr(recovery, 'apply_pending_backup_restore', lambda *args, **kwargs: next(results))
+    texts = []
+    def execute(dialog):
+        texts.append(dialog.message.text())
+        return 1 if len(texts) == 1 else 0
+    monkeypatch.setattr(recovery.BackupRecoveryDialog, 'exec', execute)
+    def create():
+        raise RuntimeError('현재 시작 실패')
+    assert recovery.open_with_backup_recovery(core.database, object(), create) is None
+    assert '지난 실패' in texts[0] and '지난 예약 안내' in texts[0]
+    assert '지난 실패' not in texts[1] and '지난 예약 안내' not in texts[1]
+    assert ('이번 결과' if next_status else '예약된 백업 복원이 없습니다') in texts[1]
