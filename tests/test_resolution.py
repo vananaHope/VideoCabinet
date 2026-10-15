@@ -82,6 +82,32 @@ def test_registration_and_rescan_store_dimensions_without_changing_records(tmp_p
     assert open_core(core.database).video(video.id) == core.video(video.id)
 
 
+def test_resolution_and_external_subtitles_both_refresh_on_registration_and_scan(tmp_path):
+    media = ResolutionMedia()
+    core = open_core(tmp_path / 'library.sqlite3', media)
+    path = video_file(tmp_path / 'videos')
+    subtitle = path.with_suffix('.ko.srt')
+    subtitle.write_text('1\n00:00:01,000 --> 00:00:03,000\n첫번째 자막\n', encoding='utf-8')
+    core.add_file(path)
+    video, = core.videos()
+    assert (video.width, video.height) == (1920, 1080)
+    assert core.external_subtitles(video.id)[0].subtitles[0].lines[0].text == '첫번째 자막'
+    assert core.search('첫번째').results[0].source == 'external'
+    # 영상 캐시가 그대로여도 외부 자막은 새로 검사한다.
+    subtitle.write_text('1\n00:00:01,000 --> 00:00:03,000\n바뀐 두번째 자막\n', encoding='utf-8')
+    core.scan()
+    assert core.video(video.id).width == 1920
+    assert core.search('두번째').results[0].video_id == video.id
+    # 해상도 재확인이 필요한 변경 검사에서도 양쪽이 함께 갱신된다.
+    media.width, media.height = 1080, 1920
+    signature = path.stat()
+    os.utime(path, ns=(signature.st_atime_ns, signature.st_mtime_ns + 1000000))
+    subtitle.write_text('1\n00:00:01,000 --> 00:00:03,000\n마지막 세번째 자막\n', encoding='utf-8')
+    core.scan()
+    assert (core.video(video.id).width, core.video(video.id).height) == (1080, 1920)
+    assert core.search('세번째').results[0].source == 'external'
+
+
 def test_v2_migration_backs_up_before_ddl_and_preserves_all_existing_columns(tmp_path, monkeypatch):
     core = open_core(tmp_path / 'data/library.sqlite3')
     core.add_file(video_file(tmp_path / 'videos'))

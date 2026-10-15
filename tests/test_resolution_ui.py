@@ -60,10 +60,13 @@ def test_resolution_worker_stops_when_exhausted_and_restarts_after_scan(window_f
     monkeypatch.setattr(core, 'fill_next_resolution', fill)
     window = window_factory()
     controls = window.resolutions
+    refreshes = []
+    monkeypatch.setattr(window.web_host.controllers['statistics'], 'refresh', lambda: refreshes.append(True))
     controls.tick()
     wait_for(lambda: controls.future.done())
     controls.tick()
     assert not controls.timer.isActive()
+    assert refreshes == []  # 처리할 항목이 없으면 이미 계산한 통계를 다시 읽지 않는다.
     QTest.qWait(1100)
     assert len(calls) == 1
     window.refresh()

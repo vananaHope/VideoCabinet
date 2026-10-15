@@ -26,6 +26,7 @@ class ResolutionControls(QObject):
         self.window, self.core = window, window.core
         self.future = None
         self.closed = False
+        self.changed = False
         self.cancellation = Event()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='resolution')
         cancellation, executor = self.cancellation, self.executor
@@ -62,21 +63,28 @@ class ResolutionControls(QObject):
                 result = self.future.result()
             except Exception as error:
                 self.window.show_status(f'해상도 채우기 실패: {error} · 다시 검사하면 재시도합니다.')
+                self.refresh_statistics()
                 self.timer.stop()
                 return
             finally:
                 self.future = None
             if result.message and result.state == 'unknown':
                 self.window.show_status(f'해상도를 읽지 못했습니다: {result.message} · 다시 검사하면 재시도합니다.')
+            self.changed = self.changed or result.state == 'completed'
             if result.state == 'exhausted' or monotonic() - self.last_refresh >= 10:
-                self.window.web_host.controllers['statistics'].refresh()
-                self.last_refresh = monotonic()
+                self.refresh_statistics()
             if result.state == 'exhausted':
                 self.timer.stop()
                 return
         if not busy:
             self.cancellation.clear()
             self.future = self.executor.submit(self.core.fill_next_resolution, cancellation=self.cancellation)
+
+    def refresh_statistics(self):
+        if self.changed:
+            self.window.web_host.controllers['statistics'].refresh()
+            self.changed = False
+            self.last_refresh = monotonic()
 
     def shutdown(self):
         self.closed = True
