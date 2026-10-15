@@ -123,6 +123,40 @@ def test_dashboard_korean_translation_tracks_pending_partial_completed_and_repla
     assert core.statistics_dashboard(7).inventory.korean_subtitled_count == 1
 
 
+@pytest.mark.parametrize('partial', [False, True])
+def test_dashboard_keeps_korean_subtitles_when_translation_finishes_between_reads(setup, monkeypatch, partial):
+    import sqlite3
+
+    core, _, _, _, _ = setup
+    video = core.videos()[0]
+    source(core, video.id, 'en')
+    if partial:
+        core.process_next_translation()
+    assert core.translation(video.id) is None
+    original_connect = sqlite3.connect
+    bounds_read = []
+
+    class CompletingConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql.startswith('SELECT COALESCE(MAX(rowid), 0) FROM translation_'):
+                bounds_read.append(sql)
+                if len(bounds_read) == 2:
+                    # 첫 표를 모두 읽은 뒤, 두 번째 표의 범위를 잡기 전에 완료한다.
+                    # 공개 번역 API가 targets를 지우고 lines로 옮기는 실제 커밋이다.
+                    finish(core)
+            return super().execute(sql, *args, **kwargs)
+
+    def connect(*args, **kwargs):
+        kwargs['factory'] = CompletingConnection
+        return original_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    result = core.statistics_dashboard(7)
+    assert len(bounds_read) == 2
+    assert core.translation(video.id) is not None
+    assert result.inventory.korean_subtitled_count == 1
+
+
 @pytest.mark.parametrize('write_kind', ['viewing', 'subtitle'])
 def test_dashboard_inventory_does_not_hold_viewing_snapshot_lock(setup, monkeypatch, write_kind):
     from concurrent.futures import ThreadPoolExecutor

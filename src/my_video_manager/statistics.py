@@ -343,16 +343,17 @@ class StatisticsReader:
         # autocommit 읽기가 끝나므로 기다리는 시청·자막 쓰기가 다음 묶음 전에 진행된다.
         korean = {row[0] for row in db.execute(
             "SELECT video_id FROM transcripts WHERE spoken_language = 'ko'").fetchall()}
+        # 완료 시 targets → lines로 이동한 행도 뒤쪽 스캔에 들어오도록 대상을 먼저 읽는다.
         queries = (
-            ('translation_lines', """SELECT DISTINCT t.video_id FROM translation_lines g
-                JOIN transcript_lines l ON l.id = g.line_id
-                JOIN transcripts t ON t.id = l.transcript_id
-                WHERE g.rowid > ? AND g.rowid <= ?"""),
             ('translation_targets', """SELECT DISTINCT q.video_id FROM translation_targets g
                 JOIN translation_queue q ON q.id = g.queue_id
                 JOIN transcripts t ON t.video_id = q.video_id
                 JOIN transcript_lines l ON l.id = g.line_id AND l.transcript_id = t.id
                 WHERE g.rowid > ? AND g.rowid <= ? AND g.text IS NOT NULL"""),
+            ('translation_lines', """SELECT DISTINCT t.video_id FROM translation_lines g
+                JOIN transcript_lines l ON l.id = g.line_id
+                JOIN transcripts t ON t.id = l.transcript_id
+                WHERE g.rowid > ? AND g.rowid <= ?"""),
         )
         for table, query in queries:
             last_rowid = db.execute(f'SELECT COALESCE(MAX(rowid), 0) FROM {table}').fetchone()[0]
