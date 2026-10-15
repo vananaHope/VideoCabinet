@@ -743,6 +743,8 @@ def test_windows_read_failure_preserves_system_message(library, monkeypatch, cod
     assert detail in warning
     assert 'private' not in warning
     assert ('읽을 권한이 없습니다' in warning) == (code == 5)
+    if code != 5:
+        assert '자막 파일을 읽지 못했습니다. 파일과 저장 장치 상태를 확인해 주세요.' in warning
     assert any(issue.message == warning for issue in result.issues)
 
 

@@ -81,8 +81,8 @@ def _read_error_message(error, *, folder=False):
         elif isinstance(error, FileNotFoundError):
             message = f"{target} 찾을 수 없습니다. 다시 검사해 주세요."
         else:
-            subject = "폴더" if folder else "파일"
-            message = f"{target} 읽지 못했습니다. {subject}와 저장 장치 상태를 확인해 주세요."
+            subject = "폴더와" if folder else "파일과"
+            message = f"{target} 읽지 못했습니다. {subject} 저장 장치 상태를 확인해 주세요."
         if winerror is None and error.errno in (errno.EACCES, errno.ENOENT):
             return message
         # str(error)는 filename을 포함한다. strerror에도 경로를 넣는 공급자가 있어 가린다.
