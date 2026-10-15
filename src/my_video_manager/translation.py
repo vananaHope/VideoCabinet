@@ -14,6 +14,7 @@ from .translation_glossary import GlossaryStore, GlossaryEntry
 
 
 CONTEXT_LINES = 10
+CONTEXT_LIMIT = 100
 MIN_BATCH_SIZE = 10
 RECOVERY_SUCCESSES = 3
 
@@ -23,7 +24,8 @@ class TranslationCancelled(Exception):
 
 
 class TranslationError(RuntimeError):
-    def __init__(self, kind: str, detail: str):
+    def __init__(self, kind: str, detail: str, *, shrinkable=True):
+        self.shrinkable = shrinkable
         self.kind, self.detail = kind, detail
         super().__init__({
             "usage_limit": "구독 사용량 한도로 보류했습니다. 잠시 뒤 자동으로 재시도합니다.",
@@ -468,7 +470,7 @@ class Translations:
             return entry
         return None
 
-    def _translate_batch(self, remaining, language, cli, cancellation, queue_id, context, glossary):
+    def _translate_batch(self, remaining, language, cli, cancellation, queue_id, transcript, glossary):
         with self._connect() as db:
             row = db.execute('SELECT selections FROM translation_job_options WHERE queue_id=?', (queue_id,)).fetchone()
         if row is None:
@@ -496,6 +498,8 @@ class Translations:
             if not current:
                 raise TranslationCancelled
             lines = remaining[:progress.size]
+            with self._connect() as db:
+                context = self._context(db, transcript, lines, queue_id)
             try:
                 response = adapter.translate(lines, language, cli=cli, cancellation=cancellation,
                                              context=context, glossary=glossary.entries, **kwargs)
@@ -507,7 +511,7 @@ class Translations:
                     raise
                 if cancellation.is_set():
                     raise TranslationCancelled
-                if progress.shrink(len(lines)):
+                if error.shrinkable and progress.shrink(len(lines)):
                     attempt = 0
                     continue
                 attempt += 1
@@ -519,9 +523,21 @@ class Translations:
                 progress.successes = 0
                 raise TranslationError('other', str(error)) from error
 
-    def _context(self, db, transcript, first_id, queue_id):
-        index = next(i for i, line in enumerate(transcript.lines) if line.id == first_id)
-        preceding = transcript.lines[max(0, index - CONTEXT_LINES):index]
+    def _context(self, db, transcript, targets, queue_id):
+        target_ids = {line.id for line in targets}
+        indices = [i for i, line in enumerate(transcript.lines) if line.id in target_ids]
+        # 각 대상의 가까운 앞 줄부터 공평하게 모으고 원어 순서로 보낸다.
+        selected = set()
+        for distance in range(1, CONTEXT_LINES + 1):
+            for index in indices:
+                previous = index - distance
+                if previous >= 0 and transcript.lines[previous].id not in target_ids:
+                    selected.add(previous)
+                if len(selected) >= CONTEXT_LIMIT:
+                    break
+            if len(selected) >= CONTEXT_LIMIT:
+                break
+        preceding = [transcript.lines[i] for i in sorted(selected)]
         if not preceding:
             return ()
         # 미번역 대상은 옛 확정 번역보다 우선한다. 수정 후 낡은 번역을 맥락에 넣지 않는다.
@@ -569,7 +585,6 @@ class Translations:
             if not lines:
                 return None  # 요청 또는 원어 세대가 읽는 도중 교체됐다.
             with self._connect() as db:
-                context = self._context(db, transcript, lines[0].id, pending.id)
                 glossary = self._glossaries.load(db, pending.id)
             with self._activity:
                 with self._connect() as db:
@@ -582,7 +597,7 @@ class Translations:
             try:
                 try:
                     result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation,
-                                                   pending.id, context, glossary)
+                                                   pending.id, transcript, glossary)
                 except TranslationError as error:
                     if cancellation.is_set():
                         raise TranslationCancelled
@@ -604,7 +619,7 @@ class Translations:
                         from .opencode_go import OpenCodeGoError
                         raise OpenCodeGoError('usage_limit', retry_at=backoff)
                     result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation,
-                                                   pending.id, context, glossary)
+                                                   pending.id, transcript, glossary)
                 if cancellation.is_set():
                     raise TranslationCancelled
                 with self._connect() as db:

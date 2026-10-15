@@ -47,7 +47,8 @@ class KeyCheckResult:
 class OpenCodeGoError(TranslationError):
     """현재 보류 분류와 호환되며 후속 연결에서 사용할 UTC retry_at을 제공한다."""
 
-    def __init__(self, kind: str, *, retry_at: datetime | None = None, diagnostic: str | None = None):
+    def __init__(self, kind: str, *, retry_at: datetime | None = None, diagnostic: str | None = None,
+                 shrinkable=True):
         messages = {
             "missing_key": "OpenCode Go 키가 등록되지 않았습니다.",
             "authentication": "OpenCode Go 키 또는 접근 권한을 확인하세요.",
@@ -63,7 +64,7 @@ class OpenCodeGoError(TranslationError):
             detail += " JSON 모드의 프롬프트에는 json 안내가 필요합니다."
         elif diagnostic == "schema_rejected":
             detail += " 모델이 JSON Schema 형식을 거부했습니다."
-        super().__init__(kind, detail)
+        super().__init__(kind, detail, shrinkable=shrinkable)
         self.args = (detail,)
         self.retry_at = retry_at
 
@@ -305,7 +306,7 @@ class OpenCodeGoTranslator:
         except Exception:
             failure = "key_storage"
         if failure:
-            raise OpenCodeGoError(failure)
+            raise OpenCodeGoError(failure, shrinkable=False)
         if key is None:
             raise OpenCodeGoError("missing_key")
         if not isinstance(key, Secret):
@@ -330,7 +331,7 @@ class OpenCodeGoTranslator:
         if cancellation.is_set():
             raise TranslationCancelled
         if failure:
-            raise OpenCodeGoError(failure)
+            raise OpenCodeGoError(failure, shrinkable=False)
         data = None
         try:
             data = json.loads(response.body)
@@ -358,7 +359,7 @@ class OpenCodeGoTranslator:
         if not 200 <= response.status < 300:
             raise OpenCodeGoError("other")
         if not isinstance(data, dict):
-            raise OpenCodeGoError("format")
+            raise OpenCodeGoError("format", shrinkable=False)
         return data
 
     def models(self, *, cancellation=None) -> tuple[TranslationModelChoice, ...]:
@@ -393,12 +394,20 @@ class OpenCodeGoTranslator:
             extra["reasoning_effort"] = self.effort
         data = self._request("/chat/completions", self._model_payload(self.model, prompt, **extra),
                              cancellation=cancellation)
-        result = None
+        valid_envelope = False
         try:
             choice = data["choices"][0]
-            if choice.get("finish_reason") != "stop":
-                raise ValueError
             content = choice["message"]["content"]
+            finish_reason = choice["finish_reason"]
+            valid_envelope = True
+        except (TypeError, KeyError, IndexError):
+            pass
+        if not valid_envelope:
+            raise OpenCodeGoError("format", shrinkable=False)
+        result = None
+        try:
+            if finish_reason != "stop":
+                raise ValueError
             if isinstance(content, str):
                 fenced = re.fullmatch(r"\s*```(?:json)?[ \t]*\r?\n(.*?)\r?\n```\s*", content, re.DOTALL)
                 if fenced:

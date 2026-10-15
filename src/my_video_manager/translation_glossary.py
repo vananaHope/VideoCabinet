@@ -1,9 +1,13 @@
 """번역 작업의 용어집 값. 저장 방식과 무관하게 첫 번역과 최근 사용 순서를 유지한다."""
 
 from dataclasses import dataclass
+import json
+import re
 
 
 GLOSSARY_LIMIT = 200
+GLOSSARY_TERM_LENGTH = 60
+GLOSSARY_PROMPT_BYTES = 24 * 1024
 
 
 @dataclass(frozen=True)
@@ -18,7 +22,24 @@ def parse_glossary(value) -> tuple[GlossaryEntry, ...]:
         return ()
     return tuple(GlossaryEntry(item['source'].strip(), item['target'].strip())
                  for item in value if isinstance(item, dict) and set(item) == {'source', 'target'}
-                 and all(isinstance(item[key], str) and item[key].strip() for key in ('source', 'target')))
+                 and all(isinstance(item[key], str) and item[key].strip()
+                         and len(item[key]) <= GLOSSARY_TERM_LENGTH
+                         and not any(c in item[key] for c in '\r\n\v\f\x1c\x1d\x1e\x85\u2028\u2029') for key in ('source', 'target')))
+
+
+def prompt_glossary(entries):
+    """UTF-8 JSON 예산 안에 최근 항목부터 담고 저장 순서로 반환한다."""
+    valid = parse_glossary([{'source': e.source, 'target': e.target} for e in entries])
+    selected = []
+    size = 2  # JSON 배열의 대괄호
+    for entry in reversed(valid[-GLOSSARY_LIMIT:]):
+        item = {'source': entry.source, 'target': entry.target}
+        cost = len(json.dumps(item, ensure_ascii=False).encode('utf-8')) + (2 if selected else 0)
+        if size + cost > GLOSSARY_PROMPT_BYTES:
+            break
+        selected.append(item)
+        size += cost
+    return list(reversed(selected))
 
 
 @dataclass(frozen=True)
@@ -34,7 +55,7 @@ class Glossary:
             entries[entry.source] = original
         text = '\n'.join(line.text for line in lines)
         for source in tuple(entries):
-            if source in text:
+            if re.search(r'\b' + re.escape(source) + r'\b', text):
                 entries[source] = entries.pop(source)
         return Glossary(tuple(entries.values())[-GLOSSARY_LIMIT:])
 
