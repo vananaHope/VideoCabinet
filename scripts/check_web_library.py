@@ -247,11 +247,11 @@ if args.verify_shell and args.mode == 'web':
     assert not window.menuBar().isVisible() and not window.statusBar().isVisible()
     assert js("document.querySelector('[aria-label=\"라이브러리 등록·표시 개수\"]').textContent") == window.library_count.text()
     window.show_status('검사 완료 · 웹 작업 알림 확인')
-    wait_until(lambda: js("document.querySelector('[role=status]')?.textContent") == '검사 완료 · 웹 작업 알림 확인')
+    wait_until(lambda: js("document.querySelector('[role=status][aria-label=\"작업 알림\"]')?.textContent") == '검사 완료 · 웹 작업 알림 확인')
     settle()  # DOM 커밋 뒤 Chromium paint까지 기다린다.
     capture_window(f'web-notice-{args.count}.png')
     window.statusBar().clearMessage()
-    wait_until(lambda: not js("!!document.querySelector('[role=status]')"))
+    wait_until(lambda: not js("!!document.querySelector('[role=status][aria-label=\"작업 알림\"]')"))
     # 탭 클릭은 실제 DOM 버튼을 사용하고, 복귀 키는 Qt WebEngine 포커스 프록시에 전달한다.
     for index, (tab, _) in enumerate(TABS):
         window.navigate_web_tab('library')
@@ -284,21 +284,9 @@ if args.verify_shell and args.mode == 'web':
     window.navigate_web_tab('library')
     settle()
     shell_key(host.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
-    wait_until(window.settings_menu.isVisible)
-    anchor = js_json("(() => {const r = document.querySelector('nav [data-tab=settings]').getBoundingClientRect(); return [r.right, r.bottom]})()")
-    anchor = host.view.mapToGlobal(QPoint(*[round(v * host.view.zoomFactor()) for v in anchor]))
-    assert abs(window.settings_menu.y() - anchor.y()) <= 3, (window.settings_menu.pos(), anchor)
-    assert abs(window.settings_menu.x() + window.settings_menu.width() - anchor.x()) <= 3
-    metrics['settingsMenuAnchor'] = {'tabBottomRight': [anchor.x(), anchor.y()], 'menuPosition': [window.settings_menu.x(), window.settings_menu.y()]}
-    # 화면 전체 grab에는 동시에 사용하는 다른 앱이 섞일 수 있다.
-    # 실제 앱/팝업 픽셀만 각각 잡아 검증한 전역 위치에 합성한다.
-    if not args.no_screenshots:
-        capture = window.grab()
-        painter = QPainter(capture)
-        painter.drawPixmap(window.mapFromGlobal(window.settings_menu.pos()), window.settings_menu.grab())
-        painter.end()
-        capture.save(str(screens / f'web-settings-menu-{args.count}.png'))
-    window.settings_menu.hide()
+    wait_until(lambda: host.active_tab == 'settings' and window.pages.currentWidget() is host)
+    assert not window.settings_menu.isVisible()
+    window.navigate_web_tab('library')
     settle()
     assert not window.sidebar.isVisible()
     metrics['checks'].append('일곱 탭 클릭·Ctrl+1~7·Qt Esc 복귀·Alt+S')
@@ -560,9 +548,12 @@ if args.verify and args.mode == 'web':
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
     wait_until(lambda: window.pages.currentWidget() is host)
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
-    wait_until(window.settings_menu.isVisible)
-    window.settings_menu.hide()
-    metrics['checks'].append('웹 포커스 Ctrl+1~7, Alt+S')
+    wait_until(lambda: host.active_tab == 'settings' and window.pages.currentWidget() is host)
+    assert not window.settings_menu.isVisible()
+    window.navigate_web_tab('library')
+    settle()
+    page.focus_content()
+    metrics['checks'].append('웹 포커스 Ctrl+1~7, Alt+S 설정 탭')
     # 실제 mpv로 열 수 있는 복사본만 골라 Enter 재생·Esc 복귀를 확인한다.
     playable = next((v for v in reversed(core.videos()) if any(loc.path.stat().st_size > 1000 for loc in v.locations)), None)
     if playable:

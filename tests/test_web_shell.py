@@ -62,7 +62,7 @@ def test_actual_qt_public_slots_and_signals_match_generator_contract(window_fact
     methods = {bytes(meta.method(i).name()).decode(): meta.method(i)
                for i in range(meta.methodOffset(), meta.methodCount())}
     assert set(methods) == set(contract.slots) | set(contract.signals)
-    names = {str: 'QString', int: 'int', bool: 'bool'}
+    names = {str: 'QString', int: 'int', float: 'double', bool: 'bool'}
     for name, arguments in contract.slots.items():
         method = methods[name]
         assert method.methodType() == QMetaMethod.MethodType.Slot
@@ -173,17 +173,24 @@ def test_chrome_visibility_survives_fullscreen_exit_and_native_window_restore(wi
     assert window.statusBar().isVisible() == (mode == '0')
 
 
-@pytest.mark.parametrize('native_tab', NATIVE_PAGES)
-def test_hidden_status_bar_delivers_notices_to_web_and_native_fallback(window_factory, native_tab):
+def test_hidden_status_bar_delivers_notices_to_web(window_factory):
     window = window_factory('1')
     changes = []
     window.web_host.bridge.shellStatusChanged.connect(changes.append)
     window.show_status('등록 작업 완료')
     assert changes == ['등록 작업 완료']
     assert json.loads(window.web_host.bridge.shellSnapshot())['status'] == '등록 작업 완료'
+    window.statusBar().clearMessage()
+    assert changes == ['등록 작업 완료', '']
+    assert json.loads(window.web_host.bridge.shellSnapshot())['status'] == ''
+
+
+@pytest.mark.parametrize('native_tab', NATIVE_PAGES)
+def test_hidden_status_bar_delivers_notices_to_native_fallback(window_factory, native_tab):
+    window = window_factory('1')
+    window.show_status('등록 작업 완료')
     window.navigate_web_tab(native_tab)
     assert window.web_notice.isVisible() and window.web_notice.text() == '등록 작업 완료'
     assert not window.statusBar().isVisible()
     window.statusBar().clearMessage()
-    assert changes == ['등록 작업 완료', '']
     assert not window.web_notice.isVisible()
