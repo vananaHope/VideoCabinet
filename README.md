@@ -47,6 +47,98 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 
 테스트는 `tests/conftest.py`가 `--disable-gpu`를 기본으로 켜며, 사용자가 지정한 `QTWEBENGINE_CHROMIUM_FLAGS` 값은 유지합니다.
 
+## 설치 파일 만들기 (앞부분, #62)
+
+현재는 빌드 흐름과 사용자 단위 Inno Setup 스크립트까지 준비되어 있습니다.
+PyInstaller onedir 포장과 실행 파일의 받아쓰기 하위 명령은 #55 병합 뒤 구현합니다.
+이 단계의 출력은 실제 배포·설치 검증이 끝난 제품이 아닙니다.
+
+README의 환경 준비를 마친 뒤 [Inno Setup 6.3 이상](https://jrsoftware.org/isdl.php)을 설치합니다.
+`ISCC.exe`를 PATH에 넣거나 `-InnoCompiler '설치 경로/ISCC.exe'`로 지정할 수 있습니다.
+준비된 실행 폴더를 대상으로 다음 명령을 실행합니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -SkipPyInstaller -AppDirectory dist/my-video-manager
+```
+
+웹 빌드 → 생성 검사 → PyInstaller 건너뛰기 → Inno Setup 순서입니다.
+버전은 `pyproject.toml`에서 읽고 `dist/installer/MyVideoManager-Setup-<version>.exe`로 만듭니다.
+컴파일 시험만 할 때는 별도 `.local/installer-smoke/` 폴더에 빈 `my-video-manager.exe`를 놓고
+`-AppDirectory .local/installer-smoke -OutputDirectory .local/installer-output`을 지정하세요.
+더미 파일로 만든 설치 프로그램은 실행 가능한 앱이 아닙니다.
+
+설치 위치는 사용자별 `%LOCALAPPDATA%/Programs/MyVideoManager`이고 관리자 권한을 요구하지 않습니다.
+시작 메뉴 바로가기와 제거 프로그램을 등록하며 바탕화면 바로가기는 선택입니다.
+동봉 FFmpeg·ffprobe는 실행 파일 옆 `ffmpeg/`, libmpv는 `mpv/`에서 찾습니다.
+소스 실행의 PATH/WinGet FFmpeg와 `.runtime/mpv` 검색은 유지됩니다.
+데이터 폴더(`~/.my-video-manager`, `--data-dir`)는 설치·제거 대상에 포함하지 않습니다.
+
+### 자막 기능 준비 API
+
+화면 연결은 후속 작업입니다. 작업자 스레드에서
+`AppCore.prepare_subtitle_support(cancellation=Event(), progress=callback)`을 호출하면
+CUDA와 Whisper large-v3를 같은 흐름에서 준비합니다.
+독립 어댑터 `SubtitlePreparation(data_directory, adapter=RuntimeDownloadAdapter(), gpu_available=...)`도
+사용할 수 있으며 `prepare()`가 CUDA 디렉터리들과 모델 경로를 반환합니다.
+콜백은 `PreparationProgress(phase, asset, completed, total)`을 받습니다.
+download/verify/extract는 파일별 바이트, reuse/ready는 완료 개수입니다.
+취소 토큰은 청크마다 검사하며 네트워크 무응답 제한 시간은 10초입니다.
+**진행률 콜백은 예외를 던지지 않아야 합니다.** 화면 갱신 실패 등 콜백 내부의 오류는 호출자가 처리합니다.
+
+`PreparationError.kind`는 `gpu_unavailable`, `network`, `hash_mismatch`, `disk_full`,
+`cancelled`, `invalid_archive`, `storage`, `preparation_required`를 구별하고 한국어 안내와 별도 `detail`을 제공합니다.
+NVIDIA 드라이버는 사용자가 설치해야 합니다.
+다운로드·해시 검증·추출과 공간 검사는 어댑터에서 주입할 수 있습니다.
+GPU 감지는 최대 15초의 별도 Python 자식(`transcription --probe-cuda`)에서 실행하므로 앱 프로세스에
+`ctranslate2`를 올리지 않습니다. 설치 실행 파일의 탐지 하위 명령 연결은 #62 마무리에서 합니다.
+frozen 받아쓰기 자식은 `prepared()`로 완료 결과만 읽고, 없으면 `preparation_required`로 바로 실패합니다.
+준비 다운로드는 명시적인 `prepare_subtitle_support()` 흐름에서만 실행합니다.
+
+CUDA 버전은 기존 `cuda` extra와 같고 Windows x64 공식 PyPI 휠 URL·SHA-256은
+`runtime_assets.py`에 고정했습니다. Whisper도 같은 파일의 revision과 SHA-256으로 검증합니다.
+CUDA는 `data_directory/runtime/cuda/<wheel-sha256>/`에 DLL만,
+모델은 기존 `data_directory/models/` 아래 `large-v3/<revision>/`에 둡니다.
+소스 실행의 `models/models--Systran--faster-whisper-large-v3/snapshots/<revision>/`가 있으면
+고정 파일 전체의 크기와 SHA-256을 한 번 확인해 `ready.json`을 만들고 그 경로를 그대로 재사용합니다.
+맞지 않는 HF 캐시는 보존하고 앱 전용 폴더에 다시 받습니다.
+반쯤 받은 `.part`와 추출 중 `.partial` 폴더는 다음 시도에서 지웁니다.
+완료 표시와 파일 크기가 맞으면 다시 받지 않으며, 같은 데이터 폴더의 준비 작업은 프로세스 사이에서도 직렬화합니다.
+소스 받아쓰기는 기존 `.venv` CUDA와 Hugging Face 모델 캐시를 계속 사용합니다.
+
+공식 CUDA 휠 실측(2026-10-15): cuBLAS 567,544,208바이트 / DLL 788,719,104바이트,
+cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
+모델 파일과 다운로드·추출 중 임시 공간은 별도로 필요합니다.
+
+## 새 버전 올리기
+
+`scripts/release.ps1`은 로컬 릴리스용입니다. Git for Windows, GitHub CLI의 `gh auth login`,
+README의 빌드 환경이 필요합니다. `main`에서만 실행하며 작업 트리가 깨끗하고 `main`,
+`origin/main`, 실제 원격 main이 모두 같아야 합니다. 기존 로컬/원격 태그나 GitHub Release가 있으면 멈춥니다.
+현재는 PyInstaller 포장이 후속 범위이므로 실제 릴리스는 #62 마무리 이후에 실행합니다.
+`-DryRun -Build`도 PyInstaller가 연결되기 전까지는 실패합니다. 빌드 뼈대만 확인하려면
+`scripts/build.ps1 -SkipPyInstaller -AppDirectory <준비한 실행 폴더>`를 직접 실행하세요.
+
+```powershell
+# 검사와 계획 출력만: 버전·커밋·태그·원격·원격 추적 ref를 바꾸지 않음
+powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0 -DryRun
+# 위 동작에 빌드 추가: pyproject.toml 수정 없이 -Version을 build.ps1에 전달
+powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0 -DryRun -Build
+# 실제 릴리스 (#62 마무리 뒤)
+powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0
+```
+
+실제 실행은 `pyproject.toml` 버전을 올려 한국어로 커밋하고 설치 파일을 빌드합니다.
+설치 파일의 SHA-256 파일을 만든 뒤 `v<version>` 태그와 main을 atomic push하고,
+`gh release create --verify-tag`로 설치 파일과 체크섬을 함께 게시합니다.
+노트는 현재 main에 포함된 가장 높은 버전 태그 이후의 커밋 제목입니다(태그가 없으면 전체).
+설치 파일은 `dist/installer/MyVideoManager-Setup-<version>.exe`, 체크섬은 그 옆의 `.exe.sha256`입니다.
+기존 태그·Release를 덮어쓰거나 강제 push하지 않습니다.
+빌드 실패나 원격에서 거부한 push는 로컬 버전 커밋과 이번에 만든 태그를 자동 복구합니다.
+다른 파일 변경이나 불확실한 원격 상태가 있으면 보존하고 복구 명령을 안내합니다.
+push 뒤 Release 생성이 실패하면 원격 main과 태그를 유지하며 Release 확인·생성·자산 추가 명령을 안내합니다.
+자동 재발행하지 않으므로 안내에 따라 상태를 확인하세요.
+`-DryRun -Build`의 빌드 산출물은 Git에서 제외된 폴더에 남으며 tracked 파일과 커밋은 그대로입니다.
+
 ## 실행과 사용
 
 ```powershell

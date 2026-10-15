@@ -12,6 +12,7 @@ dependencies = ["PySide6==6.10.2", "python-mpv==1.0.8", "faster-whisper==1.2.1",
 [project.optional-dependencies]
 dev = ["pytest==8.4.2"]
 cuda = ["nvidia-cublas-cu12==12.8.4.1; sys_platform == 'win32'", "nvidia-cudnn-cu12==9.8.0.87; sys_platform == 'win32'"]
+# 설치판 다운로드의 같은 버전 URL/SHA-256은 runtime_assets.py에 고정한다.
 
 [project.scripts]
 my-video-manager = "my_video_manager.__main__:main"
