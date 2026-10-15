@@ -26,6 +26,7 @@ class DialogModel:
         self.confirm_title = ''
         self.confirm_destructive = False
         self.pending = None
+        self.keep_pending = None
         self.message = ''
         self.information = ''
         if kind == 'highlight':
@@ -67,7 +68,10 @@ class DialogModel:
 
     def snapshot(self):
         c, ctx, kind = self.core, self.context, self.kind
-        data = dict(id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], available=[],
+        task = c.subtitle_task(ctx['video_id']) if 'video_id' in ctx else None
+        data = dict(task_kind=task.kind if task else '', task_label=task.label if task else '',
+                    subtitle_label=task.subtitle_label if task else '', short_label=task.short_label if task else '',
+                    keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], available=[],
                     choices=[], values=self.values.copy(), maximum=0.0, locked=False, warning='',
                     confirmation=self.confirmation, confirm_title=self.confirm_title, confirm_destructive=self.confirm_destructive, translation=None, network_busy=False, information=self.information)
         if kind == 'tags':
@@ -107,20 +111,20 @@ class DialogModel:
             names = dict(TRANSLATION_CHOICES)
             provenance = c.translation_line_providers(ctx['video_id'])
             data.update(description='클릭 또는 Enter로 장면 이동 · 방향키로 줄 선택 · Tab으로 버튼 이동 · Esc로 닫기', rows=[
-                row(line.original.id, line.original.text, line.translation if line.translation is not None else '미번역',
+                row(line.original.id, line.original.text, line.translation if line.translation is not None else f'미{task.label}',
                     ' · '.join(label for flag, label in ((line.original_reviewed, '원어 검수됨'),
-                                                       (line.translation_reviewed, '직접 수정'),
+                                                       (line.translation_reviewed, '사용자가 고친 줄' if task.kind == 'refinement' else '직접 수정'),
                                                        (not line.translation_reviewed and provenance.get(line.original.id), names.get(not line.translation_reviewed and provenance.get(line.original.id), ''))) if flag),
                     line.original.start, line.original.end) for line in c.review_lines(ctx['video_id'])])
         elif kind == 'range':
             data['maximum'] = c.video(ctx['video_id']).duration
             try:
                 start, end = c.subtitle_range_bounds(ctx['video_id'], self.values['start'], self.values['end'])
-                data['description'] = f'실제로 받아쓸 범위: {start:.3f}–{end:.3f}초. 경계에 걸친 줄 전체를 포함하도록 넓혀 원어와 번역을 교체합니다.'
+                data['description'] = f'실제로 받아쓸 범위: {start:.3f}–{end:.3f}초. 경계에 걸친 줄 전체를 포함하도록 넓혀 원어와 {task.subtitle_label}을 교체합니다.'
             except ValueError as error:
                 data['warning'] = str(error)
         elif kind == 'line':
-            data['title'] = '번역 줄 수정' if ctx['translated'] else '원어 줄 수정'
+            data['title'] = f'{task.short_label} 줄 수정' if ctx['translated'] else '원어 줄 수정'
         elif kind == 'translation':
             data.update(choices=[row(p['id'], p['label']) for p in self.translation['providers']],
                         translation=self.translation, network_busy=self.network_busy,
@@ -158,13 +162,19 @@ class DialogModel:
 
     def act(self, action, data):
         c, ctx, kind = self.core, self.context, self.kind
+        if action == 'keep-reviewed' and self.keep_pending:
+            callback, self.keep_pending, self.pending, self.confirmation = self.keep_pending, None, None, ''
+            callback()
+            return
         if action == 'confirm':
+            self.keep_pending = None
             callback, self.pending, self.confirmation = self.pending, None, ''
             if callback is None:
                 raise ValueError('확인할 작업이 없습니다.')
             callback()
             return
         if action == 'cancel-confirm':
+            self.keep_pending = None
             self.pending, self.confirmation = None, ''
             if kind == 'video-exclude':
                 self.owner.pop()
@@ -243,6 +253,11 @@ class DialogModel:
             else:
                 request()
         elif kind == 'review':
+            if action == 'refine':
+                c.request_refinement(ctx['video_id'])
+                self.changed()
+                self.information = '다듬기를 요청했습니다.'
+                return
             lines = c.review_lines(ctx['video_id'])
             line = next((line for line in lines if line.original.id == data.get('selected')), None)
             if action in ('jump', 'edit-original', 'edit-translation'):
@@ -270,17 +285,19 @@ class DialogModel:
             else:
                 raise ValueError('지원하지 않는 검수 작업입니다.')
         elif kind == 'line' and action == 'save':
-            def edit(overwrite=False):
+            def edit(overwrite=False, keep=False):
                 if ctx['translated']:
                     c.edit_translation_line(ctx['video_id'], ctx['line'].original.id, data['text'])
                 else:
-                    c.edit_transcript_line(ctx['video_id'], ctx['line'].original.id, data['text'], overwrite_reviewed=overwrite)
+                    c.edit_transcript_line(ctx['video_id'], ctx['line'].original.id, data['text'], overwrite_reviewed=overwrite, keep_reviewed=keep)
                 self.changed()
                 self.owner.pop(accepted=True)
             try:
                 edit()
             except ReviewConfirmationRequired as warning:
                 self.confirm(str(warning), lambda: edit(True), destructive=True)
+                if c.subtitle_task(ctx["video_id"]).kind == "refinement":
+                    self.keep_pending = lambda: edit(keep=True)
         elif kind == 'range':
             if action == 'bounds':
                 self.values.update(start=self.time_value(data['start']), end=self.time_value(data['end']))

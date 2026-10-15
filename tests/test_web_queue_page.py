@@ -77,7 +77,7 @@ def test_progress_delta_contains_only_changed_row_and_no_order(queue_page, setup
     entries = core.subtitle_queue_items()
     monkeypatch.setattr(core, 'subtitle_queue_items', lambda: (replace(entries[0], progress=.5), entries[1]))
     page.refresh()
-    assert changes == [dict(rows=[dict(videoId=a.id, title=a.title, state='queued', progress=.5, message='')],
+    assert changes == [dict(rows=[dict(videoId=a.id, title=a.title, state='queued', progress=.5, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기')],
                             removed=[], order=None, counts=None)]
 
 

@@ -163,7 +163,7 @@ QUEUE = BridgeContract(name='queue', interface='QueueBridge', slots={
     'removeRule': (Argument('ruleId', int, 'number'),),
 }, signals={'queueChanged': str, 'rulesChanged': str, 'queueFocusRequested': str, 'queueDeactivated': str,
             'preparationChanged': str},
-    aliases=(TypeAlias('QueueAction', ('promote', 'remove', 'retryFailed', 'retryHeld')),),
+    aliases=(TypeAlias('QueueAction', ('promote', 'remove', 'retryFailed', 'retryHeld', 'refineExisting')),),
     constants=(Constant('queueStates', tuple(web_queue_data.STATES.items())),),
     data_types=(web_queue_data.PreparationData, web_queue_data.QueueRowData, web_queue_data.QueueCountData, web_queue_data.QueueDeltaData,
                 web_queue_data.QueueTargetData, web_queue_data.QueueRuleData, web_queue_data.QueueRulesData))

@@ -5,6 +5,7 @@ from typing import TypedDict
 from urllib.parse import urlsplit
 
 from .web_external_subtitle_data import subtitle_file_data
+from .translation_kind import translation_task
 
 
 class TagData(TypedDict):
@@ -65,6 +66,8 @@ class DetailsData(TypedDict):
     spoken_language: str | None
     original_lines: int
     translated_lines: int
+    taskLabel: str
+    subtitleLabel: str
     subtitle_state: str | None
     translation_state: str | None
     highlight_count: int
@@ -120,8 +123,9 @@ def filter_ids(videos: list[VideoData], query: str, tag_id: int | None) -> list[
 
 
 def details_data(details, external_subtitles=()) -> DetailsData:
-    return DetailsData(**asdict(details), externalSubtitles=[
-        subtitle_file_data(file) for file in external_subtitles])
+    task = translation_task(details.spoken_language)
+    return DetailsData(**asdict(details), taskLabel=task.label, subtitleLabel=task.subtitle_label,
+                       externalSubtitles=[subtitle_file_data(file) for file in external_subtitles])
 
 
 def thumbnail_video_id(url: str) -> int | None:

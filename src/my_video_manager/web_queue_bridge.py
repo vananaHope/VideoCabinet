@@ -63,6 +63,9 @@ class QueueBridge(QObject):
     def action(self, name, video_id):
         def execute():
             core = self.page.core
+            if name == 'refineExisting':
+                count = core.request_existing_refinements()
+                return {'message': f'다듬기 {count}개를 요청했습니다.'}
             if name == 'retryFailed':
                 result = core.retry_failed_subtitles()
                 details = []

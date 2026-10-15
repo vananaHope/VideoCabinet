@@ -8,6 +8,7 @@ import re
 from uuid import uuid4
 
 from .subtitles import TranscriptLine, transcript_srt, normalize_subtitle_text
+from .translation_kind import translation_task
 
 
 class ReviewConfirmationRequired(ValueError):
@@ -28,11 +29,16 @@ class SubtitleExport:
     missing_lines: int
     default_path: Path
     pending_retranslation_lines: int = 0
+    task_label: str = "번역"
+    subtitle_label: str = "번역 자막"
 
     @property
     def warning(self):
-        return (f"{self.missing_lines}줄 미번역 · 재번역 대기 {self.pending_retranslation_lines}줄입니다. "
-                "저장된 번역으로 내보낼까요?")
+        if self.task_label == "번역":
+            return (f"{self.missing_lines}줄 미번역 · 재번역 대기 {self.pending_retranslation_lines}줄입니다. "
+                    "저장된 번역으로 내보낼까요?")
+        return (f"{self.missing_lines}줄 미{self.task_label} · 다시 {self.task_label} 대기 {self.pending_retranslation_lines}줄입니다. "
+                f"저장된 {self.subtitle_label}으로 내보낼까요?")
 
 
 @dataclass(frozen=True)
@@ -86,8 +92,9 @@ class Review:
         return sum(line.original_reviewed or line.translation_reviewed for line in self.lines(video_id))
 
     def regeneration_warning(self, video_id):
-        return (f"전체를 다시 생성하면 검수한 {self.reviewed_count(video_id)}줄(원어 수정·번역 직접 수정)을 "
-                "포함한 기존 원어 자막과 번역 자막이 사라집니다. 계속할까요?")
+        task = self.translations.task(video_id)
+        return (f"전체를 다시 생성하면 검수한 {self.reviewed_count(video_id)}줄(원어 수정·{task.label} 직접 수정)을 "
+                f"포함한 기존 원어 자막과 {task.subtitle_label}이 사라집니다. 계속할까요?")
 
     @staticmethod
     def _line(db, video_id, line_id):
@@ -104,7 +111,7 @@ class Review:
                       (video_id,)).fetchone():
             raise ValueError("원어 자막 재생성이 끝난 뒤 검수하세요.")
 
-    def edit(self, video_id, line_id, text, *, translated=False, overwrite_reviewed=False):
+    def edit(self, video_id, line_id, text, *, translated=False, overwrite_reviewed=False, keep_reviewed=False):
         text = normalize_subtitle_text(text)
         if not text:
             raise ValueError("자막 텍스트를 입력하세요.")
@@ -112,15 +119,18 @@ class Review:
             db.execute("BEGIN IMMEDIATE")
             row = self._line(db, video_id, line_id)
             self._editable(db, video_id)
-            eligible = row["spoken_language"] not in ("ko", "und")
+            eligible = row["spoken_language"] not in (None, "und")
+            task = translation_task(row["spoken_language"])
             if translated and not eligible:
-                raise ValueError("한국어이거나 원어를 알 수 없는 자막은 번역할 수 없습니다.")
+                raise ValueError("원어를 알 수 없는 자막은 처리할 수 없습니다.")
             if not translated and row["text"] == text:
                 return
             reviewed = db.execute("SELECT translation_reviewed FROM subtitle_reviews WHERE line_id = ?",
                                   (line_id,)).fetchone()
-            if not translated and reviewed and reviewed[0] and not overwrite_reviewed:
-                raise ReviewConfirmationRequired("직접 고친 번역이 덮어써집니다. 계속할까요?")
+            if not translated and reviewed and reviewed[0] and not overwrite_reviewed and not keep_reviewed:
+                if task.kind == "translation":
+                    raise ReviewConfirmationRequired("직접 고친 번역이 덮어써집니다. 계속할까요?")
+                raise ReviewConfirmationRequired(f"직접 고친 {task.subtitle_label}이 있습니다. 사용자 수정본을 유지하거나 새 원어로 다시 {task.label}할지 선택하세요.")
             db.execute("INSERT OR IGNORE INTO subtitle_reviews(line_id) VALUES (?)", (line_id,))
             if translated:
                 db.execute("UPDATE subtitle_reviews SET translation_reviewed = 1 WHERE line_id = ?", (line_id,))
@@ -132,9 +142,9 @@ class Review:
                 self.translations.finish_ready(db, video_id)
             else:
                 db.execute("UPDATE transcript_lines SET text = ? WHERE id = ?", (text, line_id))
-                db.execute("UPDATE subtitle_reviews SET original_reviewed = 1, translation_reviewed = 0 "
-                           "WHERE line_id = ?", (line_id,))
-                if eligible:
+                db.execute("UPDATE subtitle_reviews SET original_reviewed = 1, translation_reviewed = ? "
+                           "WHERE line_id = ?", (bool(keep_reviewed and reviewed and reviewed[0]), line_id))
+                if eligible and not (keep_reviewed and reviewed and reviewed[0]):
                     self.translations.request(video_id, [line_id], connection=db, preserve_state=True)
 
     def range_bounds(self, video_id, start, end, *, connection=None):
@@ -200,7 +210,7 @@ class Review:
                        [(id_, transcript_id, ordinals[id_], start + s.start, min(end, start + s.end), s.text.strip())
                         for id_, s in new])
         language = db.execute("SELECT spoken_language FROM transcripts WHERE id = ?", (transcript_id,)).fetchone()[0]
-        if new and language not in ("ko", "und"):
+        if new and language not in (None, "und"):
             self.translations.request(pending.video_id, [id_ for id_, _ in new], connection=db,
                                       preserve_state=True, continue_order=True)
         self.translations.finish_ready(db, pending.video_id)
@@ -222,11 +232,12 @@ class Review:
         if not selected:
             raise ValueError("내보낼 자막 줄이 없습니다")
         filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", title).rstrip(". ") or "영상"
-        language = "ko" if translated else transcript.spoken_language or "und"
+        task = translation_task(transcript.spoken_language)
+        language = ("ko.refined" if task.kind == "refinement" else "ko") if translated else transcript.spoken_language or "und"
         # 파일 없음 영상도 검수·내보내기는 가능하다. 위치가 없으면 홈 폴더를 제안한다.
         try:
             folder = self._playback_location(video_id).path.parent
         except (ValueError, FileNotFoundError):
             folder = Path.home()
         return SubtitleExport(transcript_srt(replace(transcript, lines=selected)),
-                              len(lines) - len(selected), folder / f"{filename}.{language}.srt", pending)
+                              len(lines) - len(selected), folder / f"{filename}.{language}.srt", pending, task.label, task.subtitle_label)

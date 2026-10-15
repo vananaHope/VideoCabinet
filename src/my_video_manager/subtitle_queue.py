@@ -7,6 +7,7 @@ import re
 from threading import RLock
 
 from .subtitles import normalize_spoken_language
+from .translation_kind import translation_task
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class SubtitleQueueItem:
     state: str
     progress: float
     error: str | None = None
+    task_label: str = "받아쓰기"
 
 
 @dataclass(frozen=True)
@@ -226,7 +228,8 @@ class SubtitleQueue:
             for start in range(0, len(ids), 800):
                 batch = ids[start:start + 800]
                 videos.extend(db.execute(
-                    "SELECT id, title, EXISTS(SELECT 1 FROM transcripts WHERE video_id = v.id) AS has_transcript "
+                    "SELECT id, title, (SELECT spoken_language FROM transcripts WHERE video_id=v.id) AS language, "
+                    "EXISTS(SELECT 1 FROM transcripts WHERE video_id = v.id) AS has_transcript "
                     "FROM videos v WHERE id IN (" + ",".join("?" for _ in batch) + ") "
                     "AND NOT EXISTS(SELECT 1 FROM subtitle_queue_hidden WHERE video_id = v.id)", batch).fetchall())
         result = []
@@ -239,9 +242,11 @@ class SubtitleQueue:
                 result.append(SubtitleQueueItem(video_id, title, t.state,
                                                t.completed_lines / max(1, t.total_lines),
                                                ' · '.join(filter(None, (t.error, _display_error_detail(t.error_detail),
-                                                                        t.notice))) or None))
+                                                                        t.notice))) or None,
+                                               translation_task(video["language"]).label))
             elif video["has_transcript"]:
-                result.append(SubtitleQueueItem(video_id, title, "completed", 1, self._notices.get(video_id)))
+                result.append(SubtitleQueueItem(video_id, title, "completed", 1, self._notices.get(video_id),
+                                                translation_task(video["language"]).label))
         return self.order.sort(result)
 
     def record(self, result):

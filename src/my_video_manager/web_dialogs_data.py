@@ -44,6 +44,11 @@ class DialogData(TypedDict):
     translation: TranslationSettingsData | None
     network_busy: bool
     information: str
+    task_kind: str
+    task_label: str
+    subtitle_label: str
+    short_label: str
+    keep_reviewed: bool
 
 
 class DialogSnapshot(TypedDict):

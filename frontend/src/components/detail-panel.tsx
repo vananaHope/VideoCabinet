@@ -25,7 +25,7 @@ function DetailActions({ videoId, scanning, onAction }: { videoId: number; scann
     {actions.map(([name, title]) => <DetailAction key={name} name={name} title={title} variant={wide.includes(name) ? "wide" : "compact"} videoId={videoId} scanning={scanning} onAction={onAction} />)}
   </div>
 }
-const queueLabels: Record<string, string> = { queued: "대기", transcribing: "받아쓰는 중", translating: "번역 중", completed: "완료", failed: "실패", held: "보류" }
+const queueLabels: Record<string, string> = { queued: "대기", transcribing: "받아쓰는 중", translating: "처리 중", completed: "완료", failed: "실패", held: "보류" }
 type Props = VariantProps<typeof detailVariants> & { video?: VideoData; details: DetailsData | null; highlights: HighlightSnapshot | null; revision: number; tab: string; onTabChange: (tab: string) => void; scanning: boolean; onAction: (action: Action, id: number) => void; onHighlight: (videoId: number, highlightId: number, edit: boolean) => void }
 export function DetailPanel({ video, details, highlights, revision, tab, onTabChange, scanning, onAction, onHighlight, variant }: Props) {
   return <aside aria-label="선택 영상 상세" className={detailVariants({ variant })}>
@@ -43,8 +43,8 @@ export function DetailPanel({ video, details, highlights, revision, tab, onTabCh
         <p>시리즈: {video.series || "없음"}</p>
         {details && <>
           <p>{details.has_transcript ? `원어: ${details.spoken_language || "알 수 없음"} · ${details.original_lines}줄` : "원어 자막 없음"}</p>
-          <p>{details.translated_lines ? `번역: ${details.translated_lines}/${details.original_lines}줄` : "번역 자막 없음"}</p>
-          <p>대기열: {[details.subtitle_state && `원어 ${queueLabels[details.subtitle_state] || details.subtitle_state}`, details.translation_state && `번역 ${queueLabels[details.translation_state] || details.translation_state}`].filter(Boolean).join(" · ") || "없음"}</p>
+          <p>{details.translated_lines ? `${details.taskLabel}: ${details.translated_lines}/${details.original_lines}줄` : `${details.subtitleLabel} 없음`}</p>
+          <p>대기열: {[details.subtitle_state && `원어 ${queueLabels[details.subtitle_state] || details.subtitle_state}`, details.translation_state && `${details.taskLabel} ${queueLabels[details.translation_state] || details.translation_state}`].filter(Boolean).join(" · ") || "없음"}</p>
           <p>하이라이트 {details.highlight_count}개</p>
           <ExternalSubtitleList files={details.externalSubtitles} />
         </>}

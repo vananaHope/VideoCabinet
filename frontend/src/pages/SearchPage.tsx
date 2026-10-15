@@ -62,7 +62,7 @@ export default function SearchPage() {
   const empty = state === "preparing" ? ["검색 색인을 준비하고 있습니다", "처음 한 번만 걸립니다. 준비가 끝나면 입력한 검색어로 바로 찾습니다."]
     : state === "no-results" ? ["검색 결과가 없습니다", "다른 낱말로 찾거나 더 짧게 입력해 보세요."]
     : state === "error" ? ["검색하지 못했습니다", data?.error ?? ""]
-    : ["찾을 내용을 입력하세요", "제목, 파일 이름, 태그, 메모, 원어·번역·외부 자막을 한 번에 찾습니다."]
+    : ["찾을 내용을 입력하세요", "제목, 파일 이름, 태그, 메모, 원어·번역·다듬은·외부 자막을 한 번에 찾습니다."]
   return <main aria-label="검색" className="flex h-full flex-col gap-3 p-4">
     <PageHeader title="검색" />
     <SearchInput id="search-query" aria-label="검색어" placeholder="제목 · 파일 이름 · 태그 · 메모 · 자막 내용" value={query}

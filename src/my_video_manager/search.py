@@ -3,14 +3,16 @@
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock
+from .translation_kind import translation_task
+
 from typing import Literal
 import unicodedata
 
 
-SearchSource = Literal["title", "filename", "tag", "note", "transcript", "translation", "external"]
+SearchSource = Literal["title", "filename", "tag", "note", "transcript", "translation", "refinement", "external"]
 SEARCH_LIMIT = 500
 SOURCE_LABELS = {"title": "제목", "filename": "파일 이름", "tag": "태그", "note": "메모",
-                 "transcript": "원어 자막", "translation": "번역 자막", "external": "외부 자막"}
+                 "transcript": "원어 자막", "translation": "번역 자막", "refinement": translation_task("ko").subtitle_label, "external": "외부 자막"}
 SUBTITLE_SOURCES = (("transcript", "transcript_lines", "id"),
                     ("translation", "translation_lines", "line_id"),
                     ("external", "external_subtitle_lines", "id"))
@@ -153,8 +155,8 @@ class Search:
 
         def response():
             selected = results[:SEARCH_LIMIT]
-            subtitles = [result for result in selected if result.source in ("transcript", "translation", "external")]
-            other = [result for result in selected if result.source not in ("transcript", "translation", "external")]
+            subtitles = [result for result in selected if result.source in ("transcript", "translation", "refinement", "external")]
+            other = [result for result in selected if result.source not in ("transcript", "translation", "refinement", "external")]
             subtitles.sort(key=lambda result: (result.video_id, result.start, result.source, result.text))
             return SearchResponse(tuple(other + subtitles), len(results) > SEARCH_LIMIT)
 
@@ -186,7 +188,8 @@ class Search:
                 candidates = """SELECT c.* FROM subtitle_search_v2 f
                     JOIN search_subtitle_lines c ON c.id=f.rowid WHERE subtitle_search_v2 MATCH ?"""
                 value = '"' + key.replace('"', '""') + '"'
-            for row in db.execute(f"""SELECT c.source, c.text, coalesce(l.start, e.start) AS start,
+            seen_korean_lines = set()
+            for row in db.execute(f"""SELECT c.source, c.line_id, t.spoken_language, c.text, coalesce(l.start, e.start) AS start,
                     coalesce(t.video_id, f.video_id) AS video_id, s.language
                     FROM ({candidates}) c
                     LEFT JOIN transcript_lines l ON c.source IN ('transcript', 'translation') AND l.id=c.line_id
@@ -194,6 +197,14 @@ class Search:
                     LEFT JOIN external_subtitle_lines e ON c.source='external' AND e.id=c.line_id
                     LEFT JOIN external_subtitles s ON s.id=e.subtitle_id
                     LEFT JOIN external_subtitle_files f ON f.id=s.file_id""", (value,)):
-                if add(row["video_id"], row["source"], row["text"], row["start"], row["language"]):
+                source = row['source']
+                task = translation_task(row['spoken_language'])
+                if task.kind == 'refinement' and source in ('transcript', 'translation'):
+                    if row['line_id'] in seen_korean_lines:
+                        continue
+                    seen_korean_lines.add(row['line_id'])
+                    if source == 'translation':
+                        source = task.kind
+                if add(row["video_id"], source, row["text"], row["start"], row["language"]):
                     break
         return response()

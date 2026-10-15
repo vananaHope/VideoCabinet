@@ -1,6 +1,5 @@
 import { memo, useCallback, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { cva } from "class-variance-authority"
-import { queueStates } from "@/bridge-types"
 import { StatusBadge } from "@/components/page-parts"
 import { QueueStore } from "./queue-store"
 
@@ -8,7 +7,6 @@ import { QueueStore } from "./queue-store"
 const columns = "grid grid-cols-6 gap-3 px-3"
 const wide = "col-span-2 min-w-0"
 const rowClass = cva(`${columns} items-center border-b py-1 text-sm`, { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
-const labels = Object.fromEntries(queueStates)
 const listClass = cva("min-h-0 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border" } } })
 const badges = { completed: "success", failed: "destructive", transcribing: "info", translating: "info", held: "highlight", queued: "muted" } as const
 
@@ -18,7 +16,7 @@ const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { sto
   if (!row) return null
   return <div id={`queue-row-${id}`} role="row" aria-selected={selected} data-queue-row={id} className={rowClass({ selected })} onClick={() => onSelect(id)}>
     <div role="gridcell" title={row.title} className={`${wide} truncate font-medium`}>{row.title}</div>
-    <div role="gridcell"><StatusBadge variant={badges[row.state as keyof typeof badges]}>{labels[row.state]}</StatusBadge></div>
+    <div role="gridcell"><StatusBadge variant={badges[row.state as keyof typeof badges]}>{row.stateLabel}</StatusBadge></div>
     <div role="gridcell" className="flex min-w-0 items-center gap-2"><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="progressbar" aria-label={`${row.title} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(row.progress * 100)} className="h-2 w-full rounded-full bg-muted"><rect width={Math.max(0, Math.min(100, row.progress * 100))} height={8} className="fill-primary" /></svg><span className="text-xs tabular-nums">{Math.round(row.progress * 100)}%</span></div>
     <div role="gridcell" title={row.message} className={`${wide} truncate text-muted-foreground`}>{row.message}</div>
   </div>

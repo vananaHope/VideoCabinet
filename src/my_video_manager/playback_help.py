@@ -35,6 +35,9 @@ class PlaybackHelp(QWidget):
             CommandType.PREVIOUS_VIDEO: "현재 영상 첫 항목 / 이전 영상",
             CommandType.NEXT_VIDEO: "다음 영상 첫 하이라이트",
         } if reel else {}
+        if core.playback.session:
+            task = core.subtitle_task(core.playback.session.video_id)
+            meanings[CommandType.TOGGLE_SUBTITLE_LANGUAGE] = f'원어 / {task.subtitle_label} 전환'
         rows = []
         for binding in core.key_bindings():
             label = meanings.get(binding.command.kind, binding.label)

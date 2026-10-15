@@ -329,6 +329,8 @@ class Subtitles:
                     db.executemany("INSERT INTO transcript_lines VALUES (?, ?, ?, ?, ?, ?)",
                                    [(uuid4().hex, transcript_id, i, s.start, s.end, s.text.strip())
                                     for i, s in enumerate(result.segments)])
+                    if language == "ko" and result.segments and self.review:
+                        self.review.translations.request(pending.video_id, automatic=True, connection=db)
                     db.execute("DELETE FROM subtitle_queue WHERE id = ?", (pending.id,))
                 return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
                                           pending.requested_at, "completed", None)

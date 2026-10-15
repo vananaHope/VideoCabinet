@@ -78,6 +78,8 @@ export interface DetailsData {
   spoken_language: string | null
   original_lines: number
   translated_lines: number
+  taskLabel: string
+  subtitleLabel: string
   subtitle_state: string | null
   translation_state: string | null
   highlight_count: number
@@ -158,6 +160,8 @@ export interface QueueRowData {
   state: string
   progress: number
   message: string
+  taskLabel: string
+  stateLabel: string
 }
 
 export interface QueueCountData {
@@ -190,8 +194,8 @@ export interface QueueRulesData {
   rules: Array<QueueRuleData>
 }
 
-export type QueueAction = "promote" | "remove" | "retryFailed" | "retryHeld"
-export const queueStates = [["queued", "대기"], ["transcribing", "받아쓰는 중"], ["translating", "번역 중"], ["held", "보류"], ["completed", "완료"], ["failed", "실패"]] as const
+export type QueueAction = "promote" | "remove" | "retryFailed" | "retryHeld" | "refineExisting"
+export const queueStates = [["queued", "대기"], ["transcribing", "받아쓰는 중"], ["translating", "자막 처리 중"], ["held", "보류"], ["completed", "완료"], ["failed", "실패"]] as const
 export interface QueueBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void
@@ -503,6 +507,11 @@ export interface DialogData {
   translation: TranslationSettingsData | null
   network_busy: boolean
   information: string
+  task_kind: string
+  task_label: string
+  subtitle_label: string
+  short_label: string
+  keep_reviewed: boolean
 }
 
 export interface DialogSnapshot {
