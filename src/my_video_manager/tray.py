@@ -27,9 +27,10 @@ class TrayControls(QObject):
     def open(self):
         was_hidden = not self.window.isVisible()
         self.window.showNormal()
-        if was_hidden:
+        if was_hidden and self.window.web_host.active_tab == 'library':
             # 닫을 때 저장한 시청 상태를 복귀 시점에만 목록과 추천에 반영한다.
-            self.window.show_library()
+            self.window.refresh(focus_gems=True if self.window._return_to_gems else None)
+            self.window._return_to_gems = False
         self.window.raise_()
         self.window.activateWindow()
 
@@ -38,8 +39,9 @@ class TrayControls(QObject):
             self.open()
 
     def show_queue(self):
-        self.open()
         self.window.navigate_web_tab('queue')
+        self.open()
+        self.window.web_host.controllers['queue'].refresh()
 
     def notify_completion(self):
         counts = self.core.take_subtitle_queue_completion()
@@ -86,8 +88,14 @@ class TrayControls(QObject):
             event.accept()
             QApplication.instance().quit()
         else:
-            window.pages.setCurrentIndex(0)
+            was_playing = window.pages.currentWidget() is window.playback_page
+            # 숨긴 뒤 page_changed가 showNormal()로 창을 다시 띄우지 않게 한다.
+            window.set_playback_fullscreen(False)
             window.hide()
+            if was_playing:
+                window.web_host.set_tab('library')
+                window.web_host.focus_content()
+            window.pages.setCurrentIndex(0)
             event.ignore()
             if self.core.acknowledge_tray_notice():
                 self.icon.showMessage("영상 라이브러리", "트레이에서 계속 처리합니다. 트레이 메뉴에서 열거나 완전 종료할 수 있습니다.")

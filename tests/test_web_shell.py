@@ -11,6 +11,210 @@ from test_web_library_data import core
 from my_video_manager.web_contract import CONTRACTS, TABS
 
 
+def wait_frontend_ready(host, tab):
+    for _ in range(200):
+        if host._frontend_ready and tab in host._ready_pages:
+            return
+        QTest.qWait(50)
+    pytest.fail(f'{tab} 프런트엔드 준비 시간 초과')
+
+
+@pytest.mark.parametrize('tab', ['library', 'search', 'settings'])
+@pytest.mark.parametrize('from_gems', [False, True])
+def test_tray_playback_restore_requests_library_focus(window_factory, core, monkeypatch, tab, from_gems):
+    from PySide6.QtWidgets import QSystemTrayIcon
+    from test_library_return_ui import Player
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    video = core.videos()[0]
+    if from_gems:
+        core.playback.start(video.id, 0)
+        core.playback.report(40)
+        core.playback.end()
+    window = window_factory()
+    window.player_factory = Player
+    host = window.web_host
+    wait_frontend_ready(host, 'library')
+    window.navigate_web_tab(tab)
+    wait_frontend_ready(host, tab)
+    requests = []
+    window.library_page.bridge.libraryFocusRequested.connect(
+        lambda target: requests.append((host.active_tab, target)))
+    window.play_video(video.id, start=0, from_gems=from_gems)
+    if from_gems:
+        window.player.positions.append((40, False))
+    window.close()
+    assert host._pending_focus == 'grid'
+    assert requests == []
+    window.tray.open()
+    assert requests == [('library', 'grid')] + ([('library', 'gems')] if from_gems else [])
+    assert host._pending_focus is None
+
+
+def test_tray_playback_before_frontend_ready_replaces_search_focus(window_factory, core, monkeypatch):
+    from PySide6.QtWidgets import QSystemTrayIcon
+    from test_library_return_ui import Player
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    window.player_factory = Player
+    host = window.web_host
+    host.frontend_loading()
+    window.navigate_web_tab('search')
+    assert host._pending_focus == 'search-content'
+    window.play(core.videos()[0].id)
+    window.close()
+    assert host.active_tab == 'library'
+    assert host._pending_focus == 'grid'
+    window.tray.open()
+    assert host._pending_focus == 'grid'
+
+
+@pytest.mark.parametrize('tab', ['library', 'queue'])
+def test_tray_show_queue_refreshes_hidden_changes_immediately(window_factory, core, monkeypatch, tab):
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    window.subtitles.timer.stop()
+    window.navigate_web_tab(tab)
+    queue = window.web_host.controllers['queue']
+    changes = []
+    queue.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+    window.close()
+    video = core.videos()[0]
+    core.request_subtitles(video.id)
+    assert changes == []
+    window.tray.show_queue()
+    # 이벤트 루프나 500ms 타이머를 기다리지 않고 새 행을 전달한다.
+    assert len(changes) == 1
+    assert changes[0]['order'] == [video.id]
+    assert [row['videoId'] for row in changes[0]['rows']] == [video.id]
+
+
+@pytest.mark.parametrize('tab', [tab for tab, _ in TABS])
+@pytest.mark.parametrize('destination', ['restore', 'queue', 'playback', 'fullscreen'])
+def test_tray_restore_activates_only_destination(window_factory, core, monkeypatch, tab, destination):
+    from PySide6.QtWidgets import QSystemTrayIcon
+    from test_library_return_ui import Player
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    window.player_factory = Player
+    host = window.web_host
+    assert TABS and set(host.controllers) == {name for name, _ in TABS}
+    window.navigate_web_tab(tab)
+    events = []
+    for name, controller in host.controllers.items():
+        for method in ('activated', 'deactivated'):
+            original = getattr(controller, method)
+
+            def record(name=name, method=method, original=original):
+                events.append((name, method))
+                original()
+
+            monkeypatch.setattr(controller, method, record)
+    transitions = []
+    host.bridge.shellChanged.connect(lambda state: transitions.append(json.loads(state)['tab']))
+    controllers = dict(host.controllers)
+    playing = destination in ('playback', 'fullscreen')
+    if playing:
+        window.play(core.videos()[0].id)
+        if destination == 'fullscreen':
+            window.set_playback_fullscreen(True)
+        events.clear()
+    window.close()
+    assert not window.isVisible()
+    assert core.playback.session is None
+    assert events == ([] if playing else [(tab, 'deactivated')])
+    events.clear()
+    transitions.clear()
+    if destination == 'queue':
+        window.tray.show_queue()
+    else:
+        window.tray.open()
+    expected = {'restore': tab, 'queue': 'queue', 'playback': 'library', 'fullscreen': 'library'}[destination]
+    assert window.isVisible()
+    assert window.pages.currentWidget() is host
+    assert host.active_tab == expected
+    assert events == [(expected, 'activated')]
+    assert transitions == (['queue'] if destination == 'queue' else [])
+    assert host.controllers == controllers
+    # 열린 창에서 다시 열기를 눌러도 페이지 수명을 다시 시작하지 않는다.
+    window.tray.open()
+    assert events == [(expected, 'activated')]
+
+
+def test_tray_restore_preserves_library_filter_and_selection(window_factory, monkeypatch):
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    library = window.library_page
+    wait_frontend_ready(window.web_host, 'library')
+    library.bridge.filter('Python', 0)
+    selected = library.visible_ids[-1]
+    library.bridge.select(selected)
+    focus_requests = []
+    library.bridge.libraryFocusRequested.connect(focus_requests.append)
+    window.close()
+    window.tray.open()
+    assert library.query == 'Python'
+    assert library.selected_video_id() == selected
+    assert focus_requests == []
+    assert window.web_host._pending_focus is None
+
+
+def test_tray_restore_preserves_rendered_settings_category_and_scroll(window_factory, monkeypatch):
+    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    host = window.web_host
+
+    def js(source):
+        loop = QEventLoop()
+        results = []
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+
+        def received(value):
+            results.append(value)
+            loop.quit()
+
+        host.engine_page.runJavaScript(source, received)
+        timer.start(10000)
+        loop.exec()
+        timer.stop()
+        assert results, 'JavaScript 응답 시간 초과'
+        return results[0]
+
+    def wait_js(source):
+        for _ in range(100):
+            if js(source):
+                return
+            loop = QEventLoop()
+            QTimer.singleShot(50, loop.quit)
+            loop.exec()
+        pytest.fail(source)
+
+    window.navigate_web_tab('settings')
+    wait_js('!!document.querySelector("[data-category=keys]")')
+    js('document.querySelector("[data-category=keys]").click()')
+    wait_js('document.querySelector("[data-category=keys]").getAttribute("aria-current") === "true"')
+    js("""window.trayScroll = document.querySelector('table[aria-label="명령별 키 배치"]').parentElement;
+          window.trayScroll.scrollTop = 180""")
+    before = js('window.trayScroll.scrollTop')
+    assert before > 0
+    window.close()
+    window.tray.open()
+    assert host.active_tab == 'settings'
+    assert js('document.querySelector("[data-category=keys]").getAttribute("aria-current")') == 'true'
+    assert js('window.trayScroll.scrollTop') == before
+
+
 def test_tab_routes_keep_one_web_view_and_native_numbering(window_factory):
     from PySide6.QtWebEngineWidgets import QWebEngineView
     window = window_factory()
