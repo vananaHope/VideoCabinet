@@ -441,6 +441,102 @@ export function publicDialogsBridge(raw: DialogsBridge): DialogsBridge {
   })
 }
 
+export interface RestorableVideoData {
+  id: number
+  title: string
+  missing: boolean
+  excluded: boolean
+}
+
+export interface FoldersData {
+  folders: Array<string>
+  excluded: Array<RestorableVideoData>
+  dismissed: Array<RestorableVideoData>
+  minimum: number
+  scanning: boolean
+  report: string
+}
+
+export type FolderAction = "addFolder" | "removeFolder" | "scan" | "addFile" | "restoreExcluded" | "restoreDismissed" | "manageTags"
+export interface FoldersBridge {
+  ready: (reply: Reply) => void
+  snapshot: (reply: Reply) => void
+  action: (name: FolderAction, target: string, reply: Reply) => void
+  setMinimum: (seconds: number, reply: Reply) => void
+  foldersChanged: Signal<string>
+  foldersFocusRequested: Signal<string>
+  foldersError: Signal<string>
+}
+export function publicFoldersBridge(raw: FoldersBridge): FoldersBridge {
+  return Object.freeze({
+    ready: raw.ready.bind(raw),
+    snapshot: raw.snapshot.bind(raw),
+    action: raw.action.bind(raw),
+    setMinimum: raw.setMinimum.bind(raw),
+    foldersChanged: Object.freeze({ connect: raw.foldersChanged.connect.bind(raw.foldersChanged), disconnect: raw.foldersChanged.disconnect.bind(raw.foldersChanged) }),
+    foldersFocusRequested: Object.freeze({ connect: raw.foldersFocusRequested.connect.bind(raw.foldersFocusRequested), disconnect: raw.foldersFocusRequested.disconnect.bind(raw.foldersFocusRequested) }),
+    foldersError: Object.freeze({ connect: raw.foldersError.connect.bind(raw.foldersError), disconnect: raw.foldersError.disconnect.bind(raw.foldersError) }),
+  })
+}
+
+export interface SettingKeyData {
+  id: string
+  label: string
+  keys: Array<string>
+  defaults: Array<string>
+  display: string
+  defaultDisplay: string
+}
+
+export interface SettingsData {
+  bindings: Array<SettingKeyData>
+  minimum: number
+  scanning: boolean
+  translationCli: string
+  heldTranslations: number
+  failedTranslations: number
+}
+
+export interface CapturedKeyData {
+  command: string
+  key: string
+  display: string
+  cancelled: boolean
+  error: string
+}
+
+export type SettingsAction = "translation" | "quit"
+export interface SettingsBridge {
+  ready: (reply: Reply) => void
+  snapshot: (reply: Reply) => void
+  saveKeys: (draft: string, reply: Reply) => void
+  beginCapture: (command: string, reply: Reply) => void
+  captureKey: (key: string, reply: Reply) => void
+  cancelCapture: (reply: Reply) => void
+  setMinimum: (seconds: number, reply: Reply) => void
+  action: (name: SettingsAction, reply: Reply) => void
+  settingsChanged: Signal<string>
+  settingsFocusRequested: Signal<string>
+  keyCaptured: Signal<string>
+  settingsError: Signal<string>
+}
+export function publicSettingsBridge(raw: SettingsBridge): SettingsBridge {
+  return Object.freeze({
+    ready: raw.ready.bind(raw),
+    snapshot: raw.snapshot.bind(raw),
+    saveKeys: raw.saveKeys.bind(raw),
+    beginCapture: raw.beginCapture.bind(raw),
+    captureKey: raw.captureKey.bind(raw),
+    cancelCapture: raw.cancelCapture.bind(raw),
+    setMinimum: raw.setMinimum.bind(raw),
+    action: raw.action.bind(raw),
+    settingsChanged: Object.freeze({ connect: raw.settingsChanged.connect.bind(raw.settingsChanged), disconnect: raw.settingsChanged.disconnect.bind(raw.settingsChanged) }),
+    settingsFocusRequested: Object.freeze({ connect: raw.settingsFocusRequested.connect.bind(raw.settingsFocusRequested), disconnect: raw.settingsFocusRequested.disconnect.bind(raw.settingsFocusRequested) }),
+    keyCaptured: Object.freeze({ connect: raw.keyCaptured.connect.bind(raw.keyCaptured), disconnect: raw.keyCaptured.disconnect.bind(raw.keyCaptured) }),
+    settingsError: Object.freeze({ connect: raw.settingsError.connect.bind(raw.settingsError), disconnect: raw.settingsError.disconnect.bind(raw.settingsError) }),
+  })
+}
+
 export interface Bridges {
   readonly shell: ShellBridge
   readonly library: LibraryBridge
@@ -449,6 +545,8 @@ export interface Bridges {
   readonly search: SearchBridge
   readonly statistics: StatisticsBridge
   readonly dialogs: DialogsBridge
+  readonly folders: FoldersBridge
+  readonly settings: SettingsBridge
 }
 export function publicBridges(raw: Bridges): Bridges {
   return Object.freeze({
@@ -459,5 +557,7 @@ export function publicBridges(raw: Bridges): Bridges {
     search: publicSearchBridge(raw.search),
     statistics: publicStatisticsBridge(raw.statistics),
     dialogs: publicDialogsBridge(raw.dialogs),
+    folders: publicFoldersBridge(raw.folders),
+    settings: publicSettingsBridge(raw.settings),
   })
 }

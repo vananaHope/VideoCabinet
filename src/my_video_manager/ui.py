@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
             return
         self.playback_page.close_help()
         if self.web_ui:
-            self.web_host.popup_settings_menu()
+            self.navigate_web_tab('settings')
         else:
             self.settings_menu.popup(self.mapToGlobal(QPoint(12, 12)))
 
@@ -340,6 +340,11 @@ class MainWindow(QMainWindow):
             self.player.set_subtitle(self.core.playback_subtitle(video_id))
 
     def eventFilter(self, watched, event):
+        if (self.web_ui and self.isActiveWindow() and QApplication.activeModalWidget() is None
+                and QApplication.activePopupWidget() is None):
+            settings = self.web_host.controllers.get('settings')
+            if settings is not None and settings.capture_event(event):
+                return True
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()
                 or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):
             return super().eventFilter(watched, event)
@@ -359,7 +364,7 @@ class MainWindow(QMainWindow):
                 return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
                 if self.web_ui:
-                    self.web_host.popup_settings_menu()
+                    self.navigate_web_tab('settings')
                 else:
                     self.settings_menu.popup(self.menuBar().mapToGlobal(self.menuBar().actionGeometry(
                         self.settings_menu.menuAction()).bottomLeft()))

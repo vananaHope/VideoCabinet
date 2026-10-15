@@ -173,7 +173,7 @@ def build_shell(window):
         back = QPushButton("← 웹 화면으로 돌아가기 (Esc)")
         back.clicked.connect(window.return_to_web)
         back_layout.addWidget(back)
-        back_layout.addWidget(QLabel("페이지 이동 Ctrl+1~7 · 설정 메뉴 Alt+S"))
+        back_layout.addWidget(QLabel("페이지 이동 Ctrl+1~7 · 설정 Alt+S"))
         back_layout.addStretch()
         window.web_notice = QLabel()
         window.web_notice.setWordWrap(True)

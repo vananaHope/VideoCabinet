@@ -11,6 +11,8 @@ from . import web_statistics_data
 from .statistics import DailyViewingStatistics, TopViewedVideo, LibraryStatistics, ViewingStatistics
 from .statistics import DistributionBucket, LibraryInventory, StatisticsDashboard
 from . import web_dialogs_data
+from . import web_folders_data
+from . import web_settings_data
 
 TABS = (
     ('library', '라이브러리'), ('reel', '모아보기'), ('search', '검색'),
@@ -119,6 +121,28 @@ STATISTICS = BridgeContract(name='statistics', interface='StatisticsBridge', slo
                 DistributionBucket, LibraryInventory, StatisticsDashboard,
                 web_statistics_data.StatisticsData))
 
+FOLDERS = BridgeContract(name='folders', interface='FoldersBridge', slots={
+    'ready': (), 'snapshot': (),
+    'action': (Argument('name', str, 'FolderAction'), Argument('target', str, 'string')),
+    'setMinimum': (Argument('seconds', float, 'number'),),
+}, signals={'foldersChanged': str, 'foldersFocusRequested': str, 'foldersError': str},
+    aliases=(TypeAlias('FolderAction', ('addFolder', 'removeFolder', 'scan', 'addFile',
+                                       'restoreExcluded', 'restoreDismissed', 'manageTags')),),
+    data_types=(web_folders_data.RestorableVideoData, web_folders_data.FoldersData))
+
+SETTINGS = BridgeContract(name='settings', interface='SettingsBridge', slots={
+    'ready': (), 'snapshot': (),
+    'saveKeys': (Argument('draft', str, 'string'),),
+    'beginCapture': (Argument('command', str, 'string'),),
+    'captureKey': (Argument('key', str, 'string'),), 'cancelCapture': (),
+    'setMinimum': (Argument('seconds', float, 'number'),),
+    'action': (Argument('name', str, 'SettingsAction'),),
+}, signals={'settingsChanged': str, 'settingsFocusRequested': str,
+            'keyCaptured': str, 'settingsError': str},
+    aliases=(TypeAlias('SettingsAction', ('translation', 'quit')),),
+    data_types=(web_settings_data.SettingKeyData, web_settings_data.SettingsData,
+                web_settings_data.CapturedKeyData))
+
 # 새 페이지는 독립 묶음을 선언한 뒤 여기에 한 줄 등록한다.
 QUEUE = BridgeContract(name='queue', interface='QueueBridge', slots={
     'ready': (), 'snapshot': (), 'rulesSnapshot': (),
@@ -152,4 +176,6 @@ CONTRACTS = (
     SEARCH,
     STATISTICS,
     DIALOGS,
+    FOLDERS,
+    SETTINGS,
 )
