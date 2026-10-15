@@ -12,9 +12,10 @@ import traceback
 import pytest
 
 from my_video_manager.opencode_go import (
-    BASE_URL, DEFAULT_MODEL, HTTPResponse, ModelPolicy, OpenCodeGoError,
-    OpenCodeGoTranslator, TranslationModelChoice, UrllibTransport, USER_AGENT,
+    BASE_URL, DEFAULT_MODEL, HTTPResponse, OpenCodeGoError,
+    OpenCodeGoTranslator, UrllibTransport, USER_AGENT,
 )
+from my_video_manager.translation_models import ModelPolicy, TranslationModelChoice
 from my_video_manager.secret_store import Secret, SecretStore
 from my_video_manager.subtitles import TranscriptLine
 from my_video_manager.translation import TranslationCancelled, TranslationError
@@ -369,14 +370,18 @@ def test_model_choice_represents_other_providers_unknown_policy_and_capabilities
     cli_choice = TranslationModelChoice("codex", "custom-model", "직접 입력")
     assert cli_choice.policy is None and not cli_choice.needs_warning(date.today())
     assert cli_choice.reasoning_supported is None and cli_choice.source is None
-    assert replace(cli_choice, reasoning_supported=True).reasoning_supported is True
-    assert replace(cli_choice, reasoning_supported=False).reasoning_supported is False
+    assert cli_choice.reasoning_efforts is None
+    supported = replace(cli_choice, reasoning_efforts=("low", "medium", "high"))
+    assert supported.reasoning_supported is True
+    assert supported.reasoning_efforts == ("low", "medium", "high")
+    assert replace(cli_choice, reasoning_efforts=()).reasoning_supported is False
     http = FakeHTTP()
     translator = adapter(http, model="custom-model")
     assert translator.model_choice().needs_warning(date.today())
     translator.translate(LINES, "en")
     payload = json.loads(http.calls[0][2]["body"])
     assert payload["model"] == "custom-model" and "response_format" not in payload
+    assert "reasoning_effort" not in payload and "reasoning" not in payload
     default = adapter(http).model_choice()
     assert default.provider == "opencode_go" and default.is_default and default.label == "DeepSeek V4.1 Flash"
     assert default.source and default.policy.source

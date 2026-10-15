@@ -40,8 +40,11 @@ Codex·Claude는 기존 구독 CLI를 사용하고, OpenCode Go는 사용자가 
   `check_key()`는 사용자가 명시적으로 요청할 때만 기본 유료 모델에 고정 문자열과 `max_tokens=1`을 보낸다.
   유효·키 없음·키 오류·한도·연결 실패·기타 결과를 구분하며 자동/주기적으로 호출하지 않는다.
 
-모델 선택 항목은 `TranslationModelChoice(provider, model_id, label, is_default, policy, source,
-reasoning_supported, structured_output)`로 둔다. `reasoning_supported`의 None/True/False는 미확인/지원/미지원을 뜻한다.
+중립 모듈 `translation_models.py`에 `ModelPolicy`와
+`TranslationModelChoice(provider, model_id, label, is_default, policy, source,
+reasoning_efforts, structured_output)`를 둔다. CLI와 Go 어댑터가 순환 import 없이 공유할 수 있다.
+`reasoning_efforts: tuple[str, ...] | None`의 `None`은 미확인, `()`은 미지원, 값이 있으면 선택 가능한 강도 목록이다.
+`reasoning_supported`는 이 목록에서 파생한다. '기본' 선택은 추론 강도 인자를 넘기지 않는다.
 `policy=None`인 CLI 직접 입력 항목에는 Go 개인정보 경고를 적용하지 않는다. Go 직접 입력은 값이 미확인인 `ModelPolicy`를 붙여 경고한다.
 개인정보 정책 출처와 모델 선택/구조화 출력 근거의 출처를 각각 보존한다. 실제 Codex·Claude 선택지와 공용 목록 통합은 연결 단계에서 한다.
 

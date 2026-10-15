@@ -20,6 +20,7 @@ from .secret_store import Secret
 from .translation import TranslationCancelled, TranslationError
 from .translation_cli import (classify_cli_failure, parse_translation_response,
                               translation_prompt, translation_schema)
+from .translation_models import ModelPolicy, TranslationModelChoice
 
 
 BASE_URL = "https://opencode.ai/inference/go/v1"
@@ -35,21 +36,6 @@ def _user_agent():
 USER_AGENT = _user_agent()
 
 
-@dataclass(frozen=True)
-class ModelPolicy:
-    model_id: str
-    training: bool | None = None
-    retention_days: int | None = None
-    checked_on: date | None = None
-    valid_until: date | None = None
-    source: str | None = None
-
-    def needs_warning(self, on: date) -> bool:
-        # 기본 모델에도 동일 규칙. 만료/미확인 정책을 안전하다고 표시하지 않는다.
-        return (self.training is not False or self.retention_days is None or self.checked_on is None
-                or on < self.checked_on or (self.valid_until is not None and on > self.valid_until))
-
-
 # Go 문서에서 확인한 chat/completions 모델. 직접 입력 모델의 정책은 미확인으로 둔다.
 CHAT_MODELS = (
     "deepseek-v4.1-flash", "deepseek-v4-pro", "glm-5.3-flash", "glm-5.3", "glm-5.2",
@@ -63,25 +49,6 @@ MODEL_POLICIES = tuple(ModelPolicy(
     valid_until=date(2026, 10, 31) if model_id.startswith("deepseek-") else None,
     source="https://opencode.ai/docs/en/go/",
 ) for model_id in CHAT_MODELS)
-
-
-@dataclass(frozen=True)
-class TranslationModelChoice:
-    provider: str
-    model_id: str
-    label: str
-    is_default: bool = False
-    policy: ModelPolicy | None = None
-    source: str | None = None
-    reasoning_supported: bool | None = None
-    structured_output: str | None = None
-
-    @property
-    def id(self):
-        return self.model_id
-
-    def needs_warning(self, on: date) -> bool:
-        return self.policy is not None and self.policy.needs_warning(on)
 
 
 MODEL_CHOICES = tuple(TranslationModelChoice(
@@ -243,8 +210,7 @@ class UrllibTransport:
 
         class TLSHandler(HTTPSHandler):
             def https_open(self, req):
-                return self.do_open(TLSConnection, req, context=self._context,
-                                    check_hostname=self._check_hostname)
+                return self.do_open(TLSConnection, req, context=self._context)
 
         def run():
             try:
