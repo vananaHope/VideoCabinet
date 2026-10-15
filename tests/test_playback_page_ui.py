@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QToolTip
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
 from my_video_manager.ui import MainWindow
@@ -480,6 +480,26 @@ def test_progress_click_keeps_focus_and_fullscreen_drag_keeps_bar(window, fullsc
     assert window.player.seeks[-1] == (120, False)
     key(window, Qt.Key.Key_Return)
     assert window.player.commands[-1].kind == CommandType.TOGGLE_PAUSE
+
+
+@pytest.mark.parametrize('fullscreen', [False, True])
+def test_progress_hover_through_window_input_after_click(window, fullscreen):
+    from my_video_manager.highlight_ui import progress_time
+    from my_video_manager.time_display import timestamp
+
+    page = window.playback_page
+    if fullscreen:
+        key(window, Qt.Key.Key_Apostrophe)
+        page.reveal_bar()
+    QApplication.processEvents()
+    progress = page.progress
+    pos = QPoint(progress.width() // 3, 7)
+    QTest.mouseClick(progress, Qt.MouseButton.LeftButton, pos=pos)
+    # QWidget 오버로드의 OS 커서 이동에 기대지 않고 실제 창의 입력 경로로 보낸다.
+    QTest.mouseMove(window.windowHandle(), progress.mapTo(window, pos))
+    assert QToolTip.isVisible()
+    assert QToolTip.text() == timestamp(progress_time(pos.x(), progress.width(), 120))
+    assert window.surface.hasFocus()
 
 
 @pytest.mark.parametrize('input_kind', ['mouse', 'keyboard'])
