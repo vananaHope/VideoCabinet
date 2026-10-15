@@ -14,7 +14,7 @@ from threading import Event, Lock, Thread
 import time
 from typing import Callable, Mapping, Protocol
 from uuid import uuid4
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import HTTPHandler, HTTPSHandler, HTTPRedirectHandler, Request, build_opener
 
 from .secret_store import Secret
@@ -27,6 +27,10 @@ from .translation_models import (ModelPolicy, TranslationModelChoice, DEFAULT_MO
 
 
 BASE_URL = "https://opencode.ai/inference/go/v1"
+TRANSLATION_TIMEOUT = 10 * 60
+CHECK_TIMEOUT = 30
+
+
 def _user_agent():
     try:
         version = metadata.version("my-video-manager")
@@ -65,6 +69,7 @@ class OpenCodeGoError(TranslationError):
             "missing_key": "OpenCode Go 키가 등록되지 않았습니다.",
             "authentication": "OpenCode Go 키 또는 접근 권한을 확인하세요.",
             "connection": "OpenCode Go에 연결하지 못했습니다.",
+            "response_timeout": "OpenCode Go 응답 시간이 초과되었습니다.",
             "format": "OpenCode Go 응답 형식이 올바르지 않습니다.",
             "usage_limit": "OpenCode Go 구독 사용량 한도로 보류했습니다.",
             "key_storage": "OpenCode Go 저장된 키를 읽지 못했습니다. 키를 다시 입력하세요.",
@@ -107,10 +112,16 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def _transport_failure_kind(error):
+    if isinstance(error, URLError):
+        error = error.reason
+    return "response_timeout" if isinstance(error, TimeoutError) else "connection"
+
+
 class UrllibTransport:
     """취소 시 소켓을 shutdown한다. 프록시/TLS 검증은 urllib 기본 정책을 유지한다."""
 
-    def __init__(self, *, connect_timeout=10, read_timeout=30):
+    def __init__(self, *, connect_timeout=10, read_timeout=TRANSLATION_TIMEOUT):
         if connect_timeout <= 0 or read_timeout <= 0:
             raise ValueError("연결/읽기 제한 시간은 양수여야 합니다.")
         self.connect_timeout, self.read_timeout = connect_timeout, read_timeout
@@ -118,7 +129,7 @@ class UrllibTransport:
     def request(self, method, url, *, headers, body, timeout, cancellation):
         if cancellation.is_set():
             raise TranslationCancelled
-        done, stopped, lock = Event(), Event(), Lock()
+        done, stopped, connected, lock = Event(), Event(), Event(), Lock()
         sockets, result = [], []
         read_timeout = min(timeout, self.read_timeout)
 
@@ -182,6 +193,7 @@ class UrllibTransport:
                 super().connect()
                 self.sock.settimeout(read_timeout)
                 self.sock = ResponseSocket(self.sock)
+                connected.set()
 
         class TLSConnection(http.client.HTTPSConnection, Connection):
             def connect(self):
@@ -193,6 +205,7 @@ class UrllibTransport:
                 self.sock.do_handshake()
                 self.sock.settimeout(read_timeout)
                 self.sock = ResponseSocket(self.sock)
+                connected.set()
 
         class PlainHandler(HTTPHandler):
             def http_open(self, req):
@@ -216,9 +229,9 @@ class UrllibTransport:
                         result.append("format")
                     else:
                         result.append(HTTPResponse(response.status, dict(response.headers), data))
-            except Exception:
+            except Exception as error:
                 # 스레드 밖으로 원래 예외/traceback/키를 전달하지 않는다.
-                result.append("connection")
+                result.append(_transport_failure_kind(error) if connected.is_set() else "connection")
             finally:
                 done.set()
 
@@ -233,10 +246,11 @@ class UrllibTransport:
                     if cancellation.is_set():
                         raise TranslationCancelled
                     if isinstance(result[0], str):
-                        raise OpenCodeGoError(result[0])
+                        raise OpenCodeGoError(result[0], shrinkable=result[0] == "response_timeout")
                     return result[0]
                 if time.monotonic() >= deadline:
-                    raise OpenCodeGoError("connection")
+                    kind = "response_timeout" if connected.is_set() else "connection"
+                    raise OpenCodeGoError(kind, shrinkable=kind == "response_timeout")
         finally:
             with lock:
                 stopped.set()
@@ -291,7 +305,7 @@ class OpenCodeGoTranslator:
 
     def __init__(self, key_provider: Callable[[], Secret | None], *, session_id: str,
                  model: str = DEFAULT_MODEL, transport: HTTPTransport | None = None,
-                 timeout: float = 60, clock=None, choices=MODEL_CHOICES, effort=""):
+                 timeout: float = TRANSLATION_TIMEOUT, clock=None, choices=MODEL_CHOICES, effort=""):
         if not isinstance(session_id, str) or not session_id or not session_id.isascii() or any(
                 c.isspace() or ord(c) < 33 or ord(c) > 126 for c in session_id):
             raise ValueError("세션 ID는 공백 없는 ASCII 문자열이어야 합니다.")
@@ -317,7 +331,7 @@ class OpenCodeGoTranslator:
         model_id = model_id or self.model
         return self.model_choice(model_id).policy
 
-    def _request(self, path, payload=None, *, cancellation=None, session_id=None):
+    def _request(self, path, payload=None, *, cancellation=None, session_id=None, timeout=None):
         cancellation = cancellation if cancellation is not None else Event()
         if cancellation.is_set():
             raise TranslationCancelled
@@ -341,18 +355,22 @@ class OpenCodeGoTranslator:
                 "GET" if payload is None else "POST", BASE_URL + path,
                 headers=headers,
                 body=None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                timeout=self._timeout, cancellation=cancellation,
+                timeout=min(self._timeout, CHECK_TIMEOUT) if timeout is None else timeout,
+                cancellation=cancellation,
             )
         except TranslationCancelled:
             raise
-        except OpenCodeGoError as error:
-            failure = "format" if error.kind == "format" else "connection"
-        except Exception:
-            failure = "connection"
+        except OpenCodeGoError:
+            # 전송 계층이 이미 정제하고 기록한 오류는 다시 만들거나 중복 기록하지 않는다.
+            if cancellation.is_set():
+                raise TranslationCancelled from None
+            raise
+        except Exception as error:
+            failure = _transport_failure_kind(error)
         if cancellation.is_set():
             raise TranslationCancelled
         if failure:
-            raise OpenCodeGoError(failure, shrinkable=False)
+            raise OpenCodeGoError(failure, shrinkable=failure == "response_timeout")
         data = None
         try:
             data = json.loads(response.body)
@@ -428,7 +446,7 @@ class OpenCodeGoTranslator:
         if self.effort and self.effort in (self.model_choice().reasoning_efforts or ()):
             extra["reasoning_effort"] = self.effort
         data = self._request("/chat/completions", self._model_payload(self.model, prompt, **extra),
-                             cancellation=cancellation)
+                             cancellation=cancellation, timeout=self._timeout)
         valid_envelope = False
         try:
             choice = data["choices"][0]

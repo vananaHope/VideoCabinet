@@ -14,6 +14,7 @@ from my_video_manager.core import AppCore
 from my_video_manager.opencode_go import HTTPResponse, OpenCodeGoTranslator
 from my_video_manager.secret_store import Secret, SecretStore, SecretStoreError
 from my_video_manager.translation import TranslationError, TranslationCancelled
+from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.translation_models import MODEL_CHOICES
 from test_translation import Media, Transcriber, Translator, source, finish
 from test_translation_cli import fake_cli
@@ -406,3 +407,104 @@ def test_go_failure_diagnostics_survive_queue_storage(connected, status):
     result = core.process_next_translation()
     assert f'HTTP {status}' in result.error_detail
     assert result.error == result.error_detail
+    assert core.subtitle_queue_items()[0].error == result.error_detail
+
+
+@pytest.mark.parametrize('language', ['en', 'ko'])
+@pytest.mark.parametrize('persistent,batch_size', [(False, 20), (True, 20), (True, 10)])
+def test_go_response_timeout_shrinks_then_uses_existing_retry_and_recovery(tmp_path, language, persistent, batch_size):
+    class SlowHTTP(HTTP):
+        def __init__(self):
+            super().__init__()
+            self.sizes = []
+            self.persistent = persistent
+
+        def request(self, method, url, **kwargs):
+            prompt = json.loads(kwargs['body'])['messages'][0]['content']
+            targets = json.JSONDecoder().raw_decode(prompt.split('SUBTITLE_DATA_JSON:\n')[1])[0]['targets']
+            self.sizes.append(len(targets))
+            if len(targets) > 10 or self.persistent:
+                raise TimeoutError('private transport diagnostic')
+            return super().request(method, url, **kwargs)
+
+    transcriber = Transcriber()
+    transcriber.result = TranscriberResult(language, tuple(
+        TranscriptSegment(i, i + 1, f'Line {i}') for i in range(20)))
+    http = SlowHTTP()
+    core = AppCore(database=tmp_path / 'data/library.sqlite3', media=Media(), transcriber=transcriber,
+                   clock=lambda: datetime(2026, 10, 15, tzinfo=timezone.utc),
+                   translation_transport=http, translation_batch_size=batch_size)
+    path = tmp_path / 'video.mkv'
+    path.write_bytes(b'video')
+    core.add_file(path)
+    save(core, 'opencode_go', key_action='replace', key='test-key')
+    video = core.videos()[0]
+    source(core, video.id)
+    result = core.process_next_translation()
+    if persistent:
+        assert http.sizes == ([20, 10] if batch_size == 20 else [10])
+        assert result.state == 'failed' and result.retry_at is None
+        assert result.error == 'OpenCode Go 응답 시간이 초과되었습니다.'
+        assert core.subtitle_queue_items()[0].error == result.error
+        assert not core.translation_ready()
+        http.persistent = False
+        core.request_translation(video.id)
+    else:
+        assert http.sizes == [20, 10]
+        assert result.state == 'queued' and result.completed_lines == 10
+    finish(core)
+    assert len(core.translation(video.id).lines) == 20
+    assert set(core.translation_line_providers(video.id).values()) == {'opencode_go'}
+
+
+@pytest.mark.parametrize('kind,detail', [
+    ('connection', 'OpenCode Go에 연결하지 못했습니다.'),
+    ('connection', 'OpenCode Go에 연결하지 못했습니다. (추가 진단)'),
+    ('connection', '별도 진단 token=private-value'),
+    ('format', '응답의 줄 ID 또는 형식이 올바르지 않습니다. (추가 진단)'),
+])
+def test_queue_error_deduplicates_summary_and_keeps_distinct_redacted_detail(connected, kind, detail):
+    core, _, cli, _, _, _ = connected
+    source(core, core.videos()[0].id)
+    cli.error = TranslationError(kind, detail)
+    result = core.process_next_translation()
+    display = core.subtitle_queue_items()[0].error
+    assert display.count(result.error) == 1
+    if detail.startswith(result.error):
+        assert display == detail
+    else:
+        assert display == result.error + ' · 별도 진단 token=[가림]'
+    assert 'private-value' not in display
+
+
+def test_go_queue_error_redacts_path_without_duplicate_summary(connected):
+    core, http, _, store, _, _ = connected
+    store.save('fake-key')
+    save(core, 'opencode_go')
+    message = 'Invalid URL (POST /v1/chat/completions)'
+    http.request = lambda *args, **kwargs: HTTPResponse(
+        404, {}, json.dumps({'error': {'message': message}}).encode())
+    source(core, core.videos()[0].id)
+    result = core.process_next_translation()
+    assert result.state == 'failed'
+    assert result.error == result.error_detail
+    assert message in result.error_detail
+    display = core.subtitle_queue_items()[0].error
+    assert display.count('OpenCode Go 요청에 실패했습니다.') == 1
+    assert display.count('HTTP 404: Invalid URL (POST ') == 1
+    assert display.count('[가림]') == 1
+    assert '/v1/chat/completions' not in display
+
+
+def test_go_timeout_keeps_cli_fallback_notice(connected):
+    core, http, cli, store, _, _ = connected
+    store.save('key')
+    source(core, core.videos()[0].id)
+    cli.error = TranslationError('timeout', 'CLI timeout')
+    def fail(*args, **kwargs):
+        raise TimeoutError('private diagnostic')
+    http.request = fail
+    result = core.process_next_translation()
+    assert result.state == 'failed'
+    assert 'CLI 응답 시간 초과' in result.notice
+    assert core.subtitle_queue_items()[0].error == result.error + ' · ' + result.notice
