@@ -8,6 +8,8 @@ import zipfile
 from datetime import datetime, timezone
 import json
 import os
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 import tempfile
 import threading
@@ -31,7 +33,7 @@ from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.ui import MainWindow
-from my_video_manager.backup import BackupBusyError, BackupRestoreResult, create_automatic_backup
+from my_video_manager.backup import BackupBusyError, BackupRestoreResult, create_automatic_backup, create_backup
 from unittest.mock import patch
 
 
@@ -272,6 +274,7 @@ try:
             assert button('백업 파일 선택')
             finished()
         assert '1개' in content('[aria-label="백업 미리보기"]')
+        assert '현재 DB 버전 3과 같은 버전' in content('[aria-label="백업 미리보기"]')
         assert js('document.activeElement.hasAttribute("data-backup-preview")')
         capture('backup-preview')
         assert button('이 백업으로 복원 예약')
@@ -308,17 +311,41 @@ try:
         settle()
         window.tray.open()
         settle()
-        # 공통 트레이 복원이 라이브러리로 이동하는 기존 동작은 별도 #82 범위다.
+        assert host.active_tab == 'settings'
         assert backup_state()['pending']
         navigate('settings')
         assert js('document.querySelector("#settings-category [aria-current=true]").dataset.category') == 'backup'
-        checks.append('재생 왕복·트레이 복원 후 다시 설정 진입에서도 백업 분류와 예약 유지 (#82 별도)')
+        checks.append('재생 왕복·트레이 복원 후 설정 탭·백업 분류와 예약 유지')
         assert button('예약 취소')
         finished()
         assert not core.backup_inventory().pending
         assert not js('!!document.querySelector("[aria-label=\\"백업 복원 예약\\"]")')
         capture('backup-cancelled')
         checks.append('예약 취소 즉시 반영과 현재 데이터 유지')
+        # 독립된 v2 사본으로 구버전 미리보기의 실제 렌더링과 예약을 확인한다.
+        old_database = workspace / 'v2.sqlite3'
+        with closing(sqlite3.connect(core.database)) as source, closing(sqlite3.connect(old_database)) as old:
+            source.backup(old)
+            with old:
+                old.execute('DROP INDEX videos_resolution_pending')
+                for column in ('width', 'height', 'resolution_checked'):
+                    old.execute(f'ALTER TABLE videos DROP COLUMN {column}')
+                old.execute('PRAGMA user_version=2')
+        old_archive = create_backup(old_database, workspace / 'v2.zip').path
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(old_archive), '')):
+            assert button('백업 파일 선택')
+            finished()
+        assert 'DB 버전은 2입니다' in content('[aria-label="백업 미리보기"]')
+        assert '현재 DB 버전 3으로 올린 뒤 복원' in content('[aria-label="백업 미리보기"]')
+        capture('backup-v2-preview')
+        assert button('이 백업으로 복원 예약')
+        wait(lambda: host.dialogs.blocks_shell_actions)
+        assert button('백업 복원 예약')
+        finished()
+        assert core.pending_backup_restore().db_version == 2
+        assert button('예약 취소')
+        finished()
+        checks.append('DB v2 백업의 v3 이전 안내·복원 예약·취소')
         for index in range(5):
             automatic = create_automatic_backup(core.database, reason='before_migration' if index % 2 else 'before_restore')
         with zipfile.ZipFile(automatic.path) as bundle:
@@ -335,7 +362,7 @@ try:
         capture('backup-many')
         assert len(backup_state()['automatic']) == 5
         assert '상세 이유 기록 없음' in content('[aria-label="자동 백업"]')
-        assert 'DB 형식 변경 전' in content('[aria-label="자동 백업"]')
+        assert 'DB 버전 올리기 전' in content('[aria-label="자동 백업"]')
         assert button('복원 미리보기')
         finished()
         assert backup_state()['preview']

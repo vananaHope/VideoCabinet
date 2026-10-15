@@ -479,6 +479,33 @@ def test_automatic_retention_keeps_latest_five_and_never_removes_manual_zip(core
     assert all(core.inspect_backup(path).db_version == 3 for path in core.automatic_backups())
 
 
+def test_v2_backup_restores_records_and_upgrades_before_reopening(core, tmp_path):
+    from test_resolution import downgrade_v2
+
+    video = core.videos()[0]
+    core.add_video_tag(video.id, 'v2 기록')
+    downgrade_v2(core.database)
+    archive = create_backup(core.database, tmp_path / 'v2.zip').path
+    upgraded = open_core(core.database)
+    upgraded.rename_video(video.id, 'v3에서 바꾼 제목')
+    upgraded.request_backup_restore(archive)
+    assert upgraded.pending_backup_restore().db_version == 2
+    assert upgraded.video(video.id).title == 'v3에서 바꾼 제목'
+
+    result = apply(core.database)
+    assert result.status == 'applied' and result.metadata.db_version == 2
+    # 시작 경로는 임시 DB의 이전이 성공해야 교체한다. AppCore를 열기 전부터 v3다.
+    with closing(sqlite3.connect(core.database)) as db:
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 3
+    reopened = open_core(core.database)
+    assert reopened.video(video.id).title == video.title
+    assert reopened.video_tags(video.id)[0].name == 'v2 기록'
+    assert reopened.video(video.id).width is None
+    assert reopened.statistics_dashboard(30).inventory.resolution_pending_count == len(reopened.videos())
+    assert reopened.pending_backup_restore() is None
+    assert inspect_backup(result.safety_backup).db_version == 3
+
+
 def test_fake_next_migration_backs_up_before_ddl_and_survives_rollback(core):
     # 다음 버전의 실패하는 가짜 이전으로 공개 연결 지점을 검증한다.
     with closing(sqlite3.connect(core.database)) as db:

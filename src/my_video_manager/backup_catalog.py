@@ -30,9 +30,9 @@ class BackupInventory:
 def backup_inventory(database: Path, *, include_automatic=True) -> BackupInventory:
     from .library import LIBRARY_DB_VERSION
     rows = []
-    reasons = {"before_restore": "백업 복원 전", "before_migration": "DB 형식 변경 전", "manual": "직접 만들기"}
+    reasons = {"before_restore": "백업 복원 전", "before_migration": "DB 버전 올리기 전", "manual": "직접 만들기"}
     for path in automatic_backups(database) if include_automatic else ():
-        size, created, reason, error = 0, "", "백업 복원 또는 DB 형식 변경 전(상세 이유 기록 없음)", ""
+        size, created, reason, error = 0, "", "백업 복원 또는 DB 버전 올리기 전(상세 이유 기록 없음)", ""
         try:
             size = path.stat().st_size
             with zipfile.ZipFile(path) as archive:

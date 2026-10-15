@@ -89,6 +89,28 @@ def test_picker_cancel_releases_busy_without_files(window_factory, core, monkeyp
     assert not core.backup_inventory().pending
 
 
+def test_v2_migration_backup_is_listed_previewed_and_scheduled_in_v3(window_factory, core):
+    from test_backup import open_core
+    from test_resolution import downgrade_v2
+
+    downgrade_v2(core.database)
+    upgraded = open_core(core.database)
+    saved, = upgraded.automatic_backups()
+    with zipfile.ZipFile(saved) as archive:
+        assert json.loads(archive.read('manifest.json'))['reason'] == 'before_migration'
+    bridge = bridge_for(window_factory())
+    result = action(bridge, 'refresh')
+    assert result['dbVersion'] == 3
+    assert result['automatic'][0]['reason'] == 'DB 버전 올리기 전'
+    result = action(bridge, 'preview', str(saved))
+    assert result['preview']['db_version'] == 2
+    assert result['preview']['video_count'] == len(upgraded.videos())
+    before = upgraded.videos()
+    assert action(bridge, 'schedule')['pending']
+    assert upgraded.pending_backup_restore().db_version == 2
+    assert upgraded.videos() == before
+
+
 @pytest.mark.parametrize('error', [BackupBusyError(3, 'source_changed')])
 def test_failed_worker_releases_busy_preserves_error_on_reentry_and_allows_retry(window_factory, core, tmp_path, monkeypatch, error):
     window = window_factory()
@@ -200,7 +222,7 @@ def test_automatic_catalog_reason_old_compatibility_and_no_extraction(core, tmp_
         raise AssertionError('목록 조회는 백업을 풀지 않아야 한다')
     monkeypatch.setattr(backup, 'inspect_backup', no_extract)
     rows = {row.path: row for row in core.backup_inventory().automatic}
-    assert rows[str(first.path)].reason == 'DB 형식 변경 전'
+    assert rows[str(first.path)].reason == 'DB 버전 올리기 전'
     assert rows[str(second.path)].reason == '백업 복원 전'
     assert '상세 이유 기록 없음' in rows[str(legacy.path)].reason
     assert all(row.size > 0 and row.created_at for row in rows.values())
