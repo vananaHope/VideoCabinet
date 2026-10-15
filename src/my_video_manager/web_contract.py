@@ -6,6 +6,7 @@ from typing import Mapping
 
 from . import web_library_data, web_shell_data
 from . import web_queue_data
+from . import web_reel_data, web_search_data
 
 TABS = (
     ('library', '라이브러리'), ('reel', '모아보기'), ('search', '검색'),
@@ -91,6 +92,21 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
 ), data_types=(web_library_data.TagData, web_library_data.VideoData, web_library_data.GemData,
                web_library_data.DetailsData, web_library_data.HighlightData, web_library_data.LibraryData))
 
+REEL = BridgeContract(name='reel', interface='ReelBridge', slots={
+    'ready': (), 'snapshot': (), 'refresh': (),
+    'filter': (Argument('tagId', int, 'number'),),
+    'select': (Argument('highlightId', int, 'number'),),
+    'play': (Argument('highlightId', int, 'number'),),
+}, signals={'changed': str, 'focusRequested': str, 'error': str},
+    data_types=(web_reel_data.ReelEntryData, web_reel_data.ReelData))
+
+SEARCH = BridgeContract(name='search', interface='SearchBridge', slots={
+    'ready': (), 'snapshot': (), 'find': (Argument('query', str, 'string'),),
+    'select': (Argument('index', int, 'number'),),
+    'play': (Argument('index', int, 'number'),),
+}, signals={'changed': str, 'focusRequested': str, 'error': str},
+    data_types=(web_search_data.SearchTextData, web_search_data.SearchResultData, web_search_data.SearchData))
+
 # 새 페이지는 독립 묶음을 선언한 뒤 여기에 한 줄 등록한다.
 QUEUE = BridgeContract(name='queue', interface='QueueBridge', slots={
     'ready': (), 'snapshot': (), 'rulesSnapshot': (),
@@ -109,4 +125,6 @@ CONTRACTS = (
     SHELL,
     LIBRARY,
     QUEUE,
+    REEL,
+    SEARCH,
 )

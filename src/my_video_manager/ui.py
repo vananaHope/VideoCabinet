@@ -67,7 +67,11 @@ class MainWindow(QMainWindow):
         # 기존 화면 어댑터용 연결점. 위젯 구성과 갱신은 각 페이지 모듈이 소유한다.
         self.surface = self.playback_page.surface
         self.progress = self.playback_page.progress
-        self.reel = ReelControls(self)
+        if self.web_ui:
+            from .web_reel_page import WebReelControls
+            self.reel = WebReelControls(self)
+        else:
+            self.reel = ReelControls(self)
         build_shell(self)
         self._active_page = self.home_page
         self._return_page = self.home_page
@@ -171,7 +175,10 @@ class MainWindow(QMainWindow):
         self.play_video(video_id)
 
     def show_search(self):
-        self.navigate(SEARCH_PAGE_INDEX)
+        if self.web_ui:
+            self.navigate_web_tab('search')
+        else:
+            self.navigate(SEARCH_PAGE_INDEX)
 
     def play_video(self, video_id, *, start=None, from_gems=False):
         if self.pages.currentWidget() is not self.playback_page:

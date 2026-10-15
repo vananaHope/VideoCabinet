@@ -116,7 +116,8 @@ class ActionPage(QWidget):
 def search_page(window):
     from .search_ui import SearchPage
 
-    page = SearchPage(window.core)
+    preparation = window.web_host.controllers['search'].preparation if window.web_ui else None
+    page = SearchPage(window.core, preparation=preparation)
 
     def play_result(result):
         window.playback_list = page.video_ids

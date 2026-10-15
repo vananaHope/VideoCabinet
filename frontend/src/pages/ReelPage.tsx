@@ -1,0 +1,74 @@
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Film } from "lucide-react"
+import { connectBridge, request } from "@/bridge"
+import type { ReelBridge, ReelData } from "@/bridge-types"
+import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
+import { EmptyState, PageHeader } from "@/components/page-parts"
+import { ResultRow, listKey, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+
+export default function ReelPage() {
+  const [bridge, setBridge] = useState<ReelBridge | null>(null)
+  const [data, setData] = useState<ReelData | null>(null)
+  const [error, setError] = useState("")
+  const scroll = useRef(0)
+  const goHome = useRef(() => {})
+  const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
+  useEffect(() => {
+    let disposed = false
+    let disconnect = () => {}
+    connectBridge().then(async ({ reel: api, shell }) => {
+      if (disposed) return
+      goHome.current = () => { request(reply => shell.navigate("library", reply)).catch(showError) }
+      const changed = (json: string) => setData(JSON.parse(json))
+      const focus = () => restoreListFocus("reel-list", scroll.current)
+      api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError)
+      disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError) }
+      const initial = await request<ReelData>(reply => api.snapshot(reply))
+      if (!disposed) { setData(initial); setBridge(api) }
+    }).catch(showError)
+    return () => { disposed = true; disconnect() }
+  }, [showError])
+  useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
+  const entries = data?.entries ?? []
+  const selected = entries.find(entry => entry.id === data?.selectedId)
+  function select(index: number) {
+    const id = entries[index].id
+    setData(previous => previous && { ...previous, selectedId: id })
+    if (bridge) request(reply => bridge.select(id, reply)).catch(showError)
+    document.getElementById(`reel-${id}`)?.scrollIntoView({ block: "nearest" })
+  }
+  function play(id: number) {
+    if (bridge) { setError(""); request(reply => bridge.play(id, reply)).catch(showError) }
+  }
+  return <main aria-label="하이라이트 모아보기" onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) { event.preventDefault(); goHome.current() } }} className="flex h-full flex-col gap-4 p-4">
+    <PageHeader title="하이라이트 모아보기" description="모든 영상의 하이라이트를 이어서 봅니다. 시청 기록과 별도로 복습을 기록합니다." />
+    <div className="flex items-center gap-3">
+      <label className="flex min-w-0 flex-1 items-center gap-3 text-sm">하이라이트 태그
+        <NativeSelect aria-label="하이라이트 모아보기 태그 필터" value={data?.tagId ?? 0} onChange={event => { if (bridge) { scroll.current = 0; request(reply => bridge.filter(Number(event.target.value), reply)).catch(showError) } }}>
+          <option value={0}>모든 하이라이트</option>{data?.tags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+        </NativeSelect>
+      </label>
+      <Button variant="outline" onClick={() => { if (bridge) request(reply => bridge.refresh(reply)).catch(showError) }}>목록 갱신</Button>
+    </div>
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    <div id="reel-list" role="listbox" aria-label="모든 영상의 하이라이트" aria-activedescendant={selected ? `reel-${selected.id}` : undefined} tabIndex={0}
+      onScroll={event => { if (event.currentTarget.offsetParent) scroll.current = event.currentTarget.scrollTop }}
+      onKeyDown={event => listKey(event, entries.length, entries.findIndex(e => e.id === selected?.id), select, () => { if (selected?.playable) play(selected.id) })}
+      className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
+      {!entries.length ? <EmptyState title={data?.emptyTitle ?? "불러오는 중…"} description={data?.emptyDescription ?? ""} /> : entries.map((entry, index) => <ResultRow key={entry.id} id={`reel-${entry.id}`} selected={entry.id === selected?.id}
+        onClick={() => { select(index); document.getElementById("reel-list")?.focus({ preventScroll: true }) }} onDoubleClick={() => { if (entry.playable) play(entry.id) }}>
+        <div className="flex aspect-video w-32 shrink-0 items-center justify-center self-start overflow-hidden rounded-md bg-muted">{entry.thumbnail ? <img src={entry.thumbnail} alt="" className="h-full w-full object-cover" /> : <Film className="size-8 text-muted-foreground" />}</div>
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="wrap-anywhere font-semibold">{entry.title}</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs"><span className="text-highlight tabular-nums">{timestamp(entry.start)}{entry.end === null ? " · 지점" : ` — ${timestamp(entry.end)}`}</span><span className="text-muted-foreground">마지막 복습: {entry.lastRevisited ?? "아직 없음"}</span></div>
+          {!entry.playable && <p className="text-xs text-muted-foreground">{entry.missing ? "파일 없음 — 재생 불가" : "길이 0인 지점"} · 차례 재생에서 건너뜀</p>}
+          {entry.note && <p className="whitespace-pre-wrap wrap-anywhere text-sm">{entry.note}</p>}
+          {!!entry.tags.length && <div className="flex flex-wrap gap-1">{entry.tags.map(tag => <span key={tag.id} className="max-w-full rounded-md bg-secondary px-2 py-1 text-xs wrap-anywhere text-secondary-foreground">{tag.name}</span>)}</div>}
+        </div>
+      </ResultRow>)}
+    </div>
+    <div className="flex flex-wrap items-center gap-3"><Button disabled={!entries.some(e => e.playable)} onClick={() => play(0)}>처음부터 차례 재생</Button><Button variant="outline" disabled={!selected?.playable} onClick={() => selected && play(selected.id)}>선택한 하이라이트부터 재생</Button><span className="text-xs text-muted-foreground">↑/↓ 선택 · Enter 재생</span></div>
+    <p role="status" className="text-xs text-muted-foreground">하이라이트 {entries.length}개 · 영상 제목 → 영상 안 시각 순 · 파일 없음·길이 0인 지점은 건너뜁니다. 새 항목은 ‘목록 갱신’으로 불러옵니다.</p>
+  </main>
+}
