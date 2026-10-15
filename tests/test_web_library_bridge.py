@@ -75,7 +75,7 @@ def test_details_include_external_tracks_partial_success_and_failure(bridge, mon
     path.with_suffix('.srt').write_text(
         '1\n00:00:01,000 --> 00:00:02,000\n부분 성공\n\n깨진 블록', encoding='utf-8')
     path.with_suffix('.broken.vtt').write_bytes(b'\xff\xfeX')
-    core.scan()
+    scan = core.scan()
     monkeypatch.setattr(core, 'external_subtitles', lambda *_: pytest.fail('본문 조회는 불필요'))
     data = json.loads(bridge.details(video.id))
     files = {file['name']: file for file in data['externalSubtitles']}
@@ -83,14 +83,46 @@ def test_details_include_external_tracks_partial_success_and_failure(bridge, mon
     tracks = files[path.with_suffix('.smi').name]['subtitles']
     assert [(s['language'], s['languageLabel'], s['lineCount']) for s in tracks] == [
         ('ko', '한국어', 1), ('en', '영어', 1)]
+    assert all(s['languageClass'] == '' for s in tracks)
     partial = files[path.with_suffix('.srt').name]
-    assert partial['warning'] == '외부 자막: 1개 블록을 건너뜀'
+    assert partial['warning'] == '1개 블록을 건너뜀'
+    assert any(issue.message == '외부 자막: 1개 블록을 건너뜀' for issue in scan.issues)
     assert partial['subtitles'][0]['languageLabel'] == '언어 모름'
     assert partial['subtitles'][0]['lineCount'] == 1
     failure = files[path.with_suffix('.broken.vtt').name]
     assert failure['warning'] and failure['subtitles'] == []
     assert str(path.parent) not in json.dumps(data)
     assert data['original_lines'] == data['translated_lines'] == 0
+
+
+def test_duplicate_file_names_and_same_language_tracks_are_distinguishable(bridge):
+    bridge, page, app = bridge
+    core = page.core
+    video = core.videos()[0]
+    path = video.locations[0].path
+    copies = []
+    for folder in ('원본', '복사본'):
+        copy = path.parent / folder / path.name
+        copy.parent.mkdir()
+        copy.write_bytes(path.read_bytes())
+        copy.with_suffix('.smi').write_text(
+            '<STYLE>.KRCC {lang:ko;} .COMMENT {lang:ko;} .ENCC {lang:en;}</STYLE>'
+            '<SYNC Start=1000><P Class=KRCC>대사<P Class=COMMENT>해설<P Class=ENCC>English',
+            encoding='utf-8')
+        core.add_file(copy)
+        copies.append(copy)
+    files = json.loads(bridge.details(video.id))['externalSubtitles']
+    assert {f['name'] for f in files} == {f'{p.with_suffix(".smi").name} · {p.parent.name}' for p in copies}
+    for file in files:
+        assert [(t['languageLabel'], t['languageClass']) for t in file['subtitles']] == [
+            ('한국어', 'KRCC'), ('한국어', 'COMMENT'), ('영어', '')]
+    assert str(path.parent) not in json.dumps(files)
+    assert all(t.language_class in ('krcc', 'comment', 'encc')
+               for f in core.external_subtitles(video.id) for t in f.subtitles)
+    copies[0].with_suffix('.smi').unlink()
+    core.scan()
+    remaining, = json.loads(bridge.details(video.id))['externalSubtitles']
+    assert remaining['name'] == path.with_suffix('.smi').name
 
 
 def test_action_rejects_arbitrary_methods_and_missing_ids(bridge):

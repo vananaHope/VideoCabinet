@@ -10,6 +10,16 @@ import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.web_library_data import snapshot_data, filter_ids, details_data, thumbnail_video_id
+from my_video_manager.external_subtitles import LANGUAGES
+from my_video_manager.web_external_subtitle_data import language_label
+
+
+def test_every_external_language_code_has_a_display_label():
+    codes = set(LANGUAGES.values())
+    assert codes
+    for code in codes:
+        assert language_label(code) not in (code, '', '언어 모름')
+    assert language_label(None) == '언어 모름'
 
 
 class Media:

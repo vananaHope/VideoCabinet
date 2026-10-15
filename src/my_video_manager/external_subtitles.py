@@ -1,6 +1,7 @@
 """영상 옆의 읽기 전용 자막 파일을 찾고, 언어별 줄과 읽기 경고를 보관한다."""
 
 from bisect import bisect_left
+from collections import Counter
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
 from html import unescape
@@ -64,18 +65,28 @@ class _ReadError(ValueError):
     """파서에서 사용자를 위해 작성한 읽기 실패 문구."""
 
 
-def _read_error_message(error):
+def _read_error_message(error, *, folder=False):
     if isinstance(error, _ReadError):
         return str(error)
     if isinstance(error, UnicodeError):
         return "자막의 문자 인코딩이 올바르지 않습니다. UTF-8, UTF-16, CP949/EUC-KR 파일인지 확인해 주세요."
-    if isinstance(error, PermissionError):
-        return "자막 파일을 읽을 권한이 없습니다. 파일의 접근 권한을 확인해 주세요."
-    if isinstance(error, FileNotFoundError):
-        return "자막 파일을 찾을 수 없습니다. 다시 검사해 주세요."
     if isinstance(error, OSError):
-        return "자막 파일을 읽지 못했습니다. 파일과 저장 장치 상태를 확인해 주세요."
-    return "자막 형식을 해석하지 못했습니다. 파일 내용과 자막 시각을 확인해 주세요."
+        target = "자막 폴더를" if folder else "자막 파일을"
+        if isinstance(error, PermissionError):
+            message = f"{target} 읽을 권한이 없습니다. 접근 권한을 확인해 주세요."
+        elif isinstance(error, FileNotFoundError):
+            message = f"{target} 찾을 수 없습니다. 다시 검사해 주세요."
+        else:
+            message = f"{target} 읽지 못했습니다. 파일과 저장 장치 상태를 확인해 주세요."
+        # str(error)는 filename을 포함한다. strerror에도 경로를 넣는 공급자가 있어 가린다.
+        detail = error.strerror or type(error).__name__
+        for filename in (error.filename, error.filename2):
+            if filename:
+                detail = detail.replace(os.fsdecode(filename), "[경로 생략]")
+        detail = re.sub(r'''(?:[A-Za-z]:[\\/]|\\\\|/)[^\r\n"'<>]*''', "[경로 생략]", detail)
+        return f"{message} (원인: {detail})"
+    return ("자막 형식을 해석하지 못했습니다. 파일 내용과 자막 시각을 확인해 주세요. "
+            f"(원인: {type(error).__name__})")
 
 
 def _language(value):
@@ -298,7 +309,10 @@ class ExternalSubtitles:
                 if row["track_id"] is not None:
                     file[1].append(ExternalSubtitleTrackSummary(
                         row["language"], row["language_class"], row["line_count"]))
-            return tuple(ExternalSubtitleFileSummary(row["id"], Path(row["path"]).name,
+            names = Counter(Path(row["path"]).name.casefold() for row, _ in files.values())
+            return tuple(ExternalSubtitleFileSummary(row["id"],
+                         (f"{Path(row['path']).name} · {Path(row['path']).parent.name}"
+                          if names[Path(row["path"]).name.casefold()] > 1 else Path(row["path"]).name),
                          row["warning"], tuple(tracks)) for row, tracks in files.values())
 
     def refresh(self, video_ids=None):
@@ -333,7 +347,7 @@ class ExternalSubtitles:
                         directories[path.parent] = []
                     except OSError as error:
                         unavailable.add(path.parent)
-                        warnings.append((path.parent, f"외부 자막: {error}"))
+                        warnings.append((path.parent, f"외부 자막: {_read_error_message(error, folder=True)}"))
                         directories[path.parent] = []
                 candidates = directories[path.parent]
                 stem = path.stem.casefold()

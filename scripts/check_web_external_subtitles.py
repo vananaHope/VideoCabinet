@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -32,6 +33,8 @@ from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.adapters import executable
 from my_video_manager.core import AppCore, MediaInfo
+from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
+from my_video_manager.translation import TranslatedLine
 from my_video_manager.ui import MainWindow
 from my_video_manager.web_contract import TABS
 from my_video_manager.web_tokens import web_tokens
@@ -40,8 +43,9 @@ app = QApplication([])
 if args.offscreen and os.name == 'nt':
     for name in ('malgun.ttf', 'malgunbd.ttf'):
         QFontDatabase.addApplicationFont(str(Path(os.environ['WINDIR']) / 'Fonts' / name))
+args.output = args.output.resolve()
 args.output.mkdir(parents=True, exist_ok=True)
-directory = Path(tempfile.mkdtemp(prefix='fixture-', dir=args.output))
+directory = Path(tempfile.mkdtemp(prefix='fixture-', dir=None if args.verify else args.output))
 checks = []
 
 
@@ -114,8 +118,20 @@ def cue(text='찾을 장면', start='00:00:12,125'):
     return f'1\n{start} --> 00:00:15,000\n{text}\n'
 
 
-core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=directory / 'library.sqlite3')
-path = directory / '영상.mp4'
+class Transcriber:
+    def transcribe(self, path, spoken_language, **kwargs):
+        return TranscriberResult('en', (TranscriptSegment(7, 9, '찾을 장면 원어'),))
+
+
+class Translator:
+    def translate(self, lines, language, **kwargs):
+        return tuple(TranslatedLine(line.id, '찾을 장면 번역') for line in lines)
+
+
+core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=directory / 'library.sqlite3',
+               transcriber=Transcriber(), translator=Translator())
+path = directory / '원본' / '영상.mp4'
+path.parent.mkdir()
 if args.verify:
     subprocess.run([executable('ffmpeg'), '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
                     '-i', 'testsrc2=size=160x90:rate=8', '-t', '60', '-c:v', 'libx264',
@@ -151,6 +167,32 @@ try:
     js(f'{section}.scrollIntoView({{block: "start"}})')
     capture('detail-languages')
 
+    smi = path.with_suffix('.smi')
+    original_smi = smi.read_bytes()
+    smi.write_text('<STYLE>.KRCC {lang:ko;} .COMMENT {lang:ko;} .ENCC {lang:en;}</STYLE>'
+                   '<SYNC Start=12125><P Class=KRCC>대사<P Class=COMMENT>해설<P Class=ENCC>English',
+                   encoding='utf-8')
+    core.scan()
+    window.refresh()
+    wait(lambda: read(f"{section}.textContent.includes('COMMENT')"))
+    assert not read(f"{section}.textContent.includes('ENCC')")
+    capture('detail-smi-multiple-tracks')
+    smi.write_bytes(original_smi)
+
+    copy = directory / '복사본' / path.name
+    copy.parent.mkdir()
+    copy.write_bytes(path.read_bytes())
+    copy.with_suffix('.smi').write_bytes(original_smi)
+    core.add_file(copy)
+    core.scan()
+    window.refresh()
+    wait(lambda: read(f"{section}.querySelectorAll('li').length === 3"))
+    titles = read(f"[...{section}.querySelectorAll('p[title]')].map(e => e.title)")
+    assert f'{smi.name} · 복사본' in titles and f'{smi.name} · 원본' in titles
+    capture('detail-duplicate-names')
+    copy.with_suffix('.smi').unlink()
+    core.scan()
+
     path.with_suffix('.broken.vtt').write_bytes(b'\xff\xfeX')
     partial = path.with_suffix('.ja.srt')
     partial.write_text(cue('부분 성공 장면') + '\n깨진 블록\n\n다른 깨진 블록', encoding='utf-8')
@@ -161,6 +203,24 @@ try:
     assert read(f"[...{section}.querySelectorAll('li')].some(e => e.textContent.includes('2개 블록') && e.textContent.includes('1줄'))")
     js(f'{section}.scrollIntoView({{block: "start"}})')
     capture('detail-warning-partial')
+
+    failed = path.with_suffix('.cause.srt')
+    failed.write_text(cue(), encoding='utf-8')
+    read_bytes = Path.read_bytes
+    def fail_read(file):
+        if file == failed:
+            raise OSError(5, '저장 장치 입출력 오류', str(failed))
+        return read_bytes(file)
+    with patch.object(Path, 'read_bytes', fail_read):
+        result = core.scan()
+    assert any('(원인: 저장 장치 입출력 오류)' in issue.message for issue in result.issues)
+    window.refresh()
+    wait(lambda: read(f"{section}.textContent.includes('(원인: 저장 장치 입출력 오류)')"))
+    assert not read(f"{section}.textContent.includes('외부 자막:')")
+    js(f"[...{section}.querySelectorAll('li')].find(e => e.textContent.includes('(원인:')).scrollIntoView({{block: 'start'}})")
+    capture('detail-warning-cause')
+    failed.unlink()
+    core.scan()
 
     long_file = path.with_name(path.stem + '.' + 'LongFileName' * 9 + '.ko.srt')
     long_file.write_text(cue('긴 이름 장면'), encoding='utf-8')
@@ -241,6 +301,15 @@ try:
     wait(lambda: read("document.activeElement.id === 'search-results'"))
     assert read("document.getElementById('search-results').getAttribute('aria-activedescendant')") == 'search-result-0'
     checks.append('외부 자막 결과 클릭 재생·Esc 선택 복귀')
+    core.request_subtitles(video.id)
+    assert core.process_next_subtitle().state == 'completed'
+    assert core.process_next_translation().state == 'completed'
+    js("(() => { const e = document.getElementById('search-query'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, '찾을 장면'); e.dispatchEvent(new Event('input', {bubbles:true})); })()")
+    wait(lambda: read("document.querySelectorAll('#search-results [role=option]').length === 5"))
+    mixed = json.loads(window.web_host.controllers['search'].bridge.snapshot())['results']
+    assert {row['source'] for row in mixed} == {'원어 자막', '번역 자막', '외부 자막'}
+    assert all(row['languageLabel'] is None for row in mixed if row['source'] != '외부 자막')
+    capture('search-mixed-sources')
     if args.verify:
         for index, (tab, _) in enumerate(TABS):
             key(Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)

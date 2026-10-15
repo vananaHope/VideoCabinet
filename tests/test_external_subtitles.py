@@ -391,7 +391,7 @@ def test_unreadable_directory_is_not_treated_as_missing(library, monkeypatch):
     core.add_file(video)
 
     def denied(path):
-        raise PermissionError("폴더 접근 거부")
+        raise PermissionError(13, "폴더 접근 거부", str(path))
 
     monkeypatch.setattr(os, "scandir", denied)
     result = core.scan()
@@ -665,3 +665,50 @@ def test_parser_exception_warning_is_readable_korean(library, content, message):
     assert message in file.warning
     assert any(message in issue.message for issue in result.issues)
     assert file.subtitles == ()
+
+
+@pytest.mark.parametrize('error,detail', [
+    (OSError(5, '저장 장치 입출력 오류', 'C:/Users/private/subtitle.srt'), '저장 장치 입출력 오류'),
+    (PermissionError(13, '액세스가 거부되었습니다', 'C:/Users/private/subtitle.srt'), '액세스가 거부되었습니다'),
+    (FileNotFoundError(2, '파일 없음', 'C:/Users/private/subtitle.srt'), '파일 없음'),
+    (OSError(5, '읽기 실패: C:/Users/private/my folder/subtitle.srt'), '읽기 실패: [경로 생략]'),
+    (OSError(5, r'읽기 실패: \\server\private\subtitle.srt'), '읽기 실패: [경로 생략]'),
+    (OSError(5, '읽기 실패: /home/private/subtitle.srt'), '읽기 실패: [경로 생략]'),
+    (OSError('C:/Users/private/subtitle.srt'), 'OSError'),
+    (TypeError('C:/Users/private/subtitle.srt'), 'TypeError'),
+])
+def test_read_failure_preserves_cause_without_private_paths(library, monkeypatch, error, detail):
+    core, video = library
+    subtitle = video.with_suffix('.srt')
+    subtitle.write_text(srt(), encoding='utf-8')
+    original = Path.read_bytes
+
+    def read(path):
+        if path == subtitle:
+            raise error
+        return original(path)
+
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    result = core.add_file(video)
+    warning = core.external_subtitles(core.videos()[0].id)[0].warning
+    assert f'(원인: {detail})' in warning
+    assert 'private' not in warning
+    assert any(issue.message == warning for issue in result.issues)
+
+
+def test_directory_failure_uses_same_safe_cause_message(library, monkeypatch):
+    core, video = library
+    core.add_file(video)
+    original = os.scandir
+
+    def scan(path):
+        if Path(path) == video.parent:
+            raise OSError(5, '저장 장치 오류', str(video.parent))
+        return original(path)
+
+    monkeypatch.setattr(os, 'scandir', scan)
+    result = core.scan()
+    issue, = [issue for issue in result.issues if issue.message.startswith('외부 자막:')]
+    assert '자막 폴더를 읽지 못했습니다' in issue.message
+    assert '(원인: 저장 장치 오류)' in issue.message
+    assert str(video.parent) not in issue.message
