@@ -366,8 +366,8 @@ def test_restart_uses_existing_safe_shutdown_and_aborted_shutdown_does_not_resta
 
 @pytest.mark.parametrize('operation', ['create', 'schedule', 'cancel', 'refresh', 'choose'])
 @pytest.mark.parametrize('code, phrase', [(errno.EACCES, '권한'), (errno.ENOSPC, '공간'),
-                                         (errno.EBUSY, '사용 중'), (errno.ENOENT, '저장 장치'),
-                                         (32, '사용 중'), (33, '사용 중'), (112, '공간')])
+                                         (errno.EBUSY, '사용 중'), (errno.ENOENT, '찾을 수 없습니다'),
+                                         (5, '사용 중'), (32, '사용 중'), (33, '사용 중'), (112, '공간')])
 def test_os_errors_have_actionable_messages_without_internal_paths(window_factory, core, tmp_path, monkeypatch, operation, code, phrase):
     archive = core.create_backup(tmp_path / 'source.zip').path
     bridge = bridge_for(window_factory())
@@ -377,7 +377,7 @@ def test_os_errors_have_actionable_messages_without_internal_paths(window_factor
         action(bridge, 'choose')
     def fail(*args, **kwargs):
         error = OSError(code, 'raw OS failure', str(tmp_path / '.backup-private' / 'backup.zip'))
-        if code in (32, 33, 112):
+        if code in (5, 32, 33, 112):
             error.winerror = code
         raise error
     if operation == 'choose':
@@ -390,7 +390,21 @@ def test_os_errors_have_actionable_messages_without_internal_paths(window_factor
     result = action(bridge, operation)
     assert phrase in result['failure']
     assert not result['busy']
+    assert f'오류 코드 {code}' in result['failure']
     assert all(raw not in result['failure'] for raw in ('[Errno', '[WinError', '.backup-', 'raw OS'))
+
+
+def test_recovery_startup_error_is_not_a_backup_error(core, tmp_path):
+    from my_video_manager.backup_recovery import BackupRecoveryDialog
+    error = PermissionError(errno.EACCES, 'Access is denied', str(tmp_path / 'private'))
+    dialog = BackupRecoveryDialog(core.database, None, error)
+    try:
+        startup = dialog.message.text().split('시작 오류: ')[1]
+        assert startup == '라이브러리를 열지 못했습니다. Access is denied'
+        assert str(tmp_path) not in startup
+        assert '백업' not in startup
+    finally:
+        dialog.close()
 
 
 @pytest.mark.parametrize('next_status', [None, 'applied', 'rejected'])

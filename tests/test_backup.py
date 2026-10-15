@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 import time
 from types import SimpleNamespace
 import zipfile
@@ -18,6 +20,7 @@ from PySide6.QtCore import QLockFile
 from my_video_manager.backup import (
     AUTO_BACKUP_KEEP, BackupError, BackupBusyError, BackupStorageError, MAX_BACKUP_RESTARTS,
     apply_pending_backup_restore, backup_before_migration,
+    backup_error_message,
     create_automatic_backup, create_backup, inspect_backup, request_backup_restore,
 )
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
@@ -27,6 +30,86 @@ from my_video_manager.translation import TranslatedLine
 
 
 NOW = datetime(2026, 10, 15, tzinfo=timezone.utc)
+
+
+def test_missing_backup_is_distinct_from_unavailable_device(tmp_path):
+    with pytest.raises(FileNotFoundError) as caught:
+        inspect_backup(tmp_path / 'removed.zip')
+    message = backup_error_message(caught.value)
+    assert '찾을 수 없습니다' in message and '지워졌거나 옮겨졌습니다' in message
+    assert '저장 장치' not in message
+    assert str(tmp_path) not in message
+    assert '저장 장치' in backup_error_message(OSError(errno.ENODEV, 'device removed'))
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows 파일 공유 및 ACL 동작')
+def test_open_destination_reports_usage_and_permissions(core, tmp_path, caplog):
+    destination = tmp_path / 'opened.zip'
+    destination.write_bytes(b'original')
+    with destination.open('rb'):
+        with pytest.raises(OSError) as caught:
+            core.create_backup(destination)
+    message = backup_error_message(caught.value)
+    assert '사용 중' in message and '권한' in message and '프로그램을 닫고' in message
+    assert f'오류 코드 {caught.value.winerror}' in message
+    assert str(tmp_path) not in message
+    assert str(caught.value) in caplog.text
+    assert destination.read_bytes() == b'original'
+    assert not list(tmp_path.glob('.backup-*'))
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows 파일 공유 및 ACL 동작')
+@pytest.mark.parametrize('operation', ['create', 'automatic', 'request', 'apply'])
+def test_directory_creation_denied_finishes_promptly(core, tmp_path, operation):
+    archive = core.create_backup(tmp_path / 'source.zip').path
+    database = core.database
+    if operation == 'apply':
+        core.request_backup_restore(archive)
+    directory = (tmp_path / 'destination' if operation == 'create' else
+                 database.parent / 'backups' if operation == 'automatic' else database.parent)
+    directory.mkdir(exist_ok=True)
+    # AD denies only child-directory creation; ordinary file creation still works.
+    user = os.environ['USERNAME']
+    script = '''
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from PySide6.QtCore import QLockFile
+from my_video_manager.backup import *
+database, archive, directory = map(Path, sys.argv[1:4])
+operation = sys.argv[4]
+try:
+    if operation == 'create': create_backup(database, directory / 'out.zip')
+    elif operation == 'automatic': create_automatic_backup(database)
+    elif operation == 'request': request_backup_restore(database, archive)
+    else:
+        lock_path = database.parent / 'acl-test.lock'
+        lock = QLockFile(str(lock_path))
+        assert lock.tryLock(0)
+        try:
+            result = apply_pending_backup_restore(database, instance=SimpleNamespace(lock=lock, lock_path=lock_path))
+            assert result.status == 'deferred'
+            assert '권한' in result.error_message and '사용 중' in result.error_message
+            assert '오류 코드 5' in result.error_message
+        finally: lock.unlock()
+except OSError as error:
+    message = backup_error_message(error)
+    assert '권한' in message and '오류 코드 5' in message
+else:
+    assert operation == 'apply', '백업 작업이 거부 ACL을 무시했습니다'
+'''
+    try:
+        subprocess.run(['icacls', str(directory), '/deny', f'{user}:(AD)'], check=True, capture_output=True)
+        probe = directory / 'file-creation-allowed'
+        probe.write_bytes(b'ok')
+        probe.unlink()
+        completed = subprocess.run([sys.executable, '-c', script, str(database), str(archive),
+                                    str(directory), operation], capture_output=True, timeout=10)
+        assert completed.returncode == 0, completed.stderr.decode(errors='replace')
+    finally:
+        subprocess.run(['icacls', str(directory), '/remove:d', user], check=True, capture_output=True)
+    assert not list(directory.glob('.backup-*'))
+    assert not list(directory.glob('.restore-*'))
 
 
 class Media:

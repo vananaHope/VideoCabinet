@@ -1,12 +1,13 @@
 """라이브러리 스냅샷과 다음 시작 시 백업 복원. 화면이나 실행 중 코어를 소유하지 않는다."""
 
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import errno
 import hashlib
 from importlib.metadata import version
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -55,22 +56,32 @@ class BackupStorageError(OSError):
 
     def __init__(self, code, message, kind):
         self.kind = kind
+        if code is not None and '오류 코드' not in message:
+            message += f" (오류 코드 {code})"
         super().__init__(code, message)
 
 
 def _storage_error(error):
     if isinstance(error, BackupStorageError):
         return error
+    logging.getLogger(__name__).warning("백업 저장 작업 실패: %s", error, exc_info=error)
+    code = getattr(error, "winerror", None) or getattr(error, "errno", None)
+    def failure(message, kind):
+        if code is not None:
+            message += f" (오류 코드 {code})"
+        return BackupStorageError(getattr(error, "errno", None), message, kind)
     if getattr(error, "errno", None) == errno.ENOSPC or getattr(error, "winerror", None) == 112:
-        return BackupStorageError(errno.ENOSPC, "백업 공간이 부족합니다. 저장 공간을 확보한 뒤 다시 시도하세요.", "disk_full")
+        return failure("백업 공간이 부족합니다. 저장 공간을 확보한 뒤 다시 시도하세요.", "disk_full")
     if getattr(error, "winerror", None) in (32, 33) or getattr(error, "errno", None) == errno.EBUSY:
-        return BackupStorageError(errno.EACCES, "백업 복원 파일 또는 DB가 사용 중이거나 접근할 수 없습니다. "
-                                  "파일을 사용하는 프로그램을 닫고 접근 권한을 확인하세요.", "file_in_use")
-    if isinstance(error, PermissionError) or getattr(error, "errno", None) in (errno.EACCES, errno.EPERM):
-        return BackupStorageError(errno.EACCES, "백업 파일 또는 폴더에 접근할 권한이 없습니다. "
-                                  "읽기 전용 설정과 접근 권한을 확인하세요.", "file_in_use")
-    return BackupStorageError(getattr(error, "errno", None),
-                              "백업 저장 장치에 접근할 수 없습니다. 연결과 쓰기 권한을 확인하세요.", "storage_error")
+        return failure("백업 파일 또는 DB가 사용 중입니다. 파일을 사용하는 프로그램을 닫고 다시 시도하세요.", "file_in_use")
+    if (isinstance(error, PermissionError) or getattr(error, "winerror", None) == 5
+            or getattr(error, "errno", None) in (errno.EACCES, errno.EPERM)):
+        return failure("다른 프로그램이 파일을 사용 중이거나 접근 권한이 없습니다. "
+                       "파일을 연 프로그램을 닫고 읽기 전용 설정과 권한을 확인하세요.", "file_in_use")
+    if isinstance(error, FileNotFoundError):
+        return failure("백업 파일이나 폴더를 찾을 수 없습니다(지워졌거나 옮겨졌습니다). "
+                       "위치를 확인하거나 목록을 새로고침하세요.", "storage_error")
+    return failure("백업 저장 장치에 접근할 수 없습니다. 연결과 쓰기 권한을 확인하세요.", "storage_error")
 
 
 def backup_error_message(error):
@@ -80,6 +91,18 @@ def backup_error_message(error):
     if isinstance(error, OSError):
         return _storage_error(error).strerror
     return str(error)
+
+
+@contextmanager
+def _staging_directory(parent, prefix, *, ignore_cleanup_errors=False):
+    # Windows tempfile.mkdtemp retries PermissionError when os.access misses an ACL.
+    # A UUID collision or denied mkdir must fail promptly instead of retrying.
+    stage = parent / f"{prefix}{uuid4().hex}"
+    stage.mkdir()
+    try:
+        yield stage
+    finally:
+        shutil.rmtree(stage, ignore_errors=ignore_cleanup_errors)
 
 
 @dataclass(frozen=True)
@@ -181,7 +204,7 @@ def create_backup(database: Path, destination: Path, *, include_thumbnails=False
         raise BackupError("백업 파일의 확장자는 .zip이어야 합니다.")
     if destination == database or destination == pending_backup_restore_path(database):
         raise BackupError("라이브러리 또는 백업 복원 요청을 백업 대상으로 쓸 수 없습니다.")
-    with tempfile.TemporaryDirectory(prefix=".backup-", dir=destination.parent) as temporary:
+    with _staging_directory(destination.parent, ".backup-") as temporary:
         stage = Path(temporary)
         snapshot = stage / DATABASE_NAME
         elapsed, max_step, restarts = _snapshot(database, snapshot)
@@ -295,7 +318,7 @@ def pending_backup_restore_path(database: Path) -> Path:
 def request_backup_restore(database: Path, archive: Path) -> BackupRestoreResult:
     """원본 ZIP이 이동되어도 유지되는 검증된 사본 하나를 원자적으로 예약한다."""
     database = Path(database).resolve()
-    with tempfile.TemporaryDirectory(prefix=".restore-request-", dir=database.parent) as temporary:
+    with _staging_directory(database.parent, ".restore-request-") as temporary:
         candidate = Path(temporary) / "pending.zip"
         shutil.copyfile(archive, candidate)
         metadata = inspect_backup(candidate)
@@ -456,8 +479,7 @@ def _apply_backup_restore(database: Path) -> BackupRestoreResult:
     consumed = pending.with_name(pending.name + ".applying")
     committed = False
     try:
-        with tempfile.TemporaryDirectory(prefix=".restore-", dir=database.parent,
-                                         ignore_cleanup_errors=True) as temporary:
+        with _staging_directory(database.parent, ".restore-", ignore_cleanup_errors=True) as temporary:
             stage = Path(temporary)
             metadata = _extract_checked(pending, stage)
             snapshot = stage / DATABASE_NAME

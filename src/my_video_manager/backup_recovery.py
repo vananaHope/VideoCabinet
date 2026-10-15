@@ -21,7 +21,8 @@ class BackupRecoveryDialog(QDialog):
         layout.addWidget(title)
         guidance = ((result.error_message or '') + '\n' + result.guidance if result is not None else
                     '예약된 백업 복원이 없습니다. 현재 라이브러리를 열 수 없는 원인을 해결한 뒤 다시 시도하세요.')
-        self.message = QLabel(guidance + '\n\n시작 오류: ' + backup_error_message(error))
+        startup_error = error.strerror if isinstance(error, OSError) and error.strerror else str(error)
+        self.message = QLabel(guidance + '\n\n시작 오류: 라이브러리를 열지 못했습니다. ' + startup_error)
         self.message.setWordWrap(True)
         self.message.setTextFormat(Qt.TextFormat.PlainText)
         self.message.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
