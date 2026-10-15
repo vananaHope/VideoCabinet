@@ -61,7 +61,7 @@ export default function QueuePage() {
     setTab(value)
     if (value === "rules" && bridge) request<QueueRulesData>(reply => bridge.rulesSnapshot(reply)).then(setRules).catch(showError)
   }
-  return <main className="flex h-full min-h-0 flex-col gap-4 p-6">
+  return <main className="flex h-full min-h-0 flex-col gap-3 p-4">
     <PageHeader title="자막 대기열" />
     <Tabs label="대기열 영역" value={tab} onChange={changeTab} items={[{ value: "status", label: "처리 상태" }, { value: "rules", label: "자동 자막 규칙" }]} />
     {error && <p role="alert" className="shrink-0 text-sm text-destructive">{error}</p>}

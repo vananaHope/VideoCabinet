@@ -152,7 +152,7 @@ def check_chart(index, values, *, count=False, labels=None):
       }};
     }})())"""))
     maximum = max(values)
-    divisor = 1 if count else 3600 if maximum >= 3600 else 60 if maximum >= 60 else 1
+    divisor = 1 if count else 3600 if maximum >= 7200 else 60 if maximum >= 60 else 1
     axis_max = max(chart['ticks']) * divisor
     assert chart['role'] == 'figure' and chart['name']
     assert min(chart['ticks']) == 0 and axis_max >= maximum, (index, chart)

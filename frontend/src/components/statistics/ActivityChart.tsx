@@ -1,10 +1,10 @@
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
-import { exactDuration } from "./DailyChart"
+import { exactDuration, timeDivisor } from "./DailyChart"
 
 export function ActivityChart({ values, labels, title, tickStep = 1 }: { values: number[]; labels: string[]; title: string; tickStep?: number }) {
   const maximum = Math.max(...values, 0)
-  const divisor = maximum >= 3600 ? 3600 : maximum >= 60 ? 60 : 1
+  const divisor = timeDivisor(maximum)
   const unit = divisor === 3600 ? "시간" : divisor === 60 ? "분" : "초"
   const data = values.map((seconds, index) => ({ label: labels[index], seconds: seconds / divisor }))
   return <section className="min-w-0 space-y-3 rounded-xl border bg-card p-5"><h2 className="text-lg font-semibold">{title}</h2><p className="text-xs text-muted-foreground">단위: {unit} · 시청 시작 시각에 전량 배정</p><ChartContainer label={title} config={{ seconds: { label: "시청 시간", color: "var(--primary-text)" } }}>

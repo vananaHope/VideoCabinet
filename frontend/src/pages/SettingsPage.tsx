@@ -37,7 +37,7 @@ export default function SettingsPage() {
     if (bridge) request(reply => bridge.action(name, reply)).catch(error => setError(String(error)))
   }
   if (!data || !bridge || !shell) return <p role="status" className="p-6">{error || '설정을 불러오는 중…'}</p>
-  return <main className="flex h-full min-h-0 flex-col gap-4 p-6" aria-label="설정">
+  return <main className="flex h-full min-h-0 flex-col gap-3 p-4" aria-label="설정">
     <PageHeader title="설정" description="키 배치와 라이브러리 설정을 한곳에서 관리합니다. Alt+S 또는 Ctrl+7로 엽니다." />
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <div className="flex min-h-0 flex-1 gap-6">

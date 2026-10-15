@@ -81,7 +81,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     const next = [...form.members]; [next[index], next[target]] = [next[target], next[index]]; update({ members: next })
   }
   return <DialogFrame title={data.title} description={data.description} onClose={() => { if (!data.confirmation) void act('close') }} composing={composing} onSize={onSize} wide={['review', 'series', 'highlights'].includes(kind)}>
-    <div ref={content} className="min-h-0 space-y-4" onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
+    <div ref={content} className="flex min-h-0 flex-col gap-4" onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
       onKeyDown={event => {
         if (editable && event.target instanceof HTMLInputElement && event.target.type !== 'checkbox'
           && event.key === 'Enter' && !composing.current && !event.nativeEvent.isComposing && event.keyCode !== 229
@@ -94,7 +94,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {kind === 'series' && <>
         <Choice label="시리즈" rows={data.choices} value={form.choice} onChange={choice => void act('choose', { choice })} />
         <Input aria-label="시리즈 이름" placeholder="시리즈 이름" value={form.name} onChange={event => update({ name: event.target.value })} />
-        <div className="flex min-w-0 gap-3"><DialogList label="시리즈 영상 순서" rows={members} selected={member} onSelect={setMember} />
+        <div className="flex min-h-0 min-w-0 gap-3"><DialogList label="시리즈 영상 순서" rows={members} selected={member} onSelect={setMember} />
           <div className="flex shrink-0 flex-col justify-center gap-2">
             <Button variant="outline" disabled={!others.some(row => row.id === available)} onClick={() => { update({ members: [...form.members, available] }); setMember(available); setAvailable(others.find(row => row.id !== available)?.id ?? '') }}>← 넣기</Button>
             <Button variant="outline" disabled={!form.members.includes(member)} onClick={() => { update({ members: form.members.filter(id => id !== member) }); setAvailable(member); setMember(form.members.find(id => id !== member) ?? '') }}>빼기 →</Button>
@@ -116,11 +116,12 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {data.warning && <p role="status" className="whitespace-pre-wrap text-sm text-destructive">{data.warning}</p>}
       {error && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-destructive">{error}</p>}
     </div>
+    {/* 선택한 행에 대한 작업은 왼쪽, 대화상자를 끝내는 닫기·취소 → 주 작업은 오른쪽 끝에 둔다. 순서는 그대로다. */}
     <footer className="flex flex-wrap justify-end gap-2">
-      {kind === 'tags' && <>{button('선택한 태그 떼기', 'remove', !currentSelected)}{button('모든 태그 관리', 'manage')}</>}
-      {kind === 'tag-manager' && <>{button('이름 변경', 'rename', !currentSelected, 'default')}{button('태그 삭제', 'delete', !currentSelected, 'destructive')}</>}
-      {kind === 'highlights' && <>{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</>}
-      {kind === 'review' && <>{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button('번역 줄 수정', 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button('번역 SRT 저장', 'export-translation', !data.rows.length)}</>}
+      {kind === 'tags' && <div className="mr-auto flex flex-wrap gap-2">{button('선택한 태그 떼기', 'remove', !currentSelected)}{button('모든 태그 관리', 'manage')}</div>}
+      {kind === 'tag-manager' && <div className="mr-auto flex flex-wrap gap-2">{button('이름 변경', 'rename', !currentSelected, 'default')}{button('태그 삭제', 'delete', !currentSelected, 'destructive')}</div>}
+      {kind === 'highlights' && <div className="mr-auto flex flex-wrap gap-2">{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</div>}
+      {kind === 'review' && <div className="mr-auto flex flex-wrap gap-2">{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button('번역 줄 수정', 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button('번역 SRT 저장', 'export-translation', !data.rows.length)}</div>}
       {button(editable ? '취소' : '닫기', 'close')}
       {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'translation' ? '확인' : '저장', 'save', data.locked || kind === 'range' && !!data.warning, kind === 'range' ? 'destructive' : 'default')}
     </footer>

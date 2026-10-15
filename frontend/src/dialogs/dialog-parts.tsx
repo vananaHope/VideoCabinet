@@ -22,7 +22,7 @@ export function DialogFrame({ title, description, children, onClose, composing, 
       onEscapeKeyDown={event => {
         if (composing.current || content?.querySelector('[role="combobox"][aria-expanded="true"]')) event.preventDefault()
       }}>
-      <header className="space-y-2"><Dialog.Title className="text-xl font-semibold">{title}</Dialog.Title>
+      <header className="space-y-2"><Dialog.Title className="text-lg font-semibold">{title}</Dialog.Title>
         <Dialog.Description className="text-sm text-muted-foreground">{description || '입력한 내용을 확인한 뒤 저장하세요.'}</Dialog.Description></header>
       {children}
     </Dialog.Content>
@@ -39,10 +39,11 @@ export function DialogList({ label, rows, selected, onSelect, onActivate, review
   review?: boolean; highlights?: boolean; clickActivates?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  return <div className="min-h-0 min-w-0 flex-1">
+  // 목록은 대화상자 최대 높이 안에서 남는 공간을 쓴다. 재생 중 컨테이너의 상한은 dialogs.css가 정한다.
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <p className="mb-2 text-sm font-medium">{label} · {rows.length}</p>
     <div ref={ref} role="listbox" aria-label={label} tabIndex={0} aria-activedescendant={selected ? `${label}-${selected}` : undefined}
-      className="max-h-72 min-h-24 overflow-auto rounded-md border focus-visible:outline-2 focus-visible:outline-ring"
+      data-dialog-list className="min-h-24 flex-1 overflow-auto rounded-md border focus-visible:outline-2 focus-visible:outline-ring"
       onKeyDown={event => {
         if (event.nativeEvent.isComposing || event.keyCode === 229) return
         const index = rows.findIndex(row => row.id === selected)

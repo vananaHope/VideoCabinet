@@ -4,7 +4,10 @@ import { queueStates } from "@/bridge-types"
 import { StatusBadge } from "@/components/page-parts"
 import { QueueStore } from "./queue-store"
 
-const rowClass = cva("grid grid-cols-4 items-center gap-4 border-b px-4 py-3 text-sm", { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
+// 열 비율은 영상 2 : 상태 1 : 진행률 1 : 안내 2로 두어 긴 안내가 일찍 잘리지 않게 한다.
+const columns = "grid grid-cols-6 gap-3 px-3"
+const wide = "col-span-2 min-w-0"
+const rowClass = cva(`${columns} items-center border-b py-1 text-sm`, { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
 const labels = Object.fromEntries(queueStates)
 const listClass = cva("min-h-0 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border" } } })
 const badges = { completed: "success", failed: "destructive", transcribing: "info", translating: "info", held: "highlight", queued: "muted" } as const
@@ -14,10 +17,10 @@ const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { sto
   const row = useSyncExternalStore(subscribe, () => store.rows.get(id))
   if (!row) return null
   return <div id={`queue-row-${id}`} role="row" aria-selected={selected} data-queue-row={id} className={rowClass({ selected })} onClick={() => onSelect(id)}>
-    <div role="gridcell" title={row.title} className="min-w-0 truncate font-medium">{row.title}</div>
+    <div role="gridcell" title={row.title} className={`${wide} truncate font-medium`}>{row.title}</div>
     <div role="gridcell"><StatusBadge variant={badges[row.state as keyof typeof badges]}>{labels[row.state]}</StatusBadge></div>
     <div role="gridcell" className="flex min-w-0 items-center gap-2"><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="progressbar" aria-label={`${row.title} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(row.progress * 100)} className="h-2 w-full rounded-full bg-muted"><rect width={Math.max(0, Math.min(100, row.progress * 100))} height={8} className="fill-primary" /></svg><span className="text-xs tabular-nums">{Math.round(row.progress * 100)}%</span></div>
-    <div role="gridcell" title={row.message} className="min-w-0 truncate text-muted-foreground">{row.message}</div>
+    <div role="gridcell" title={row.message} className={`${wide} truncate text-muted-foreground`}>{row.message}</div>
   </div>
 })
 
@@ -39,7 +42,7 @@ export function QueueList({ store, ids, selected, onSelect, emptyState }: { stor
     document.getElementById(`queue-row-${ids[next]}`)?.scrollIntoView({ block: "nearest" })
   }
   return <div id="queue-list" role={ids.length ? "grid" : "region"} aria-label="자막 대기열" aria-activedescendant={selected === null ? undefined : `queue-row-${selected}`} tabIndex={0} onKeyDown={keyDown} className={listClass({ empty: !ids.length })}>
-    {!ids.length ? emptyState : <div role="row" className="sticky top-0 z-10 grid grid-cols-4 gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">{["영상", "상태", "진행률", "안내"].map(label => <div key={label} role="columnheader">{label}</div>)}</div>}
+    {!ids.length ? emptyState : <div role="row" className={`${columns} sticky top-0 z-10 border-b bg-muted py-1.5 text-xs text-muted-foreground`}>{["영상", "상태", "진행률", "안내"].map(label => <div key={label} role="columnheader" className={label === "영상" || label === "안내" ? wide : undefined}>{label}</div>)}</div>}
     {ids.map(id => <QueueRow key={id} store={store} id={id} selected={id === selected} onSelect={onSelect} />)}
   </div>
 }
