@@ -5,7 +5,7 @@ import { ResponsiveContainer, Tooltip } from "recharts"
 export type ChartConfig = Record<string, { label: string; color: string }>
 const ChartContext = createContext<ChartConfig>({})
 export function ChartContainer({ config, children, label }: { config: ChartConfig; children: ComponentProps<typeof ResponsiveContainer>["children"]; label: string }) {
-  return <ChartContext.Provider value={config}><div data-slot="chart" aria-label={label} className="h-48 w-full min-w-0 text-xs">
+  return <ChartContext.Provider value={config}><div data-slot="chart" role="figure" aria-label={label} className="h-48 w-full min-w-0 text-xs">
     <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 600, height: 192 }}>{children}</ResponsiveContainer>
   </div></ChartContext.Provider>
 }

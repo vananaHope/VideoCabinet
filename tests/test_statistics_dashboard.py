@@ -6,7 +6,7 @@ import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
 from test_statistics import library, watch, NOW, KST, UTC
-from test_translation import setup, source
+from test_translation import setup, source, finish
 
 
 @pytest.mark.parametrize('days', [7, 30, 90, 365])
@@ -97,6 +97,76 @@ def test_dashboard_partial_korean_translation_and_original_language(setup):
     assert core.statistics_dashboard(7).inventory.korean_subtitled_count == 2
 
 
+def test_dashboard_korean_translation_tracks_pending_partial_completed_and_replacement(setup):
+    core, _, _, _, _ = setup
+    a, b = core.videos()
+    source(core, a.id, 'en')
+    source(core, b.id, 'ja')
+
+    def check(expected):
+        # 한국어 집계는 기존 공개 상세의 번역 줄 유무와 같아야 한다.
+        assert sum(core.library_details(v.id).translated_lines > 0 for v in (a, b)) == expected
+        assert core.statistics_dashboard(7).inventory.korean_subtitled_count == expected
+
+    check(0)  # 대상 행만 존재하며 아직 text가 NULL인 상태
+    core.process_next_translation()
+    assert core.translation(a.id) is None
+    check(1)  # 확정 번역 없이 대상 행에만 두 줄이 저장됨
+    finish(core)
+    assert core.translation(a.id) is not None and core.translation(b.id) is not None
+    check(2)  # 대기열 없이 확정 번역만 존재
+    core.request_translation(a.id)
+    check(2)  # 재번역 대기/부분 번역과 기존 확정 번역은 중복 집계하지 않음
+    core.process_next_translation()
+    check(2)
+    core.exclude_video(b.id)
+    assert core.statistics_dashboard(7).inventory.korean_subtitled_count == 1
+
+
+@pytest.mark.parametrize('write_kind', ['viewing', 'subtitle'])
+def test_dashboard_inventory_does_not_hold_viewing_snapshot_lock(setup, monkeypatch, write_kind):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, get_ident
+    import sqlite3
+
+    core, _, _, _, _ = setup
+    a, b = core.videos()
+    source(core, a.id, 'en')
+    # 스냅샷에 읽을 행이 있어야 구 버전에서도 읽기 잠금을 잡는다.
+    watch(core, a.id, 20)
+    paused, resume = Event(), Event()
+    original_connect = sqlite3.connect
+    main_thread = get_ident()
+
+    def connect(*args, **kwargs):
+        kwargs['timeout'] = 0.05
+        connection = original_connect(*args, **kwargs)
+        def trace(sql):
+            if get_ident() != main_thread and "spoken_language = 'ko'" in sql:
+                paused.set()
+                assert resume.wait(10)
+        connection.set_trace_callback(trace)
+        return connection
+
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(core.statistics_dashboard, 7)
+        try:
+            assert paused.wait(10)
+            if write_kind == 'viewing':
+                watch(core, b.id, 40)
+            else:
+                assert core.process_next_translation().completed_lines == 2
+        finally:
+            resume.set()
+        # 시청 수치는 조회 시점에 고정되고 현황 조회 동안의 저장은 완료된다.
+        assert pending.result(timeout=10).period.watched_seconds == 20
+    if write_kind == 'viewing':
+        assert core.statistics_dashboard(7).period.watched_seconds == 60
+    else:
+        assert core.statistics_dashboard(7).inventory.korean_subtitled_count == 1
+
+
 def test_dashboard_duration_boundaries_and_container_names(tmp_path):
     class Media:
         def read(self, path):
@@ -145,4 +215,4 @@ def test_dashboard_query_count_does_not_grow_with_library(library, tmp_path, mon
         core.add_file(path)
     statements.clear()
     core.statistics_dashboard(365)
-    assert sum(sql.startswith('SELECT') for sql in statements) == before == 8
+    assert sum(sql.startswith('SELECT') for sql in statements) == before == 10

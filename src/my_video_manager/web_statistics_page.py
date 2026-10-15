@@ -39,9 +39,15 @@ class _Calculation(QRunnable):
         try:
             data = asdict(self.core.statistics_dashboard(self.days))
         except Exception as error:
-            self.result.completed.emit(self.generation, None, str(error))
+            data, message = None, str(error)
         else:
-            self.result.completed.emit(self.generation, data, '')
+            message = ''
+        try:
+            self.result.completed.emit(self.generation, data, message)
+        except RuntimeError:
+            # QApplication 종료는 실행 중인 작업자의 신호 객체를 먼저 지울 수 있다.
+            # 계산 결과를 기다리며 UI 종료를 막지 않고 더 이상 받을 수 없는 결과를 버린다.
+            pass
 
 
 class WebStatisticsPage(WebPageController):
@@ -86,7 +92,6 @@ class WebStatisticsPage(WebPageController):
         if not self._pending:
             return
         self.loading, self.message = True, ''
-        self.result = None
         self._publish()
         self._timer.start()
 
@@ -100,7 +105,9 @@ class WebStatisticsPage(WebPageController):
     def _completed(self, generation, result, message):
         self._running = False
         if generation == self._generation and self.is_active():
-            self.result, self.message, self.loading = result, message, False
+            if result is not None:
+                self.result = result
+            self.message, self.loading = message, False
             self._publish()
         if self._pending and self.is_active():
             self._timer.start()

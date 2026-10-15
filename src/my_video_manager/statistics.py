@@ -126,6 +126,8 @@ class _LocalDates:
                 return self.dates[0] - timedelta(days=1)
         if isinstance(value, str):
             value = datetime.fromisoformat(value)
+        # 같은 행의 요일·시간대 집계에서도 이미 파싱한 시작 시각을 사용한다.
+        self.parsed = value
         if self.tz is None and not self.system_local:
             return value.date()
         if self.tz is not None and (value.tzinfo is None or value.tzinfo is self.tz):
@@ -183,7 +185,7 @@ def _period_statistics(records, videos, days, today, local_date, settings, activ
         day = local_date(viewing.started_at)
         if start <= day <= today:
             if activity is not None:
-                activity.in_period(viewing, day)
+                activity.in_period(viewing, day, local_date.parsed)
             offset = (day - start).days
             seconds = viewing.played_seconds
             daily_seconds[offset] += seconds
@@ -236,10 +238,7 @@ class _Activity:
         if kind != ViewingKind.GLANCE:
             self.watched_seconds += viewing.played_seconds
 
-    def in_period(self, viewing, day):
-        started = viewing.started_at
-        if isinstance(started, str):
-            started = datetime.fromisoformat(started)
+    def in_period(self, viewing, day, started):
         if started.tzinfo is None and self.tz is not None:
             started = started.replace(tzinfo=self.tz)
         local = started.astimezone(self.tz)
@@ -311,18 +310,15 @@ class StatisticsReader:
         now = now.astimezone(tz)
         with self._connect() as db:
             db.execute('BEGIN')
+            video_rows = db.execute('SELECT id, title, registered_at, excluded, duration, format FROM videos').fetchall()
+            snapshot = self._viewings.read_rows(connection=db)
+        # 현황은 시청 스냅샷과 별개다. 명시적 BEGIN 없이 각 fetch 직후 읽기 잠금을
+        # 풀어 시청·자막 작업자의 커밋이 여러 현황 쿼리 전체를 기다리지 않게 한다.
+        with self._connect() as db:
             locations = db.execute('SELECT video_id, MAX(CASE WHEN size >= 0 THEN size END) FROM locations GROUP BY video_id').fetchall()
             transcripts = db.execute('SELECT video_id FROM transcripts').fetchall()
             highlights = db.execute('SELECT video_id, COUNT(*) FROM highlights GROUP BY video_id').fetchall()
-            video_rows = db.execute('SELECT id, title, registered_at, excluded, duration, format FROM videos').fetchall()
-            snapshot = self._viewings.read_rows(connection=db)
-            # LibraryDetails의 TranslationSummary와 같은 확정/현재 요청의 부분 번역 규칙.
-            korean_rows = db.execute("""SELECT t.video_id FROM transcripts t WHERE t.spoken_language = 'ko'
-                OR EXISTS (SELECT 1 FROM transcript_lines l
-                           LEFT JOIN translation_lines tr ON tr.line_id = l.id
-                           LEFT JOIN translation_queue q ON q.video_id = t.video_id
-                           LEFT JOIN translation_targets target ON target.queue_id = q.id AND target.line_id = l.id
-                           WHERE l.transcript_id = t.id AND COALESCE(tr.text, target.text) IS NOT NULL)""").fetchall()
+            korean = self._korean_subtitled(db)
             tagged_rows = db.execute('SELECT DISTINCT video_id FROM video_tags').fetchall()
             revisited_rows = db.execute('SELECT DISTINCT h.video_id FROM revisits r JOIN highlights h ON h.id = r.highlight_id').fetchall()
         # 모든 fetch와 진행분 복사를 마친 뒤 읽기 트랜잭션을 닫고 파싱한다.
@@ -336,6 +332,31 @@ class StatisticsReader:
         activity = _Activity(tz)
         period = _period_statistics(snapshot.records(), videos, days, now.date(),
                                     _LocalDates(tz, system_local=tz is None), self._viewings.settings, activity)
-        inventory = _inventory(video_rows, sizes, {r[0] for r in korean_rows}, highlight_counts,
+        inventory = _inventory(video_rows, sizes, korean, highlight_counts,
                                {r[0] for r in tagged_rows}, {r[0] for r in revisited_rows}, activity)
         return StatisticsDashboard(period, tuple(activity.weekdays), tuple(activity.hours), inventory)
+
+    @staticmethod
+    def _korean_subtitled(db):
+        # LibraryDetails의 TranslationSummary와 같은 확정/현재 요청의 부분 번역 규칙.
+        # 번역 행에서 출발하되 큰 번역 테이블도 한 번에 잠그지 않는다. 각 fetch 후
+        # autocommit 읽기가 끝나므로 기다리는 시청·자막 쓰기가 다음 묶음 전에 진행된다.
+        korean = {row[0] for row in db.execute(
+            "SELECT video_id FROM transcripts WHERE spoken_language = 'ko'").fetchall()}
+        queries = (
+            ('translation_lines', """SELECT DISTINCT t.video_id FROM translation_lines g
+                JOIN transcript_lines l ON l.id = g.line_id
+                JOIN transcripts t ON t.id = l.transcript_id
+                WHERE g.rowid > ? AND g.rowid <= ?"""),
+            ('translation_targets', """SELECT DISTINCT q.video_id FROM translation_targets g
+                JOIN translation_queue q ON q.id = g.queue_id
+                JOIN transcripts t ON t.video_id = q.video_id
+                JOIN transcript_lines l ON l.id = g.line_id AND l.transcript_id = t.id
+                WHERE g.rowid > ? AND g.rowid <= ? AND g.text IS NOT NULL"""),
+        )
+        for table, query in queries:
+            last_rowid = db.execute(f'SELECT COALESCE(MAX(rowid), 0) FROM {table}').fetchone()[0]
+            for lower in range(0, last_rowid, 10000):
+                rows = db.execute(query, (lower, lower + 10000)).fetchall()
+                korean.update(row[0] for row in rows)
+        return korean

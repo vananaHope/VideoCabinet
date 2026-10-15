@@ -10,10 +10,12 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import shutil
 import subprocess
 import tempfile
 import sys
 import time
+from threading import Event
 
 for stream in (sys.stdout, sys.stderr):
     stream.reconfigure(encoding='utf-8', errors='replace')
@@ -34,7 +36,7 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 if args.offscreen:
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu'
 
-from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QThreadPool, Qt, QTimer
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -92,6 +94,7 @@ if not args.empty_library:
             # 항상 긴 제목의 영상이 상위 목록에 들어가게 한다.
             rows[-1] = (1, 100, now.isoformat(), now.isoformat(), now.isoformat(), '[[0,95]]', 95)
         db.executemany('INSERT INTO viewings (video_id,duration,started_at,updated_at,ended_at,intervals,last_position) VALUES (?,?,?,?,?,?,?)', rows)
+    db.close()
 
 window = MainWindow(core)
 window.resize(1100, 720)
@@ -137,10 +140,63 @@ def content_ready(days):
     settle(150)
 
 
+def check_chart(index, values, *, count=False, labels=None):
+    chart = json.loads(js(f"""JSON.stringify((() => {{
+      const chart = document.querySelectorAll('[data-slot=chart]')[{index}];
+      return {{
+        role: chart.getAttribute('role'), name: chart.getAttribute('aria-label'),
+        ticks: [...chart.querySelectorAll('.recharts-yAxis-tick-labels text')].map(e => Number(e.textContent.replaceAll(',', ''))),
+        labels: [...chart.querySelectorAll('.recharts-xAxis-tick-labels text')].map(e => e.textContent),
+        grid: [...chart.querySelectorAll('.recharts-cartesian-grid-horizontal line')].map(e => Number(e.getAttribute('y1'))),
+        bars: [...chart.querySelectorAll('.recharts-bar-rectangle path')].map(e => Number(e.getAttribute('height')))
+      }};
+    }})())"""))
+    maximum = max(values)
+    divisor = 1 if count else 3600 if maximum >= 3600 else 60 if maximum >= 60 else 1
+    axis_max = max(chart['ticks']) * divisor
+    assert chart['role'] == 'figure' and chart['name']
+    assert min(chart['ticks']) == 0 and axis_max >= maximum, (index, chart)
+    # 시간도 표시 단위(초/분/시간)에서 정수 눈금이어야 한다.
+    assert all(value.is_integer() for value in map(float, chart['ticks'])), (index, chart)
+    if labels is not None:
+        assert chart['labels'] == labels, (index, chart['labels'])
+    if maximum:
+        height = max(chart['grid']) - min(chart['grid'])
+        assert abs(max(chart['bars']) / height - maximum / axis_max) < 0.01, (index, chart)
+
+
+def check_refresh_keeps_content():
+    original = core.statistics_dashboard
+    started, release = Event(), Event()
+    def slow(days):
+        started.set()
+        assert release.wait(10)
+        return original(days)
+    core.statistics_dashboard = slow
+    js("document.querySelector('main[aria-label=통계]').scrollTop=200; globalThis.previousStatisticsChart=document.querySelector('[data-slot=chart]')")
+    scroll = js("document.querySelector('main[aria-label=통계]').scrollTop")
+    page.bridge.setPeriod(365)
+    try:
+        wait(started.is_set)
+        wait(lambda: js("document.querySelector('main[aria-label=통계]').getAttribute('aria-busy')") == 'true')
+        assert page.result['period']['days'] == 30
+        assert js("document.querySelector('[data-slot=chart]') === globalThis.previousStatisticsChart")
+        assert js("document.querySelector('main[aria-label=통계]').scrollTop") == scroll
+    finally:
+        release.set()
+        core.statistics_dashboard = original
+    content_ready(365)
+    assert js("document.querySelector('main[aria-label=통계]').getAttribute('aria-busy')") == 'false'
+    assert js("document.querySelector('[data-slot=chart]') === globalThis.previousStatisticsChart")
+    assert js("document.querySelector('main[aria-label=통계]').scrollTop") == scroll
+    checks.append('재계산 중 이전 본문·스크롤 보존, aria-busy true → false')
+
+
 try:
     wait(lambda: bool(js("!!document.querySelector('[data-tab=statistics]')")))
     window.navigate_web_tab('statistics')
     content_ready(30)
+    check_refresh_keeps_content()
     for days in (7, 30, 90, 365):
         js(f"document.querySelector('nav[aria-label=\"통계 기간\"] [data-tab=\"{days}\"]').click()")
         content_ready(days)
@@ -151,17 +207,7 @@ try:
             settle(200)
             assert js("document.querySelector('main[aria-label=통계]').scrollWidth <= document.querySelector('main[aria-label=통계]').clientWidth")
             assert js("document.querySelectorAll('main[aria-label=통계] .recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value').length > 0")
-            chart = json.loads(js("JSON.stringify({ticks:[...document.querySelector('[data-slot=chart]').querySelectorAll('.recharts-yAxis-tick-labels text')].map(e=>Number(e.textContent.replaceAll(',', ''))), grid:[...document.querySelector('[data-slot=chart]').querySelectorAll('.recharts-cartesian-grid-horizontal line')].map(e=>Number(e.getAttribute('y1'))), bars:[...document.querySelector('[data-slot=chart]').querySelectorAll('.recharts-bar-rectangle path')].map(e=>Number(e.getAttribute('height')))})"))
-            values = [day[metric] for day in expected['period']['daily']]
-            maximum = max(values)
-            divisor = 1 if metric == 'viewing_count' else 3600 if maximum >= 3600 else 60 if maximum >= 60 else 1
-            axis_max = max(chart['ticks']) * divisor
-            assert min(chart['ticks']) == 0 and axis_max + divisor * 0.01 >= maximum
-            if metric == 'viewing_count':
-                assert all(value.is_integer() for value in map(float, chart['ticks']))
-            if maximum:
-                height = max(chart['grid']) - min(chart['grid'])
-                assert abs(max(chart['bars']) / height - maximum / axis_max) < 0.01
+            check_chart(0, [day[metric] for day in expected['period']['daily']], count=metric == 'viewing_count')
             if args.offscreen:
                 js("document.querySelector('main[aria-label=통계]').scrollTop=0")
                 settle()
@@ -169,7 +215,10 @@ try:
                 js("document.querySelector('main[aria-label=통계]').scrollTop=99999")
                 settle()
                 window.grab().save(str(args.output / f'{sample}-{days}-{metric}-lower.png'))
-            checks.append(f'{days}일/{metric}: 데이터 일치, 축 존재, 가로 넘침 없음')
+            checks.append(f'{days}일/{metric}: 데이터 일치, 표시 단위 정수 눈금·막대 비율, 접근성 이름, 가로 넘침 없음')
+        check_chart(1, expected['weekday_seconds'], labels=list('일월화수목금토'))
+        check_chart(2, expected['hourly_seconds'], labels=[f'{hour}시' for hour in range(0, 24, 3)])
+        checks.append(f'{days}일/요일·시간대: 정수 시간 눈금·막대 비율, 요일 7개·3시간 간격 축')
         if args.offscreen:
             js("document.querySelectorAll('[data-slot=chart]')[1].scrollIntoView({block:'center'})")
             settle()
@@ -226,5 +275,7 @@ try:
 finally:
     window.tray.quit()
     window.deleteLater()
+    assert QThreadPool.globalInstance().waitForDone(10000)
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+    shutil.rmtree(directory)
