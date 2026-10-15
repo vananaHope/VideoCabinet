@@ -1,4 +1,4 @@
-"""웹 브리지 TypedDict에서 TypeScript 계약 생성. --check는 드리프트를 실패로 처리한다."""
+"""웹 브리지 TypedDict/dataclass에서 TypeScript 계약 생성. --check는 드리프트를 실패로 처리한다."""
 import argparse
 from pathlib import Path
 import types
@@ -14,6 +14,11 @@ def ts_type(annotation):
         return {str: 'string', int: 'number', float: 'number', bool: 'boolean', type(None): 'null'}[annotation]
     if get_origin(annotation) is list:
         return f'Array<{ts_type(get_args(annotation)[0])}>'
+    if get_origin(annotation) is tuple:
+        args = get_args(annotation)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return f'Array<{ts_type(args[0])}>'
+        return '[' + ', '.join(ts_type(arg) for arg in args) + ']'
     if get_origin(annotation) is types.UnionType:
         return ' | '.join(ts_type(arg) for arg in get_args(annotation))
     return annotation.__name__

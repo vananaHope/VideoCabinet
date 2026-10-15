@@ -81,3 +81,21 @@ def test_contract_copies_mutable_inputs_and_prevents_later_mutation():
 def test_duplicate_channel_or_export_names_fail_instead_of_overwriting(example):
     with pytest.raises(ValueError, match='중복'):
         generator()['render_types']((*CONTRACTS, example))
+
+
+def test_dataclass_and_tuple_extension_preserves_existing_contract_output():
+    from my_video_manager.web_contract import STATISTICS
+    from my_video_manager.statistics import ViewingStatistics
+    api = generator()
+    assert api['ts_type'](tuple[int, ...]) == 'Array<number>'
+    assert api['ts_type'](tuple[str, int]) == '[string, number]'
+    block = api['render_contract'](STATISTICS)
+    assert 'daily: Array<DailyViewingStatistics>' in block
+    assert 'top_videos: Array<TopViewedVideo>' in block
+    assert 'library: LibraryStatistics' in block
+    assert 'watched_seconds_change_percent: number | null' in block
+    assert ViewingStatistics in STATISTICS.data_types
+    # 기존 생성물이 통계 추가와 무관하게 바이트 단위로 유지된다.
+    checked_in = (Path(__file__).resolve().parents[1] / 'frontend/src/bridge-types.ts').read_text(encoding='utf-8')
+    for contract in (SHELL, LIBRARY):
+        assert api['render_contract'](contract) in checked_in

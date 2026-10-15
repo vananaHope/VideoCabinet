@@ -1,0 +1,252 @@
+"""확장 통계는 AppCore의 저장·복습·자막 공개 시나리오로 검증한다."""
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from my_video_manager.core import AppCore, MediaInfo
+from test_statistics import library, watch, NOW, KST, UTC
+from test_translation import setup, source, finish
+
+
+@pytest.mark.parametrize('days', [7, 30, 90, 365])
+def test_dashboard_activity_assigns_whole_session_to_local_start_hour(library, days):
+    core, clock, (a, b, c) = library
+    start = datetime.combine(NOW.date() - timedelta(days=days - 1), datetime.min.time(), KST)
+    clock.now = start - timedelta(seconds=1)
+    watch(core, a.id, 20)  # 이전 기간
+    clock.now = NOW.replace(hour=23, minute=59, second=59).astimezone(UTC)
+    core.playback.start(a.id, 0)
+    clock.now += timedelta(seconds=95)  # 자정과 정시를 넘어도 시작일 23시에 넣는다.
+    core.playback.report(95)
+    core.playback.end()
+    clock.now = NOW
+    watch(core, b.id, 1)  # 틀어보기는 이력만 남는다.
+    core.playback.start(c.id, 0, record_viewing=False)
+    core.playback.report(95)
+    core.playback.end()
+    result = core.statistics_dashboard(days, tz=KST)
+    assert result.period == core.viewing_statistics(days, tz=KST)
+    assert sum(result.weekday_seconds) == sum(result.hourly_seconds) == result.period.watched_seconds == 95
+    assert result.hourly_seconds[23] == 95
+    assert result.weekday_seconds[(NOW.weekday() + 1) % 7] == 95
+    assert result.inventory.all_watched_seconds == 115
+    assert result.inventory.never_played_count == 1
+
+
+def test_dashboard_inventory_deduplicates_copies_and_keeps_unknown_sizes(library, tmp_path):
+    core, _, (a, b, c) = library
+    copy = tmp_path / 'copy.mkv'
+    copy.write_bytes(a.locations[0].path.read_bytes())
+    core.add_file(copy)
+    watch(core, a.id, 90)
+    watch(core, b.id, 10)
+    core.add_video_tag(b.id, '태그')
+    core.request_subtitles(b.id)
+    core.process_next_subtitle()
+    core.playback.start(b.id, 1, record_viewing=False)
+    core.execute_highlight_command(core.command_for_key('Insert'))
+    core.playback.end()
+    before = core.statistics_dashboard(7)
+    assert before.inventory.video_count == 3
+    assert before.inventory.known_size_bytes == 3
+    assert before.inventory.unknown_size_count == 0
+    core.exclude_video(a.id)
+    b.locations[0].path.unlink()
+    core.scan()
+    result = core.statistics_dashboard(7)
+    inventory = result.inventory
+    assert inventory.video_count == 2
+    assert inventory.duration_seconds == 200
+    assert inventory.known_size_bytes == 1
+    assert inventory.unknown_size_count == 1
+    assert inventory.all_watched_seconds == 100  # 제외 영상의 기록도 포함
+    assert inventory.korean_subtitled_count == 1
+    assert inventory.highlighted_video_count == inventory.tagged_video_count == 1
+    assert result.period.library.subtitled_video_count == 1
+    assert core.statistics_dashboard(365).inventory == inventory
+
+
+def test_dashboard_completed_revisit_is_history_but_not_watching(library):
+    core, clock, (a, b, c) = library
+    watch(core, b.id, 1)
+    core.playback.start(a.id, 10, record_viewing=False)
+    core.execute_highlight_command(core.command_for_key('Insert'))
+    core.playback.end()
+    highlight = core.highlights(a.id)[0]
+    core.update_highlight(highlight.id, start=10, end=20, note='복습')
+    core.start_reel(highlight_id=highlight.id)
+    clock.now += timedelta(seconds=4)
+    core.playback.report(14)
+    core.playback.end()
+    result = core.statistics_dashboard(7)
+    assert core.viewings(a.id) == ()
+    assert result.period.library.unwatched_count == 3
+    assert result.inventory.never_played_count == 1
+    assert result.inventory.all_watched_seconds == sum(result.hourly_seconds) == 0
+
+
+def test_dashboard_partial_korean_translation_and_original_language(setup):
+    core, _, _, _, _ = setup
+    a, b = core.videos()
+    source(core, a.id, 'en')
+    source(core, b.id, 'ko')
+    assert core.statistics_dashboard(7).inventory.korean_subtitled_count == 1
+    core.process_next_translation()  # 전체 완료 전 저장된 두 줄도 자막이다.
+    assert 0 < core.library_details(a.id).translated_lines < len(core.transcript(a.id).lines)
+    assert core.statistics_dashboard(7).inventory.korean_subtitled_count == 2
+
+
+def test_dashboard_korean_translation_tracks_pending_partial_completed_and_replacement(setup):
+    core, _, _, _, _ = setup
+    a, b = core.videos()
+    source(core, a.id, 'en')
+    source(core, b.id, 'ja')
+
+    def check(expected):
+        # 한국어 집계는 기존 공개 상세의 번역 줄 유무와 같아야 한다.
+        assert sum(core.library_details(v.id).translated_lines > 0 for v in (a, b)) == expected
+        assert core.statistics_dashboard(7).inventory.korean_subtitled_count == expected
+
+    check(0)  # 대상 행만 존재하며 아직 text가 NULL인 상태
+    core.process_next_translation()
+    assert core.translation(a.id) is None
+    check(1)  # 확정 번역 없이 대상 행에만 두 줄이 저장됨
+    finish(core)
+    assert core.translation(a.id) is not None and core.translation(b.id) is not None
+    check(2)  # 대기열 없이 확정 번역만 존재
+    core.request_translation(a.id)
+    check(2)  # 재번역 대기/부분 번역과 기존 확정 번역은 중복 집계하지 않음
+    core.process_next_translation()
+    check(2)
+    core.exclude_video(b.id)
+    assert core.statistics_dashboard(7).inventory.korean_subtitled_count == 1
+
+
+@pytest.mark.parametrize('partial', [False, True])
+def test_dashboard_keeps_korean_subtitles_when_translation_finishes_between_reads(setup, monkeypatch, partial):
+    import sqlite3
+
+    core, _, _, _, _ = setup
+    video = core.videos()[0]
+    source(core, video.id, 'en')
+    if partial:
+        core.process_next_translation()
+    assert core.translation(video.id) is None
+    original_connect = sqlite3.connect
+    bounds_read = []
+
+    class CompletingConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql.startswith('SELECT COALESCE(MAX(rowid), 0) FROM translation_'):
+                bounds_read.append(sql)
+                if len(bounds_read) == 2:
+                    # 첫 표를 모두 읽은 뒤, 두 번째 표의 범위를 잡기 전에 완료한다.
+                    # 공개 번역 API가 targets를 지우고 lines로 옮기는 실제 커밋이다.
+                    finish(core)
+            return super().execute(sql, *args, **kwargs)
+
+    def connect(*args, **kwargs):
+        kwargs['factory'] = CompletingConnection
+        return original_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    result = core.statistics_dashboard(7)
+    assert len(bounds_read) == 2
+    assert core.translation(video.id) is not None
+    assert result.inventory.korean_subtitled_count == 1
+
+
+@pytest.mark.parametrize('write_kind', ['viewing', 'subtitle'])
+def test_dashboard_inventory_does_not_hold_viewing_snapshot_lock(setup, monkeypatch, write_kind):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, get_ident
+    import sqlite3
+
+    core, _, _, _, _ = setup
+    a, b = core.videos()
+    source(core, a.id, 'en')
+    # 스냅샷에 읽을 행이 있어야 구 버전에서도 읽기 잠금을 잡는다.
+    watch(core, a.id, 20)
+    paused, resume = Event(), Event()
+    original_connect = sqlite3.connect
+    main_thread = get_ident()
+
+    def connect(*args, **kwargs):
+        kwargs['timeout'] = 0.05
+        connection = original_connect(*args, **kwargs)
+        def trace(sql):
+            if get_ident() != main_thread and "spoken_language = 'ko'" in sql:
+                paused.set()
+                assert resume.wait(10)
+        connection.set_trace_callback(trace)
+        return connection
+
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(core.statistics_dashboard, 7)
+        try:
+            assert paused.wait(10)
+            if write_kind == 'viewing':
+                watch(core, b.id, 40)
+            else:
+                assert core.process_next_translation().completed_lines == 2
+        finally:
+            resume.set()
+        # 시청 수치는 조회 시점에 고정되고 현황 조회 동안의 저장은 완료된다.
+        assert pending.result(timeout=10).period.watched_seconds == 20
+    if write_kind == 'viewing':
+        assert core.statistics_dashboard(7).period.watched_seconds == 60
+    else:
+        assert core.statistics_dashboard(7).inventory.korean_subtitled_count == 1
+
+
+def test_dashboard_duration_boundaries_and_container_names(tmp_path):
+    class Media:
+        def read(self, path):
+            return MediaInfo(float(path.stem), 'mov,mp4,m4a,3gp,3g2,mj2' if path.stem == '600' else 'matroska,webm')
+
+        def capture(self, path, destination, seconds):
+            destination.write_bytes(b'image')
+
+    core = AppCore(media=Media(), clock=lambda: NOW, database=tmp_path / 'db/library.sqlite3')
+    for duration in (599, 600, 1799, 1800, 3599, 3600, 7199, 7200):
+        path = tmp_path / f'{duration}.mkv'
+        path.write_bytes(str(duration).encode())
+        core.add_file(path)
+    inventory = core.statistics_dashboard(7).inventory
+    assert [bucket.video_count for bucket in inventory.duration_distribution] == [1, 2, 2, 2, 1]
+    assert {bucket.label: bucket.video_count for bucket in inventory.format_distribution} == {'Matroska / WebM': 7, 'MP4 / QuickTime': 1}
+    assert inventory.duration_seconds == sum((599, 600, 1799, 1800, 3599, 3600, 7199, 7200))
+
+
+def test_dashboard_empty_library_has_zero_buckets(tmp_path):
+    core = AppCore(media=None, clock=lambda: NOW, database=tmp_path / 'db/library.sqlite3')
+    result = core.statistics_dashboard(7)
+    assert result.inventory.video_count == result.inventory.known_size_bytes == result.inventory.unknown_size_count == 0
+    assert result.inventory.format_distribution == ()
+    assert len(result.inventory.duration_distribution) == 5
+    assert result.weekday_seconds == (0,) * 7 and result.hourly_seconds == (0,) * 24
+
+
+def test_dashboard_query_count_does_not_grow_with_library(library, tmp_path, monkeypatch):
+    import sqlite3
+    core, _, _ = library
+    statements = []
+    original_connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(sqlite3, 'connect', traced_connect)
+    core.statistics_dashboard(7)
+    before = sum(sql.startswith('SELECT') for sql in statements)
+    for i in range(20):
+        path = tmp_path / f'new{i}.mkv'
+        path.write_bytes(str(i).encode())
+        core.add_file(path)
+    statements.clear()
+    core.statistics_dashboard(365)
+    assert sum(sql.startswith('SELECT') for sql in statements) == before == 10

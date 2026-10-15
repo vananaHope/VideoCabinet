@@ -390,14 +390,15 @@ def test_minute_memo_distinguishes_repeated_local_minute_fold():
     assert result.daily[-2].viewing_count == result.daily[-1].viewing_count == 1
 
 
-@pytest.mark.parametrize("operation", ["snapshot", "video", "period"])
+@pytest.mark.parametrize("operation", ["snapshot", "video", "period", "dashboard"])
 def test_background_parsing_releases_lock_and_keeps_active_snapshot(library, monkeypatch, operation):
     core, clock, (a, b, _) = library
     watch(core, a.id, 90)
     core.playback.start(b.id, 0)
     core.playback.report(20)  # 아직 저장되지 않은 진행분
     query = {"snapshot": core.library_snapshot, "video": core.video_viewing_statistics,
-             "period": lambda: core.viewing_statistics(7, tz=KST)}[operation]
+             "period": lambda: core.viewing_statistics(7, tz=KST),
+             "dashboard": lambda: core.statistics_dashboard(7, tz=KST)}[operation]
     expected = query()
     parsing, resume = Event(), Event()
     main_thread = get_ident()

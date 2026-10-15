@@ -287,12 +287,108 @@ export function publicSearchBridge(raw: SearchBridge): SearchBridge {
   })
 }
 
+export interface DailyViewingStatistics {
+  date: string
+  watched_seconds: number
+  viewing_count: number
+}
+
+export interface TopViewedVideo {
+  video_id: number
+  title: string
+  watched_seconds: number
+  viewing_count: number
+  excluded: boolean
+  missing: boolean
+}
+
+export interface LibraryStatistics {
+  finished_count: number
+  abandoned_count: number
+  unwatched_count: number
+  subtitled_video_count: number
+  highlight_count: number
+}
+
+export interface ViewingStatistics {
+  days: number
+  start_date: string
+  end_date: string
+  watched_seconds: number
+  viewing_count: number
+  previous_watched_seconds: number
+  previous_viewing_count: number
+  watched_seconds_change_percent: number | null
+  viewing_count_change_percent: number | null
+  watched_video_count: number
+  watched_day_count: number
+  longest_streak_days: number
+  added_video_count: number
+  average_seconds: number
+  daily: Array<DailyViewingStatistics>
+  top_videos: Array<TopViewedVideo>
+  library: LibraryStatistics
+}
+
+export interface DistributionBucket {
+  label: string
+  video_count: number
+}
+
+export interface LibraryInventory {
+  video_count: number
+  duration_seconds: number
+  known_size_bytes: number
+  unknown_size_count: number
+  all_watched_seconds: number
+  korean_subtitled_count: number
+  never_played_count: number
+  highlighted_video_count: number
+  tagged_video_count: number
+  duration_distribution: Array<DistributionBucket>
+  format_distribution: Array<DistributionBucket>
+}
+
+export interface StatisticsDashboard {
+  period: ViewingStatistics
+  weekday_seconds: Array<number>
+  hourly_seconds: Array<number>
+  inventory: LibraryInventory
+}
+
+export interface StatisticsData {
+  days: number
+  loading: boolean
+  message: string
+  result: StatisticsDashboard | null
+}
+
+export interface StatisticsBridge {
+  ready: (reply: Reply) => void
+  snapshot: (reply: Reply) => void
+  setPeriod: (days: number, reply: Reply) => void
+  playVideo: (videoId: number, reply: Reply) => void
+  statisticsChanged: Signal<string>
+  statisticsFocusRequested: Signal<string>
+}
+export function publicStatisticsBridge(raw: StatisticsBridge): StatisticsBridge {
+  return Object.freeze({
+    ready: raw.ready.bind(raw),
+    snapshot: raw.snapshot.bind(raw),
+    setPeriod: raw.setPeriod.bind(raw),
+    playVideo: raw.playVideo.bind(raw),
+    statisticsChanged: Object.freeze({ connect: raw.statisticsChanged.connect.bind(raw.statisticsChanged), disconnect: raw.statisticsChanged.disconnect.bind(raw.statisticsChanged) }),
+    statisticsFocusRequested: Object.freeze({ connect: raw.statisticsFocusRequested.connect.bind(raw.statisticsFocusRequested), disconnect: raw.statisticsFocusRequested.disconnect.bind(raw.statisticsFocusRequested) }),
+  })
+}
+
 export interface Bridges {
   readonly shell: ShellBridge
   readonly library: LibraryBridge
   readonly queue: QueueBridge
   readonly reel: ReelBridge
   readonly search: SearchBridge
+  readonly statistics: StatisticsBridge
 }
 export function publicBridges(raw: Bridges): Bridges {
   return Object.freeze({
@@ -301,5 +397,6 @@ export function publicBridges(raw: Bridges): Bridges {
     queue: publicQueueBridge(raw.queue),
     reel: publicReelBridge(raw.reel),
     search: publicSearchBridge(raw.search),
+    statistics: publicStatisticsBridge(raw.statistics),
   })
 }
