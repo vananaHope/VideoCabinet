@@ -107,6 +107,8 @@ class AppCore:
         transcriber: Transcriber | None = None,
         translator: Translator | None = None,
         translation_batch_size: int = 30,
+        translation_secret_store=None,
+        translation_transport=None,
         reel_settings: ReelSettings | None = None,
     ):
         self.database = (Path(database) if database is not None else default_data_directory() / "library.sqlite3").resolve()
@@ -142,9 +144,12 @@ class AppCore:
         self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location, self._queue_order)
         self._review = Review(self._connect, clock, self._subtitles, self.playback_location, self._queue_order)
         self._subtitles.review = self._review
+        from .translation_options import TranslationOptions
+        self._translation_options = TranslationOptions(self.settings, self._connect, self.database.parent, clock,
+                                                       secret_store=translation_secret_store, transport=translation_transport)
         self._translations = Translations(self._connect, clock, self._subtitles, self.settings, translator,
                                           batch_size=translation_batch_size, order=self._queue_order,
-                                          protected_lines=self._review.protected_lines)
+                                          protected_lines=self._review.protected_lines, options=self._translation_options)
         self._review.translations = self._translations
         self._auto_subtitle_rules = AutoSubtitleRules(self._connect, self)
         self._subtitle_queue = SubtitleQueue(self, self._queue_order)
@@ -204,6 +209,21 @@ class AppCore:
     def automatic_backups(self):
         from .backup import automatic_backups
         return automatic_backups(self.database)
+
+    def translation_settings(self):
+        return self._translation_options.snapshot()
+
+    def save_translation_settings(self, provider, selections, fallback, *, key_action='keep', key=''):
+        return self._translation_options.save(provider, selections, fallback, key_action=key_action, key=key)
+
+    def check_translation_key(self, key='', *, delete=False, cancellation=None):
+        return self._translation_options.check_key(key, delete=delete, cancellation=cancellation)
+
+    def translation_models(self, key='', *, cancellation=None):
+        return self._translation_options.models(key, cancellation=cancellation)
+
+    def translation_line_providers(self, video_id):
+        return self._translations.line_providers(video_id)
 
     def review_lines(self, video_id):
         return self._review.lines(video_id)

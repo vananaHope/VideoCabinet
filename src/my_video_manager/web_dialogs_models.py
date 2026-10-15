@@ -12,7 +12,7 @@ TITLES = {
     'series': '시리즈 편집', 'highlights': '현재 영상의 하이라이트',
     'highlight': '하이라이트 시각·메모 편집', 'subtitles': '원어 자막 만들기',
     'review': '자막 검수 · SRT 내보내기', 'line': '자막 줄 수정',
-    'range': '구간 원어 자막 다시 생성', 'translation': '번역 CLI / 재시도',
+    'range': '구간 원어 자막 다시 생성', 'translation': '번역 방식 / 재시도',
     'video-rename': '제목 변경', 'video-exclude': '영상 제외',
 }
 
@@ -27,6 +27,7 @@ class DialogModel:
         self.confirm_destructive = False
         self.pending = None
         self.message = ''
+        self.information = ''
         if kind == 'highlight':
             h, duration = context['highlight'], context['duration']
             self.values = values(start=initial_time_input(h.start, duration),
@@ -36,7 +37,10 @@ class DialogModel:
             transcript = self.core.transcript(context['video_id'])
             self.values['choice'] = transcript.spoken_language if transcript and transcript.language_specified else '자동 감지'
         elif kind == 'translation':
-            self.values['choice'] = self.core.translation_cli
+            self.translation = self.core.translation_settings()
+            self.values.update(choice=self.translation['provider'], selections=self.translation['selections'],
+                               fallback=self.translation['fallback'])
+            self.network_busy = False
             self.waiting = [e.video_id for e in self.core.translation_queue() if e.state in ('failed', 'held')]
         elif kind == 'line':
             line = context['line']
@@ -65,7 +69,7 @@ class DialogModel:
         c, ctx, kind = self.core, self.context, self.kind
         data = dict(id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], available=[],
                     choices=[], values=self.values.copy(), maximum=0.0, locked=False, warning='',
-                    confirmation=self.confirmation, confirm_title=self.confirm_title, confirm_destructive=self.confirm_destructive)
+                    confirmation=self.confirmation, confirm_title=self.confirm_title, confirm_destructive=self.confirm_destructive, translation=None, network_busy=False, information=self.information)
         if kind == 'tags':
             highlight = ctx.get('highlight_id')
             tags = c.highlight_tags(highlight) if highlight is not None else c.video_tags(ctx['video_id'])
@@ -98,10 +102,14 @@ class DialogModel:
             if transcript:
                 data['description'] += f" 현재 원어: {transcript.spoken_language or '알 수 없음'} ({'직접 지정' if transcript.language_specified else '자동 감지'})"
         elif kind == 'review':
+            from .translation_models import TRANSLATION_CHOICES
+            names = dict(TRANSLATION_CHOICES)
+            provenance = c.translation_line_providers(ctx['video_id'])
             data.update(description='클릭 또는 Enter로 장면 이동 · 방향키로 줄 선택 · Tab으로 버튼 이동 · Esc로 닫기', rows=[
                 row(line.original.id, line.original.text, line.translation if line.translation is not None else '미번역',
                     ' · '.join(label for flag, label in ((line.original_reviewed, '원어 검수됨'),
-                                                       (line.translation_reviewed, '번역 검수됨')) if flag),
+                                                       (line.translation_reviewed, '번역 검수됨'),
+                                                       (provenance.get(line.original.id), names.get(provenance.get(line.original.id), ''))) if flag),
                     line.original.start, line.original.end) for line in c.review_lines(ctx['video_id'])])
         elif kind == 'range':
             data['maximum'] = c.video(ctx['video_id']).duration
@@ -113,11 +121,11 @@ class DialogModel:
         elif kind == 'line':
             data['title'] = '번역 줄 수정' if ctx['translated'] else '원어 줄 수정'
         elif kind == 'translation':
-            from .translation_cli import TRANSLATION_CLI_CHOICES
-            data.update(choices=[row(identifier, label) for identifier, label in TRANSLATION_CLI_CHOICES],
-                        description='한국어 번역에 사용할 구독 CLI를 고르세요. 설치와 로그인이 필요합니다.')
+            data.update(choices=[row(p['id'], p['label']) for p in self.translation['providers']],
+                        translation=self.translation, network_busy=self.network_busy,
+                        description='한국어 번역 방식과 모델을 고르세요. 키·설정 변경은 확인할 때 저장됩니다.')
             if self.waiting:
-                data['description'] += f' 확인하면 실패·보류 중인 번역 {len(self.waiting)}건을 저장한 묶음부터 재시도합니다. 선택한 CLI의 사용량 한도 보류 시간이 남았으면 그 시각까지 기다립니다.'
+                data['description'] += f' 확인하면 실패·보류 중인 번역 {len(self.waiting)}건을 저장한 묶음부터 재시도합니다. 선택한 방식의 사용량 한도 보류 시간이 남았으면 그 시각까지 기다립니다.'
         if kind in ('review', 'line', 'range'):
             data['locked'] = any(e.video_id == ctx['video_id'] and e.state in ('queued', 'transcribing') for e in c.subtitle_queue())
             if data['locked']:
@@ -280,14 +288,19 @@ class DialogModel:
                 self.owner.pop(accepted=True)
             else:
                 raise ValueError('지원하지 않는 구간 작업입니다.')
+        elif kind == 'translation' and action in ('check-key', 'load-models'):
+            self.owner.translation_request(self, action, data)
         elif kind == 'translation' and action == 'save':
-            c.set_translation_cli(data['choice'])
+            if self.network_busy:
+                raise ValueError('키 확인 또는 목록 조회가 끝난 뒤 저장하세요.')
+            notice = c.save_translation_settings(data['choice'], data.get('selections', self.values['selections']),
+                data.get('fallback', self.values['fallback']), key_action=data.get('key_action', 'keep'), key=data.get('key', ''))
             for video_id in self.waiting:
                 try:
                     c.request_translation(video_id)
                 except ValueError:
                     pass  # Qt 경로와 같이 그 사이 원어가 재생성된 영상은 새 요청을 따른다.
-            self.owner.window.statusBar().showMessage(f"번역 CLI: {data['choice']}", 5000)
+            self.owner.window.statusBar().showMessage(f"번역 방식: {data['choice']} {notice}", 5000)
             self.owner.pop(accepted=True)
         else:
             raise ValueError('지원하지 않는 대화상자 작업입니다.')

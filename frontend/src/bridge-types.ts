@@ -399,6 +399,43 @@ export function publicStatisticsBridge(raw: StatisticsBridge): StatisticsBridge 
   })
 }
 
+export interface TranslationSelectionData {
+  provider: string
+  model: string
+  effort: string
+}
+
+export interface TranslationModelData {
+  id: string
+  label: string
+  efforts: Array<string>
+  policy: string
+  warning: boolean
+}
+
+export interface TranslationProviderData {
+  id: string
+  label: string
+  default_model: string
+  notice: string
+  models: Array<TranslationModelData>
+  custom_efforts: Array<string>
+  cli_default: boolean
+  unknown_model: TranslationModelData
+  expensive_efforts: Array<string>
+  effort_notice: string
+}
+
+export interface TranslationSettingsData {
+  provider: string
+  selections: Array<TranslationSelectionData>
+  providers: Array<TranslationProviderData>
+  key_masked: string
+  key_error: string
+  fallback: boolean
+  fallback_notice: string
+}
+
 export interface DialogRow {
   id: string
   title: string
@@ -416,6 +453,10 @@ export interface DialogValues {
   range: boolean
   choice: string
   members: Array<string>
+  selections: Array<TranslationSelectionData>
+  fallback: boolean
+  key_action: string
+  key: string
 }
 
 export interface DialogData {
@@ -433,6 +474,9 @@ export interface DialogData {
   confirmation: string
   confirm_title: string
   confirm_destructive: boolean
+  translation: TranslationSettingsData | null
+  network_busy: boolean
+  information: string
 }
 
 export interface DialogSnapshot {
@@ -510,6 +554,7 @@ export interface SettingsData {
   minimum: number
   scanning: boolean
   translationCli: string
+  translation: TranslationSettingsData
   heldTranslations: number
   failedTranslations: number
 }

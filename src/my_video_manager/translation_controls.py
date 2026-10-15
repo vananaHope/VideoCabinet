@@ -51,9 +51,9 @@ class TranslationControls(QObject):
         bar = self.window.statusBar()
         bar.setToolTip(result.error_detail or "")
         if result.state == "held":
-            bar.showMessage(f"번역 CLI 전체 보류 · {result.retry_at.astimezone():%H:%M} 자동 재시도 · {result.error}")
+            bar.showMessage(f"번역 방식 보류 · {result.retry_at.astimezone():%H:%M} 자동 재시도 · {result.error}")
         elif result.error:
-            bar.showMessage(f"번역 실패 · {result.error} 번역 CLI / 재시도에서 다시 요청하세요.")
+            bar.showMessage(f"번역 실패 · {result.error} 번역 방식 / 재시도에서 다시 요청하세요.")
         else:
             keys = next((display_keys(row.keys) for row in self.core.key_bindings()
                          if row.command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE), "키 미할당")
@@ -79,6 +79,7 @@ class TranslationControls(QObject):
 
     def shutdown(self):
         self.timer.stop()
+        self.window.web_host.dialogs.shutdown()
         self.core.stop_translation_processing()
         if self.worker:
             self.worker.wait()

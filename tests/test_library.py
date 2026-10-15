@@ -551,7 +551,7 @@ def test_v1_translation_records_survive_migration_identity_changes_and_resume(tm
         def __init__(self):
             self.calls = []
 
-        def translate(self, lines, spoken_language, *, cli, cancellation):
+        def translate(self, lines, spoken_language, *, cli, cancellation, model="", effort=""):
             self.calls.append(tuple(line.id for line in lines))
             return tuple(TranslatedLine(line.id, "이어서 번역") for line in lines)
 

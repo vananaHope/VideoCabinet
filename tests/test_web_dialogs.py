@@ -298,12 +298,14 @@ def test_common_modal_gate_clears_on_navigation_reload_and_playback(window_facto
 
 
 def test_translation_choices_come_from_adapter(window_factory, monkeypatch):
-    from my_video_manager import translation_cli
-    monkeypatch.setattr(translation_cli, 'TRANSLATION_CLI_CHOICES', (('codex', 'Codex 표시 이름'), ('claude', 'Claude 표시 이름')))
+    from dataclasses import replace
+    from my_video_manager import translation_options
+    choices = tuple(replace(p, label=p.label + ' 검증') for p in translation_options.PROVIDERS)
+    monkeypatch.setattr(translation_options, 'PROVIDERS', choices)
     window = window_factory()
     dialogs = window.web_host.dialogs
     def check():
-        assert [(r['id'], r['title']) for r in state(dialogs)['choices']] == list(translation_cli.TRANSLATION_CLI_CHOICES)
+        assert [(r['id'], r['label']) for r in state(dialogs)['translation']['providers']] == [(p.id, p.label) for p in choices]
     within(window.translations.settings, dialogs, check)
 
 

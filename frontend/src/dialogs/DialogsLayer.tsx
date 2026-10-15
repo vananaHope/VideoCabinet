@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/page-parts'
 import { Choice, DialogFrame, DialogList, TextArea } from './dialog-parts'
 import { TagEntry } from './TagEntry'
+import { TranslationForm } from './TranslationForm'
 
 type FormValues = Omit<DialogValues, 'start' | 'end'> & { start: number | string; end: number | string }
 type Draft = { form: FormValues; selected: string; member: string; available: string; scroll: number[] }
@@ -83,7 +84,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   if (kind === 'video-exclude') return <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }}
     title={data.confirm_title} description={data.confirmation} variant="destructive" onConfirm={() => void act('confirm')} />
   return <DialogFrame title={data.title} description={data.description} onClose={() => { if (!data.confirmation) void act('close') }} composing={composing} onSize={onSize} wide={['review', 'series', 'highlights'].includes(kind)}>
-    <div ref={content} className="flex min-h-0 flex-col gap-4" onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
+    <div ref={content} data-dialog-body={kind} className="flex min-h-0 flex-col gap-4" onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
       onKeyDown={event => {
         if (editable && event.target instanceof HTMLInputElement && event.target.type !== 'checkbox'
           && event.key === 'Enter' && !composing.current && !event.nativeEvent.isComposing && event.keyCode !== 229
@@ -114,8 +115,9 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       </div>}
       {(kind === 'highlight' || kind === 'line') && <label className="block space-y-2 text-sm">{kind === 'highlight' ? '메모' : '자막 텍스트'}<TextArea value={form.text} onChange={text => update({ text })} /></label>}
       {kind === 'subtitles' && <label className="block space-y-2 text-sm">원어<Input aria-label="원어" list="spoken-languages" value={form.choice} onChange={event => update({ choice: event.target.value })} /><datalist id="spoken-languages">{data.choices.map(row => <option key={row.id} value={row.title} />)}</datalist></label>}
-      {kind === 'translation' && <Choice label="번역 CLI" rows={data.choices} value={form.choice} onChange={choice => update({ choice })} />}
+      {kind === 'translation' && data.translation && <TranslationForm data={data.translation} form={form} update={update} act={act} busy={busy || data.network_busy} />}
       {kind === 'video-rename' && <Input aria-label="영상 제목" value={form.name} onChange={event => update({ name: event.target.value })} />}
+      {data.information && <p role="status" className="whitespace-pre-wrap text-sm text-muted-foreground">{data.information}</p>}
       {data.warning && <p role="status" className="whitespace-pre-wrap text-sm text-destructive">{data.warning}</p>}
       {error && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-destructive">{error}</p>}
     </div>
@@ -126,7 +128,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {kind === 'highlights' && <div className="mr-auto flex flex-wrap gap-2">{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</div>}
       {kind === 'review' && <div className="mr-auto flex flex-wrap gap-2">{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button('번역 줄 수정', 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button('번역 SRT 저장', 'export-translation', !data.rows.length)}</div>}
       {button(editable ? '취소' : '닫기', 'close')}
-      {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'translation' ? '확인' : '저장', 'save', data.locked || kind === 'range' && !!data.warning, kind === 'range' ? 'destructive' : 'default')}
+      {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'translation' ? '확인' : '저장', 'save', data.locked || data.network_busy || kind === 'range' && !!data.warning, kind === 'range' ? 'destructive' : 'default')}
     </footer>
     <ConfirmDialog open={!!data.confirmation} onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.confirm_title} description={data.confirmation}
       variant={data.confirm_destructive ? 'destructive' : 'default'} onConfirm={() => void act('confirm')} />

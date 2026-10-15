@@ -1,12 +1,43 @@
 """기존 웹 뷰 한 개를 쓰는 모달 층과 숨은 셸의 네이티브 소유 창."""
 from time import perf_counter
+from threading import Event
 
-from PySide6.QtCore import QEventLoop, QObject, QTimer, Qt
+from PySide6.QtCore import QEventLoop, QObject, QTimer, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import QDialog, QFileDialog, QVBoxLayout
 
 from .web_dialogs_bridge import DialogsBridge
 from .web_dialogs_models import DialogModel
 from .web_json import encode
+
+
+class TranslationRequest(QThread):
+    completed = Signal(object)
+
+    def __init__(self, owner, frame, action, data):
+        super().__init__(owner)
+        self.core, self.frame, self.action = owner.core, frame, action
+        self.key = data.get('key', '') if data.get('key_action') == 'replace' else ''
+        self.deleted = data.get('key_action') == 'delete'
+        self.cancellation = Event()
+
+    def run(self):
+        from .translation import TranslationCancelled
+        try:
+            if self.action == 'check-key':
+                result = self.core.check_translation_key(self.key, delete=self.deleted, cancellation=self.cancellation)
+            else:
+                if self.deleted:
+                    raise ValueError('삭제 예정인 키로 모델 목록을 조회할 수 없습니다.')
+                result = self.core.translation_models(self.key, cancellation=self.cancellation)
+            if not self.cancellation.is_set():
+                self.completed.emit(result)
+        except TranslationCancelled:
+            pass
+        except Exception as error:
+            # 코어는 정제된 오류만 반환한다. 입력/키를 결과에 붙이지 않는다.
+            self.completed.emit(str(error))
+        finally:
+            self.key = ''
 
 
 class DialogContainer(QDialog):
@@ -40,6 +71,7 @@ class WebDialogs(QObject):
         self.metrics = []
         self.last_payload = None
         self.content_size = (640, 320)
+        self.translation_worker = None
         self.timer = QTimer(self)
         self.timer.setInterval(500)
         self.timer.timeout.connect(self.publish)
@@ -162,7 +194,9 @@ class WebDialogs(QObject):
     def pop(self, accepted=False):
         if not self.stack:
             return
-        self.stack.pop()
+        frame = self.stack.pop()
+        if self.translation_worker and self.translation_worker.frame is frame:
+            self.translation_worker.cancellation.set()
         if self.stack:
             self.publish()
             return
@@ -247,6 +281,59 @@ class WebDialogs(QObject):
                 self.publish()
                 self.host.view.setFocus()
         QTimer.singleShot(0, save)
+
+    def translation_request(self, frame, action, data):
+        if self.translation_worker:
+            raise ValueError('이전 요청이 끝난 뒤 다시 시도하세요.')
+        frame.network_busy = True
+        frame.message = ''
+        frame.information = '키 확인 중…' if action == 'check-key' else '모델 목록 조회 중…'
+        worker = self.translation_worker = TranslationRequest(self, frame, action, data)
+        worker.completed.connect(self.translation_result)
+        worker.finished.connect(self.translation_finished)
+        worker.start()
+
+    @Slot(object)
+    def translation_result(self, result):
+        worker = self.sender()
+        if worker.frame not in self.stack or worker.cancellation.is_set():
+            return
+        frame = worker.frame
+        frame.information = ''
+        if isinstance(result, str):
+            frame.message = result
+        elif worker.action == 'check-key':
+            frame.message = {
+                'valid': '키 확인 성공. 입력한 새 키는 확인 버튼을 눌러야 저장됩니다.',
+                'missing_key': 'OpenCode Go 키가 없습니다.',
+                'authentication': 'OpenCode Go 키 또는 접근 권한을 확인하세요.',
+                'usage_limit': '구독 사용량 한도에 도달했습니다.',
+                'connection': 'OpenCode Go에 연결하지 못했습니다.',
+                'other': '키 확인 요청에 실패했습니다.',
+            }[result.status]
+            if result.status == 'valid':
+                frame.information, frame.message = frame.message, ''
+        else:
+            item = next(p for p in frame.translation['providers'] if p['id'] == 'opencode_go')
+            merged = {m['id']: m for m in item['models']}
+            merged.update({m['id']: m for m in result})
+            item['models'] = list(merged.values())
+            frame.information = f'모델 {len(result)}개를 조회했습니다. 목록에 없는 이름도 직접 입력할 수 있습니다.'
+        self.publish()
+
+    @Slot()
+    def translation_finished(self):
+        worker = self.sender()
+        worker.frame.network_busy = False
+        if self.translation_worker is worker:
+            self.translation_worker = None
+        worker.deleteLater()
+        self.publish()
+
+    def shutdown(self):
+        if self.translation_worker:
+            self.translation_worker.cancellation.set()
+            self.translation_worker.wait()
 
 
 def web_dialogs(parent):

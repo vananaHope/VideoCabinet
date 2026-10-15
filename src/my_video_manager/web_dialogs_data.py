@@ -1,5 +1,6 @@
 """대화상자에 필요한 값만 전달하는 웹 계약. 도메인 객체는 노출하지 않는다."""
 from typing import TypedDict
+from .web_translation_data import TranslationSettingsData, TranslationSelectionData
 
 
 class DialogRow(TypedDict):
@@ -19,6 +20,10 @@ class DialogValues(TypedDict):
     range: bool
     choice: str
     members: list[str]
+    selections: list[TranslationSelectionData]
+    fallback: bool
+    key_action: str
+    key: str
 
 
 class DialogData(TypedDict):
@@ -36,6 +41,9 @@ class DialogData(TypedDict):
     confirmation: str
     confirm_title: str
     confirm_destructive: bool
+    translation: TranslationSettingsData | None
+    network_busy: bool
+    information: str
 
 
 class DialogSnapshot(TypedDict):
@@ -47,4 +55,4 @@ def row(identifier, title, detail='', status='', start=0, end=None):
 
 
 def values(**updates):
-    return {**dict(name='', text='', start=0.0, end=0.0, range=False, choice='', members=[]), **updates}
+    return {**dict(name='', text='', start=0.0, end=0.0, range=False, choice='', members=[], selections=[], fallback=False, key_action="keep", key=""), **updates}

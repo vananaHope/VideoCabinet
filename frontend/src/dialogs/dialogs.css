@@ -16,3 +16,6 @@ html[data-dialog-container="true"] [data-dialog-list] { max-height: var(--dialog
 html[data-dialog-container="true"] [data-dialog-frame][data-wide="true"] {
   width: min(896px, var(--dialog-max-width));
 }
+
+/* 번역 설정·결과가 늘어나도 확인/취소 버튼은 항상 본문 아래에 남는다. */
+[data-dialog-body="translation"] { overflow-y: auto; }

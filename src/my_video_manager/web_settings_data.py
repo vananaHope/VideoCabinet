@@ -1,5 +1,6 @@
 """웹 설정의 표시 데이터. 저장 형식은 기존 키 배치·설정 API가 소유한다."""
 from typing import TypedDict
+from .web_translation_data import TranslationSettingsData
 
 
 class SettingKeyData(TypedDict):
@@ -16,6 +17,7 @@ class SettingsData(TypedDict):
     minimum: float
     scanning: bool
     translationCli: str
+    translation: TranslationSettingsData
     heldTranslations: int
     failedTranslations: int
 
