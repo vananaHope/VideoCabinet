@@ -7,6 +7,7 @@ import http.client
 import io
 from importlib import metadata
 import json
+import logging
 import re
 import socket
 from threading import Event, Lock, Thread
@@ -17,6 +18,7 @@ from urllib.error import HTTPError
 from urllib.request import HTTPHandler, HTTPSHandler, HTTPRedirectHandler, Request, build_opener
 
 from .secret_store import Secret
+from .app_logging import safe_detail
 from .translation import TranslationCancelled, TranslationError
 from .translation_cli import (classify_cli_failure, parse_translation_response,
                               translation_prompt, translation_schema)
@@ -42,20 +44,32 @@ USER_AGENT = _user_agent()
 class KeyCheckResult:
     status: str
     retry_at: datetime | None = None
+    error: 'OpenCodeGoError | None' = None
+
+    @property
+    def message(self):
+        if self.error is not None:
+            return self.error.detail
+        return {
+            'valid': '키 확인 성공. 입력한 새 키는 확인 버튼을 눌러야 저장됩니다.',
+            'missing_key': 'OpenCode Go 키가 없습니다.',
+        }.get(self.status, '키 확인 요청에 실패했습니다.')
 
 
 class OpenCodeGoError(TranslationError):
     """현재 보류 분류와 호환되며 후속 연결에서 사용할 UTC retry_at을 제공한다."""
 
     def __init__(self, kind: str, *, retry_at: datetime | None = None, diagnostic: str | None = None,
-                 shrinkable=True):
+                 shrinkable=True, status: int | None = None, server_message: str | None = None):
         messages = {
             "missing_key": "OpenCode Go 키가 등록되지 않았습니다.",
             "authentication": "OpenCode Go 키 또는 접근 권한을 확인하세요.",
             "connection": "OpenCode Go에 연결하지 못했습니다.",
             "format": "OpenCode Go 응답 형식이 올바르지 않습니다.",
             "usage_limit": "OpenCode Go 구독 사용량 한도로 보류했습니다.",
-            "key_storage": "OpenCode Go 저장된 키를 읽지 못했습니다.",
+            "key_storage": "OpenCode Go 저장된 키를 읽지 못했습니다. 키를 다시 입력하세요.",
+            "billing": "OpenCode Go 구독 또는 결제 상태를 확인하세요.",
+            "server": "OpenCode Go 서버가 일시적으로 응답하지 않습니다.",
             "other": "OpenCode Go 요청에 실패했습니다.",
             "request_rejected": "OpenCode Go가 요청을 거부했습니다.",
         }
@@ -64,9 +78,16 @@ class OpenCodeGoError(TranslationError):
             detail += " JSON 모드의 프롬프트에는 json 안내가 필요합니다."
         elif diagnostic == "schema_rejected":
             detail += " 모델이 JSON Schema 형식을 거부했습니다."
+        self.status = status
+        self.server_message = ' '.join(safe_detail(server_message).split()) if server_message else None
+        if self.server_message and len(self.server_message) > 160:
+            self.server_message = self.server_message[:159] + '…'
+        if status is not None:
+            detail += f" (HTTP {status}" + (f": {self.server_message}" if self.server_message else '') + ")"
         super().__init__(kind, detail, shrinkable=shrinkable)
         self.args = (detail,)
         self.retry_at = retry_at
+        logging.getLogger(__name__).warning('%s', detail)
 
 
 @dataclass(frozen=True)
@@ -338,12 +359,25 @@ class OpenCodeGoTranslator:
         except (ValueError, TypeError):
             pass
         # HTTP 실패의 진단만 분류한다. 성공한 번역 속 '429' 같은 문구는 읽지 않는다.
-        if response.status >= 400:
+        if response.status >= 400 or (isinstance(data, dict) and 'error' in data):
             diagnostic = None
+            error = data.get("error", data) if isinstance(data, dict) else None
+            if isinstance(error, dict):
+                message = error.get('message') or error.get('code') or json.dumps(error, ensure_ascii=False)
+            else:
+                message = error if isinstance(error, str) else response.body.decode('utf-8', errors='replace')
+            # 응답이 키 자체를 되돌려 줘도 일반 토큰 패턴에 의존하지 않는다.
+            message = safe_detail(str(message).replace(key.reveal(), '[가림]'))
             if response.status in (401, 403):
                 kind = "authentication"
-            elif response.status == 429:
+            elif response.status == 402:
+                kind = "billing"
+            elif response.status >= 500:
+                kind = "server"
+            elif response.status == 429 or classify_cli_failure(message) == 'usage_limit':
                 kind = "usage_limit"
+            elif re.search(r'payment|billing|subscription|insufficient.{0,20}(?:credit|balance)|결제|구독', message, re.IGNORECASE):
+                kind = "billing"
             else:
                 error = data.get("error", data) if isinstance(data, dict) else None
                 detail = response.body.decode("utf-8", errors="replace").lower()
@@ -355,11 +389,12 @@ class OpenCodeGoTranslator:
                     elif "json" in detail and ("prompt" in detail or "word" in detail):
                         diagnostic = "json_required"
             raise OpenCodeGoError(kind, retry_at=_retry_at(response.headers, data, self._clock())
-                                  if kind == "usage_limit" else None, diagnostic=diagnostic)
+                                  if kind == "usage_limit" else None, diagnostic=diagnostic,
+                                  status=response.status, server_message=message)
         if not 200 <= response.status < 300:
-            raise OpenCodeGoError("other")
+            raise OpenCodeGoError("other", status=response.status)
         if not isinstance(data, dict):
-            raise OpenCodeGoError("format", shrinkable=False)
+            raise OpenCodeGoError("format", shrinkable=False, status=response.status)
         return data
 
     def models(self, *, cancellation=None) -> tuple[TranslationModelChoice, ...]:
@@ -422,15 +457,15 @@ class OpenCodeGoTranslator:
     def check_key(self, *, cancellation=None) -> KeyCheckResult:
         """사용자의 명시적 키 확인 때만 호출한다. 유료 기본 모델에 요청 한 번을 보낸다."""
         try:
-            data = self._request("/chat/completions", self._model_payload(
-                DEFAULT_MODEL, 'Return a json object. Example: {"ok": true}.', max_tokens=1),
+            data = self._request("/chat/completions", {
+                'model': DEFAULT_MODEL, 'messages': [{'role': 'user', 'content': 'Reply OK.'}],
+                'max_tokens': 16, 'stream': False},
                 cancellation=cancellation, session_id=str(uuid4()))
         except OpenCodeGoError as error:
-            status = error.kind if error.kind in (
-                "missing_key", "authentication", "usage_limit", "connection") else "other"
-            return KeyCheckResult(status, error.retry_at)
+            return KeyCheckResult(error.kind, error.retry_at, error)
         choices = data.get("choices")
         if (not isinstance(choices, list) or not choices or not isinstance(choices[0], dict)
                 or not isinstance(choices[0].get("message"), dict) or "error" in data):
-            return KeyCheckResult("other")
+            return KeyCheckResult("other", error=OpenCodeGoError('other', status=200,
+                                  server_message='응답에 choices[0].message가 없습니다.'))
         return KeyCheckResult("valid")

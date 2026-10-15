@@ -310,3 +310,29 @@ def test_fallback_notice_and_manual_label_in_real_window(window_factory, connect
     wait_for(lambda: '사용량 한도' in js(window, 'document.body.textContent'))
     assert '사용량 한도' in js(window, 'document.body.textContent')
     capture(window, 'queue-fallback-notice')
+
+
+def test_key_failure_diagnostic_is_rendered(window_factory, connected, tmp_path, monkeypatch):
+    core, http, _, _, _, _ = connected
+    http.status = 402
+    window = window_factory()
+    window.resize(1100, 720)
+    for name in ('malgun.ttf', 'malgunbd.ttf'):
+        QFontDatabase.addApplicationFont(str(Path(os.environ['WINDIR']) / 'Fonts' / name))
+    dialogs = window.web_host.dialogs
+    def check():
+        loaded(window)
+        input_text(window, 'OpenCode Go 키 입력', 'fake-key-for-check')
+        click(window, '키 확인')
+        wait_for(lambda: dialogs.translation_worker is None)
+        rendered(window)
+        warning = state(dialogs)['warning']
+        assert 'HTTP 402: quota_exceeded' in warning and '구독 또는 결제' in warning
+        assert warning in js(window, 'document.querySelector("[role=dialog]").textContent')
+        if output := os.environ.get('MVM_KEY_FAILURE_SCREEN_DIR'):
+            monkeypatch.setenv('MVM_TRANSLATION_SCREEN_DIR', output)
+            js(window, "document.querySelector('[role=dialog] [role=status]').scrollIntoView({block:'center',behavior:'instant'})")
+            QTest.qWait(500)
+            capture(window, 'key-check-failure')
+        click(window, '취소')
+    within(window.translations.settings, dialogs, check)

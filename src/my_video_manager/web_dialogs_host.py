@@ -303,14 +303,7 @@ class WebDialogs(QObject):
         if isinstance(result, str):
             frame.message = result
         elif worker.action == 'check-key':
-            frame.message = {
-                'valid': '키 확인 성공. 입력한 새 키는 확인 버튼을 눌러야 저장됩니다.',
-                'missing_key': 'OpenCode Go 키가 없습니다.',
-                'authentication': 'OpenCode Go 키 또는 접근 권한을 확인하세요.',
-                'usage_limit': '구독 사용량 한도에 도달했습니다.',
-                'connection': 'OpenCode Go에 연결하지 못했습니다.',
-                'other': '키 확인 요청에 실패했습니다.',
-            }[result.status]
+            frame.message = result.message
             if result.status == 'valid':
                 frame.information, frame.message = frame.message, ''
         else:

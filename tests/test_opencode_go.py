@@ -80,8 +80,8 @@ def test_remaining_batch_reuses_contract_headers_and_stable_session():
 @pytest.mark.parametrize("status,payload,kind", [
     (429, {}, "usage_limit"), (401, {"error": KEY}, "authentication"),
     (403, {"error": "usage_limit " + KEY}, "authentication"),
-    (402, {"error": {"code": "quota_exceeded"}}, "usage_limit"),
-    (503, {"error": KEY}, "other"), (400, {"error": "bad request " + KEY}, "request_rejected"),
+    (402, {"error": {"code": "quota_exceeded"}}, "billing"),
+    (503, {"error": KEY}, "server"), (400, {"error": "bad request " + KEY}, "request_rejected"),
     (302, {}, "other"),
 ])
 def test_http_errors_are_safe_and_usage_limit_matches_queue(status, payload, kind, caplog):
@@ -169,7 +169,7 @@ def test_bad_model_list_is_format_error(payload):
 
 
 @pytest.mark.parametrize("status,expected", [(200, "valid"), (401, "authentication"),
-    (403, "authentication"), (429, "usage_limit"), (500, "other")])
+    (403, "authentication"), (429, "usage_limit"), (500, "server")])
 def test_key_check_is_one_explicit_minimal_paid_model_request(status, expected):
     http = FakeHTTP(completion("", finish="length"), status=status)
     translator = adapter(http, model="glm-5.2")
@@ -177,8 +177,8 @@ def test_key_check_is_one_explicit_minimal_paid_model_request(status, expected):
     assert translator.check_key().status == expected
     assert len(http.calls) == 1
     assert json.loads(http.calls[0][2]["body"]) == {
-        "model": DEFAULT_MODEL, "messages": [{"role": "user", "content": 'Return a json object. Example: {"ok": true}.'}],
-        "max_tokens": 1, "stream": False, "response_format": {"type": "json_object"},
+        "model": DEFAULT_MODEL, "messages": [{"role": "user", "content": 'Reply OK.'}],
+        "max_tokens": 16, "stream": False,
     }
     assert adapter(FakeHTTP(error=OSError(KEY))).check_key().status == "connection"
     assert adapter(FakeHTTP({})).check_key().status == "other"
@@ -412,7 +412,7 @@ def test_session_headers_are_scoped_to_model_requests_and_independent_key_checks
     (400, {"error": "json_schema unsupported " + KEY}, "request_rejected", "JSON Schema"),
     (400, {"error": "Prompt must contain the word 'json' " + KEY}, "request_rejected", "json 안내"),
     (400, {"model": DEFAULT_MODEL}, "request_rejected", "요청을 거부"),
-    (402, {"error": "usage_limit reached " + KEY}, "usage_limit", "한도"),
+    (402, {"error": "usage_limit reached " + KEY}, "billing", "결제"),
     (429, {"error": KEY}, "usage_limit", "한도"),
 ])
 def test_local_server_request_rejections_and_limits_are_not_retried(server, status, payload, kind, diagnostic):
@@ -483,3 +483,52 @@ def test_delayed_server_respects_total_deadline_without_retries(server, phase):
     assert raised.value.kind == "connection"
     assert time.monotonic() - started < 1
     assert len(server.requests) == 1
+
+@pytest.mark.parametrize('status,payload,kind', [
+    (400, {'error': {'message': 'bad request'}}, 'request_rejected'),
+    (402, {'error': 'payment required'}, 'billing'),
+    (404, {'error': 'not found'}, 'other'),
+    (500, {'error': 'temporary failure'}, 'server'),
+    (200, {'error': {'message': 'subscription expired'}}, 'billing'),
+    (200, {}, 'other'),
+])
+def test_key_diagnostics_reach_result_and_app_log(tmp_path, status, payload, kind):
+    import logging
+    from my_video_manager.app_logging import file_log_handler
+    path = tmp_path / 'logs/app.log'
+    handler = file_log_handler(path)
+    logger = logging.getLogger('my_video_manager')
+    logger.addHandler(handler)
+    try:
+        result = adapter(FakeHTTP(payload, status=status)).check_key()
+        assert result.status == kind
+        assert result.error.status == status
+        assert f'HTTP {status}' in result.message
+        assert result.message in path.read_text(encoding='utf-8')
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+
+
+def test_diagnostics_redact_before_truncation_and_repr(caplog):
+    from pathlib import Path
+    raw = f'{KEY} sk-other-secret hf_PrivateToken {Path.home()} Authorization: Basic abcdef\n' + 'x' * 200
+    http = FakeHTTP({'error': {'message': raw}}, status=400)
+    result = adapter(http).check_key()
+    assert len(result.error.server_message) == 160
+    with pytest.raises(OpenCodeGoError) as raised:
+        adapter(http).translate(LINES, 'en')
+    assert raised.value.detail == result.message
+    output = repr(result) + repr(raised.value) + caplog.text
+    for secret in (KEY, 'sk-other-secret', 'hf_PrivateToken', str(Path.home()), 'abcdef'):
+        assert secret not in output
+
+
+def test_key_storage_failure_has_own_guidance_and_log(caplog):
+    def broken():
+        raise OSError('sk-storage-secret')
+    result = OpenCodeGoTranslator(broken, session_id='test', transport=FakeHTTP()).check_key()
+    assert result.status == 'key_storage'
+    assert '키를 다시 입력' in result.message
+    assert result.message in caplog.text
+    assert 'sk-storage-secret' not in caplog.text + repr(result)
