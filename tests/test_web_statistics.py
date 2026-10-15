@@ -4,6 +4,8 @@ import json
 from threading import Event, get_ident
 from time import monotonic
 
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import pytest
 from PySide6.QtTest import QTest
 
@@ -205,6 +207,6 @@ shiboken6.delete(app)
     result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
                             cwd=Path(__file__).resolve().parents[1],
                             env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen',
-                                 'QTWEBENGINE_CHROMIUM_FLAGS': '--disable-gpu'}, timeout=30)
+                                 'QTWEBENGINE_CHROMIUM_FLAGS': '--disable-gpu'}, timeout=CHILD_READY_TIMEOUT)
     assert result.returncode == 0, result.stderr
     assert 'Traceback' not in result.stderr and 'Signal source has been deleted' not in result.stderr

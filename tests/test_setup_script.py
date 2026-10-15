@@ -5,6 +5,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import pytest
 
 
@@ -72,7 +74,7 @@ try {
 '''.replace("FAST_FLAG", "$true" if fast else "$false")
        .replace("MISSING_TOOL", missing).replace("UV_INSTALL", uv_install), encoding="utf-8-sig")
     result = subprocess.run([POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
-                            capture_output=True, timeout=30)
+                            capture_output=True, timeout=CHILD_READY_TIMEOUT)
     calls = json.loads((tmp_path / "calls.json").read_text(encoding="utf-8-sig"))
     error = tmp_path / "error.txt"
     return result, calls, error.read_text(encoding="utf-8-sig") if error.exists() else ""

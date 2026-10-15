@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import pytest
 
 
@@ -117,7 +119,7 @@ install(Path(sys.argv[3]), cache, '7z')
                  for i in range(2)]
     try:
         for process in processes:
-            out, err = process.communicate(timeout=30)
+            out, err = process.communicate(timeout=CHILD_READY_TIMEOUT)
             assert process.returncode == 0, (out, err)
     finally:
         for process in processes:
@@ -144,9 +146,10 @@ with m['cache_lock'](cache):
     Path(sys.argv[3]).touch()
     time.sleep(60)
 '''
+    code = code.replace("time.sleep(60)", f"time.sleep({CHILD_READY_TIMEOUT * 2})")
     process = subprocess.Popen([sys.executable, "-c", code, str(SCRIPT), str(cache), str(marker)])
     try:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + CHILD_READY_TIMEOUT
         while not marker.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.05)
         assert marker.exists(), "잠금 소유 프로세스가 준비되지 않았습니다."
@@ -156,7 +159,7 @@ with m['cache_lock'](cache):
     finally:
         if process.poll() is None:
             process.kill()
-        process.wait(timeout=30)
+        process.wait(timeout=CHILD_READY_TIMEOUT)
     monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(b"archive"))
     installer.install(tmp_path / "runtime", cache, "7z")
     assert not list(cache.glob("*.part"))
@@ -189,26 +192,28 @@ else:
     notice = tmp_path / "waiter.log"
     output = notice.open("wb")
     try:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + CHILD_READY_TIMEOUT
         while not (cache / "ready").exists() and owner.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
         assert (cache / "ready").exists()
         waiter = subprocess.Popen([sys.executable, "-u", "-c", code, str(SCRIPT), str(cache), "waiter"],
                                   stdout=output, stderr=subprocess.STDOUT)
         # 두 안내 사이에 가상 시간이 301초 경과한다. 이전 기본 300초는 여기서 실패한다.
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + CHILD_READY_TIMEOUT
         while notice.read_bytes().count(b"\n") < 2 and waiter.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
         assert notice.read_bytes().count(b"\n") >= 2
         assert owner.poll() is None and waiter.poll() is None
         assert not (cache / "acquired").exists()
         (cache / "release").touch()
-        assert waiter.wait(timeout=30) == 0, notice.read_bytes()
-        assert owner.wait(timeout=30) == 0
+        assert waiter.wait(timeout=CHILD_READY_TIMEOUT) == 0, notice.read_bytes()
+        assert owner.wait(timeout=CHILD_READY_TIMEOUT) == 0
         assert (cache / "acquired").exists()
     finally:
+        # Windows venv 런처만 kill하면 실제 Python 자식이 남을 수 있다.
+        # 정상 해제 신호로 소유자를 먼저 회수한 뒤 대기자도 종료시킨다.
+        (cache / "release").touch()
         for process in (owner, waiter):
             if process is not None and process.poll() is None:
-                process.kill()
-                process.wait(timeout=30)
+                process.wait(timeout=CHILD_READY_TIMEOUT)
         output.close()

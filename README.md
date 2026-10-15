@@ -74,6 +74,7 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 `QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu`를 기본으로 적용하며, 사용자가 지정한 값은 유지합니다.
 `-n auto`는 CPU 수에 맞춰 작업자를 만들고, 여러 작업이 같은 PC를 쓸 때는 `-n 2`처럼 수를 줄일 수 있습니다.
 직렬 실행은 `-n auto`를 빼고 `.venv/Scripts/python -m pytest`로 실행합니다.
+자식 프로세스 성공 경로의 대기 한도는 `tests/wait_helpers.py`의 `CHILD_READY_TIMEOUT`(기본 90초)이며 `MVM_TEST_CHILD_TIMEOUT` 환경 변수로 조정합니다. 조건이 충족되면 즉시 진행하고, 짧은 timeout 동작 검사는 별도 한도를 유지합니다.
 건너뛴 테스트와 이유까지 비교하려면 직렬·병렬 명령에 각각 `-rs`를 붙입니다.
 
 ## 설치 파일 만들기

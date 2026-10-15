@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import pytest
 
 from my_video_manager.subtitles import TranscriptLine
@@ -99,7 +101,7 @@ def test_prompt_encodes_commands_and_delimiters_as_data_and_parser_never_execute
     assert parse_translation_response(response, (line,))[0].id == "real"
 
 
-def fake_cli(tmp_path, script, cli="codex", timeout=30):
+def fake_cli(tmp_path, script, cli="codex", timeout=CHILD_READY_TIMEOUT):
     worker = tmp_path / "가짜 번역 CLI.py"
     worker.write_text(script, encoding="utf-8")
     return SubscriptionCLITranslator(tmp_path / "data", commands={cli: (sys.executable, str(worker))}, timeout=timeout)
@@ -142,9 +144,9 @@ def test_core_with_fake_cli_process_uses_safe_arguments_utf8_and_temp_directory(
     monkeypatch.setenv("OPENAI_API_KEY", "do-not-use-api-billing")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "do-not-use-api-billing")
     # CLI 자식은 Windows에서 낮은 우선순위로 실행된다. xdist 부하에서
-    # 시작/import가 늦어져도 성공 계약을 검사하도록 30초를 허용한다.
+    # 시작/import가 늦어져도 성공 계약을 검사하도록 공용 대기 한도를 쓴다.
     # 시간 초과 동작은 아래 별도 테스트의 timeout=0.2로 검증한다.
-    adapter = fake_cli(tmp_path, SUCCESS_SCRIPT, cli, timeout=30)
+    adapter = fake_cli(tmp_path, SUCCESS_SCRIPT, cli, timeout=CHILD_READY_TIMEOUT)
     core = reopen(adapter)
     core.set_translation_cli(cli)
     video = core.videos()[0]
@@ -222,13 +224,13 @@ child = subprocess.Popen([sys.executable, '-c',
     str(marker) + '.child'])
 marker.write_text(json.dumps([os.getpid(), child.pid]))
 time.sleep(60)
-'''
+'''.replace("time.sleep(60)", f"time.sleep({CHILD_READY_TIMEOUT * 2})")
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows Job 프로세스 정리")
 def test_core_cancellation_kills_cli_and_its_children(setup, tmp_path):
     core, _, _, _, reopen = setup
-    adapter = fake_cli(tmp_path, TREE_SCRIPT, timeout=30)
+    adapter = fake_cli(tmp_path, TREE_SCRIPT, timeout=CHILD_READY_TIMEOUT)
     core = reopen(adapter)
     source(core, core.videos()[0].id)
     marker = tmp_path / "가짜 번역 CLI.ready"
@@ -239,7 +241,7 @@ def test_core_cancellation_kills_cli_and_its_children(setup, tmp_path):
             pids.append(int(wait_file(Path(str(marker) + ".child"))))
         finally:
             core.stop_translation_processing()
-        assert future.result(timeout=30).state == "queued"
+        assert future.result(timeout=CHILD_READY_TIMEOUT).state == "queued"
     assert_processes_exited(pids)
     assert list(adapter.directory.iterdir()) == []
 
@@ -271,9 +273,9 @@ core.process_next_translation()
         pids = json.loads(wait_file(marker))
         pids.append(int(wait_file(Path(str(marker) + ".child"))))
         subprocess.run(["taskkill", "/PID", str(parent_pid), "/F"], check=True, capture_output=True)
-        parent.communicate(timeout=30)
+        parent.communicate(timeout=CHILD_READY_TIMEOUT)
         assert_processes_exited(pids)
     finally:
         if parent.poll() is None:
             subprocess.run(["taskkill", "/PID", str(parent.pid), "/T", "/F"], capture_output=True)
-        parent.communicate(timeout=30)
+        parent.communicate(timeout=CHILD_READY_TIMEOUT)

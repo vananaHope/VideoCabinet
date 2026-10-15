@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from threading import Event
 
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import pytest
 
 from my_video_manager.core import AppCore
@@ -88,7 +90,7 @@ else:
     print(json.dumps({'structured_output': result}))
 '''.replace('CAPTURE', repr(str(capture)))
     # xdist 부하에서 저우선순위 자식의 시작을 기다린다. 시간 초과 계약은 timeout=0.2로 따로 검증한다.
-    adapter = fake_cli(tmp_path, script, cli=identifier, timeout=30)
+    adapter = fake_cli(tmp_path, script, cli=identifier, timeout=CHILD_READY_TIMEOUT)
     core = reopen(adapter)
     if model is None:
         core.set_translation_cli(identifier)
@@ -116,7 +118,7 @@ else:
 def test_cli_configuration_error_is_failed_not_held(connected, tmp_path, message):
     *_, reopen = connected
     # 시간 초과 대신 실제 구성 오류 응답을 판정하도록 xdist 자식 시작에 30초를 허용한다.
-    adapter = fake_cli(tmp_path, f'import sys\nprint({message!r}, file=sys.stderr)\nsys.exit(1)', timeout=30)
+    adapter = fake_cli(tmp_path, f'import sys\nprint({message!r}, file=sys.stderr)\nsys.exit(1)', timeout=CHILD_READY_TIMEOUT)
     core = reopen(adapter)
     save(core, key_action='replace', key='test-key')
     source(core, core.videos()[0].id)

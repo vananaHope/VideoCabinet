@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import tempfile
 
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import pytest
 
 
@@ -114,7 +116,7 @@ Write-Output "POWERSHELL_MAJOR=$($PSVersionTable.PSVersion.Major)"
 exit $ResultCode
 '''
     return subprocess.run([POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", harness],
-                          env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+                          env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CHILD_READY_TIMEOUT)
 
 
 def snapshot(repository):

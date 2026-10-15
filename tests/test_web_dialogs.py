@@ -204,6 +204,9 @@ def test_program_navigation_keeps_dialog_as_shell_overlay(window_factory, core, 
     window = window_factory()
     host, dialogs = window.web_host, window.web_host.dialogs
     navigate = {'reel': window.reel.open, 'queue': window.tray.show_queue, 'search': window.show_search}[target]
+    # 숨은 WebEngine은 초기 로드가 지연될 수 있다. 전환 계약을 검사하기 전에
+    # 보이는 셸의 준비를 기다리고, 그 뒤 실제 재생 화면으로 전환한다.
+    wait_for(lambda: host._loaded_notified)
     window.pages.setCurrentWidget(window.playback_page)
     def check():
         wait_for(lambda: dialogs.container is not None)

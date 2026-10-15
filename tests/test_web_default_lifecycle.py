@@ -1,5 +1,7 @@
 """기본 진입점과 데이터 폴더별 중복 실행의 웹 셸 복원."""
 import os
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import subprocess
 import sys
 
@@ -23,7 +25,7 @@ def test_second_default_process_activates_existing_web_window(window_factory, co
     try:
         result = subprocess.run([sys.executable, '-m', 'my_video_manager', '--data-dir', str(core.database.parent)],
                                 env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'}, capture_output=True,
-                                text=True, timeout=30)
+                                text=True, timeout=CHILD_READY_TIMEOUT)
         assert result.returncode == 0, result.stderr
         for _ in range(100):
             if activated:

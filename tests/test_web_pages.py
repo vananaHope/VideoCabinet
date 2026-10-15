@@ -13,6 +13,7 @@ from test_web_library_data import core
 from my_video_manager import web_page_registry, web_shell
 from my_video_manager.web_contract import Argument, BridgeContract, CONTRACTS, TABS
 from my_video_manager.web_page import WebPageController
+from qt_wait import wait_for
 
 
 @pytest.fixture
@@ -69,7 +70,7 @@ def test_new_page_registers_its_bridge_refresh_and_focus_without_host_changes(wi
     host = window.web_host
     loaded = QSignalSpy(host.view.loadFinished)
     if host.engine_page.isLoading():
-        assert loaded.wait(5000)
+        wait_for(lambda: loaded.count() > 0)
     registered = host.channel.registeredObjects()
     assert set(registered) == {contract.name for contract in (*CONTRACTS, example_page)}
     assert json.loads(registered['example'].find('한글')) == {'query': '한글'}
@@ -163,7 +164,7 @@ def test_frontend_loaded_fires_once_per_load_with_multiple_pages(window_factory,
     host = window_factory().web_host
     loaded = QSignalSpy(host.view.loadFinished)
     if host.engine_page.isLoading():
-        assert loaded.wait(5000)
+        wait_for(lambda: loaded.count() > 0)
     host.frontend_loading()
     notifications = QSignalSpy(host.frontend_loaded)
     if shell_first:

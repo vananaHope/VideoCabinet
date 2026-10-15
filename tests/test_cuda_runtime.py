@@ -10,6 +10,8 @@ import sys
 from threading import Event, Thread
 import zipfile
 
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import pytest
 
 from my_video_manager.core import AppCore
@@ -346,7 +348,7 @@ SubtitlePreparation(Path(sys.argv[1]), gpu_available=lambda: True,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(2)]
     try:
         for process in processes:
-            _, error = process.communicate(timeout=30)
+            _, error = process.communicate(timeout=CHILD_READY_TIMEOUT)
             assert process.returncode == 0, error.decode(errors="replace")
     finally:
         for process in processes:
