@@ -6,8 +6,11 @@
 
 ## 웹 UI 완료 조건
 
+- 앱은 단일 웹 셸을 기본으로 사용한다. 재생·트레이·공용 네이티브 경고만 Qt로 남긴다.
+- 준비·개발 서버 연결·새 웹 페이지 등록은 README의 해당 절을 따른다. 페이지 추가 때 Python·React 등록부와 생성 계약을 함께 갱신한다.
 - `frontend/` 변경은 해당 폴더에서 `npm run lint`, `npm run typecheck`, `npm run build`가 모두 통과해야 완료다.
 - 브리지 계약을 바꾸면 `scripts/generate_web_types.py`로 타입을 생성하고 pytest를 실행한다.
+- UI 검사는 `scripts/check_web_*.py --offscreen`으로 1100×720 화면을 확인하고, 실창에서 탭·단축키·mpv 왕복·대화상자·트레이를 확인한다.
 
 ## Agent skills
 
