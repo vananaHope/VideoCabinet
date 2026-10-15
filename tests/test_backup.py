@@ -32,6 +32,23 @@ from my_video_manager.translation import TranslatedLine
 NOW = datetime(2026, 10, 15, tzinfo=timezone.utc)
 
 
+def test_new_backup_missing_drive_message(core, tmp_path, monkeypatch):
+    destination = tmp_path / 'missing' / 'backup.zip'
+    exists = Path.exists
+    monkeypatch.setattr(Path, 'exists', lambda path: False if str(path) == path.anchor else exists(path))
+    with pytest.raises(OSError) as caught:
+        core.create_backup(destination)
+    assert '백업을 저장할 드라이브를 찾을 수 없습니다' in backup_error_message(caught.value)
+
+
+def test_backup_message_survives_drive_probe_error(tmp_path, monkeypatch):
+    def denied(path):
+        raise PermissionError('root unavailable')
+    monkeypatch.setattr(Path, 'exists', denied)
+    message = backup_error_message(FileNotFoundError(errno.ENOENT, 'missing', str(tmp_path / 'backup.zip')))
+    assert '백업 파일이나 폴더를 찾을 수 없습니다' in message
+
+
 def test_missing_backup_is_distinct_from_unavailable_device(tmp_path):
     with pytest.raises(FileNotFoundError) as caught:
         inspect_backup(tmp_path / 'removed.zip')

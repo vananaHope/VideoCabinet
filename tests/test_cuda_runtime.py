@@ -438,7 +438,7 @@ def test_preparation_log_is_rotated_and_excluded_from_backup(tmp_path, server):
 def test_upgrade_partial_waits_for_retry(tmp_path, server, location):
     (tmp_path / location).mkdir(parents=True)
     service = preparation(tmp_path, server)
-    assert service.status()['kind'] == 'cancelled'
+    assert service.status()['kind'] == 'interrupted'
     assert server[0].requests == []
     service.prepare()
     assert service.status()['kind'] == 'ready'

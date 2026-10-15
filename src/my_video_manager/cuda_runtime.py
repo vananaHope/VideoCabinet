@@ -332,7 +332,7 @@ class SubtitlePreparation:
                 return previous
             if previous is None and (any((self.data_directory / 'runtime/cuda').glob('*.partial'))
                                      or any((self.data_directory / 'models').rglob('*.partial'))):
-                return dict(kind='cancelled', message=PreparationError.MESSAGES['interrupted'], detail='')
+                return dict(kind='interrupted', message=PreparationError.MESSAGES['interrupted'], detail='')
             return dict(kind='idle', message='', detail='')
         return dict(kind='ready', message='', detail='')
 

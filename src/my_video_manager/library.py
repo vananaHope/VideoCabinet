@@ -369,7 +369,8 @@ class Library:
         inaccessible: set[Path] = set()
         # 직접 추가한 파일도 변경/사라짐을 확인한다. 읽기 권한 오류는 위치 삭제로 해석하지 않는다.
         with self._connect() as db:
-            db.execute('UPDATE videos SET resolution_checked=0 WHERE resolution_checked=2')
+            # 실패한 해상도는 유지한다. 파일 변경은 _register에서 다시 읽고,
+            # 명시적 위치 연결은 reconnect_video에서 미확인으로 되돌린다.
             paths = [Path(row[0]) for row in db.execute("SELECT path FROM locations")]
             missing_at_start = {row[0] for row in db.execute(
                 "SELECT id FROM videos WHERE NOT EXISTS (SELECT 1 FROM locations WHERE video_id = videos.id)")}

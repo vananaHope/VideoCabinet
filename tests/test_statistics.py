@@ -346,6 +346,35 @@ def test_combined_summary_matches_original_status_and_statistics_for_every_video
         assert stats.last_viewed_at == (expected.last_viewed_at.isoformat() if expected.last_viewed_at else None)
 
 
+def test_resume_percent_uses_duration_of_last_position_even_when_latest_viewing_has_none():
+    rows = (
+        replace(viewing(seconds=50, ident=1), last_position=50),
+        replace(viewing(seconds=1, ident=2), duration=200, last_position=60),
+        replace(viewing(seconds=0, ident=3), duration=1000, last_position=None),
+    )
+    records = [ViewingRecord(v.id, v.video_id, v.duration, v.played_seconds,
+                             v.started_at, v.updated_at, v.last_position) for v in rows]
+    expected = ViewingStatus(abandoned=True, resume_point=60, stopped_percent=30,
+                             last_viewed_at=rows[0].updated_at)
+    assert viewing_status(rows, ViewingSettings()) == expected
+    assert summarize_viewings(reversed(records), [1], ViewingSettings()).statuses[1] == expected
+    assert calculate(rows).library.abandoned_count == 1
+    assert calculate(rows).library.finished_count == 0
+
+
+@pytest.mark.parametrize('settings', [ViewingSettings(), ViewingSettings(finished_ratio=0.8, abandoned_ratio=0.1)])
+def test_period_inventory_matches_all_time_status_with_glances_and_exclusions(settings):
+    rows = [viewing(1, seconds=85), viewing(1, seconds=1, ident=2),
+            viewing(2, seconds=6), viewing(3, seconds=1), viewing(4, seconds=100)]
+    rows = [replace(v, started_at=NOW - timedelta(days=90)) for v in rows]
+    result = calculate(rows, [video(vid, excluded=vid == 4) for vid in range(1, 6)], settings=settings)
+    statuses = [viewing_status(tuple(v for v in rows if v.video_id == vid), settings) for vid in range(1, 4)]
+    assert result.viewing_count == 0
+    assert result.library.finished_count == sum(s.finished for s in statuses)
+    assert result.library.abandoned_count == sum(s.abandoned for s in statuses)
+    assert result.library.unwatched_count == 4 - sum(s.finished or s.abandoned for s in statuses)
+
+
 @pytest.mark.parametrize("days", [7, 365])
 @pytest.mark.parametrize("tz", [None, UTC, KST, timezone(timedelta(hours=-5)),
                                 timezone(timedelta(seconds=30))])

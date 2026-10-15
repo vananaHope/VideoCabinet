@@ -5,9 +5,49 @@ import traceback
 import pytest
 
 from my_video_manager.secret_store import Secret, SecretStore, SecretStoreError, WindowsDPAPI
+from pathlib import Path
 
 
 KEY = "test-subscription-key-never-in-output-1234"
+
+
+def test_saved_key_survives_staging_cleanup_failure(tmp_path, monkeypatch, caplog):
+    class Protector:
+        def protect(self, value):
+            return b'encrypted-new'
+    store = SecretStore(tmp_path, protector=Protector())
+    rmdir = Path.rmdir
+    def denied(path):
+        if path.name.startswith('.key-'):
+            raise PermissionError(KEY)
+        return rmdir(path)
+    monkeypatch.setattr(Path, 'rmdir', denied)
+    store.save(KEY)
+    assert store.path.read_bytes() == b'encrypted-new'
+    assert '임시 폴더' in caplog.text
+    assert KEY not in caplog.text
+
+
+def test_denied_staging_directory_is_attempted_once_and_preserves_previous_key(tmp_path, monkeypatch):
+    class Protector:
+        def protect(self, value):
+            return b'encrypted'
+    store = SecretStore(tmp_path, protector=Protector())
+    store.path.parent.mkdir()
+    store.path.write_bytes(b'previous')
+    mkdir = Path.mkdir
+    attempts = []
+    def denied(path, *args, **kwargs):
+        if path.name.startswith('.key-'):
+            attempts.append(path)
+            raise PermissionError('denied')
+        return mkdir(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'mkdir', denied)
+    with pytest.raises(SecretStoreError):
+        store.save(KEY)
+    assert len(attempts) == 1
+    assert store.path.read_bytes() == b'previous'
+    assert list(store.path.parent.iterdir()) == [store.path]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="실제 Windows 사용자 DPAPI")
