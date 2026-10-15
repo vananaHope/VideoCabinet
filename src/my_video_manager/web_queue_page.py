@@ -1,5 +1,5 @@
 """활성 대기열만 조회하고 변경된 행만 웹에 보낸다."""
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Slot
 
 from .web_page import WebPageController
 from .web_queue_bridge import QueueBridge
@@ -24,6 +24,14 @@ class WebQueuePage(WebPageController):
         self.timer.timeout.connect(self.refresh)
         host.register_page(self)
 
+    @Slot(object)
+    def bulk_completed(self, result):
+        self.bridge.bulk_running = False
+        try:
+            self.refresh()
+        finally:
+            self.bridge.bulkFinished.emit(encode(result))
+
     def activated(self):
         # 호스트의 refresh() 경로와 달리 규칙 대상은 활성화 때 한 번만 조회한다.
         self.refresh_rules()
@@ -38,7 +46,7 @@ class WebQueuePage(WebPageController):
                     order=self.order, counts=self.counts)
 
     def refresh(self):
-        if not self.is_active():
+        if not self.is_active() or self.bridge.bulk_running:
             return
         items = self.core.subtitle_queue_items()
         entries = {item.video_id: item for item in items}

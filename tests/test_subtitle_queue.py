@@ -170,6 +170,9 @@ def test_unified_translation_progress_held_failure_retry_and_notification(setup)
     core.process_next_subtitle()
     core.process_next_subtitle()
     assert core.take_subtitle_queue_completion() is None
+    core.promote_subtitle(b.id)
+    while any(e.video_id == b.id for e in core.translation_queue()):
+        core.process_next_translation()
     translator.error = TranslationError("authentication", "로그인")
     core.process_next_translation()
     assert {i.video_id: i.state for i in core.subtitle_queue_items()} == {a.id: "failed", b.id: "completed"}
@@ -287,13 +290,22 @@ def test_remove_active_cancels_only_that_video_and_next_can_run(setup):
         core.remove_from_subtitle_queue(a.id)
         future.result(5)
     assert core.process_next_subtitle().video_id == b.id
+    assert core.take_subtitle_queue_completion() is None
+    core = translation_core(core, adapter, Translator())
+    while core.translation_ready():
+        core.process_next_translation()
     assert core.take_subtitle_queue_completion() == (1, 0)
+    assert not core.translation_queue()
 
 
 def test_completed_removal_and_first_tray_notice_survive_restart(setup):
     core, adapter, (a, _) = setup
     core.request_subtitles(a.id, "ko")
     core.process_next_subtitle()
+    assert core.subtitle_queue_items()[0].state == "queued"
+    core = translation_core(core, adapter, Translator())
+    while core.translation_ready():
+        core.process_next_translation()
     assert core.subtitle_queue_items()[0].state == "completed"
     core.remove_from_subtitle_queue(a.id)
     assert core.acknowledge_tray_notice()

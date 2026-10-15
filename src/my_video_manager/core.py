@@ -258,8 +258,8 @@ class AppCore:
     def subtitle_regeneration_warning(self, video_id):
         return self._review.regeneration_warning(video_id)
 
-    def edit_transcript_line(self, video_id, line_id, text, *, overwrite_reviewed=False):
-        self._review.edit(video_id, line_id, text, overwrite_reviewed=overwrite_reviewed)
+    def edit_transcript_line(self, video_id, line_id, text, *, overwrite_reviewed=False, keep_reviewed=False):
+        self._review.edit(video_id, line_id, text, overwrite_reviewed=overwrite_reviewed, keep_reviewed=keep_reviewed)
 
     def edit_translation_line(self, video_id, line_id, text):
         self._review.edit(video_id, line_id, text, translated=True)
@@ -298,6 +298,18 @@ class AppCore:
     def request_translation(self, video_id: int, line_ids=None) -> TranslationQueueEntry | None:
         """전체 또는 지정한 원어 줄 ID만 번역한다. 실패/보류 재요청은 완료한 묶음을 유지한다."""
         return self._translations.request(video_id, line_ids)
+
+    def subtitle_task(self, video_id):
+        return self._translations.task(video_id)
+
+    def request_refinement(self, video_id):
+        return self._translations.request_refinement(video_id)
+
+    def existing_refinement_candidates(self):
+        return self._translations.existing_refinement_candidates()
+
+    def request_existing_refinements(self):
+        return self._translations.request_existing_refinements()
 
     def translation(self, video_id: int) -> Translation | None:
         return self._translations.translation(video_id)
@@ -347,11 +359,13 @@ class AppCore:
     def _execute_reel_transition(self, transition) -> None:
         previous = self.reel_playback
         translated = self._subtitle_selection.translated
+        chosen = self._subtitle_selection.chosen
         transition()
         current = self.reel_playback
         if previous and current and current.action == "seek" and previous.video_id == current.video_id:
             # 항목별 재생 수명주기는 닫되, 같은 영상의 자막 선택은 엔진과 함께 유지한다.
             self._subtitle_selection.translated = translated
+            self._subtitle_selection.chosen = chosen
 
     def last_highlight_revisited_at(self, highlight_id: int) -> datetime | None:
         return self._revisits.last_for_highlight(highlight_id)
@@ -497,6 +511,7 @@ class AppCore:
         return self._subtitles.has_transcript(video_id)
 
     def playback_subtitle(self, video_id: int) -> Path | None:
+        self._subtitle_selection.select_default()
         transcript = self.transcript(video_id)
         translated = self._subtitle_selection.video_id == video_id and self._subtitle_selection.translated
         if translated:

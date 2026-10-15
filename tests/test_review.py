@@ -245,7 +245,7 @@ def test_invalid_range_is_rejected(setup, start, end):
     assert not core.subtitle_queue()
 
 
-@pytest.mark.parametrize("language", ["ko", "und"])
+@pytest.mark.parametrize("language", ["und"])
 def test_noneligible_source_can_be_edited_and_range_regenerated_without_translation(setup, language):
     core, vid, transcriber, translator, _, _ = setup
     transcriber.result = TranscriberResult(language, transcriber.result.segments)

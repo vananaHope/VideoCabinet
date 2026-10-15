@@ -2,10 +2,31 @@
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from .web_contract import QUEUE
 from .web_json import encode
+
+
+class _BulkResult(QObject):
+    completed = Signal(object)
+
+
+class _BulkRefinement(QRunnable):
+    def __init__(self, core, signals):
+        super().__init__()
+        self.core, self.signals = core, signals
+
+    def run(self):
+        try:
+            count, skipped = self.core.request_existing_refinements()
+            result = {'message': f'다듬기 {count}개를 요청했습니다. 사용자가 뺀 영상 {skipped}개는 건너뛰었습니다.'}
+        except Exception as error:
+            result = {'error': str(error)}
+        try:
+            self.signals.completed.emit(result)
+        except RuntimeError:
+            pass  # 종료된 화면에는 결과를 보내지 않는다. 등록 트랜잭션은 끝까지 보존한다.
 
 
 class QueueBridge(QObject):
@@ -14,10 +35,14 @@ class QueueBridge(QObject):
     queueFocusRequested = QUEUE.signal('queueFocusRequested')
     queueDeactivated = QUEUE.signal('queueDeactivated')
     preparationChanged = QUEUE.signal('preparationChanged')
+    bulkFinished = QUEUE.signal('bulkFinished')
 
     def __init__(self, page):
         super().__init__(page)
         self.page = page
+        self.bulk_running = False
+        self._bulk_signals = _BulkResult()
+        self._bulk_signals.completed.connect(page.bulk_completed)
         page.window.subtitles.preparation_changed.connect(lambda value: self.preparationChanged.emit(encode(value)))
 
     @QUEUE.slot('preparationSnapshot')
@@ -63,6 +88,16 @@ class QueueBridge(QObject):
     def action(self, name, video_id):
         def execute():
             core = self.page.core
+            if name == 'previewRefineExisting':
+                count, skipped = core.existing_refinement_candidates()
+                return {'confirmation': f'아직 다듬지 않은 한국어 영상 {count}개를 자동 대상 우선순위로 추가할까요? '
+                        f'사용자가 뺀 영상 {skipped}개는 건너뜁니다.'}
+            if name == 'refineExisting':
+                if self.bulk_running:
+                    raise ValueError('기존 한국어 자막을 대기열에 추가하고 있습니다.')
+                self.bulk_running = True
+                QThreadPool.globalInstance().start(_BulkRefinement(core, self._bulk_signals))
+                return {'pending': True}
             if name == 'retryFailed':
                 result = core.retry_failed_subtitles()
                 details = []

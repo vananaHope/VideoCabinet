@@ -9,6 +9,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from .subtitles import TranscriptLine
+from .translation_kind import translation_task, TranslationTask
 from .translation_models import DEFAULT_PROVIDER, provider
 from .translation_glossary import GlossaryStore, GlossaryEntry
 
@@ -30,16 +31,16 @@ class TranslationError(RuntimeError):
         super().__init__({
             "usage_limit": "구독 사용량 한도로 보류했습니다. 잠시 뒤 자동으로 재시도합니다.",
             "usage_limit_repeated": "사용량 한도가 3회 반복되어 자동 재시도를 멈췄습니다. 한도 확인 후 직접 재시도하세요.",
-            "authentication": "번역 CLI 로그인이 필요합니다.",
-            "missing_cli": "번역 CLI가 없습니다. 선택한 CLI를 설치하거나 설정을 바꾸세요.",
+            "authentication": "CLI 로그인이 필요합니다.",
+            "missing_cli": "CLI가 없습니다. 선택한 CLI를 설치하거나 설정을 바꾸세요.",
             "configuration": "모델을 쓸 수 없음: 모델 이름 또는 추론 강도를 확인하세요.",
             "missing_key": "OpenCode Go 키가 등록되지 않았습니다.",
             "connection": "OpenCode Go에 연결하지 못했습니다.",
             "key_storage": "OpenCode Go 저장된 키를 읽지 못했습니다.",
             "request_rejected": "OpenCode Go가 요청을 거부했습니다.",
-            "format": "번역 응답의 줄 ID 또는 형식이 올바르지 않습니다.",
-            "timeout": "번역 CLI 응답 시간이 초과되었습니다.",
-        }.get(kind, "번역에 실패했습니다. 자세한 내용을 확인하세요."))
+            "format": "응답의 줄 ID 또는 형식이 올바르지 않습니다.",
+            "timeout": "CLI 응답 시간이 초과되었습니다.",
+        }.get(kind, "자막 처리에 실패했습니다. 자세한 내용을 확인하세요."))
 
 
 @dataclass(frozen=True)
@@ -95,10 +96,15 @@ class Translator(Protocol):
                   context: tuple[ContextLine, ...] = (), glossary: tuple[GlossaryEntry, ...] = ()) -> TranslationResponse: ...
 
 
-def validate_translation(lines, result) -> tuple[TranslatedLine, ...]:
+def validate_translation(lines, result, *, spoken_language=None) -> tuple[TranslatedLine, ...]:
     """응답 순서는 무관하지만 대상 ID와 정확히 일대일이어야 한다."""
     try:
         result = tuple(result)
+        if translation_task(spoken_language).kind == 'refinement':
+            originals = {line.id: line.text for line in lines}
+            result = tuple(TranslatedLine(line.id, originals.get(line.id, line.text))
+                           if isinstance(line.text, str) and not line.text.strip() else line
+                           for line in result)
         ids = [line.id for line in result]
         if (len(ids) != len(lines) or len(set(ids)) != len(ids)
                 or set(ids) != {line.id for line in lines}
@@ -134,6 +140,7 @@ class TranslationQueueEntry:
     error: str | None
     error_detail: str | None
     notice: str = ""
+    kind: str = "translation"
 
 
 class Translations:
@@ -243,10 +250,10 @@ class Translations:
     def request(self, video_id: int, line_ids=None, *, automatic=False, connection=None,
                 preserve_state=False, continue_order=False):
         transcript = self._subtitles.transcript(video_id, connection=connection)
-        if transcript is None or not transcript.translation_eligible:
+        if transcript is None or not transcript.lines or transcript.spoken_language in (None, "und"):
             if automatic:
                 return None
-            raise ValueError("한국어이거나 원어를 알 수 없는 자막은 번역할 수 없습니다.")
+            raise ValueError("원어를 알 수 없거나 비어 있는 자막은 처리할 수 없습니다.")
         selected = set(line_ids) if line_ids is not None else {line.id for line in transcript.lines}
         if not selected or not selected <= {line.id for line in transcript.lines}:
             raise ValueError("번역할 원어 자막 줄 ID를 확인하세요.")
@@ -320,6 +327,46 @@ class Translations:
                                [(queue_id, line_id, name) for line_id, name in provenance])
             return self._entry(db, db.execute("SELECT * FROM translation_queue WHERE id = ?", (queue_id,)).fetchone())
 
+    def task(self, video_id, *, connection=None) -> TranslationTask:
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            row = db.execute("SELECT spoken_language FROM transcripts WHERE video_id=?", (video_id,)).fetchone()
+            return translation_task(row[0] if row else None)
+
+    def request_refinement(self, video_id):
+        with self._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if self.task(video_id, connection=db).kind != 'refinement':
+                raise ValueError('한국어 원어 자막이 있는 영상을 고르세요.')
+            return self.request(video_id, connection=db)
+
+    def _existing_refinements(self, db):
+        rows = db.execute("""SELECT t.video_id,
+                EXISTS (SELECT 1 FROM translation_omissions o WHERE o.transcript_id=t.id) AS omitted
+            FROM transcripts t JOIN videos v ON v.id=t.video_id
+            WHERE t.spoken_language='ko' AND NOT v.excluded
+              AND NOT EXISTS (SELECT 1 FROM translation_queue q WHERE q.video_id=t.video_id)
+              AND EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id=t.id
+                          AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id=l.id))
+              AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=t.video_id
+                              AND s.state IN ('queued', 'transcribing'))""").fetchall()
+        return [r['video_id'] for r in rows if not r['omitted']], sum(r['omitted'] for r in rows)
+
+    def existing_refinement_candidates(self):
+        with self._connect() as db:
+            ids, skipped = self._existing_refinements(db)
+        return len(ids), skipped
+
+    def request_existing_refinements(self):
+        with self._connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            ids, skipped = self._existing_refinements(db)
+            count = 0
+            for video_id in ids:
+                if self._order:
+                    self._order.finish(db, video_id)
+                count += self.request(video_id, automatic=True, connection=db) is not None
+        return count, skipped
+
     def finish_ready(self, db, video_id):
         """검수/구간 삭제가 마지막 미완료 대상을 없앤 경우도 저장한 묶음을 확정한다."""
         row = db.execute("SELECT id FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
@@ -345,9 +392,11 @@ class Translations:
         if error and row['error_kind'] != 'usage_limit_repeated' and row['error_detail'] and row['error_detail'].startswith('OpenCode Go'):
             error = row['error_detail']
         notice = db.execute("SELECT message FROM translation_fallback_notices WHERE queue_id=?", (row["id"],)).fetchone()
+        language = db.execute("SELECT spoken_language FROM transcripts WHERE id=?", (row["transcript_id"],)).fetchone()[0]
+        task = translation_task(language)
         return TranslationQueueEntry(row["id"], row["video_id"], row["state"], counts[0], counts[1],
                                      datetime.fromisoformat(row["retry_at"]) if row["retry_at"] else None,
-                                     str(error) if error else None, row["error_detail"], notice[0] if notice else "")
+                                     str(error) if error else None, row["error_detail"], notice[0] if notice else "", task.kind)
 
     def queue(self):
         with self._connect() as db:
@@ -380,6 +429,14 @@ class Translations:
                 return None
             return Translation(video_id, transcript[0], tuple(
                 TranscriptLine(r["id"], r["start"], r["end"], r["translated"]) for r in rows))
+
+    def available(self, video_id):
+        with self._connect() as db:
+            return bool(db.execute("""SELECT 1 FROM transcripts t WHERE t.video_id=?
+                AND EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id=t.id)
+                AND NOT EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id=t.id
+                    AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id=l.id))""",
+                (video_id,)).fetchone())
 
     def summary(self, video_id: int, *, connection=None) -> TranslationSummary:
         """확정 번역과 현재 요청의 저장된 부분 번역을 선택 영상 범위에서 센다."""
@@ -441,7 +498,8 @@ class Translations:
         reason = {'usage_limit': '사용량 한도', 'format': '형식 오류 재시도 소진',
                   'authentication': 'CLI 로그인 필요', 'missing_cli': 'CLI 없음',
                   'timeout': 'CLI 응답 시간 초과'}.get(kind, 'CLI 오류')
-        message = f"{provider(cli).label} {reason} → OpenCode Go로 이어서 번역"
+        language = db.execute("SELECT t.spoken_language FROM transcripts t JOIN translation_queue q ON q.transcript_id=t.id WHERE q.id=?", (queue_id,)).fetchone()[0]
+        message = f"{provider(cli).label} {reason} → OpenCode Go로 이어서 {translation_task(language).label}"
         db.execute("INSERT OR REPLACE INTO translation_routes VALUES (?, ?)", (queue_id, 'opencode_go'))
         db.execute("INSERT OR REPLACE INTO translation_fallback_notices VALUES (?, ?)", (queue_id, message))
 
@@ -503,7 +561,7 @@ class Translations:
             try:
                 response = adapter.translate(lines, language, cli=cli, cancellation=cancellation,
                                              context=context, glossary=glossary.entries, **kwargs)
-                return TranslationResponse(validate_translation(lines, response),
+                return TranslationResponse(validate_translation(lines, response, spoken_language=language),
                                            response.glossary if isinstance(response, TranslationResponse) else ())
             except TranslationError as error:
                 progress.successes = 0
@@ -701,14 +759,17 @@ class Translations:
 
 
 class SubtitleSelection:
-    """재생마다 원어로 시작하며 없는 번역으로 전환하지 않는다."""
+    """외국어는 원어, 한국어는 다듬은 자막을 기본으로 하며 직접 선택을 유지한다."""
     def __init__(self, translations):
         self._translations = translations
         self.video_id = None
         self.translated = False
+        self.chosen = False
 
     def playback_started(self, session, position):
         self.video_id, self.translated = session.video_id, False
+        self.chosen = False
+        self.select_default()
 
     def playback_position(self, session, position, seeked):
         pass
@@ -716,10 +777,18 @@ class SubtitleSelection:
     def playback_ended(self, session, position):
         self.video_id, self.translated = None, False
 
+    def select_default(self):
+        if (self.video_id is not None and not self.chosen and not self.translated
+                and self._translations.task(self.video_id).kind == 'refinement'
+                and self._translations.available(self.video_id)):
+            self.translated = True
+
     def toggle(self):
         if self.video_id is None:
             return False, "재생 중인 영상이 없습니다."
+        task = self._translations.task(self.video_id)
         if not self.translated and self._translations.translation(self.video_id) is None:
-            return False, "번역 자막이 아직 없습니다. 원어 자막을 유지합니다."
+            return False, f"{task.subtitle_label}이 아직 없습니다. 원어 자막을 유지합니다."
+        self.chosen = True
         self.translated = not self.translated
-        return True, "번역 자막" if self.translated else "원어 자막"
+        return True, task.subtitle_label if self.translated else "원어 자막"

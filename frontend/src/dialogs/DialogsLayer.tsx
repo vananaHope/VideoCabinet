@@ -91,7 +91,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
           && !data.locked && !data.confirmation) { event.preventDefault(); void act('save') }
       }}>
       {kind === 'tags' && <TagEntry bridge={bridge} composing={composing} add={name => act('add', { name })} />}
-      {['tags', 'tag-manager', 'highlights', 'review'].includes(kind) && <DialogList label={kind === 'review' ? '원어 · 번역 자막' : '목록'} rows={data.rows} selected={currentSelected} onSelect={setSelected}
+      {['tags', 'tag-manager', 'highlights', 'review'].includes(kind) && <DialogList label={kind === 'review' ? `원어 · ${data.subtitle_label}` : '목록'} rows={data.rows} selected={currentSelected} onSelect={setSelected}
         review={kind === 'review'} highlights={kind === 'highlights'} clickActivates={kind === 'review'}
         onActivate={kind === 'review' || kind === 'highlights' ? id => void act(kind === 'review' ? 'jump' : 'edit', { selected: id }) : undefined} />}
       {kind === 'series' && <>
@@ -126,11 +126,14 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {kind === 'tags' && <div className="mr-auto flex flex-wrap gap-2">{button('선택한 태그 떼기', 'remove', !currentSelected)}{button('모든 태그 관리', 'manage')}</div>}
       {kind === 'tag-manager' && <div className="mr-auto flex flex-wrap gap-2">{button('이름 변경', 'rename', !currentSelected, 'default')}{button('태그 삭제', 'delete', !currentSelected, 'destructive')}</div>}
       {kind === 'highlights' && <div className="mr-auto flex flex-wrap gap-2">{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</div>}
-      {kind === 'review' && <div className="mr-auto flex flex-wrap gap-2">{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button('번역 줄 수정', 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button('번역 SRT 저장', 'export-translation', !data.rows.length)}</div>}
+      {kind === 'review' && <div className="mr-auto flex flex-wrap gap-2">{data.task_kind === 'refinement' && button(data.task_label, 'refine', data.locked)}{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button(`${data.short_label} SRT 저장`, 'export-translation', !data.rows.length)}</div>}
       {button(editable ? '취소' : '닫기', 'close')}
       {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'translation' ? '확인' : '저장', 'save', data.locked || data.network_busy || kind === 'range' && !!data.warning, kind === 'range' ? 'destructive' : 'default')}
     </footer>
-    <ConfirmDialog open={!!data.confirmation} onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.confirm_title} description={data.confirmation}
+    {data.keep_reviewed && <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.confirm_title} description={data.confirmation}
+      confirmLabel={`새 원어로 다시 ${data.task_label}`} cancelLabel="사용자 수정본 유지" onCancel={() => void act('keep-reviewed')}
+      variant="destructive" onConfirm={() => void act('confirm')} />}
+    <ConfirmDialog open={!!data.confirmation && !data.keep_reviewed} onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.confirm_title} description={data.confirmation}
       variant={data.confirm_destructive ? 'destructive' : 'default'} onConfirm={() => void act('confirm')} />
   </DialogFrame>
 }

@@ -2,7 +2,7 @@
 from typing import TypedDict
 
 
-STATES = {'queued': '대기', 'transcribing': '받아쓰는 중', 'translating': '번역 중',
+STATES = {'queued': '대기', 'transcribing': '받아쓰는 중', 'translating': '자막 처리 중',
           'held': '보류', 'completed': '완료', 'failed': '실패'}
 
 
@@ -12,6 +12,8 @@ class QueueRowData(TypedDict):
     state: str
     progress: float
     message: str
+    taskLabel: str
+    stateLabel: str
 
 
 class PreparationData(TypedDict):
@@ -60,7 +62,10 @@ class QueueRulesData(TypedDict):
 
 def row_data(entry) -> QueueRowData:
     return dict(videoId=entry.video_id, title=entry.title, state=entry.state,
-                progress=entry.progress, message=entry.error or '')
+                progress=entry.progress, message=entry.error or '', taskLabel=entry.task_label,
+                stateLabel='받아쓰는 중' if entry.state == 'transcribing'
+                else f'{entry.task_label} · 처리 중' if entry.state == 'translating'
+                else f'{entry.task_label} · {STATES[entry.state]}')
 
 
 def counts_data(entries) -> list[QueueCountData]:

@@ -155,6 +155,11 @@ def test_ineligible_transcripts_never_call_translator(setup, language, probabili
     video = core.videos()[0]
     transcript = source(core, video.id)
     assert not transcript.translation_eligible
+    if language == 'ko':
+        assert reopen().translation_queue()[0].kind == 'refinement'
+        assert core.process_next_translation().state == 'completed'
+        assert len(adapter.calls) == 1
+        return
     assert reopen().translation_queue() == ()
     assert core.process_next_translation() is None
     with pytest.raises(ValueError):
@@ -248,7 +253,7 @@ def test_queue_failure_detail_is_readable_and_redacted_after_restart(setup, sens
         message = row_data(entry)["message"]
         assert "segfault in helper xyz" in message
         assert "exit code 3" in message
-        assert "번역에 실패" in message
+        assert "자막 처리에 실패" in message
         assert sensitive not in message
         assert "private" not in message.lower()
         assert "[가림]" in message
@@ -671,6 +676,7 @@ def test_translation_completion_after_switch_to_does_not_change_new_video_subtit
     a, b = core.videos()
     source(core, a.id)
     source(core, b.id, "ko")
+    core.remove_from_subtitle_queue(b.id)  # 다듬기를 원하지 않는 영상으로 전환하는 계약
     core.switch_to(a.id)
     core.process_next_translation()
     core.switch_to(b.id)

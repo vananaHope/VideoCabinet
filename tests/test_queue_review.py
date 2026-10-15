@@ -82,8 +82,11 @@ def test_retry_all_skips_missing_and_reports_reason_but_retries_rest(setup):
 
 def test_completed_items_are_current_run_only_and_do_not_read_transcript_lines(setup, monkeypatch):
     core, adapter, (a, b) = setup
+    core = translation_core(core, adapter, Translator())
     core.request_subtitles(a.id, "ko")
     core.process_next_subtitle()
+    while core.translation_ready():
+        core.process_next_translation()
 
     def no_lines(*args):
         raise AssertionError("대기열 화면에서 원어 줄을 읽음")
