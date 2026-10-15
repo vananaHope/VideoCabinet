@@ -309,6 +309,53 @@ def rewrite_archive(archive, *, change_manifest=None, change_files=None):
             bundle.writestr(name, content)
 
 
+@pytest.mark.parametrize("suffix", [".jpg", ".640.jpg"])
+def test_thumbnail_backup_restores_version_and_excludes_temporary_files(core, tmp_path, suffix):
+    video = core.videos()[0]
+    original = video.thumbnail
+    thumbnail = original.with_name("backup-test" + suffix)
+    original.rename(thumbnail)
+    temporary = thumbnail.with_name("unfinished.tmp.jpg")
+    temporary.write_bytes(b"partial")
+    with closing(sqlite3.connect(core.database)) as db, db:
+        db.execute("UPDATE videos SET thumbnail=? WHERE id=?",
+                   ("thumbnails/" + thumbnail.name, video.id))
+        # Even an invalid stale DB reference must not archive an in-progress capture.
+        db.execute("UPDATE videos SET thumbnail=? WHERE id!=?",
+                   ("thumbnails/" + temporary.name, video.id))
+    archive = tmp_path / "thumbnails.zip"
+    core.create_backup(archive, include_thumbnails=True)
+    with zipfile.ZipFile(archive) as bundle:
+        assert set(bundle.namelist()) == {"manifest.json", "library.sqlite3",
+                                          "thumbnails/" + thumbnail.name}
+    inspect_backup(archive)
+    thumbnail.write_bytes(b"different current cache")
+    core.request_backup_restore(archive)
+    assert apply(core.database).status == "applied"
+    restored = open_core(core.database).video(video.id).thumbnail
+    assert restored.read_bytes() == b"thumbnail"
+    assert restored.name.endswith(suffix)
+    assert restored.name.endswith(".640.jpg") == (suffix == ".640.jpg")
+
+
+@pytest.mark.parametrize("member", [
+    "thumbnails/../outside.640.jpg", "thumbnails/nested/x.640.jpg",
+    "thumbnails/x.tmp.jpg", "thumbnails/x.1280.jpg", "thumbnails/x.640.jpg/extra",
+    "thumbnails/x.640.jpg",
+])
+def test_versioned_thumbnail_validation_rejects_unsafe_paths_and_bad_hashes(core, tmp_path, member):
+    archive = tmp_path / "invalid-thumbnail.zip"
+    core.create_backup(archive)
+    def inject(files, manifest):
+        files[member] = b"thumbnail"
+        manifest["includes_thumbnails"] = True
+        manifest["files"][member] = hashlib.sha256(
+            b"wrong" if member == "thumbnails/x.640.jpg" else files[member]).hexdigest()
+    rewrite_archive(archive, change_files=inject)
+    with pytest.raises(BackupError):
+        inspect_backup(archive)
+
+
 @pytest.mark.parametrize("damage", [
     "not_zip", "foreign_app", "future_version", "bad_hash", "missing_db", "bad_db",
     "metadata_count", "bad_date", "path_traversal", "extra_file", "duplicate", "bad_json",

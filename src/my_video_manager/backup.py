@@ -240,13 +240,15 @@ def create_backup(database: Path, destination: Path, *, include_thumbnails=False
                     with closing(_readonly(snapshot)) as db:
                         names = {Path(row[0]).name for row in db.execute("SELECT thumbnail FROM videos")}
                     for name in sorted(names):
+                        member = "thumbnails/" + name
+                        if not _valid_member(member):
+                            continue  # 임시 캡처 등 지원하지 않는 캐시는 백업하지 않는다.
                         source = database.parent / "thumbnails" / name
                         if not source.is_file() or source.is_symlink():
                             continue
                         # 파일이 바뀌더라도 해시와 압축 내용은 같은 사본에서 만든다.
                         thumbnail = stage / "thumbnail"
                         shutil.copyfile(source, thumbnail)
-                        member = "thumbnails/" + name
                         files[member] = _sha256(thumbnail)
                         bundle.write(thumbnail, member)
                 manifest = dict(application=APPLICATION, format_version=FORMAT_VERSION,
@@ -260,7 +262,7 @@ def create_backup(database: Path, destination: Path, *, include_thumbnails=False
 
 
 def _valid_member(name):
-    return name == DATABASE_NAME or bool(re.fullmatch(r"thumbnails/[A-Za-z0-9_-]+\.jpg", name))
+    return name == DATABASE_NAME or bool(re.fullmatch(r"thumbnails/[A-Za-z0-9_-]+(?:\.640)?\.jpg", name))
 
 
 def _extract_checked(archive, stage):
@@ -530,7 +532,8 @@ def _apply_backup_restore(database: Path) -> BackupRestoreResult:
                     if target.exists() and _sha256(target) == _sha256(source):
                         continue
                     if target.exists():
-                        target = thumbnails / f"restored-{uuid4().hex}.jpg"
+                        suffix = ".640.jpg" if source.name.endswith(".640.jpg") else ".jpg"
+                        target = thumbnails / f"restored-{uuid4().hex}{suffix}"
                         for video_id, thumbnail in db.execute("SELECT id, thumbnail FROM videos").fetchall():
                             if Path(thumbnail).name == source.name:
                                 db.execute("UPDATE videos SET thumbnail=? WHERE id=?",
