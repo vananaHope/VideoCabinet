@@ -223,6 +223,37 @@ def test_other_failures_require_explicit_retry_and_keep_completed_batches(setup,
     assert core.translation(video.id)
 
 
+@pytest.mark.parametrize("sensitive", [
+    "API_KEY=private-key-value",
+    '"access_token": "private-token-value"',
+    "Authorization: Bearer private-bearer-value",
+    "sk-private-key-value",
+    r"C:\Users\PrivateName\cli\config.json",
+    r"C:\Users\Private Name\cli\config.json",
+    '"C:\\Users\\Private Name\\cli\\config.json"',
+    "/home/private-name/.config/cli.json",
+    "/home/private name/.config/cli.json",
+    r"\\private-server\private-share\config.json",
+])
+def test_queue_failure_detail_is_readable_and_redacted_after_restart(setup, sensitive):
+    from my_video_manager.web_queue_data import row_data
+
+    core, _, adapter, _, reopen = setup
+    video = core.videos()[0]
+    source(core, video.id)
+    adapter.error = TranslationError("other", f"segfault in helper xyz; {sensitive}\nexit code 3")
+    assert core.process_next_translation().state == "failed"
+    for current in (core, reopen()):
+        entry, = current.subtitle_queue_items()
+        message = row_data(entry)["message"]
+        assert "segfault in helper xyz" in message
+        assert "exit code 3" in message
+        assert "번역에 실패" in message
+        assert sensitive not in message
+        assert "private" not in message.lower()
+        assert "[가림]" in message
+
+
 @pytest.mark.parametrize("response", [
     lambda lines: (),
     lambda lines: [TranslatedLine(lines[0].id, "a")] * len(lines),

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from contextlib import contextmanager
 from pathlib import Path
+import re
 from threading import RLock
 
 from .subtitles import normalize_spoken_language
@@ -44,6 +45,23 @@ class SubtitleRetryResult:
 def subtitle_order_key(video_id, positions):
     """옛 항목은 직접 요청 등급의 마지막에서 기존 상대 순서를 유지한다."""
     return positions.get(video_id, (0, 0, float("inf")))
+
+
+def _display_error_detail(detail):
+    """CLI 진단의 원인은 남기되 인증 값과 로컬 절대 경로는 표시하지 않는다."""
+    if not detail:
+        return None
+    detail = re.sub(r'(?i)\bBearer\s+[^\s\"\'<>;,]+', 'Bearer [가림]', detail)
+    detail = re.sub(
+        r'''(?ix)(\b[\w-]*(?:key|token|secret|password)\b["']?\s*[:=]\s*)
+            (?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)''',
+        r'\1[가림]', detail)
+    detail = re.sub(r'\bsk-[\w-]+', '[가림]', detail)
+    # 따옴표로 둘러싼 경로는 공백을 포함한 전체를 먼저 가린다.
+    detail = re.sub(r'''(["'])(?:[A-Za-z]:[\\/]|\\\\|/)[^\r\n]*?\1''', '[가림]', detail)
+    detail = re.sub(r'''(?:[A-Za-z]:[\\/]|\\\\)[^\r\n"'<>|;,]+|(?<![\w:])/[^\r\n"'<>;,]+''',
+                    '[가림]', detail)
+    return detail
 
 
 class QueueOrder:
@@ -220,7 +238,8 @@ class SubtitleQueue:
             elif t:
                 result.append(SubtitleQueueItem(video_id, title, t.state,
                                                t.completed_lines / max(1, t.total_lines),
-                                               ' · '.join(filter(None, (t.error, t.notice))) or None))
+                                               ' · '.join(filter(None, (t.error, _display_error_detail(t.error_detail),
+                                                                        t.notice))) or None))
             elif video["has_transcript"]:
                 result.append(SubtitleQueueItem(video_id, title, "completed", 1, self._notices.get(video_id)))
         return self.order.sort(result)
