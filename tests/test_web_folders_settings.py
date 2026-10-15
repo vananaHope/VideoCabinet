@@ -305,3 +305,19 @@ def test_inactive_refresh_skips_payload_and_timer_only_emits_changes(window_fact
     assert json.loads(changes[0])['translationCli'] == 'claude'
     pages['settings'].timer.timeout.emit()
     assert len(changes) == 1
+
+
+def test_folders_reactivation_delivers_changes_skipped_while_hidden(window_factory, core, tmp_path):
+    window = window_factory('1')
+    window.navigate_web_tab('folders')
+    changes = []
+    bridges(window)['folders'].foldersChanged.connect(lambda value: changes.append(json.loads(value)))
+    window.web_host.hide()
+    folder = tmp_path / '비활성 동안 추가한 폴더'
+    folder.mkdir()
+    core.add_watched_folder(folder)
+    window.library_page.refreshed.emit()
+    assert changes == []
+    window.web_host.show()
+    assert len(changes) == 1
+    assert str(folder.resolve()) in changes[0]['folders']

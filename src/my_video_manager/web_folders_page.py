@@ -103,6 +103,9 @@ class WebFoldersPage(WebPageController):
         self.library.refreshed.connect(self.refresh)
         host.register_page(self)
 
+    def activated(self):
+        self.refresh()
+
     def report_scan(self, text):
         self.report = text
         self.refresh()
