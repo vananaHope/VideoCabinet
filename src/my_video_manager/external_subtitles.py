@@ -1,6 +1,7 @@
 """영상 옆의 읽기 전용 자막 파일을 찾고, 언어별 줄과 읽기 경고를 보관한다."""
 
 from bisect import bisect_left
+from concurrent.futures import CancelledError
 from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
@@ -91,8 +92,13 @@ def _timed_text(text, language):
     lines = []
     skipped = 0
     text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    # Some VTT writers omit the blank line after the header.
-    text = re.sub(r"^WEBVTT[^\n]*(?:\n|$)", "", text).lstrip()
+    # Metadata belongs to the header, but some writers omit its blank terminator.
+    if re.match(r"^WEBVTT(?:\s|$)", text):
+        rows = text.splitlines()
+        index = 1
+        while index < len(rows) and rows[index].strip() and "-->" not in rows[index]:
+            index += 1
+        text = "\n".join(rows[index:]).lstrip()
     for block in re.split(r"\n\s*\n", text):
         rows = block.splitlines()
         if not rows or re.match(r"^(WEBVTT|NOTE|STYLE|REGION)(?:\s|$)", rows[0]):
@@ -312,7 +318,9 @@ class ExternalSubtitles:
                     after = path.stat()
                     if (after.st_size, after.st_mtime_ns) != (size, mtime):
                         raise ValueError("검사 중 자막 파일이 변경되었습니다. 다시 검사해 주세요.")
-                except (OSError, ValueError) as error:
+                except CancelledError:
+                    raise
+                except Exception as error:
                     warning = f"외부 자막: {error}"
                     tracks = ()
                 if warning:

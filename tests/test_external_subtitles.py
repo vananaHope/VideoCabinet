@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+from concurrent.futures import CancelledError
+from asyncio import CancelledError as AsyncCancelledError
 import os
 from pathlib import Path
 import sqlite3
@@ -268,7 +270,8 @@ def test_one_directory_listing_per_scan(library, monkeypatch):
     assert len(core.search("체중이동").results) == 20
 
 
-def test_transient_read_failure_is_retried_even_without_signature_change(library, monkeypatch):
+@pytest.mark.parametrize("failure", [PermissionError, TimeoutError, RuntimeError])
+def test_transient_read_failure_is_retried_even_without_signature_change(library, monkeypatch, failure):
     core, video = library
     sidecar = video.with_suffix(".srt")
     sidecar.write_text(srt(), encoding="utf-8")
@@ -276,7 +279,7 @@ def test_transient_read_failure_is_retried_even_without_signature_change(library
 
     def denied(path):
         if path == sidecar:
-            raise PermissionError("접근 거부")
+            raise failure("읽기 실패")
         return read(path)
 
     monkeypatch.setattr(Path, "read_bytes", denied)
@@ -505,7 +508,8 @@ def test_vtt_without_blank_line_after_header(library):
     assert core.search("Hello").results[0].start == 1
 
 
-def test_import_commits_complete_files_and_resumes_after_interruption(library, monkeypatch):
+@pytest.mark.parametrize("interruption", [CancelledError, AsyncCancelledError, KeyboardInterrupt])
+def test_import_commits_complete_files_and_resumes_after_interruption(library, monkeypatch, interruption):
     core, video = library
     first = video.with_suffix(".a.srt")
     second = video.with_suffix(".b.srt")
@@ -520,10 +524,10 @@ def test_import_commits_complete_files_and_resumes_after_interruption(library, m
             with sqlite3.connect(core.database, timeout=.05) as db:
                 assert db.execute("SELECT count(*) FROM external_subtitle_files").fetchone()[0] == 1
                 db.execute("UPDATE videos SET title=title WHERE id=?", (video_id,))
-            raise RuntimeError("검사 중단")
+            raise interruption("검사 중단")
         return original(path)
     monkeypatch.setattr(Path, "read_bytes", interrupt)
-    with pytest.raises(RuntimeError, match="검사 중단"):
+    with pytest.raises(interruption, match="검사 중단"):
         core.scan()
     assert len(core.external_subtitles(video_id)) == 1
     assert core.search("첫파일").results
@@ -532,6 +536,43 @@ def test_import_commits_complete_files_and_resumes_after_interruption(library, m
     core.scan()
     assert len(core.external_subtitles(video_id)) == 2
     assert core.search("둘째파일").results
+
+
+@pytest.mark.parametrize("broken", ["<![x <SYNC Start=1000><P>bad", *[
+    "<SYNC Start=" + "9" * digits + "><P>bad" for digits in (309, 312)]])
+@pytest.mark.parametrize("operation", ["scan", "add_file"])
+def test_smi_parser_exception_is_isolated_to_file(library, broken, operation):
+    core, video = library
+    bad = video.with_suffix(".a.smi")
+    good = video.with_suffix(".z.srt")
+    bad.write_text(broken, encoding="utf-8")
+    good.write_text(srt(), encoding="utf-8")
+    core.add_watched_folder(video.parent)
+    for _ in range(2):
+        result = core.scan() if operation == "scan" else core.add_file(video)
+        assert any(issue.path == bad and issue.failed for issue in result.issues)
+        files = {file.path: file for file in core.external_subtitles(core.videos()[0].id)}
+        assert files[bad].warning and files[bad].subtitles == ()
+        assert files[good].warning is None
+        assert core.search("체중이동").results
+    bad.write_text('<SYNC Start=1000><P Class=KRCC>복구 완료', encoding="utf-8")
+    core.scan()
+    assert core.search("복구완료").results
+    assert all(file.warning is None for file in core.external_subtitles(core.videos()[0].id))
+
+
+@pytest.mark.parametrize("header", ["Kind: captions\nLanguage: en", "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000"])
+@pytest.mark.parametrize("separator", ["\n", "\n\n"])
+def test_vtt_metadata_header_has_no_warning(library, header, separator):
+    core, video = library
+    video.with_suffix(".vtt").write_text(
+        "WEBVTT\n" + header + separator + "00:01.000 --> 00:02.000\nHello", encoding="utf-8")
+    for operation in (lambda: core.add_file(video), core.scan):
+        result = operation()
+        assert not result.issues
+        file, = core.external_subtitles(core.videos()[0].id)
+        assert file.warning is None
+        assert core.search("Hello").results[0].start == 1
 
 
 @pytest.mark.parametrize("operation", ["DELETE", "UPDATE"])
