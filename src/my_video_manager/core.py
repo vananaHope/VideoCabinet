@@ -165,6 +165,34 @@ class AppCore:
     def translation_cli(self) -> str:
         return self._translations.cli
 
+    def create_backup(self, destination: Path, *, include_thumbnails=False):
+        from .backup import create_backup
+        session = self.playback.session
+        active = tuple(viewing for viewing in self.viewings(session.video_id) if viewing.ended_at is None) if session else ()
+        return create_backup(self.database, destination, include_thumbnails=include_thumbnails,
+                             active_viewings=active)
+
+    def inspect_backup(self, archive: Path):
+        from .backup import inspect_backup
+        return inspect_backup(archive)
+
+    def request_restore(self, archive: Path):
+        from .backup import request_restore
+        return request_restore(self.database, archive)
+
+    def pending_restore(self):
+        from .backup import inspect_backup, pending_restore_path
+        pending = pending_restore_path(self.database)
+        return inspect_backup(pending) if pending.exists() else None
+
+    def cancel_restore(self):
+        from .backup import cancel_restore
+        cancel_restore(self.database)
+
+    def automatic_backups(self):
+        from .backup import automatic_backups
+        return automatic_backups(self.database)
+
     def review_lines(self, video_id):
         return self._review.lines(video_id)
 
