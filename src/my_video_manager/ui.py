@@ -336,6 +336,8 @@ class MainWindow(QMainWindow):
             self.player.set_subtitle(self.core.playback_subtitle(video_id))
 
     def eventFilter(self, watched, event):
+        if self.web_ui and (self.web_host.dialogs.active or self.web_host.dialogs.web_modal):
+            return super().eventFilter(watched, event)
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()
                 or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):
             return super().eventFilter(watched, event)

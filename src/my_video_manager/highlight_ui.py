@@ -56,7 +56,7 @@ class HighlightProgress(QWidget):
                 painter.fillRect(x(highlight.start) - 2, 16, 4, 10, QColor(c['highlight']))
             else:
                 painter.fillRect(x(highlight.start), 18,
-                                 max(3, x(highlight.end) - x(highlight.start)), 6, QColor(c['status-success']))
+                                 max(3, x(highlight.end) - x(highlight.start)), 6, QColor(c['highlight-range']))
         if self.open_start is not None:
             start, end = sorted((x(self.open_start), x(self.position)))
             painter.fillRect(start, 18, max(3, end - start), 6, QColor(c['highlight-open']))
@@ -206,9 +206,16 @@ class PlaybackHighlights(QWidget):
 
 
 class HighlightEditor(QDialog):
+    def exec(self):
+        from .web_dialogs_host import web_dialogs
+        if dialogs := web_dialogs(self):
+            return dialogs.run('highlight', highlight=self.highlight, duration=self.web_duration)
+        return super().exec()
+
     def __init__(self, core, highlight, duration, parent):
         super().__init__(parent)
         self.core, self.highlight = core, highlight
+        self.web_duration = duration
         self.setWindowTitle("하이라이트 시각·메모 편집")
         self.resize(470, 320)
         layout = space_layout(QVBoxLayout(self))
@@ -251,6 +258,12 @@ class HighlightEditor(QDialog):
 
 
 class HighlightList(QDialog):
+    def exec(self):
+        from .web_dialogs_host import web_dialogs
+        if dialogs := web_dialogs(self):
+            return dialogs.run('highlights', video_id=self.video_id, duration=self.duration)
+        return super().exec()
+
     def __init__(self, core, video_id, duration, parent):
         super().__init__(parent)
         self.core, self.video_id, self.duration = core, video_id, duration

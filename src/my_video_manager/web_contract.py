@@ -10,6 +10,7 @@ from . import web_reel_data, web_search_data
 from . import web_statistics_data
 from .statistics import DailyViewingStatistics, TopViewedVideo, LibraryStatistics, ViewingStatistics
 from .statistics import DistributionBucket, LibraryInventory, StatisticsDashboard
+from . import web_dialogs_data
 
 TABS = (
     ('library', '라이브러리'), ('reel', '모아보기'), ('search', '검색'),
@@ -71,7 +72,8 @@ class BridgeContract:
 
 SHELL = BridgeContract(
     name='shell', interface='ShellBridge',
-    slots={'ready': (), 'shellSnapshot': (), 'navigate': (Argument('tab', str, 'Tab'),)},
+    slots={'ready': (), 'shellSnapshot': (), 'navigate': (Argument('tab', str, 'Tab'),),
+           'modalState': (Argument('open', bool, 'boolean'),)},
     signals={'shellChanged': str, 'shellStatusChanged': str, 'shellFocusRequested': str},
     aliases=(TypeAlias('Tab', tuple(name for name, _ in TABS)),),
     constants=(Constant('tabs', TABS),),
@@ -131,6 +133,15 @@ QUEUE = BridgeContract(name='queue', interface='QueueBridge', slots={
     constants=(Constant('queueStates', tuple(web_queue_data.STATES.items())),),
     data_types=(web_queue_data.QueueRowData, web_queue_data.QueueCountData, web_queue_data.QueueDeltaData,
                 web_queue_data.QueueTargetData, web_queue_data.QueueRuleData, web_queue_data.QueueRulesData))
+DIALOGS = BridgeContract(
+    name='dialogs', interface='DialogsBridge',
+    slots={'snapshot': (),
+           'act': (Argument('id', str, 'string'), Argument('action', str, 'string'), Argument('payload', str, 'string')),
+           'candidates': (Argument('prefix', str, 'string'),)},
+    signals={'dialogsChanged': str},
+    data_types=(web_dialogs_data.DialogRow, web_dialogs_data.DialogValues,
+                web_dialogs_data.DialogData, web_dialogs_data.DialogSnapshot),
+)
 
 CONTRACTS = (
     SHELL,
@@ -139,4 +150,5 @@ CONTRACTS = (
     REEL,
     SEARCH,
     STATISTICS,
+    DIALOGS,
 )

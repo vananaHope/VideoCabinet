@@ -12,6 +12,16 @@ from .dialog_ui import dialog_buttons, space_layout
 
 
 class ReviewDialog(QDialog):
+    def exec(self):
+        from .web_dialogs_host import web_dialogs
+        if dialogs := web_dialogs(self):
+            self.timer.stop()
+            try:
+                return dialogs.run('review', video_id=self.video_id, jump=self.jump, changed=self.changed)
+            finally:
+                self.deleteLater()
+        return super().exec()
+
     def __init__(self, core, video_id, jump, changed, parent=None):
         super().__init__(parent)
         self.core, self.video_id = core, video_id

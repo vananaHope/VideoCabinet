@@ -24,6 +24,11 @@ class ShellBridge(QObject):
     def shellSnapshot(self):
         return encode({'tab': self.host.active_tab, 'status': self.host.window.statusBar().currentMessage()})
 
+    @SHELL.slot('modalState')
+    def modalState(self, opened):
+        self.host.dialogs.web_modal = opened and self.host.isVisible()
+        return encode({'ok': True})
+
     @SHELL.slot('navigate')
     def navigate(self, tab):
         if tab not in self.host.routes:

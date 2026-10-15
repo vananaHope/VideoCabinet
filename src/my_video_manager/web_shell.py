@@ -85,6 +85,9 @@ class WebShellHost(QWidget):
         self.view.setPage(self.engine_page)
         self.channel = QWebChannel(self.engine_page)
         self.channel.registerObject('shell', self.bridge)
+        from .web_dialogs_host import WebDialogs
+        self.dialogs = WebDialogs(self)
+        self.channel.registerObject('dialogs', self.dialogs.bridge)
         self.engine_page.setWebChannel(self.channel)
         # file 페이지에서 비-file 썸네일 스킴 접근에 필요하다. 외부 네트워크는 interceptor가 차단한다.
         self.engine_page.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
