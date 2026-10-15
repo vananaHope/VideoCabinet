@@ -253,7 +253,7 @@ def test_queue_failure_detail_is_readable_and_redacted_after_restart(setup, sens
         message = row_data(entry)["message"]
         assert "segfault in helper xyz" in message
         assert "exit code 3" in message
-        assert "번역에 실패" in message
+        assert "자막 처리에 실패" in message
         assert sensitive not in message
         assert "private" not in message.lower()
         assert "[가림]" in message

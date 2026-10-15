@@ -229,7 +229,9 @@ class SubtitleQueue:
                 batch = ids[start:start + 800]
                 videos.extend(db.execute(
                     "SELECT id, title, (SELECT spoken_language FROM transcripts WHERE video_id=v.id) AS language, "
-                    "EXISTS(SELECT 1 FROM transcripts WHERE video_id = v.id) AS has_transcript "
+                    "EXISTS(SELECT 1 FROM transcripts WHERE video_id = v.id) AS has_transcript, "
+                    "EXISTS(SELECT 1 FROM translation_lines tr JOIN transcript_lines l ON l.id=tr.line_id "
+                    "JOIN transcripts t ON t.id=l.transcript_id WHERE t.video_id=v.id) AS has_result "
                     "FROM videos v WHERE id IN (" + ",".join("?" for _ in batch) + ") "
                     "AND NOT EXISTS(SELECT 1 FROM subtitle_queue_hidden WHERE video_id = v.id)", batch).fetchall())
         result = []
@@ -246,7 +248,9 @@ class SubtitleQueue:
                                                translation_task(video["language"]).label))
             elif video["has_transcript"]:
                 result.append(SubtitleQueueItem(video_id, title, "completed", 1, self._notices.get(video_id),
-                                                translation_task(video["language"]).label))
+                                                translation_task(video["language"]).label
+                                                if video["has_result"] and video["language"] not in (None, "und")
+                                                else "받아쓰기"))
         return self.order.sort(result)
 
     def record(self, result):

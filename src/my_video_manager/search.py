@@ -196,7 +196,8 @@ class Search:
                     LEFT JOIN transcripts t ON t.id=l.transcript_id
                     LEFT JOIN external_subtitle_lines e ON c.source='external' AND e.id=c.line_id
                     LEFT JOIN external_subtitles s ON s.id=e.subtitle_id
-                    LEFT JOIN external_subtitle_files f ON f.id=s.file_id""", (value,)):
+                    LEFT JOIN external_subtitle_files f ON f.id=s.file_id
+                    ORDER BY CASE WHEN t.spoken_language='ko' AND c.source='translation' THEN 0 ELSE 1 END""", (value,)):
                 source = row['source']
                 task = translation_task(row['spoken_language'])
                 if task.kind == 'refinement' and source in ('transcript', 'translation'):

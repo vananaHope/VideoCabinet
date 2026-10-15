@@ -189,3 +189,48 @@ def test_tray_opens_web_queue(window_factory):
     assert window.web_host.controllers['queue'].timer.isActive()
     window.navigate_web_tab('library')
     assert not window.web_host.controllers['queue'].timer.isActive()
+
+
+def test_bulk_confirmation_then_background_result_keeps_ui_responsive(queue_page, setup, monkeypatch):
+    from threading import Event
+    from PySide6.QtCore import QTimer
+    from test_web_statistics import wait_for as wait
+    core, _, _ = setup
+    page = queue_page
+    entered, release = Event(), Event()
+    monkeypatch.setattr(core, 'existing_refinement_candidates', lambda: (3, 2))
+    def request_bulk():
+        entered.set()
+        assert release.wait(10)
+        return 3, 2
+    monkeypatch.setattr(core, 'request_existing_refinements', request_bulk)
+    preview = reply(page.bridge.action('previewRefineExisting', -1))
+    assert '3개' in preview['confirmation'] and '2개' in preview['confirmation']
+    assert not entered.is_set()
+    results = []
+    page.bridge.bulkFinished.connect(lambda value: results.append(json.loads(value)))
+    try:
+        assert reply(page.bridge.action('refineExisting', -1))['pending']
+        assert entered.wait(5)
+        ticks = []
+        QTimer.singleShot(0, lambda: ticks.append(True))
+        wait(lambda: bool(ticks))
+        assert page.bridge.bulk_running
+        assert 'error' in json.loads(page.bridge.action('refineExisting', -1))
+    finally:
+        release.set()
+        wait(lambda: not page.bridge.bulk_running)
+    assert '3개' in results[0]['message'] and '2개' in results[0]['message']
+
+
+def test_bulk_failure_releases_busy_state(queue_page, monkeypatch):
+    from test_web_statistics import wait_for as wait
+    def fail():
+        raise ValueError('등록 실패')
+    monkeypatch.setattr(queue_page.core, 'request_existing_refinements', fail)
+    results = []
+    queue_page.bridge.bulkFinished.connect(lambda value: results.append(json.loads(value)))
+    assert reply(queue_page.bridge.action('refineExisting', -1))['pending']
+    wait(lambda: bool(results))
+    assert results == [{'error': '등록 실패'}]
+    assert not queue_page.bridge.bulk_running

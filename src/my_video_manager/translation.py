@@ -31,16 +31,16 @@ class TranslationError(RuntimeError):
         super().__init__({
             "usage_limit": "구독 사용량 한도로 보류했습니다. 잠시 뒤 자동으로 재시도합니다.",
             "usage_limit_repeated": "사용량 한도가 3회 반복되어 자동 재시도를 멈췄습니다. 한도 확인 후 직접 재시도하세요.",
-            "authentication": "번역 CLI 로그인이 필요합니다.",
-            "missing_cli": "번역 CLI가 없습니다. 선택한 CLI를 설치하거나 설정을 바꾸세요.",
+            "authentication": "CLI 로그인이 필요합니다.",
+            "missing_cli": "CLI가 없습니다. 선택한 CLI를 설치하거나 설정을 바꾸세요.",
             "configuration": "모델을 쓸 수 없음: 모델 이름 또는 추론 강도를 확인하세요.",
             "missing_key": "OpenCode Go 키가 등록되지 않았습니다.",
             "connection": "OpenCode Go에 연결하지 못했습니다.",
             "key_storage": "OpenCode Go 저장된 키를 읽지 못했습니다.",
             "request_rejected": "OpenCode Go가 요청을 거부했습니다.",
-            "format": "번역 응답의 줄 ID 또는 형식이 올바르지 않습니다.",
-            "timeout": "번역 CLI 응답 시간이 초과되었습니다.",
-        }.get(kind, "번역에 실패했습니다. 자세한 내용을 확인하세요."))
+            "format": "응답의 줄 ID 또는 형식이 올바르지 않습니다.",
+            "timeout": "CLI 응답 시간이 초과되었습니다.",
+        }.get(kind, "자막 처리에 실패했습니다. 자세한 내용을 확인하세요."))
 
 
 @dataclass(frozen=True)
@@ -96,10 +96,15 @@ class Translator(Protocol):
                   context: tuple[ContextLine, ...] = (), glossary: tuple[GlossaryEntry, ...] = ()) -> TranslationResponse: ...
 
 
-def validate_translation(lines, result) -> tuple[TranslatedLine, ...]:
+def validate_translation(lines, result, *, spoken_language=None) -> tuple[TranslatedLine, ...]:
     """응답 순서는 무관하지만 대상 ID와 정확히 일대일이어야 한다."""
     try:
         result = tuple(result)
+        if translation_task(spoken_language).kind == 'refinement':
+            originals = {line.id: line.text for line in lines}
+            result = tuple(TranslatedLine(line.id, originals.get(line.id, line.text))
+                           if isinstance(line.text, str) and not line.text.strip() else line
+                           for line in result)
         ids = [line.id for line in result]
         if (len(ids) != len(lines) or len(set(ids)) != len(ids)
                 or set(ids) != {line.id for line in lines}
@@ -334,14 +339,33 @@ class Translations:
                 raise ValueError('한국어 원어 자막이 있는 영상을 고르세요.')
             return self.request(video_id, connection=db)
 
+    def _existing_refinements(self, db):
+        rows = db.execute("""SELECT t.video_id,
+                EXISTS (SELECT 1 FROM translation_omissions o WHERE o.transcript_id=t.id) AS omitted
+            FROM transcripts t JOIN videos v ON v.id=t.video_id
+            WHERE t.spoken_language='ko' AND NOT v.excluded
+              AND NOT EXISTS (SELECT 1 FROM translation_queue q WHERE q.video_id=t.video_id)
+              AND EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id=t.id
+                          AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id=l.id))
+              AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=t.video_id
+                              AND s.state IN ('queued', 'transcribing'))""").fetchall()
+        return [r['video_id'] for r in rows if not r['omitted']], sum(r['omitted'] for r in rows)
+
+    def existing_refinement_candidates(self):
+        with self._connect() as db:
+            ids, skipped = self._existing_refinements(db)
+        return len(ids), skipped
+
     def request_existing_refinements(self):
         with self._connect() as db:
-            ids = [r[0] for r in db.execute("""SELECT t.video_id FROM transcripts t
-                JOIN videos v ON v.id=t.video_id WHERE t.spoken_language='ko' AND NOT v.excluded
-                AND EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id=t.id)
-                AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=t.video_id
-                                AND s.state IN ('queued', 'transcribing'))""")]
-        return sum(self.request_refinement(video_id) is not None for video_id in ids)
+            db.execute('BEGIN IMMEDIATE')
+            ids, skipped = self._existing_refinements(db)
+            count = 0
+            for video_id in ids:
+                if self._order:
+                    self._order.finish(db, video_id)
+                count += self.request(video_id, automatic=True, connection=db) is not None
+        return count, skipped
 
     def finish_ready(self, db, video_id):
         """검수/구간 삭제가 마지막 미완료 대상을 없앤 경우도 저장한 묶음을 확정한다."""
@@ -372,7 +396,7 @@ class Translations:
         task = translation_task(language)
         return TranslationQueueEntry(row["id"], row["video_id"], row["state"], counts[0], counts[1],
                                      datetime.fromisoformat(row["retry_at"]) if row["retry_at"] else None,
-                                     str(error).replace("번역", task.label) if error else None, row["error_detail"], notice[0] if notice else "", task.kind)
+                                     str(error) if error else None, row["error_detail"], notice[0] if notice else "", task.kind)
 
     def queue(self):
         with self._connect() as db:
@@ -537,7 +561,7 @@ class Translations:
             try:
                 response = adapter.translate(lines, language, cli=cli, cancellation=cancellation,
                                              context=context, glossary=glossary.entries, **kwargs)
-                return TranslationResponse(validate_translation(lines, response),
+                return TranslationResponse(validate_translation(lines, response, spoken_language=language),
                                            response.glossary if isinstance(response, TranslationResponse) else ())
             except TranslationError as error:
                 progress.successes = 0

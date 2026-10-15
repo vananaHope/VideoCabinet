@@ -305,6 +305,9 @@ class AppCore:
     def request_refinement(self, video_id):
         return self._translations.request_refinement(video_id)
 
+    def existing_refinement_candidates(self):
+        return self._translations.existing_refinement_candidates()
+
     def request_existing_refinements(self):
         return self._translations.request_existing_refinements()
 

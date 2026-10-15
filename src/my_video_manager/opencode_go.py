@@ -412,7 +412,7 @@ class OpenCodeGoTranslator:
                 fenced = re.fullmatch(r"\s*```(?:json)?[ \t]*\r?\n(.*?)\r?\n```\s*", content, re.DOTALL)
                 if fenced:
                     content = fenced[1]
-            result = parse_translation_response(content, lines)
+            result = parse_translation_response(content, lines, spoken_language=spoken_language)
         except (TranslationError, ValueError, TypeError, KeyError, IndexError, AttributeError):
             pass
         if result is None:

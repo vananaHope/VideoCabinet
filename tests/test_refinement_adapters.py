@@ -12,7 +12,8 @@ from test_opencode_go import adapter, HTTPResponse
 
 
 @pytest.mark.parametrize('cli', ['codex', 'claude'])
-def test_refinement_uses_shared_cli_arguments_and_system_instructions(tmp_path, cli):
+@pytest.mark.parametrize('blank', [False, True])
+def test_refinement_uses_shared_cli_arguments_and_system_instructions(tmp_path, cli, blank):
     script = '''
 import sys, json
 from pathlib import Path
@@ -35,6 +36,8 @@ else:
     assert sys.argv[sys.argv.index('--effort')+1] == 'high'
     print(json.dumps({'structured_output':result}))
 '''
+    if blank:
+        script = script.replace("'text':l['text']", "'text':' '")
     translator = fake_cli(tmp_path, script, cli, timeout=30)
     lines = (TranscriptLine('one', 0, 1, '음'),)
     response = translator.translate(lines, 'ko', cli=cli, model='test-model', effort='high',
@@ -43,7 +46,8 @@ else:
     assert list(translator.directory.iterdir()) == []
 
 
-def test_opencode_uses_identical_refinement_prompt_without_network():
+@pytest.mark.parametrize('text', ['음', '', '  '])
+def test_opencode_uses_identical_refinement_prompt_without_network(text):
     lines = (TranscriptLine('one', 0, 1, '음'),)
     class Transport:
         def request(self, method, url, **kwargs):
@@ -51,5 +55,5 @@ def test_opencode_uses_identical_refinement_prompt_without_network():
             assert request['messages'][-1]['content'].startswith(translation_prompt(lines, 'ko'))
             assert translation_task('ko').instructions in request['messages'][-1]['content']
             return HTTPResponse(200, {}, json.dumps({'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps({
-                'lines': [{'id': 'one', 'text': '음'}], 'glossary': []})}}]}).encode())
+                'lines': [{'id': 'one', 'text': text}], 'glossary': []})}}]}).encode())
     assert adapter(Transport()).translate(lines, 'ko')[0].text == '음'

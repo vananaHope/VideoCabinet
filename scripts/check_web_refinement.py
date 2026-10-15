@@ -3,6 +3,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 import tempfile
@@ -171,7 +172,18 @@ with tempfile.TemporaryDirectory(prefix='mvm-73-ui-') as temporary:
 
         core.remove_from_subtitle_queue(vid)
         queue.refresh()
+        # 옛 한국어 자막을 재현한다. 사용자가 뺀 세대는 별도 테스트에서 건너뛰기를 검증한다.
+        with sqlite3.connect(core.database) as db:
+            db.execute('DELETE FROM translation_omissions')
+        db.close()
         click('기존 한국어 자막 모두 다듬기')
+        wait(lambda: js("document.body.innerText.includes('한국어 영상 1개')"))
+        assert not core.translation_queue()
+        capture('queue-bulk-confirmation')
+        click('취소')
+        assert not core.translation_queue()
+        click('기존 한국어 자막 모두 다듬기')
+        click('다듬기 요청')
         wait(lambda: len(core.translation_queue()) == 1)
         result = core.process_next_translation()
         window.translations.completed(result)
@@ -184,10 +196,10 @@ with tempfile.TemporaryDirectory(prefix='mvm-73-ui-') as temporary:
         wait(lambda: js("!!document.getElementById('search-query')"))
         js("(() => { const e = document.getElementById('search-query'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, '결제'); e.dispatchEvent(new Event('input', {bubbles:true})); })()")
         wait(lambda: len(search.results) == 2)
-        assert {r.source for r in search.results} == {'transcript', 'refinement'}
-        wait(lambda: js("document.body.innerText.includes('다듬은 자막') && document.body.innerText.includes('원어 자막')"))
+        assert {r.source for r in search.results} == {'refinement'}
+        wait(lambda: js("document.body.innerText.includes('다듬은 자막')"))
         capture('search-original-refined')
-        metrics['checks'].append('검색 원어와 다듬은 자막 두 줄, 같은 ID 중복 없음')
+        metrics['checks'].append('검색 두 줄, 같은 ID 중복 없음과 다듬은 자막 우선')
 
         def review_scenario():
             wait(lambda: js("document.body.innerText.includes('다듬은 SRT 저장')"))

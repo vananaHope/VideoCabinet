@@ -63,7 +63,8 @@ class QueueRulesData(TypedDict):
 def row_data(entry) -> QueueRowData:
     return dict(videoId=entry.video_id, title=entry.title, state=entry.state,
                 progress=entry.progress, message=entry.error or '', taskLabel=entry.task_label,
-                stateLabel=f'{entry.task_label} · 처리 중' if entry.state == 'translating'
+                stateLabel='받아쓰는 중' if entry.state == 'transcribing'
+                else f'{entry.task_label} · 처리 중' if entry.state == 'translating'
                 else f'{entry.task_label} · {STATES[entry.state]}')
 
 

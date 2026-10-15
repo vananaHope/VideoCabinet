@@ -291,7 +291,10 @@ def test_remove_active_cancels_only_that_video_and_next_can_run(setup):
         future.result(5)
     assert core.process_next_subtitle().video_id == b.id
     assert core.take_subtitle_queue_completion() is None
-    core.remove_from_subtitle_queue(b.id)
+    core = translation_core(core, adapter, Translator())
+    while core.translation_ready():
+        core.process_next_translation()
+    assert core.take_subtitle_queue_completion() == (1, 0)
     assert not core.translation_queue()
 
 

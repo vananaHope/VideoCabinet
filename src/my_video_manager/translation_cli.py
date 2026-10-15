@@ -49,14 +49,14 @@ def translation_schema(lines):
             }}}}}
 
 
-def parse_translation_response(output, lines):
+def parse_translation_response(output, lines, *, spoken_language=None):
     try:
         data = json.loads(output)
         if (not isinstance(data, dict) or 'lines' not in data or set(data) - {'lines', 'glossary'}
                 or not isinstance(data['lines'], list)):
             raise ValueError("lines 배열이 필요합니다.")
         result = tuple(TranslatedLine(**line) for line in data["lines"])
-        return TranslationResponse(validate_translation(lines, result), parse_glossary(data.get('glossary')))
+        return TranslationResponse(validate_translation(lines, result, spoken_language=spoken_language), parse_glossary(data.get('glossary')))
     except (ValueError, TypeError, KeyError) as error:
         raise TranslationError("format", str(error)) from error
 
@@ -176,7 +176,7 @@ class SubscriptionCLITranslator:
                     output = json.dumps(envelope["structured_output"], ensure_ascii=False)
                 except (ValueError, TypeError, KeyError, AttributeError) as error:
                     raise TranslationError("format", f"claude 응답 형식: {error}") from error
-            return parse_translation_response(output, lines)
+            return parse_translation_response(output, lines, spoken_language=spoken_language)
 
     def _run(self, arguments, directory, prompt, cancellation):
         job, process = None, None

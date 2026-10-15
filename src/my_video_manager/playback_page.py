@@ -299,14 +299,14 @@ class PlaybackPage(QWidget):
         if details is None:
             return
         task = translation_task(details.spoken_language)
-        state = task.short_label if self.core.playback_subtitle_language == "translated" else "원어"
+        state = task.subtitle_label if self.core.playback_subtitle_language == "translated" else "자막 원어"
         if not visible:
-            state = "꺼짐"
+            state = "자막 꺼짐"
         elif not details.original_lines:
-            state = "없음"
+            state = "자막 없음"
         work = {"queued": "대기", "transcribing": "만드는 중", "translating": "진행 중",
                 "held": "보류", "failed": "실패"}
-        labels = [f"자막 {state}"]
+        labels = [state]
         if details.subtitle_state in work:
             labels.append(f"원어 {work[details.subtitle_state]}")
         if details.translation_state in work:

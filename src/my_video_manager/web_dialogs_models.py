@@ -128,9 +128,9 @@ class DialogModel:
         elif kind == 'translation':
             data.update(choices=[row(p['id'], p['label']) for p in self.translation['providers']],
                         translation=self.translation, network_busy=self.network_busy,
-                        description='한국어 번역 방식과 모델을 고르세요. 키·설정 변경은 확인할 때 저장됩니다.')
+                        description='한국어 번역 방식과 모델을 고르세요. 한국어 영상의 다듬기도 같은 방식을 씁니다. 키·설정 변경은 확인할 때 저장됩니다.')
             if self.waiting:
-                data['description'] += f' 확인하면 실패·보류 중인 번역 {len(self.waiting)}건을 저장한 묶음부터 재시도합니다. 선택한 방식의 사용량 한도 보류 시간이 남았으면 그 시각까지 기다립니다.'
+                data['description'] += f' 확인하면 실패·보류 중인 번역·다듬기 {len(self.waiting)}건을 저장한 묶음부터 재시도합니다. 선택한 방식의 사용량 한도 보류 시간이 남았으면 그 시각까지 기다립니다.'
         if kind in ('review', 'line', 'range'):
             data['locked'] = any(e.video_id == ctx['video_id'] and e.state in ('queued', 'transcribing') for e in c.subtitle_queue())
             if data['locked']:

@@ -194,7 +194,7 @@ export interface QueueRulesData {
   rules: Array<QueueRuleData>
 }
 
-export type QueueAction = "promote" | "remove" | "retryFailed" | "retryHeld" | "refineExisting"
+export type QueueAction = "promote" | "remove" | "retryFailed" | "retryHeld" | "refineExisting" | "previewRefineExisting"
 export const queueStates = [["queued", "대기"], ["transcribing", "받아쓰는 중"], ["translating", "자막 처리 중"], ["held", "보류"], ["completed", "완료"], ["failed", "실패"]] as const
 export interface QueueBridge {
   ready: (reply: Reply) => void
@@ -211,6 +211,7 @@ export interface QueueBridge {
   queueFocusRequested: Signal<string>
   queueDeactivated: Signal<string>
   preparationChanged: Signal<string>
+  bulkFinished: Signal<string>
 }
 export function publicQueueBridge(raw: QueueBridge): QueueBridge {
   return Object.freeze({
@@ -228,6 +229,7 @@ export function publicQueueBridge(raw: QueueBridge): QueueBridge {
     queueFocusRequested: Object.freeze({ connect: raw.queueFocusRequested.connect.bind(raw.queueFocusRequested), disconnect: raw.queueFocusRequested.disconnect.bind(raw.queueFocusRequested) }),
     queueDeactivated: Object.freeze({ connect: raw.queueDeactivated.connect.bind(raw.queueDeactivated), disconnect: raw.queueDeactivated.disconnect.bind(raw.queueDeactivated) }),
     preparationChanged: Object.freeze({ connect: raw.preparationChanged.connect.bind(raw.preparationChanged), disconnect: raw.preparationChanged.disconnect.bind(raw.preparationChanged) }),
+    bulkFinished: Object.freeze({ connect: raw.bulkFinished.connect.bind(raw.bulkFinished), disconnect: raw.bulkFinished.disconnect.bind(raw.bulkFinished) }),
   })
 }
 

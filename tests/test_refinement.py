@@ -84,7 +84,7 @@ def test_existing_korean_requires_explicit_bulk_or_individual_request(refinement
     assert [e.video_id for e in core.translation_queue()] == [b.id]
     finish(core)
     assert not core.translation_queue()
-    assert core.request_existing_refinements() == 1
+    assert core.request_existing_refinements() == (1, 0)
     assert core.translation_queue()[0].video_id == a.id
     finish(core)
     assert core.request_refinement(a.id).kind == 'refinement'
@@ -199,6 +199,7 @@ def test_prompt_and_search_and_export_and_default_playback(refinement):
     assert 'Translate subtitle data' in translation_prompt(original.lines, 'en')
     matches = core.search('한빛').results
     assert len(matches) == 5
+    assert all(r.source == 'refinement' for r in matches)
     assert len(core.search('할수').results) == 5
     core.edit_translation_line(vid, original.lines[0].id, '한빛 결제 완료')
     matches = core.search('결제').results
@@ -306,3 +307,88 @@ def test_reel_same_video_keeps_explicit_original_choice(refinement):
     core.execute_highlight_command(Command(CommandType.NEXT_HIGHLIGHT))
     assert core.playback_subtitle_language == 'original'
     assert '할수' in core.playback_subtitle(vid).read_text(encoding='utf-8')
+
+
+def test_bulk_skips_queued_completed_and_omitted_and_is_automatic(refinement):
+    core, _, _, _, reopen = refinement
+    a, b = core.videos()
+    source(core, a.id)
+    source(core, b.id)
+    assert core.request_existing_refinements() == (0, 0)
+    core.remove_from_subtitle_queue(a.id)
+    assert core.existing_refinement_candidates() == (0, 1)
+    assert core.request_existing_refinements() == (0, 1)
+    finish(core)
+    assert core.request_existing_refinements() == (0, 1)
+    # 이주 전의 한국어 영상에는 omission이 없다.
+    with sqlite3.connect(core.database) as db:
+        db.execute('DELETE FROM translation_omissions')
+    core = reopen()
+    assert core.existing_refinement_candidates() == (1, 0)
+    assert core.request_existing_refinements() == (1, 0)
+    assert core.request_existing_refinements() == (0, 0)
+    core.request_refinement(b.id)
+    assert [e.video_id for e in core.translation_queue()] == [b.id, a.id]
+    finish(core)
+    assert core.request_existing_refinements() == (0, 0)
+
+
+@pytest.mark.parametrize('text', ['', '  '])
+def test_refinement_blank_response_keeps_original_and_translation_rejects(refinement, text):
+    core, _, adapter, _, reopen = refinement
+    a, b = core.videos()
+    original = source(core, a.id)
+    adapter.action = lambda lines, _: tuple(TranslatedLine(l.id, text) for l in lines)
+    finish(core)
+    assert reopen().translation(a.id).lines == original.lines
+    source(core, b.id, 'en')
+    assert core.process_next_translation().state == 'failed'
+    assert core.translation(b.id) is None
+    lines = (TranscriptLine('a', 0, 1, '음, 어…'),)
+    payload = json.dumps({'lines': [{'id': 'a', 'text': text}]})
+    assert parse_translation_response(payload, lines, spoken_language='ko')[0].text == '음, 어…'
+    with pytest.raises(TranslationError):
+        parse_translation_response(payload, lines, spoken_language='en')
+
+
+@pytest.mark.parametrize('language,segments', [('und', (TranscriptSegment(0, 1, '음'),)), ('ko', ())])
+def test_completed_without_result_is_transcription(refinement, language, segments):
+    core, transcriber, _, _, _ = refinement
+    transcriber.result = TranscriberResult(language, segments)
+    vid = core.videos()[0].id
+    source(core, vid, None)
+    assert core.subtitle_queue_items()[0].task_label == '받아쓰기'
+
+
+def test_error_message_does_not_rewrite_external_detail(refinement):
+    core, _, adapter, _, _ = refinement
+    source(core, core.videos()[0].id)
+    def fail(*args):
+        raise TranslationError('authentication', '서버 원문: 번역 CLI 인증 오류')
+    adapter.action = fail
+    result = core.process_next_translation()
+    assert result.error == 'CLI 로그인이 필요합니다.'
+    assert result.error_detail == '서버 원문: 번역 CLI 인증 오류'
+
+
+from test_translation_connection import connected
+
+
+def test_refinement_fallback_notice_and_progress_survive_restart(connected):
+    core, http, cli, store, _, reopen = connected
+    store.save('fake-key')
+    vid = core.videos()[0].id
+    transcript = source(core, vid, 'ko')
+    assert core.process_next_translation().completed_lines == 2
+    cli.error = TranslationError('usage_limit', 'limit')
+    result = core.process_next_translation()
+    assert result.completed_lines == 4
+    assert 'OpenCode Go로 이어서 다듬기' in result.notice
+    core = reopen()
+    result = core.process_next_translation()
+    assert result.state == 'completed'
+    assert 'OpenCode Go로 이어서 다듬기' in result.notice
+    assert len(cli.calls) == 2
+    providers = core.translation_line_providers(vid)
+    assert [providers[l.id] for l in transcript.lines] == ['codex'] * 2 + ['opencode_go'] * 3
+    assert len(http.requests) == 2

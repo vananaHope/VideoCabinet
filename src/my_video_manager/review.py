@@ -37,7 +37,7 @@ class SubtitleExport:
         if self.task_label == "번역":
             return (f"{self.missing_lines}줄 미번역 · 재번역 대기 {self.pending_retranslation_lines}줄입니다. "
                     "저장된 번역으로 내보낼까요?")
-        return (f"{self.missing_lines}줄 미{self.task_label} · 다시 {self.task_label} 대기 {self.pending_retranslation_lines}줄입니다. "
+        return (f"{self.missing_lines}줄 다듬지 않음 · 다시 {self.task_label} 대기 {self.pending_retranslation_lines}줄입니다. "
                 f"저장된 {self.subtitle_label}으로 내보낼까요?")
 
 
