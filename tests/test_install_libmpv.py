@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -127,3 +128,36 @@ install(Path(sys.argv[3]), cache, '7z')
     assert not list(cache.glob("*.part"))
     for i in range(2):
         assert (tmp_path / str(i) / "mpv/libmpv-2.dll").read_bytes() == b"dll"
+
+
+def test_lock_timeout_and_killed_owner_recovery(installer, tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    marker = tmp_path / "locked"
+    code = '''
+import runpy, sys, time
+from pathlib import Path
+m = runpy.run_path(sys.argv[1])
+cache = Path(sys.argv[2])
+with m['cache_lock'](cache):
+    (cache / (m['NAME'] + '.part')).write_bytes(b'partial')
+    Path(sys.argv[3]).touch()
+    time.sleep(60)
+'''
+    process = subprocess.Popen([sys.executable, "-c", code, str(SCRIPT), str(cache), str(marker)])
+    try:
+        deadline = time.monotonic() + 10
+        while not marker.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert marker.exists(), "잠금 소유 프로세스가 준비되지 않았습니다."
+        with pytest.raises(TimeoutError):
+            with installer.cache_lock(cache, timeout=0.1):
+                pytest.fail("다른 프로세스의 잠금을 획득했습니다.")
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=10)
+    monkeypatch.setattr(installer.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(b"archive"))
+    installer.install(tmp_path / "runtime", cache, "7z")
+    assert not list(cache.glob("*.part"))
+    assert (tmp_path / "runtime/mpv/libmpv-2.dll").read_bytes() == b"dll"

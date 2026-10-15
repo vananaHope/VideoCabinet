@@ -16,6 +16,10 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Node.js 22.12 이상이 필요합니다. https://nodejs.org/en/download 에서 업데이트하고 새 터미널에서 다시 실행하세요 (README 환경 준비 참고).'
 }
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    # 같은 IDE에서 다른 worktree가 먼저 설치한 경우에도 새 PATH를 찾는다.
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+}
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     # 2025-09-03 출시. 최초 설치만 고정하고 이미 설치된 uv는 유지한다.
     winget install --id astral-sh.uv --version 0.8.15 --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
     Confirm-Exit 'uv install'
