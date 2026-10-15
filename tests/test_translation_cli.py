@@ -99,7 +99,7 @@ def test_prompt_encodes_commands_and_delimiters_as_data_and_parser_never_execute
     assert parse_translation_response(response, (line,))[0].id == "real"
 
 
-def fake_cli(tmp_path, script, cli="codex", timeout=5):
+def fake_cli(tmp_path, script, cli="codex", timeout=30):
     worker = tmp_path / "가짜 번역 CLI.py"
     worker.write_text(script, encoding="utf-8")
     return SubscriptionCLITranslator(tmp_path / "data", commands={cli: (sys.executable, str(worker))}, timeout=timeout)

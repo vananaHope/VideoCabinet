@@ -378,16 +378,16 @@ class OpenCodeGoTranslator:
             payload["response_format"] = {"type": "json_object"}
         return payload
 
-    def translate(self, lines, spoken_language, *, cli=None, cancellation=None):
+    def translate(self, lines, spoken_language, *, cli=None, cancellation=None, context=(), glossary=()):
         lines = tuple(lines)
         if cancellation is not None and cancellation.is_set():
             raise TranslationCancelled
         if not lines:
             return ()
         # Go의 strict JSON Schema 지원은 미확인. 계약을 프롬프트에 첨부하고 로컬에서 검증한다.
-        prompt = translation_prompt(lines, spoken_language)
+        prompt = translation_prompt(lines, spoken_language, context=context, glossary=glossary)
         prompt += "\nOUTPUT_JSON_SCHEMA:\n" + json.dumps(translation_schema(lines), ensure_ascii=False)
-        prompt += '\nReturn a json object only. Example: {"lines": [{"id": "target id", "text": "번역"}]}.'
+        prompt += '\nReturn a json object only. Example: {"lines": [{"id": "target id", "text": "번역"}], "glossary": []}.'
         extra = {}
         if self.effort and self.effort in (self.model_choice().reasoning_efforts or ()):
             extra["reasoning_effort"] = self.effort

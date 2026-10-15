@@ -107,7 +107,7 @@ class AppCore:
         viewing_settings: ViewingSettings | None = None,
         transcriber: Transcriber | None = None,
         translator: Translator | None = None,
-        translation_batch_size: int = 30,
+        translation_batch_size: int | None = None,
         translation_secret_store=None,
         translation_transport=None,
         reel_settings: ReelSettings | None = None,

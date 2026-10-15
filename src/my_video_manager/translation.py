@@ -10,6 +10,12 @@ from uuid import uuid4
 
 from .subtitles import TranscriptLine
 from .translation_models import DEFAULT_PROVIDER, provider
+from .translation_glossary import Glossary, GlossaryEntry
+
+
+CONTEXT_LINES = 10
+MIN_BATCH_SIZE = 10
+RECOVERY_SUCCESSES = 3
 
 
 class TranslationCancelled(Exception):
@@ -40,9 +46,51 @@ class TranslatedLine:
     text: str
 
 
+@dataclass(frozen=True)
+class ContextLine:
+    id: str
+    text: str
+    translation: str | None = None
+
+
+@dataclass(frozen=True)
+class TranslationResponse:
+    lines: tuple[TranslatedLine, ...]
+    glossary: tuple[GlossaryEntry, ...] = ()
+
+    def __iter__(self):
+        return iter(self.lines)
+
+    def __getitem__(self, index):
+        return self.lines[index]
+
+    def __len__(self):
+        return len(self.lines)
+
+
+@dataclass
+class BatchProgress:
+    size: int
+    successes: int = 0
+
+    def shrink(self, actual_size):
+        self.successes = 0
+        if actual_size <= MIN_BATCH_SIZE:
+            return False
+        self.size = max(MIN_BATCH_SIZE, actual_size // 2)
+        return True
+
+    def succeeded(self, ceiling):
+        self.successes += 1
+        if self.successes >= RECOVERY_SUCCESSES:
+            self.size = min(ceiling, self.size * 2)
+            self.successes = 0
+
+
 class Translator(Protocol):
     def translate(self, lines: tuple[TranscriptLine, ...], spoken_language: str, *,
-                  cli: str, cancellation: Event, model: str = "", effort: str = "") -> tuple[TranslatedLine, ...]: ...
+                  cli: str, cancellation: Event, model: str = "", effort: str = "",
+                  context: tuple[ContextLine, ...] = (), glossary: tuple[GlossaryEntry, ...] = ()) -> TranslationResponse: ...
 
 
 def validate_translation(lines, result) -> tuple[TranslatedLine, ...]:
@@ -87,9 +135,9 @@ class TranslationQueueEntry:
 
 
 class Translations:
-    def __init__(self, connect, clock, subtitles, settings, translator, *, batch_size=30,
+    def __init__(self, connect, clock, subtitles, settings, translator, *, batch_size=None,
                  retry_delay=timedelta(minutes=15), format_attempts=3, order=None, protected_lines=None, options=None):
-        if batch_size < 1 or format_attempts < 1 or retry_delay.total_seconds() <= 0:
+        if (batch_size is not None and batch_size < 1) or format_attempts < 1 or retry_delay.total_seconds() <= 0:
             raise ValueError("번역 묶음 크기, 재시도 횟수와 보류 시간은 양수여야 합니다.")
         self._connect, self._clock = connect, clock
         self._subtitles, self._settings, self._translator = subtitles, settings, translator
@@ -103,6 +151,8 @@ class Translations:
         self._cached_transcript = None
         self._activity = Lock()
         self._protected_lines = protected_lines or (lambda db: set())
+        self._glossaries = {}
+        self._batch_progress = {}
         with connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS translation_lines (
@@ -415,7 +465,7 @@ class Translations:
             return entry
         return None
 
-    def _translate_batch(self, lines, language, cli, cancellation, queue_id):
+    def _translate_batch(self, remaining, language, cli, cancellation, queue_id, context, glossary):
         with self._connect() as db:
             row = db.execute('SELECT selections FROM translation_job_options WHERE queue_id=?', (queue_id,)).fetchone()
         if row is None:
@@ -430,19 +480,61 @@ class Translations:
             kwargs.pop('provider', None)
         if adapter is None:
             raise TranslationError('missing_cli', '번역 어댑터가 설정되지 않았습니다.')
-        for attempt in range(self._format_attempts):
+        ceiling = self._batch_size or provider(cli).batch_size
+        progress = self._batch_progress.setdefault((queue_id, cli), BatchProgress(ceiling))
+        attempt = 0
+        while True:
             if cancellation.is_set():
                 raise TranslationCancelled
+            with self._connect() as db:
+                current = db.execute("""SELECT 1 FROM translation_queue q WHERE q.id=?
+                    AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=q.video_id
+                                    AND s.state IN ('queued', 'transcribing'))""", (queue_id,)).fetchone()
+            if not current:
+                raise TranslationCancelled
+            lines = remaining[:progress.size]
             try:
-                return validate_translation(lines, adapter.translate(lines, language, cli=cli,
-                                            cancellation=cancellation, **kwargs))
+                response = adapter.translate(lines, language, cli=cli, cancellation=cancellation,
+                                             context=context, glossary=glossary.entries, **kwargs)
+                return TranslationResponse(validate_translation(lines, response),
+                                           response.glossary if isinstance(response, TranslationResponse) else ())
             except TranslationError as error:
-                if error.kind != 'format' or attempt + 1 == self._format_attempts:
+                progress.successes = 0
+                if error.kind != 'format':
+                    raise
+                if cancellation.is_set():
+                    raise TranslationCancelled
+                if progress.shrink(len(lines)):
+                    attempt = 0
+                    continue
+                attempt += 1
+                if attempt >= self._format_attempts:
                     raise
             except TranslationCancelled:
                 raise
             except Exception as error:
+                progress.successes = 0
                 raise TranslationError('other', str(error)) from error
+
+    def _context(self, db, transcript, first_id, queue_id):
+        index = next(i for i, line in enumerate(transcript.lines) if line.id == first_id)
+        preceding = transcript.lines[max(0, index - CONTEXT_LINES):index]
+        if not preceding:
+            return ()
+        # 미번역 대상은 옛 확정 번역보다 우선한다. 수정 후 낡은 번역을 맥락에 넣지 않는다.
+        marks = ','.join('?' for _ in preceding)
+        translated = dict(db.execute(f"""SELECT l.id,
+            CASE WHEN target.line_id IS NOT NULL THEN target.text ELSE saved.text END
+            FROM transcript_lines l
+            LEFT JOIN translation_targets target ON target.line_id=l.id AND target.queue_id=?
+            LEFT JOIN translation_lines saved ON saved.line_id=l.id
+            WHERE l.id IN ({marks})""", (queue_id, *(line.id for line in preceding))))
+        return tuple(ContextLine(line.id, line.text, translated.get(line.id)) for line in preceding)
+
+    def _prune_progress(self, db):
+        live = {r[0] for r in db.execute('SELECT id FROM translation_queue')}
+        self._glossaries = {key: value for key, value in self._glossaries.items() if key in live}
+        self._batch_progress = {key: value for key, value in self._batch_progress.items() if key[0] in live}
 
     def process_next(self):
         """한 번에 한 묶음. 성공한 묶음은 저장하고 전체/선택 줄 교체는 마지막에 원자적으로 한다."""
@@ -463,6 +555,7 @@ class Translations:
             if transcript is None:
                 return None
             with self._connect() as db:
+                self._prune_progress(db)
                 ids = {r[0] for r in db.execute("SELECT line_id FROM translation_targets "
                                                "WHERE queue_id = ? AND text IS NULL", (pending.id,))}
                 self._start_job(db, pending.id, cli)
@@ -470,9 +563,12 @@ class Translations:
                 if self._backoff(db, cli) and self._can_fallback(cli):
                     self._fallback(db, pending.id, cli, 'usage_limit')
                     cli = 'opencode_go'
-            lines = tuple(line for line in transcript.lines if line.id in ids)[:self._batch_size]
+            lines = tuple(line for line in transcript.lines if line.id in ids)
             if not lines:
                 return None  # 요청 또는 원어 세대가 읽는 도중 교체됐다.
+            with self._connect() as db:
+                context = self._context(db, transcript, lines[0].id, pending.id)
+            glossary = self._glossaries.get(pending.id, Glossary())
             with self._activity:
                 with self._connect() as db:
                     if not db.execute("UPDATE translation_queue SET state = 'translating' WHERE id = ?", (pending.id,)).rowcount:
@@ -483,7 +579,8 @@ class Translations:
                     cancellation.set()
             try:
                 try:
-                    result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation, pending.id)
+                    result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation,
+                                                   pending.id, context, glossary)
                 except TranslationError as error:
                     if cancellation.is_set():
                         raise TranslationCancelled
@@ -504,7 +601,8 @@ class Translations:
                     if backoff:
                         from .opencode_go import OpenCodeGoError
                         raise OpenCodeGoError('usage_limit', retry_at=backoff)
-                    result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation, pending.id)
+                    result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation,
+                                                   pending.id, context, glossary)
                 if cancellation.is_set():
                     raise TranslationCancelled
                 with self._connect() as db:
@@ -539,7 +637,11 @@ class Translations:
                         db.execute("DELETE FROM translation_queue WHERE id = ?", (pending.id,))
                         if self._order:
                             self._order.finish(db, pending.video_id)
-                    return entry
+                self._batch_progress[(pending.id, cli)].succeeded(self._batch_size or provider(cli).batch_size)
+                self._glossaries[pending.id] = glossary.updated(lines[:len(result)], result.glossary)
+                with self._connect() as db:
+                    self._prune_progress(db)
+                return entry
             except TranslationCancelled:
                 with self._connect() as db:
                     db.execute("UPDATE translation_queue SET state = ? WHERE id = ? AND state = 'translating'",
