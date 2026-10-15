@@ -6,6 +6,8 @@ root = Path(SPECPATH).parent
 stage = root / 'build' / 'bundle-assets'
 datas = collect_data_files('my_video_manager', includes=['web/**', 'web_tokens.json'])
 datas += collect_data_files('faster_whisper') + copy_metadata('my-video-manager')
+datas += [(str(root / 'installer' / 'THIRD-PARTY-NOTICES.txt'), '.'),
+          (str(root / 'installer' / 'licenses'), 'licenses')]
 datas += [(str(stage / 'build-version.txt'), 'my_video_manager'),
           (str(stage / 'app.ico'), 'my_video_manager')]
 # 외부 프로그램은 공식 배포 폴더 그대로 동봉한다.

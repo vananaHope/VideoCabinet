@@ -101,7 +101,12 @@ WebEngine이 참조하는 Qml·Quick 기반 DLL과 소프트웨어 렌더러는 
 `transcription` 하위 명령을 사용하며 부모가 연결한 stdout/stderr 파이프를 보존합니다.
 설치 진입점은 이 자식 출력의 인코딩을 UTF-8로 지정해 한국어 JSON을 전달합니다.
 
+새 `src/` 하위 프로세스 호출은 Windows에서 `CREATE_NO_WINDOW`를 사용해야 하며 정적 회귀 테스트로 검사합니다.
+FFmpeg 원본 `LICENSE`·`README.txt`도 함께 추출합니다. 번들은 불필요한 Qt 모듈과 950,000,000 bytes 상한을 검사합니다.
+
 ## 설치해서 쓰기
+
+제3자 라이선스·소스 안내는 설치 폴더의 `THIRD-PARTY-NOTICES.txt`, `ffmpeg/LICENSE.txt`, `ffmpeg/README.txt`, `licenses/`에 있습니다.
 
 설치 위치는 사용자별 `%LOCALAPPDATA%/Programs/MyVideoManager`이고 관리자 권한을 요구하지 않습니다.
 시작 메뉴 바로가기와 제거 프로그램을 등록하며 바탕화면 바로가기는 선택입니다.

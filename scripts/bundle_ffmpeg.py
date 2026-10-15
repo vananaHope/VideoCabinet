@@ -15,6 +15,7 @@ NAME = f"ffmpeg-{VERSION}-essentials_build.7z"
 URL = f"https://github.com/GyanD/codexffmpeg/releases/download/{VERSION}/{NAME}"
 SHA256 = "4705843ccaaf54257c16ad90f3e952ece33c17df964ecf7bfdbb0f49c7171077"
 EXECUTABLES = ("ffmpeg.exe", "ffprobe.exe")
+DOCUMENTS = {"LICENSE": "LICENSE.txt", "README.txt": "README.txt"}
 
 
 def digest(path):
@@ -52,17 +53,18 @@ def prepare(destination, cache, seven_zip):
         with tempfile.TemporaryDirectory(prefix="ffmpeg-", dir=destination.parent) as temporary:
             stage = Path(temporary)
             members = [f"ffmpeg-{VERSION}-essentials_build/bin/{name}" for name in EXECUTABLES]
+            members += [f"ffmpeg-{VERSION}-essentials_build/{name}" for name in DOCUMENTS]
             subprocess.run([seven_zip, "e", str(archive), *members, f"-o{stage}", "-y"], check=True)
-            if any(not (stage / name).is_file() for name in EXECUTABLES):
-                raise RuntimeError("FFmpeg 아카이브에 ffmpeg.exe 또는 ffprobe.exe가 없습니다.")
+            if any(not (stage / name).is_file() for name in (*EXECUTABLES, *DOCUMENTS)):
+                raise RuntimeError("FFmpeg 아카이브에 필수 실행 파일 또는 라이선스 문서가 없습니다.")
             manifest = {"version": VERSION, "url": URL, "sha256": SHA256,
                         "files": {name: digest(stage / name) for name in EXECUTABLES}}
             # 검증·추출이 성공한 뒤 이전 입력을 교체해 실패한 빌드의 혼합물을 쓰지 않는다.
             if destination.exists():
                 shutil.rmtree(destination)
             destination.mkdir()
-            for name in EXECUTABLES:
-                os.replace(stage / name, destination / name)
+            for name in (*EXECUTABLES, *DOCUMENTS):
+                os.replace(stage / name, destination / DOCUMENTS.get(name, name))
             (destination / "source.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 

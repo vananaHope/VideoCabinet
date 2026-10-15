@@ -7,6 +7,10 @@ import subprocess
 from bundle_ffmpeg import EXECUTABLES, SHA256, URL, VERSION, digest
 
 
+MAX_BUNDLE_BYTES = 950_000_000  # MB (decimal), not MiB
+UNUSED_QT_PREFIXES = ("qt6quick3d", "qt63d", "qt6charts", "qt6graphs",
+                      "qt6multimedia", "qt6virtualkeyboard", "qt6pdf", "qt6location")
+
 def check_bundle(directory: Path):
     required = (
         'my-video-manager.exe', 'my_video_manager/web/index.html',
@@ -20,16 +24,21 @@ def check_bundle(directory: Path):
         'PySide6/translations/qtwebengine_locales/ko.pak',
         'PySide6/translations/qtwebengine_locales/en-US.pak',
         'PySide6/plugins/platforms/qwindows.dll', 'PySide6/opengl32sw.dll',
-        'ffmpeg/source.json',
+        'ffmpeg/source.json', 'ffmpeg/LICENSE.txt', 'ffmpeg/README.txt',
+        'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt',
     )
     missing = [name for name in required if not (directory / name).is_file()]
     cuda = [str(path.relative_to(directory)) for path in directory.rglob('*.dll')
             if path.name.lower().startswith(('cublas', 'cudnn', 'nvblas', 'cudart', 'nvrtc', 'cusparse', 'cufft', 'curand'))]
     unnecessary = [str(path.relative_to(directory)) for path in (directory / 'PySide6').rglob('*')
-                   if path.is_file() and ('.debug.' in path.name.lower() or 'qml' in path.parts
+                   if path.is_file() and (path.name.lower().startswith(UNUSED_QT_PREFIXES) or '.debug.' in path.name.lower() or 'qml' in path.parts
                    or (path.parent.name == 'qtwebengine_locales' and path.name not in ('ko.pak', 'en-US.pak')))]
     if missing or cuda or unnecessary:
         raise RuntimeError(f'설치판 자산 검사 실패: missing={missing}, CUDA={cuda}, unnecessary={unnecessary}')
+    total_bytes = sum(path.stat().st_size for path in directory.rglob('*') if path.is_file())
+    if total_bytes > MAX_BUNDLE_BYTES:
+        raise RuntimeError(f'설치판 크기 상한 초과: {total_bytes} > {MAX_BUNDLE_BYTES} bytes')
+    print(f'설치판 합계: {total_bytes} bytes (상한 {MAX_BUNDLE_BYTES})')
     manifest = json.loads((directory / 'ffmpeg/source.json').read_text(encoding='utf-8'))
     if (manifest.get('version'), manifest.get('url'), manifest.get('sha256')) != (VERSION, URL, SHA256):
         raise RuntimeError('FFmpeg 고정 출처·버전·SHA-256이 일치하지 않습니다.')

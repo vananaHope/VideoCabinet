@@ -1,4 +1,5 @@
 """설치 입력의 출처 검증·실패 복구와 배포 필수 자산 계약."""
+import ast
 import hashlib
 import importlib
 import io
@@ -25,7 +26,7 @@ def ffmpeg(packaging, monkeypatch):
 
     def extract(command, **kwargs):
         stage = Path(next(arg[2:] for arg in command if arg.startswith('-o')))
-        for name in module.EXECUTABLES:
+        for name in (*module.EXECUTABLES, *module.DOCUMENTS):
             (stage / name).write_bytes(name.encode())
 
     monkeypatch.setattr(module.subprocess, 'run', extract)
@@ -40,7 +41,7 @@ def test_ffmpeg_cache_is_verified_on_each_build_and_never_uses_path(ffmpeg, tmp_
     for _ in range(2):
         ffmpeg.prepare(destination, cache, '7z')
     assert len(calls) == 1
-    assert {p.name for p in destination.iterdir()} == {'ffmpeg.exe', 'ffprobe.exe', 'source.json'}
+    assert {p.name for p in destination.iterdir()} == {'ffmpeg.exe', 'ffprobe.exe', 'source.json', 'LICENSE.txt', 'README.txt'}
     manifest = json.loads((destination / 'source.json').read_text())
     assert manifest['url'] == ffmpeg.URL
     assert manifest['files']['ffmpeg.exe'] == hashlib.sha256(b'ffmpeg.exe').hexdigest()
@@ -51,7 +52,7 @@ def test_ffmpeg_cache_is_verified_on_each_build_and_never_uses_path(ffmpeg, tmp_
     assert not list(cache.glob('*.part'))
 
 
-@pytest.mark.parametrize('failure', ['hash', 'network', 'timeout', 'cancel', 'extract', 'missing'])
+@pytest.mark.parametrize('failure', ['hash', 'network', 'timeout', 'cancel', 'extract', 'missing', 'missing-license'])
 def test_ffmpeg_failure_preserves_previous_input_and_cleans_partial(ffmpeg, tmp_path, monkeypatch, failure):
     destination, cache = tmp_path / 'assets/ffmpeg', tmp_path / 'cache'
     ffmpeg.prepare(destination, cache, '7z')
@@ -66,9 +67,13 @@ def test_ffmpeg_failure_preserves_previous_input_and_cleans_partial(ffmpeg, tmp_
     def extract(*args, **kwargs):
         if failure == 'extract':
             raise subprocess.CalledProcessError(2, '7z')
+        if failure == 'missing-license':
+            stage = Path(next(arg[2:] for arg in args[0] if arg.startswith('-o')))
+            for name in ffmpeg.EXECUTABLES:
+                (stage / name).write_bytes(b'executable')
 
     monkeypatch.setattr(ffmpeg.urllib.request, 'urlopen', download)
-    if failure in ('extract', 'missing'):
+    if failure in ('extract', 'missing', 'missing-license'):
         monkeypatch.setattr(ffmpeg.subprocess, 'run', extract)
     with pytest.raises((OSError, RuntimeError, KeyboardInterrupt, subprocess.CalledProcessError)):
         ffmpeg.prepare(destination, cache, '7z')
@@ -92,7 +97,7 @@ def download(*args, **kwargs):
     return io.BytesIO(b'archive')
 def extract(command, **kwargs):
     stage=Path(next(a[2:] for a in command if a.startswith('-o')))
-    for name in bundle.EXECUTABLES: (stage/name).write_bytes(b'executable')
+    for name in (*bundle.EXECUTABLES, *bundle.DOCUMENTS): (stage/name).write_bytes(b'executable')
 bundle.urllib.request.urlopen=download
 bundle.subprocess.run=extract
 bundle.prepare(Path(sys.argv[3]), cache, '7z')
@@ -124,7 +129,8 @@ def bundle(packaging, tmp_path, monkeypatch):
         *('PySide6/resources/' + name for name in ['icudtl.dat', 'qtwebengine_resources.pak',
           'qtwebengine_resources_100p.pak', 'qtwebengine_resources_200p.pak', 'v8_context_snapshot.bin']),
         'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak',
-        'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe',
+        'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe', 'ffmpeg/LICENSE.txt', 'ffmpeg/README.txt',
+        'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt',
     ]
     for name in files:
         path = tmp_path / name
@@ -144,7 +150,8 @@ def test_bundle_logs_pinned_ffmpeg_version(bundle, capsys):
     assert 'ffmpeg version 9.0.2-essentials_build' in capsys.readouterr().out
 
 
-@pytest.mark.parametrize('name', ['PySide6/QtWebEngineProcess.exe', 'PySide6/resources/v8_context_snapshot.bin',
+@pytest.mark.parametrize('name', ['THIRD-PARTY-NOTICES.txt', 'ffmpeg/LICENSE.txt',
+    'ffmpeg/README.txt', 'licenses/LGPL-3.0.txt', 'PySide6/QtWebEngineProcess.exe', 'PySide6/resources/v8_context_snapshot.bin',
     'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak'])
 def test_bundle_missing_required_runtime_fails(bundle, name):
     checker, directory = bundle
@@ -155,7 +162,9 @@ def test_bundle_missing_required_runtime_fails(bundle, name):
 
 @pytest.mark.parametrize('name', ['PySide6/qml/QtQuick/qmldir', 'PySide6/resources/v8_context_snapshot.debug.bin',
     'PySide6/resources/qtwebengine_resources.debug.pak', 'PySide6/translations/qtwebengine_locales/fr.pak',
-    'cublas64_12.dll'])
+    'cublas64_12.dll', *('PySide6/' + name + '.dll' for name in (
+        'Qt6Quick3DUtils', 'Qt63DCore', 'Qt6Charts', 'Qt6Graphs', 'Qt6Multimedia',
+        'Qt6VirtualKeyboard', 'Qt6Pdf', 'Qt6Location'))])
 def test_bundle_rejects_excluded_assets(bundle, name):
     checker, directory = bundle
     path = directory / name
@@ -199,3 +208,60 @@ runpy.run_path(entry, run_name='__main__')
     assert result.returncode == 0
     assert json.loads(result.stdout.decode('utf-8')) == {'text': '한국어 자막'}
     assert json.loads(result.stderr.decode('utf-8')) == {'detail': '준비 필요'}
+
+
+def test_bundle_rejects_size_regression(bundle, monkeypatch):
+    checker, directory = bundle
+    size = sum(p.stat().st_size for p in directory.rglob('*') if p.is_file())
+    monkeypatch.setattr(checker, 'MAX_BUNDLE_BYTES', size)
+    checker.check_bundle(directory)
+    (directory / 'unexpected.dat').write_bytes(b'x')
+    with pytest.raises(RuntimeError, match='크기 상한 초과'):
+        checker.check_bundle(directory)
+
+
+def test_windowed_entry_supports_print_without_standard_streams():
+    entry = Path(__file__).resolve().parents[1] / 'installer/entry.py'
+    code = """
+import runpy, sys, types
+def main():
+    assert sys.stdout is not None and sys.stderr is not None
+    print('windowed output', flush=True)
+    print('windowed error', file=sys.stderr, flush=True)
+    return 0
+sys.modules['my_video_manager.__main__'] = types.SimpleNamespace(main=main)
+entry = sys.argv[1]
+sys.argv = [entry]
+sys.stdout = sys.stderr = None
+runpy.run_path(entry, run_name='__main__')
+"""
+    result = subprocess.run([sys.executable, '-c', code, str(entry)], capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == result.stderr == b''
+
+
+def test_source_subprocess_calls_hide_windows_console():
+    root = Path(__file__).resolve().parents[1] / 'src'
+    calls = []
+    for path in root.rglob('*.py'):
+        tree = ast.parse(path.read_text(encoding='utf-8-sig'))
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == 'subprocess'
+                    and node.func.attr in ('Popen', 'run')):
+                continue
+            calls.append((path, node.lineno))
+            flags = next((k.value for k in node.keywords if k.arg == 'creationflags'), None)
+            assert flags is not None, (path, node.lineno, 'creationflags missing')
+            expressions = [flags]
+            if isinstance(flags, ast.Name):
+                scope = parents[node]
+                while not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+                    scope = parents[scope]
+                expressions += [n.value for n in ast.walk(scope) if isinstance(n, ast.Assign)
+                                and n.lineno < node.lineno and any(isinstance(t, ast.Name)
+                                and t.id == flags.id for t in n.targets)]
+            assert any(isinstance(n, ast.Attribute) and n.attr == 'CREATE_NO_WINDOW'
+                       for expr in expressions for n in ast.walk(expr)), (path, node.lineno)
+    assert calls, 'No subprocess calls were inspected'
