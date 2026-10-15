@@ -32,6 +32,6 @@ export function Inventory({ inventory, library }: { inventory: LibraryInventory;
       <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{counts.map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-sm text-muted-foreground">{label}</dt><dd className="font-medium tabular-nums">{value.toLocaleString()}개</dd></div>)}</dl>
       <p className="text-xs text-muted-foreground">아직 안 본 영상은 틀어보기·복습만 한 영상도 포함합니다. 재생 이력 없음은 일반 재생과 완료한 복습 기록이 모두 없는 영상입니다.</p>
     </section>
-    <div className="grid gap-5 lg:grid-cols-2"><Distribution title="영상 길이 분포" buckets={inventory.duration_distribution} total={inventory.video_count} /><Distribution title="파일 형식 분포" buckets={inventory.format_distribution} total={inventory.video_count} /></div>
+    <section className="space-y-3"><PageHeader variant="section" title="라이브러리 구성" description="해상도는 짧은 변 기준" /><div className="grid gap-5 lg:grid-cols-3"><Distribution title="영상 길이 분포" buckets={inventory.duration_distribution} total={inventory.video_count} /><Distribution title="파일 형식 분포" buckets={inventory.format_distribution} total={inventory.video_count} /><Distribution title="해상도 분포" buckets={inventory.resolution_distribution} total={inventory.video_count} /></div></section>
   </div>
 }

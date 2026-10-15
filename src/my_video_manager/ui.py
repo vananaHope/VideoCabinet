@@ -63,6 +63,8 @@ class MainWindow(QMainWindow):
 
         QApplication.instance().installEventFilter(self)
         self.refresh()
+        from .resolution_controls import ResolutionControls
+        self.resolutions = ResolutionControls(self)
 
     def page_changed(self, _index):
         page = self.pages.currentWidget()

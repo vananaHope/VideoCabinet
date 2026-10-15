@@ -88,6 +88,7 @@ class LibraryInventory:
     tagged_video_count: int
     duration_distribution: tuple[DistributionBucket, ...]
     format_distribution: tuple[DistributionBucket, ...]
+    resolution_distribution: tuple[DistributionBucket, ...]
 
 
 @dataclass(frozen=True)
@@ -249,12 +250,16 @@ class _Activity:
 def _inventory(video_rows, sizes, korean, highlighted, tagged, revisited, activity):
     visible = [row for row in video_rows if not row['excluded']]
     bands = [0] * 5
+    resolutions = [0] * 6
     formats = {}
     format_names = {'matroska,webm': 'Matroska / WebM', 'matroska': 'Matroska',
                     'webm': 'WebM', 'mov,mp4,m4a,3gp,3g2,mj2': 'MP4 / QuickTime',
                     'mp4': 'MP4', 'mov': 'QuickTime', 'avi': 'AVI', 'mpegts': 'MPEG-TS',
                     'mpeg': 'MPEG', 'flv': 'Flash Video', 'asf': 'ASF / WMV', 'ogg': 'Ogg'}
     for row in visible:
+        # 구간의 최소값 이상으로 묶는다. PAL 576p도 SD, 1600p는 1440p다.
+        short_side = min(row['width'] or 0, row['height'] or 0)
+        resolutions[bisect_right((720, 1080, 1440, 2160), short_side) if short_side > 0 else 5] += 1
         bands[bisect_right((600, 1800, 3600, 7200), row['duration'])] += 1
         name = format_names.get(row['format'], row['format'].upper() or '알 수 없음')
         formats[name] = formats.get(name, 0) + 1
@@ -268,6 +273,8 @@ def _inventory(video_rows, sizes, korean, highlighted, tagged, revisited, activi
         tuple(DistributionBucket(label, count) for label, count in zip(
             ('10분 미만', '10~30분', '30~60분', '1~2시간', '2시간 이상'), bands)),
         tuple(DistributionBucket(label, count) for label, count in sorted(formats.items(), key=lambda x: (-x[1], x[0]))),
+        tuple(DistributionBucket(label, count) for label, count in zip(
+            ('SD', '720p', '1080p', '1440p', '4K 이상', '알 수 없음'), resolutions)),
     )
 
 
@@ -310,7 +317,7 @@ class StatisticsReader:
         now = now.astimezone(tz)
         with self._connect() as db:
             db.execute('BEGIN')
-            video_rows = db.execute('SELECT id, title, registered_at, excluded, duration, format FROM videos').fetchall()
+            video_rows = db.execute('SELECT id, title, registered_at, excluded, duration, format, width, height FROM videos').fetchall()
             snapshot = self._viewings.read_rows(connection=db)
         # 현황은 시청 스냅샷과 별개다. 명시적 BEGIN 없이 각 fetch 직후 읽기 잠금을
         # 풀어 시청·자막 작업자의 커밋이 여러 현황 쿼리 전체를 기다리지 않게 한다.

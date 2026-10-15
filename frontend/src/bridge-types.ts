@@ -380,6 +380,7 @@ export interface LibraryInventory {
   tagged_video_count: number
   duration_distribution: Array<DistributionBucket>
   format_distribution: Array<DistributionBucket>
+  resolution_distribution: Array<DistributionBucket>
 }
 
 export interface StatisticsDashboard {

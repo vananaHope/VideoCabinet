@@ -80,6 +80,11 @@ if not args.empty_library:
                          (now - timedelta(days=i % 365)).isoformat()) for i in range(2, video_count + 1)])
         db.executemany('INSERT INTO locations (path,video_id,size) VALUES (?,?,?)',
                        [(str(directory / f'video-{i}.mkv'), i, i * 10000000 if i % 10 else None) for i in range(2, video_count + 1)])
+        # 해상도는 실제 코어 분포 입력이다. 일부 미확인과 세로 영상을 함께 확인한다.
+        db.executemany('UPDATE videos SET width=?,height=?,resolution_checked=1 WHERE id=?',
+                       [(height, 3840, i) if height else (None, None, i)
+                        for i in range(1, video_count + 1)
+                        for height in [(480, 720, 1080, 1440, 2160, None)[(i - 1) % 6]]])
         rows = []
         for i in range(args.count):
             # 730일에 분/초/마이크로초를 퍼뜨려 분 단위 메모에 유리하지 않게 한다.
@@ -229,6 +234,13 @@ try:
             window.grab().save(str(args.output / f'{sample}-{days}-inventory.png'))
             js("document.querySelector('main[aria-label=통계]').scrollTop=99999")
             settle()
+            distribution = json.loads(js("""JSON.stringify([...document.querySelectorAll('[data-statistics-inventory] section')]
+                .find(e => e.querySelector('h2')?.textContent === '해상도 분포')?.innerText)"""))
+            assert distribution and '알 수 없음' in distribution
+            for bucket in expected['inventory']['resolution_distribution']:
+                assert bucket['label'] in distribution
+                assert f"{bucket['video_count']:,}개" in distribution
+            assert js("document.querySelector('main[aria-label=통계]').scrollWidth <= document.querySelector('main[aria-label=통계]').clientWidth")
             window.grab().save(str(args.output / f'{sample}-{days}-inventory-lower.png'))
             js("document.querySelector('nav[aria-label=\"통계 구역\"] [data-tab=activity]').click()")
             settle()

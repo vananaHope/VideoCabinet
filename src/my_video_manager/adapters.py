@@ -7,6 +7,7 @@ from queue import Empty, SimpleQueue
 import shutil
 import subprocess
 import sys
+import time
 from threading import Lock
 
 from .core import Command, CommandType, MediaInfo, playback_speed
@@ -46,6 +47,28 @@ class FFmpegMediaReader:
         result = self._run([self.ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)])
         return parse_ffprobe_result(result.stdout, suffix=path.suffix,
                                     returncode=result.returncode, error=result.stderr)
+
+    def read_resolution(self, path: Path, *, cancellation) -> MediaInfo | None:
+        """채우기 전용: 낮은 우선순위로 읽고 종료/전경 작업 요청에 즉시 양보한다."""
+        flags = (subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS) if sys.platform == 'win32' else 0
+        process = subprocess.Popen([self.ffprobe, '-v', 'error', '-show_format', '-show_streams', '-of', 'json', str(path)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                   encoding='utf-8', errors='replace', creationflags=flags)
+        deadline = time.monotonic() + 15
+        try:
+            while not cancellation.is_set():
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('해상도 읽기 제한 시간(15초)을 초과했습니다. 다시 검사해 주세요.')
+                try:
+                    output, error = process.communicate(timeout=0.05)
+                    return parse_ffprobe_result(output, suffix=path.suffix, returncode=process.returncode, error=error)
+                except subprocess.TimeoutExpired:
+                    pass
+            return None
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.communicate()
 
     def capture(self, path: Path, destination: Path, seconds: float) -> None:
         result = self._run([self.ffmpeg, "-v", "error", "-nostdin", "-y", "-ss", str(seconds),
