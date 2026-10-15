@@ -523,6 +523,28 @@ try:
             metrics.update(before_working_set_mib=baseline, after_working_set_mib=memory(), reparent=dialogs.metrics)
             metrics['checks'].append('단일 웹 뷰·mpv 진행·재생 키 복귀·라이브러리 선택/스크롤')
             metrics['manual'].extend(['실제 Windows 한국어 IME 조합·한자 후보 선택', '재부모화 순간 검은 프레임/깜빡임의 육안 확인', 'Windows SRT 저장 창의 빠른 접근/덮어쓰기'])
+        # #49 통합 뒤 실제 검색 입력/결과/선택/스크롤도 왕복한다.
+        window.navigate_web_tab('search')
+        wait(lambda: js("!!document.getElementById('search-query')"))
+        input_value('검색어', 'Long subtitle')
+        wait(lambda: js("document.querySelectorAll('#search-results [role=option]').length > 20"))
+        js("document.getElementById('search-results').focus()")
+        for _ in range(3): QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Down)
+        js("document.getElementById('search-results').scrollTop = 400")
+        settle()
+        search_state = "JSON.stringify([document.getElementById('search-query').value, document.querySelectorAll('#search-results [role=option]').length, document.getElementById('search-results').getAttribute('aria-activedescendant'), document.getElementById('search-results').scrollTop])"
+        search_before = js(search_state)
+        if args.real:
+            window.play_video(video.id, start=0)
+            wait(lambda: window.player is not None and core.playback.position > .1)
+        else:
+            window.pages.setCurrentWidget(window.playback_page)
+        web_modal('review', review_context, lambda: click('닫기'))
+        if args.real: window.back_to_list()
+        else: window.pages.setCurrentWidget(host)
+        settle(400)
+        assert js(search_state) == search_before, (search_before, js(search_state))
+        metrics['checks'].append('검색어·결과·선택·스크롤의 재생 중 검수 왕복 보존')
         metrics['checks'].append('웹 대화상자 전체·0개/많음/긴 텍스트')
 finally:
     path = args.output / f'{args.mode}-{"ime" if args.windows_ime else "real" if args.real else "offscreen"}-metrics.json'
