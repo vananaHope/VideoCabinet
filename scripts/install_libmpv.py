@@ -34,9 +34,9 @@ def verified(path):
 
 
 @contextmanager
-def cache_lock(cache, timeout=300):
+def cache_lock(cache, timeout=300, *, name=NAME):
     # OS 잠금은 프로세스 강제 종료에도 해제된다. 잠금 파일은 지우지 않는다.
-    with (cache / f"{NAME}.lock").open("a+b") as lock:
+    with (cache / f"{name}.lock").open("a+b") as lock:
         if lock.tell() == 0:
             lock.write(b"\0")
             lock.flush()
@@ -55,7 +55,7 @@ def cache_lock(cache, timeout=300):
                 if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
                     raise
                 if time.monotonic() >= deadline:
-                    raise TimeoutError("libmpv 캐시 잠금 대기 시간이 초과되었습니다.") from exc
+                    raise TimeoutError(f"{name} 캐시 잠금 대기 시간이 초과되었습니다.") from exc
                 time.sleep(0.1)
         try:
             yield

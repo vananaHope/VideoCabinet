@@ -91,6 +91,16 @@ libmpv·FFmpeg·ffprobe를 포함합니다. CUDA·Whisper 모델은 넣지 않�
 `-Version 0.2.0`은 소스를 바꾸지 않고 설치 파일과 앱 표시 버전을 함께 지정합니다(Release DryRun용).
 이미 만든 실행 폴더로 설치 파일만 다시 만들 때는 `-SkipPyInstaller -AppDirectory <실행 폴더>`를 사용합니다.
 
+설치판 FFmpeg는 PATH와 무관하게 Gyan `9.0.2 essentials` 배포본을 사용합니다.
+고정 URL·SHA-256은 `scripts/bundle_ffmpeg.py`에 있으며 `%LOCALAPPDATA%/my-video-manager/cache/ffmpeg/`의
+공용 아카이브를 빌드마다 재검증합니다. `ffmpeg.exe`·`ffprobe.exe`만 추출하고 `source.json`에 출처와
+실행 파일 해시를 기록합니다. `check_bundle.py`는 이 해시와 두 도구의 `-version`을 검사·출력합니다.
+Qt는 웹 셸에 쓰지 않는 QML 트리와 debug 리소스를 제외하고 로캘은 ko·en-US만 포함합니다.
+WebEngine이 참조하는 Qml·Quick 기반 DLL과 소프트웨어 렌더러는 유지합니다.
+실행 파일은 콘솔 창을 만들지 않는 `windowed` 모드입니다. 받아쓰기·GPU 감지는 같은 exe의
+`transcription` 하위 명령을 사용하며 부모가 연결한 stdout/stderr 파이프를 보존합니다.
+설치 진입점은 이 자식 출력의 인코딩을 UTF-8로 지정해 한국어 JSON을 전달합니다.
+
 ## 설치해서 쓰기
 
 설치 위치는 사용자별 `%LOCALAPPDATA%/Programs/MyVideoManager`이고 관리자 권한을 요구하지 않습니다.
