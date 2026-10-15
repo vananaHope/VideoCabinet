@@ -411,6 +411,8 @@ export interface TranslationModelData {
   efforts: Array<string>
   policy: string
   warning: boolean
+  training_warning: boolean
+  expired_warning: boolean
 }
 
 export interface TranslationProviderData {

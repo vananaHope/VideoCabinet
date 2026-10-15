@@ -108,8 +108,8 @@ class DialogModel:
             data.update(description='클릭 또는 Enter로 장면 이동 · 방향키로 줄 선택 · Tab으로 버튼 이동 · Esc로 닫기', rows=[
                 row(line.original.id, line.original.text, line.translation if line.translation is not None else '미번역',
                     ' · '.join(label for flag, label in ((line.original_reviewed, '원어 검수됨'),
-                                                       (line.translation_reviewed, '번역 검수됨'),
-                                                       (provenance.get(line.original.id), names.get(provenance.get(line.original.id), ''))) if flag),
+                                                       (line.translation_reviewed, '직접 수정'),
+                                                       (not line.translation_reviewed and provenance.get(line.original.id), names.get(not line.translation_reviewed and provenance.get(line.original.id), ''))) if flag),
                     line.original.start, line.original.end) for line in c.review_lines(ctx['video_id'])])
         elif kind == 'range':
             data['maximum'] = c.video(ctx['video_id']).duration
@@ -300,7 +300,8 @@ class DialogModel:
                     c.request_translation(video_id)
                 except ValueError:
                     pass  # Qt 경로와 같이 그 사이 원어가 재생성된 영상은 새 요청을 따른다.
-            self.owner.window.statusBar().showMessage(f"번역 방식: {data['choice']} {notice}", 5000)
+            from .translation_models import provider
+            self.owner.window.statusBar().showMessage(f"번역 방식: {provider(data['choice']).label} {notice}", 5000)
             self.owner.pop(accepted=True)
         else:
             raise ValueError('지원하지 않는 대화상자 작업입니다.')

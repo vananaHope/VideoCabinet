@@ -162,7 +162,7 @@ def test_ineligible_transcripts_never_call_translator(setup, language, probabili
     assert not adapter.calls
 
 
-def test_cli_setting_defaults_persists_and_is_used_for_next_batch(setup):
+def test_cli_setting_defaults_persists_and_is_used_for_next_job(setup):
     core, _, adapter, _, reopen = setup
     assert core.translation_cli == "codex"
     source(core, core.videos()[0].id)
@@ -172,7 +172,7 @@ def test_cli_setting_defaults_persists_and_is_used_for_next_batch(setup):
     assert core.translation_cli == "claude"
     assert core.settings.get("translation.cli") == "claude"
     core.process_next_translation()
-    assert [call[2] for call in adapter.calls] == ["codex", "claude"]
+    assert [call[2] for call in adapter.calls] == ["codex", "codex"]
     with pytest.raises(ValueError):
         core.set_translation_cli("unknown")
     assert core.translation_cli == "claude"
@@ -465,6 +465,8 @@ def test_each_cli_keeps_its_own_usage_deadline_and_can_resume_held_video(setup):
     assert core.process_next_translation().state == "held"
     time[0] += timedelta(minutes=5)
     core.set_translation_cli("claude")
+    assert not core.translation_ready()  # 기존 작업은 시작할 때의 Codex를 유지한다.
+    core.request_translation(core.videos()[0].id)  # 직접 재시도는 새 설정으로 시작한다.
     assert core.translation_ready()
     assert core.process_next_translation().state == "held"
     assert [call[2] for call in adapter.calls] == ["codex", "claude"]
@@ -472,6 +474,8 @@ def test_each_cli_keeps_its_own_usage_deadline_and_can_resume_held_video(setup):
     time[0] += timedelta(minutes=10)
     assert not core.translation_ready()  # claude는 아직 5분 남았다.
     core.set_translation_cli("codex")
+    assert not core.translation_ready()
+    core.request_translation(core.videos()[0].id)
     assert core.translation_ready()
     adapter.error = None
     finish(core)
@@ -575,18 +579,17 @@ def test_successful_batch_resets_consecutive_usage_limit_count(setup):
     assert core.process_next_translation().state == "held"
 
 
-def test_repeated_usage_limit_count_is_separate_for_each_cli(setup):
+def test_setting_change_does_not_reset_running_job_usage_limit_count(setup):
     core, _, adapter, time, reopen = setup
     source(core, core.videos()[0].id)
     adapter.error = TranslationError("usage_limit", "usage_limit")
     for cli in ("codex", "claude"):
         core.set_translation_cli(cli)
-        for _ in range(2):
-            assert core.process_next_translation().state == "held"
-            time[0] += timedelta(minutes=15)
+        assert core.process_next_translation().state == "held"
+        time[0] += timedelta(minutes=15)
     core = reopen()
-    core.set_translation_cli("codex")
     assert core.process_next_translation().state == "failed"
+    assert [call[2] for call in adapter.calls] == ["codex"] * 3
 
 
 def test_usage_limit_from_replaced_request_still_holds_cli_without_stale_attempts(setup):

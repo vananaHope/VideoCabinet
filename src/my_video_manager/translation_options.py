@@ -62,7 +62,7 @@ class TranslationOptions:
                                     expensive_efforts=list(EXPENSIVE_EFFORTS),
                                     effort_notice='번역이 느려지고 구독 사용량을 더 씁니다.') for p in PROVIDERS],
                     key_masked=masked, key_error=error,
-                    fallback=self.settings.get('translation.fallback', bool(masked)),
+                    fallback=self.fallback_enabled(),
                     fallback_notice='이어받기를 켜면 실패한 번역의 남은 자막 텍스트가 OpenCode 서버로 전송됩니다.')
 
     def model_data(self, choice):
@@ -76,7 +76,9 @@ class TranslationOptions:
             if choice.needs_warning(self.clock().date()):
                 messages.append('주의: 학습 사용·미확인 또는 만료 정책을 확인하세요.')
         return dict(id=choice.model_id, label=choice.label, efforts=list(choice.reasoning_efforts or ()),
-                    policy=' · '.join(messages), warning=choice.needs_warning(self.clock().date()))
+                    policy=' · '.join(messages), warning=choice.needs_warning(self.clock().date()),
+                    training_warning=bool(policy and policy.training is True),
+                    expired_warning=bool(policy and policy.valid_until and self.clock().date() > policy.valid_until))
 
     def save(self, identifier, selections, fallback, *, key_action='keep', key=''):
         provider(identifier)
@@ -126,9 +128,9 @@ class TranslationOptions:
                 self._key_cache = None
         return ' '.join(notices)
 
-    def adapter(self, session_id, *, key=None):
+    def adapter(self, session_id, *, key=None, selection=None):
         from .opencode_go import OpenCodeGoTranslator
-        selected = self.selection('opencode_go')
+        selected = selection if selection is not None else self.selection('opencode_go')
         return OpenCodeGoTranslator(self.store.read if key is None else lambda: key,
                                     session_id=session_id, model=selected['model'], effort=selected['effort'],
                                     transport=self.transport, clock=self.clock)

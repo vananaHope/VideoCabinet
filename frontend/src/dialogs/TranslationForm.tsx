@@ -22,6 +22,7 @@ export function TranslationForm({ data, form, update, act, busy }: {
     update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, model: value, effort } : s) })
   }
   const registered = !!data.key_masked && form.key_action !== 'delete'
+  const hasKey = registered || (form.key_action === 'replace' && !!form.key)
   return <div className="space-y-3" data-translation-form onKeyDown={event => {
     // 모델 직접 입력·키 편집의 Enter는 전체 대화상자를 저장하지 않는다.
     if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.stopPropagation()
@@ -41,19 +42,23 @@ export function TranslationForm({ data, form, update, act, busy }: {
       {selected.expensive_efforts.includes(current.effort) && <p className="text-sm text-muted-foreground">{selected.effort_notice}</p>}
       {notice && <p role="status" className="text-sm text-destructive">{notice}</p>}
       <p className="text-sm text-muted-foreground">{selected.notice}</p>
-      {model.policy && <p role="note" className="whitespace-pre-wrap break-words rounded-md border p-2 text-sm">{model.policy}</p>}
+      {model.policy && <div role="note" className={`space-y-2 whitespace-pre-wrap break-words rounded-md border p-2 text-sm ${model.warning ? 'border-destructive' : ''}`}>
+        {model.training_warning && <p className="rounded bg-destructive px-2 py-1 text-destructive-foreground">학습 사용 주의</p>}
+        {model.expired_warning && <p className="rounded bg-highlight px-2 py-1 text-highlight-foreground">무보존 계약 만료 · 갱신 확인 필요</p>}
+        <p>{model.policy}</p>
+      </div>}
       <section className="space-y-2 rounded-md border p-3" aria-label="OpenCode Go 키">
         <p className="text-sm font-medium">OpenCode Go 키 · {form.key_action === 'delete' ? '삭제 예정' : form.key_action === 'replace' ? '교체 예정' : registered ? `등록됨 (${data.key_masked})` : '없음'}</p>
         <Input type="password" autoComplete="off" aria-label="OpenCode Go 키 입력" placeholder="새 키 입력 (확인할 때 저장)" value={form.key} onChange={event => update({ key: event.target.value, key_action: event.target.value ? 'replace' : 'keep', fallback: !data.key_masked && !form.key && !!event.target.value ? true : form.fallback })} />
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => void act('check-key')}>키 확인</Button>
           <Button variant="outline" onClick={() => void act('load-models')}>모델 목록 조회</Button>
-          <Button variant="outline" onClick={() => update({ key: '', key_action: 'delete' })}>키 지우기</Button>
+          <Button variant="outline" onClick={() => update({ key: '', key_action: 'delete', fallback: false })}>키 지우기</Button>
           <Button variant="ghost" onClick={() => update({ key: '', key_action: 'keep' })}>키 편집 취소</Button>
         </div>
         {data.key_error && <p className="text-sm text-destructive">{data.key_error}</p>}
       </section>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.fallback} onChange={event => update({ fallback: event.target.checked })} />실패하면 OpenCode Go로 이어서</label>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={!hasKey} checked={hasKey && form.fallback} onChange={event => update({ fallback: event.target.checked })} />실패하면 OpenCode Go로 이어서</label>
       <p className="text-xs text-muted-foreground">{data.fallback_notice}</p>
       <Button variant="ghost" onClick={() => { setNotice(''); update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, model: selected.default_model, effort: '' } : s) }) }}>이 방식의 모델·강도 기본값</Button>
     </fieldset>

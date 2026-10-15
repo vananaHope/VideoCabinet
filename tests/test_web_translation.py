@@ -108,11 +108,13 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
             assert '2026-10-31' in text and 'OpenCode 서버' in text
             assert ('주의:' in text) == expired
         assert ('등록됨 (****1234)' in text) == key
+        if expired:
+            assert js(window, 'document.querySelector("[role=note] .bg-highlight") !== null')
         if long_model:
             assert js(window, 'document.querySelector("[aria-label=\'모델 직접 입력\']").value') == model
         geometry = json.loads(js(window, """JSON.stringify((() => {
             const footer = document.querySelector('[role=dialog] footer').getBoundingClientRect();
-            const last = document.querySelector('[data-translation-form] fieldset').getBoundingClientRect();
+            const last = document.querySelector('[data-dialog-body]').getBoundingClientRect();
             return {bottom: footer.bottom, top: footer.top, fields: last.bottom, height: innerHeight};
         })())"""))
         assert geometry['bottom'] <= geometry['height'] and geometry['fields'] <= geometry['top'], geometry
@@ -157,6 +159,8 @@ def test_real_editor_preserves_each_provider_and_discards_key_on_cancel(window_f
         assert js(window, 'document.querySelector("[aria-label=\'추론 강도\']").value') == 'max'
         input_text(window, 'OpenCode Go 키 입력', 'replacement-key-5678')
         click(window, '키 지우기')
+        assert js(window, 'document.querySelector("input[type=checkbox]").disabled')
+        assert not js(window, 'document.querySelector("input[type=checkbox]").checked')
         click(window, '취소')
     within(window.translations.settings, dialogs, cancel)
     assert store.read().reveal() == 'existing-key-1234'
@@ -215,6 +219,8 @@ def test_explicit_key_check_models_and_settings_status(window_factory, connected
         click(window, '확인')
     within(window.translations.settings, dialogs, check)
     assert store.read().reveal() == 'draft-secret-1234'
+    assert 'OpenCode Go (API)' in window.statusBar().currentMessage()
+    assert 'opencode_go' not in window.statusBar().currentMessage()
     window.navigate_web_tab('settings')
     wait_for(lambda: js(window, '!!document.querySelector("[data-category=translation]")'))
     js(window, 'document.querySelector("[data-category=translation]").click()')
@@ -240,6 +246,7 @@ def test_training_policy_warning_comes_from_bridge_data(window_factory, connecte
         loaded(window)
         text = js(window, 'document.querySelector("[role=note]").textContent')
         assert '학습 사용 ·' in text and '주의:' in text
+        assert js(window, 'document.querySelector("[role=note] .bg-destructive") !== null')
         capture(window, 'opencode-policy-training-fixture')
     within(window.translations.settings, dialogs, check)
 
@@ -267,3 +274,33 @@ def test_high_effort_and_key_feedback_scroll_above_footer(window_factory):
         capture(window, 'high-effort-feedback')
         click(window, '취소')
     within(window.translations.settings, dialogs, check)
+
+
+def test_fallback_notice_and_manual_label_in_real_window(window_factory, connected):
+    from test_translation import source, finish
+    from my_video_manager.translation import TranslationError
+    from my_video_manager.web_dialogs_entries import ReviewDialog
+    core, _, cli, store, _, _ = connected
+    store.save('key')
+    video = core.videos()[0]
+    transcript = source(core, video.id)
+    cli.error = TranslationError('usage_limit', 'quota')
+    results = finish(core)
+    line = transcript.lines[0]
+    core.edit_translation_line(video.id, line.id, '직접 고친 번역')
+    window = window_factory()
+    window.resize(1100, 720)
+    window.translations.completed(results[-1])
+    assert '사용량 한도' in window.statusBar().currentMessage()
+    assert 'OpenCode Go로 이어서 번역' in window.statusBar().currentMessage()
+    dialogs = window.web_host.dialogs
+    def check():
+        wait_for(lambda: js(window, '!!document.querySelector("[role=dialog]")'))
+        row = next(r for r in state(dialogs)['rows'] if r['id'] == line.id)
+        assert '직접 수정' in row['status'] and 'OpenCode' not in row['status']
+        capture(window, 'manual-review-fallback-notice')
+    within(lambda: ReviewDialog(core, video.id, window.review_jump, window.review_changed, window).exec(), dialogs, check)
+    window.navigate_web_tab('queue')
+    QTest.qWait(200)
+    assert '사용량 한도' in js(window, 'document.body.textContent')
+    capture(window, 'queue-fallback-notice')

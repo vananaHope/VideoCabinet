@@ -126,6 +126,7 @@ class Review:
                 db.execute("UPDATE subtitle_reviews SET translation_reviewed = 1 WHERE line_id = ?", (line_id,))
                 db.execute("INSERT INTO translation_lines VALUES (?, ?) ON CONFLICT(line_id) "
                            "DO UPDATE SET text = excluded.text", (line_id, text))
+                db.execute("DELETE FROM translation_line_providers WHERE line_id = ?", (line_id,))
                 # 이미 실행 중인 응답도 이 줄을 다시 쓰지 못한다.
                 db.execute("DELETE FROM translation_targets WHERE line_id = ?", (line_id,))
                 self.translations.finish_ready(db, video_id)

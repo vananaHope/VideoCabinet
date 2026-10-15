@@ -174,6 +174,7 @@ class SubtitleQueue:
         self._lock = RLock()
         self._outcomes = {}
         self._completed = set()
+        self._notices = {}
         self._active = 0
 
     @contextmanager
@@ -190,6 +191,7 @@ class SubtitleQueue:
         with self._lock:
             self._outcomes.pop(video_id, None)
             self._completed.discard(video_id)
+            self._notices.pop(video_id, None)
             with self.order.connect() as db:
                 db.execute("INSERT OR IGNORE INTO subtitle_queue_hidden VALUES (?)", (video_id,))
 
@@ -217,9 +219,10 @@ class SubtitleQueue:
                 result.append(SubtitleQueueItem(video_id, title, s.state, s.progress, s.error_detail or s.error))
             elif t:
                 result.append(SubtitleQueueItem(video_id, title, t.state,
-                                               t.completed_lines / max(1, t.total_lines), t.error_detail or t.error))
+                                               t.completed_lines / max(1, t.total_lines),
+                                               ' · '.join(filter(None, (t.error, t.notice))) or None))
             elif video["has_transcript"]:
-                result.append(SubtitleQueueItem(video_id, title, "completed", 1))
+                result.append(SubtitleQueueItem(video_id, title, "completed", 1, self._notices.get(video_id)))
         return self.order.sort(result)
 
     def record(self, result):
@@ -229,6 +232,7 @@ class SubtitleQueue:
             with self.order.connect() as db:
                 if db.execute("SELECT 1 FROM subtitle_queue_hidden WHERE video_id = ?", (result.video_id,)).fetchone():
                     return
+            self._notices[result.video_id] = getattr(result, "notice", "")
             self._outcomes[result.video_id] = result.state
             if result.state == "completed":
                 self._completed.add(result.video_id)

@@ -65,6 +65,8 @@ class TranslationControls(QObject):
                     self.window.player.set_subtitle(self.core.playback_subtitle(result.video_id))
                 except Exception as error:
                     bar.showMessage(f"번역은 저장됐지만 표시에 실패했습니다: {error}")
+        if result.notice:
+            bar.showMessage(f"{bar.currentMessage()} · {result.notice}")
         self.video_changed.emit(result.video_id)
 
     def toggle(self):

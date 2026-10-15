@@ -14,6 +14,8 @@ class TranslationModelData(TypedDict):
     efforts: list[str]
     policy: str
     warning: bool
+    training_warning: bool
+    expired_warning: bool
 
 
 class TranslationProviderData(TypedDict):
