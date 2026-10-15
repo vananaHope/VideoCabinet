@@ -22,6 +22,7 @@ def main():
     from .theme import apply_theme
     apply_theme(app)
     app.setQuitOnLastWindowClosed(False)
+    restore_result = None
     try:
         data_directory = args.data_dir or default_data_directory()
         instance = SingleInstance(data_directory, app)
@@ -38,7 +39,10 @@ def main():
         instance.activated.connect(window.tray.open)
         app.aboutToQuit.connect(instance.close)
     except Exception as error:
-        QMessageBox.critical(None, "시작 실패", str(error))
+        message = str(error)
+        if restore_result is not None and restore_result.status == "deferred":
+            message = restore_result.error_message + "\n\n" + restore_result.guidance
+        QMessageBox.critical(None, "시작 실패", message)
         return 1
     window.show()
     return app.exec()

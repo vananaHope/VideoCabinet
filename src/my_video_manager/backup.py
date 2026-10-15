@@ -339,6 +339,73 @@ def backup_before_migration(db, target_version: int) -> BackupResult | None:
     return create_automatic_backup(Path(filename)) if filename else None
 
 
+def _check_replace_available(database):
+    """Windows 열린 파일을 백업 생성 전에 검사한다. 최종 replace도 다시 보호한다."""
+    if os.name != "nt":
+        return  # POSIX에서는 열린 파일도 rename 가능하다. SQLite 잠금은 아래에서 확인한다.
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                       wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = (wintypes.HANDLE,)
+    close.restype = wintypes.BOOL
+    for path in (database, *(Path(str(database) + suffix) for suffix in ("-wal", "-journal", "-shm"))):
+        if not path.exists():
+            continue
+        # DELETE | GENERIC_READ, 공유 없음, OPEN_EXISTING. 내용을 읽거나 바꾸지 않는다.
+        handle = create(str(path), 0x00010000 | 0x80000000, 0, None, 3, 0, None)
+        if handle == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        close(handle)
+
+
+def _preserve_damaged_database(database):
+    """손상 사본은 자동 ZIP 5개 정리에서 제외하고 사용자가 정리할 때까지 보존한다."""
+    directory = database.parent / "backups"
+    directory.mkdir(exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    target = directory / f"damaged-{stamp}-{uuid4().hex}.sqlite3"
+    for suffix in ("", "-wal", "-journal"):
+        source = Path(str(database) + suffix)
+        if source.exists():
+            copy = Path(str(target) + suffix)
+            shutil.copyfile(source, copy)
+            _sync(copy)
+    return target
+
+
+def _safety_backup(database):
+    if not database.exists():
+        return None
+    _check_replace_available(database)
+    try:
+        # 깨진 헤더와 저널이 함께 있으면 readonly SQLite가 손상 대신
+        # 저널 복구를 위한 쓰기 권한 오류를 먼저 낼 수 있다.
+        with database.open("rb") as stream:
+            if stream.read(16) != b"SQLite format 3\x00":
+                raise BackupError("현재 DB 헤더가 손상되었습니다.")
+        _database_metadata(database)
+        with closing(sqlite3.connect(database, timeout=1)) as db:
+            if db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+                raise BackupStorageError(errno.EBUSY, "사용 중인 DB 연결을 닫은 뒤 백업 복원을 다시 시도하세요.",
+                                         "file_in_use")
+            db.execute("PRAGMA journal_mode=DELETE")
+        return create_automatic_backup(database, include_thumbnails=True).path
+    except (BackupError, sqlite3.DatabaseError) as error:
+        # 현재 DB의 손상은 검증을 마친 예약 ZIP의 결함이 아니다.
+        if isinstance(error, sqlite3.OperationalError):
+            message = str(error).lower()
+            if any(word in message for word in ("locked", "busy", "full", "readonly", "disk i/o", "unable to open")):
+                code = errno.ENOSPC if "full" in message else errno.EBUSY
+                raise _storage_error(OSError(code, str(error))) from error
+        return _preserve_damaged_database(database)
+
+
 def _apply_backup_restore(database: Path) -> BackupRestoreResult:
     """SingleInstance 잠금 확보 뒤, AppCore/작업자/DB 연결을 만들기 전에만 호출한다.
 
@@ -389,19 +456,22 @@ def _apply_backup_restore(database: Path) -> BackupRestoreResult:
                     added_thumbnails.append(target)
                     _sync(target)
             _sync(snapshot)
-            safety = create_automatic_backup(database, include_thumbnails=True).path if database.exists() else None
-            if database.exists():
-                # WAL은 SQLite로 회수한다. DELETE 모드의 열린 연결은 아래
-                # Windows os.replace의 파일 사용 오류가 실제 교체를 막는다.
-                with closing(sqlite3.connect(database, timeout=1)) as db:
-                    if db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
-                        raise BackupStorageError(errno.EBUSY, "사용 중인 DB 연결을 닫은 뒤 백업 복원을 다시 시도하세요.",
-                                                 "file_in_use")
-                    db.execute("PRAGMA journal_mode=DELETE")
+            safety = _safety_backup(database)
+            # 손상 DB의 WAL/저널이 새 DB에 재생되지 않도록 격리한다.
+            # 교체가 실패하면 같은 위치로 돌려 원본과 동반 파일을 함께 보존한다.
+            moved_sidecars = []
             os.replace(pending, consumed)
             try:
+                for suffix in ("-wal", "-journal", "-shm"):
+                    source = Path(str(database) + suffix)
+                    if source.exists():
+                        saved = stage / ("original" + suffix)
+                        os.replace(source, saved)
+                        moved_sidecars.append((saved, source))
                 os.replace(snapshot, database)
             except BaseException:
+                for saved, source in reversed(moved_sidecars):
+                    os.replace(saved, source)
                 os.replace(consumed, pending)
                 raise
             committed = True
@@ -443,6 +513,15 @@ def _cleanup_stale_restore_files(database):
             pass
 
 
+def _deferred_restore_result(database, kind, message, *, restart_count=0):
+    action = ("디스크 공간을 확보한 뒤 다시 시작하면 예약된 백업 복원이 적용됩니다."
+              if kind == "disk_full" else
+              "오류 원인을 해결한 뒤 다시 시작하면 예약된 백업 복원을 다시 시도합니다.")
+    return BackupRestoreResult(None, False, status="deferred", error_kind=kind,
+                               error_message=message, restart_count=restart_count,
+                               guidance=action + "\n예약 파일: " + str(pending_backup_restore_path(database)))
+
+
 def apply_pending_backup_restore(database: Path, *, instance) -> BackupRestoreResult | None:
     """시작 결과를 반환한다. 복원 실패는 현재 라이브러리의 정상 시작을 막지 않는다."""
     database = Path(database).resolve()
@@ -460,17 +539,18 @@ def apply_pending_backup_restore(database: Path, *, instance) -> BackupRestoreRe
             os.replace(pending, rejected)
         except OSError as quarantine_error:
             failure = _storage_error(quarantine_error)
-            return BackupRestoreResult(None, False, status="deferred", error_kind=failure.kind,
-                                       error_message=str(failure))
+            return _deferred_restore_result(database, failure.kind, failure.strerror)
         return BackupRestoreResult(None, False, status="rejected", error_kind=error.kind,
                                    error_message=str(error), rejected_path=rejected)
     except BackupBusyError as error:
-        return BackupRestoreResult(None, False, status="deferred", error_kind=error.reason,
-                                   error_message=str(error), restart_count=error.restart_count)
-    except (OSError, sqlite3.OperationalError) as error:
-        if isinstance(error, sqlite3.OperationalError):
+        return _deferred_restore_result(database, error.reason, str(error), restart_count=error.restart_count)
+    except (OSError, sqlite3.DatabaseError) as error:
+        if isinstance(error, sqlite3.DatabaseError):
             code = errno.ENOSPC if "full" in str(error).lower() else errno.EBUSY
             error = OSError(code, str(error))
         failure = _storage_error(error)
-        return BackupRestoreResult(None, False, status="deferred", error_kind=failure.kind,
-                                   error_message=str(failure))
+        return _deferred_restore_result(database, failure.kind, failure.strerror)
+    except Exception:
+        # 예상하지 못한 준비 오류도 예약을 보존하고 현재 DB로 시작하게 한다.
+        return _deferred_restore_result(database, "restore_failed",
+                                        "백업 복원을 완료하지 못했습니다. 예약을 취소하거나 다른 백업으로 다시 시도하세요.")

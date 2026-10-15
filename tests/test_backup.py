@@ -539,7 +539,7 @@ def test_review_locked_old_backup_does_not_block_new_backup(core, monkeypatch):
     assert len(core.automatic_backups()) == AUTO_BACKUP_KEEP
 
 
-@pytest.mark.parametrize("failure", ["corrupt", "migration", "disk_full"])
+@pytest.mark.parametrize("failure", ["corrupt", "migration", "disk_full", "damaged_and_full"])
 def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, monkeypatch, failure):
     """실제 main → 복원 → AppCore 시작 순서. 화면/엔진 대신 관찰용 경계만 주입한다."""
     import sys
@@ -561,10 +561,20 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
                 raise RuntimeError("invalid migration")
             return real_migration(db, **kwargs)
         monkeypatch.setattr("my_video_manager.library.migrate_library", fail_staging)
-    else:
+    elif failure == "disk_full":
         def full_disk(*args, **kwargs):
             raise OSError(errno.ENOSPC, "disk full")
         monkeypatch.setattr("shutil.copyfileobj", full_disk)
+    else:
+        # 정상 예약의 추출은 되지만 현재 손상 DB의 안전용 원시 복사는 공간 부족이다.
+        import shutil
+        real_copy = shutil.copyfile
+        def full_raw_copy(source, target, *args, **kwargs):
+            if Path(source) == core.database:
+                raise OSError(errno.ENOSPC, "disk full")
+            return real_copy(source, target, *args, **kwargs)
+        monkeypatch.setattr(shutil, "copyfile", full_raw_copy)
+        core.database.write_bytes(b"damaged header")
 
     class Signal:
         def __init__(self):
@@ -612,6 +622,16 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
     errors = []
     monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *args: errors.append(args))
     for attempt in range(2):
+        if failure == "damaged_and_full":
+            assert __main__.main() == 1
+            assert started == []
+            assert core.database.read_bytes() == b"damaged header"
+            assert core.pending_backup_restore() is not None
+            message = errors[-1][2]
+            assert "디스크 공간을 확보한 뒤 다시 시작하면 예약된 백업 복원이 적용" in message
+            assert str(core.database.with_name(core.database.name + ".restore-pending.zip")) in message
+            assert "[Errno" not in message
+            continue
         assert __main__.main() == 0
         assert public_records(started[-1]) == expected
         state = started[-1].backup_restore_status()
@@ -621,6 +641,13 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
             assert state.status == "rejected"
         else:
             assert state is None
+    if failure == "damaged_and_full":
+        assert len(errors) == 2
+        monkeypatch.setattr(shutil, "copyfile", real_copy)
+        assert __main__.main() == 0
+        assert started[-1].backup_restore_status().status == "applied"
+        assert len(errors) == 2
+        return
     assert errors == []
     if failure == "disk_full":
         started[-1].cancel_backup_restore()
@@ -773,7 +800,79 @@ def test_open_delete_journal_database_defers_restore_with_actionable_error(core,
         assert result.status == "deferred"
         assert result.error_kind == "file_in_use"
         assert "사용" in result.error_message
+        assert not result.error_message.startswith("[Errno")
+        assert apply(core.database).status == "deferred"
+        assert core.automatic_backups() == ()
         writer.rollback()
     assert public_records(open_core(core.database)) == expected
     assert core.pending_backup_restore() is not None
     assert apply(core.database).status == "applied"
+
+
+@pytest.mark.parametrize("damage", ["index", "header"])
+def test_valid_backup_restores_damaged_current_database(core, tmp_path, damage):
+    expected = public_records(core)
+    core.request_backup_restore(core.create_backup(tmp_path / "healthy.zip").path)
+    with closing(sqlite3.connect(core.database)) as db:
+        page_size = db.execute("PRAGMA page_size").fetchone()[0]
+        root = db.execute("SELECT rootpage FROM sqlite_master WHERE name='locations_video_id'").fetchone()[0]
+    with core.database.open("r+b") as stream:
+        stream.seek((root - 1) * page_size if damage == "index" else 0)
+        stream.write(b"broken database!")
+    original = core.database.read_bytes()
+    sidecars = {}
+    if damage == "header":
+        # 원시 보존은 SQLite가 열 수 없는 DB의 동반 파일도 빠뜨리지 않는다.
+        for suffix in ("-wal", "-journal"):
+            path = Path(str(core.database) + suffix)
+            sidecars[suffix] = ("damaged" + suffix).encode()
+            path.write_bytes(sidecars[suffix])
+    result = apply(core.database)
+    assert result.status == "applied"
+    assert public_records(open_core(core.database)) == expected
+    assert result.safety_backup.name.startswith("damaged-")
+    assert result.safety_backup.read_bytes() == original
+    for suffix, contents in sidecars.items():
+        assert Path(str(result.safety_backup) + suffix).read_bytes() == contents
+        assert not Path(str(core.database) + suffix).exists()
+    assert core.pending_backup_restore() is None
+    assert apply(core.database) is None
+    for _ in range(AUTO_BACKUP_KEEP + 1):
+        create_automatic_backup(core.database)
+    assert len(core.automatic_backups()) == AUTO_BACKUP_KEEP
+    assert result.safety_backup.read_bytes() == original
+
+
+@pytest.mark.parametrize("failure", ["raw_copy", "sidecar_move", "database_replace"])
+def test_damaged_database_restore_failure_keeps_original_and_pending(core, tmp_path, monkeypatch, failure):
+    expected = public_records(core)
+    core.request_backup_restore(core.create_backup(tmp_path / "healthy.zip").path)
+    core.database.write_bytes(b"damaged original database")
+    originals = {core.database: core.database.read_bytes()}
+    for suffix in ("-wal", "-journal"):
+        path = Path(str(core.database) + suffix)
+        originals[path] = ("original" + suffix).encode()
+        path.write_bytes(originals[path])
+    import shutil
+    copyfile, replace_file = shutil.copyfile, os.replace
+    def copy(source, target, *args, **kwargs):
+        if failure == "raw_copy" and Path(source) == core.database:
+            raise OSError(errno.ENOSPC, "disk full")
+        return copyfile(source, target, *args, **kwargs)
+    def move(source, target):
+        if ((failure == "database_replace" and Path(target) == core.database)
+                or (failure == "sidecar_move" and Path(source) == Path(str(core.database) + "-journal"))):
+            raise PermissionError(errno.EACCES, "in use")
+        return replace_file(source, target)
+    with monkeypatch.context() as patch:
+        patch.setattr(shutil, "copyfile", copy)
+        patch.setattr(os, "replace", move)
+        result = apply(core.database)
+    assert result.status == "deferred"
+    assert result.error_kind == ("disk_full" if failure == "raw_copy" else "file_in_use")
+    assert not result.error_message.startswith("[Errno")
+    for path, contents in originals.items():
+        assert path.read_bytes() == contents
+    assert core.pending_backup_restore() is not None
+    assert apply(core.database).status == "applied"
+    assert public_records(open_core(core.database)) == expected
