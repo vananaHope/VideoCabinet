@@ -9,6 +9,7 @@ from .web_json import encode
 
 
 class LibraryBridge(QObject):
+    thumbnailsChanged = LIBRARY.signal('thumbnailsChanged')
     libraryChanged = LIBRARY.signal('libraryChanged')
     libraryDetailsChanged = LIBRARY.signal('libraryDetailsChanged')
     libraryFocusRequested = LIBRARY.signal('libraryFocusRequested')

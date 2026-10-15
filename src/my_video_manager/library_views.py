@@ -37,12 +37,17 @@ class LibraryViewOptions(TypedDict):
     sort: str
     descending: bool
     card_size: str
+    collapsed_folders: list[str]
 
 
 def default_options() -> LibraryViewOptions:
     return dict(query='', mode='all', folder='', tags=[], viewing='', original='', translated='',
                 external=False, highlights=False, missing=False, added_preset='', added_from='', added_to='',
-                viewed_preset='', viewed_from='', viewed_to='', sort='title', descending=False, card_size='medium')
+                viewed_preset='', viewed_from='', viewed_to='', sort='title', descending=False, card_size='medium', collapsed_folders=[])
+
+
+FILTER_DEFAULTS = {key: value for key, value in default_options().items()
+                   if key not in ('mode', 'folder', 'sort', 'descending', 'card_size', 'collapsed_folders')}
 
 
 def normalize_options(value) -> LibraryViewOptions:
@@ -55,6 +60,10 @@ def normalize_options(value) -> LibraryViewOptions:
         if key == 'tags':
             if not isinstance(item, list) or any(type(t) is not int or t <= 0 for t in item):
                 raise ValueError('태그 목록이 올바르지 않습니다.')
+            item = sorted(set(item))
+        elif key == 'collapsed_folders':
+            if not isinstance(item, list) or any(not isinstance(t, str) for t in item):
+                raise ValueError('접힌 폴더 목록이 올바르지 않습니다.')
             item = sorted(set(item))
         elif type(item) is not type(result[key]):
             raise ValueError('라이브러리 조건의 형식이 올바르지 않습니다.')
@@ -86,6 +95,7 @@ class LibraryFolder(TypedDict):
 class LibraryChip(TypedDict):
     key: str
     label: str
+    reset: LibraryViewOptions
 
 
 def filter_chips(options, tags) -> list[LibraryChip]:
@@ -100,13 +110,24 @@ def filter_chips(options, tags) -> list[LibraryChip]:
             chips.append(dict(key=key, label=label))
     for prefix, label in (('added', '추가일'), ('viewed', '마지막 시청')):
         preset = options[prefix + '_preset']
-        if preset:
-            text = (f"{options[prefix + '_from'] or '처음'} ~ {options[prefix + '_to'] or '오늘 이후'}"
+        if preset and (preset != 'custom' or options[prefix + '_from'] or options[prefix + '_to']):
+            text = (f"{options[prefix + '_from'] or '처음'} ~ {options[prefix + '_to'] or '끝 없음'}"
                     if preset == 'custom' else dict(CHOICES[prefix + '_preset'])[preset])
             chips.append(dict(key=prefix + '_preset', label=f'{label}: {text}'))
     for tag_id in options['tags']:
         if tag_id in tags:
             chips.append(dict(key=f'tag:{tag_id}', label=tags[tag_id]))
+    for chip in chips:
+        key = chip['key']
+        reset = dict(options)
+        if key.startswith('tag:'):
+            reset['tags'] = [tid for tid in options['tags'] if tid != int(key[4:])]
+        else:
+            reset[key] = FILTER_DEFAULTS[key]
+            if key.endswith('_preset'):
+                reset[key.replace('_preset', '_from')] = ''
+                reset[key.replace('_preset', '_to')] = ''
+        chip['reset'] = reset
     return chips
 
 

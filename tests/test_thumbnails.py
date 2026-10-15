@@ -159,6 +159,6 @@ def test_background_ffmpeg_is_low_priority_and_killed_on_cancel_or_timeout(tmp_p
         with pytest.raises(RuntimeError, match='120'):
             reader.capture_background(tmp_path / 'input.mp4', tmp_path / 'out.jpg', 10, cancellation=cancellation)
     assert process.killed
-    assert 'scale=640:-2' in commands[0][0] and '-threads' in commands[0][0]
+    assert "scale='min(640,iw)':-2" in commands[0][0] and '-threads' in commands[0][0]
     if adapters.sys.platform == 'win32':
         assert commands[0][1]['creationflags'] & subprocess.BELOW_NORMAL_PRIORITY_CLASS

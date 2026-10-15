@@ -18,6 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--offscreen', action='store_true')
 parser.add_argument('--verify', action='store_true')
 parser.add_argument('--playback-only', action='store_true', help='승인된 추가 실창 검사: 크기 변경과 mpv 왕복만 실행')
+parser.add_argument('--review-fixes', action='store_true')
 parser.add_argument('--count', type=int, default=5000)
 parser.add_argument('--source', type=Path)
 parser.add_argument('--output', type=Path, default=Path('.local/screens-114'))
@@ -141,7 +142,23 @@ def key(value):
 try:
     wait(lambda: js("!!document.getElementById('library-grid')"))
     settle()
-    if not args.playback_only:
+    if args.review_fixes:
+        for name, changes in (
+            ('medium', {}), ('large', {'card_size': 'large'}),
+            ('medium-folders', {'mode': 'folders'}),
+            ('small-folders-chips', {'mode': 'folders', 'card_size': 'small', 'viewing': 'unwatched'}),
+        ):
+            view(**changes)
+            capture(name)
+            geometry = json.loads(js("JSON.stringify((()=>{const g=document.getElementById('library-grid'),c=g.querySelector('[role=gridcell]'),i=c.querySelector('img'),r=g.querySelector('[role=row]');return {columns:Number(g.getAttribute('aria-colcount')),height:g.clientHeight,cardHeight:c.offsetHeight,rowHeight:r.offsetHeight,thumbWidth:i.clientWidth,thumbHeight:i.clientHeight}})())"))
+            metrics[name] = geometry
+            assert abs(geometry['thumbWidth'] / geometry['thumbHeight'] - 16 / 9) < 0.03
+            if name == 'medium-folders':
+                assert geometry['columns'] >= 2 and geometry['height'] / geometry['rowHeight'] >= 1.5, geometry
+            if name == 'large':
+                assert geometry['height'] >= geometry['cardHeight'], geometry
+        metrics['checks'].append('I1: 보통+폴더별 2열 및 1.5행, 크게 카드 전체, 16:9 썸네일')
+    if not args.playback_only and not args.review_fixes:
         for size in ('small', 'medium', 'large'):
             view(card_size=size)
             capture(f'{args.count}-{size}')

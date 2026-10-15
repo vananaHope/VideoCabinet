@@ -72,7 +72,8 @@ class ResolutionControls(QObject):
             finally:
                 self.future = None
             if result.message and result.state == 'unknown':
-                self.window.show_status(f'{self.label}을 읽지 못했습니다: {result.message} · 다시 검사하면 재시도합니다.')
+                message = '썸네일을 만들지 못했습니다' if self.kind == 'thumbnail' else '해상도를 읽지 못했습니다'
+                self.window.show_status(f'{message}: {result.message} · 다시 검사하면 재시도합니다.')
             self.changed = self.changed or result.state == 'completed'
             if result.state == 'completed':
                 self.completed_ids.add(result.video_id)

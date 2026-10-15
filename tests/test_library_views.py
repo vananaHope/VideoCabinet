@@ -139,3 +139,18 @@ def test_options_persist_and_invalid_options_preserve_saved_settings(library):
         assert core.library_view_options() == options
     with sqlite3.connect(core.database) as db:
         assert db.execute('PRAGMA user_version').fetchone()[0] == 4
+
+
+def test_date_chips_and_reset_follow_python_defaults():
+    from my_video_manager.library_views import filter_chips, FILTER_DEFAULTS
+    options = {**default_options(), 'added_preset': 'custom'}
+    assert filter_chips(options, {}) == []
+    options['added_from'] = '2026-01-01'
+    chip, = filter_chips(options, {})
+    assert chip['label'].endswith('끝 없음')
+    assert chip['reset']['added_preset'] == chip['reset']['added_from'] == ''
+    assert 'collapsed_folders' not in FILTER_DEFAULTS
+    options = {**default_options(), 'external': True, 'tags': [1, 2]}
+    chips = filter_chips(options, {1: 'one', 2: 'two'})
+    assert chips[0]['reset']['external'] is False
+    assert chips[1]['reset']['tags'] == [2]

@@ -94,7 +94,7 @@ def test_view_channel_composes_filters_persists_and_refreshes_presence(window_fa
                'card_size': 'large', 'sort': 'added', 'descending': True}
     result = json.loads(page.bridge.view(json.dumps(options)))
     assert result['visibleIds'] == [video.id]
-    assert result['chips'] == [{'key': f'tag:{tag.id}', 'label': tag.name}]
+    assert result['chips'] == [{'key': f'tag:{tag.id}', 'label': tag.name, 'reset': {**options, 'tags': []}}]
     assert core.library_view_options() == options
     assert 'error' in json.loads(page.bridge.view('{broken'))
     assert 'error' in json.loads(page.bridge.view(json.dumps({'sort': 'invalid'})))
@@ -146,3 +146,35 @@ def test_completed_subtitles_refresh_unselected_card_badge(window_factory, core)
     assert len(changes) == 1
     assert next(v for v in changes[0]['videos'] if v['id'] == video_id)['hasSubtitles']
     assert changes[0]['selectedId'] == page.selected_id
+
+
+def test_thumbnails_send_only_ids_and_batch_while_hidden(window_factory):
+    window = window_factory()
+    page = window.library_page
+    changes, details, thumbnails = [], [], []
+    page.bridge.libraryChanged.connect(changes.append)
+    page.bridge.libraryDetailsChanged.connect(details.append)
+    page.bridge.thumbnailsChanged.connect(lambda value: thumbnails.append(json.loads(value)))
+    ids = list(page.video_ids)
+    page.refresh_thumbnails({ids[0]})
+    assert thumbnails == [[ids[0]]]
+    assert changes == details == []
+    window.hide()
+    page.refresh_thumbnails({ids[0]})
+    page.refresh_thumbnails(set(ids[1:]))
+    assert len(thumbnails) == 1
+    window.show()
+    assert thumbnails == [[ids[0]], sorted(ids)]
+    assert changes == []
+
+
+def test_collapsed_folders_survive_view_switch_and_settings_reload(window_factory, core):
+    from my_video_manager.library_views import default_options
+    window = window_factory()
+    page = window.library_page
+    options = {**default_options(), 'mode': 'folders', 'collapsed_folders': ['root|child']}
+    page.bridge.view(json.dumps(options))
+    page.bridge.view(json.dumps({**page.options, 'mode': 'all'}))
+    assert core.library_view_options()['collapsed_folders'] == ['root|child']
+    page.bridge.view(json.dumps({**core.library_view_options(), 'mode': 'folders'}))
+    assert page.options['collapsed_folders'] == ['root|child']

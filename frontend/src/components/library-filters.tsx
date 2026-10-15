@@ -3,7 +3,7 @@ import { SlidersHorizontal, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { NativeSelect } from "@/components/ui/native-select"
 import { Input } from "@/components/ui/input"
-import { libraryChoices, type LibraryViewOptions, type TagData, type LibraryChip } from "@/bridge-types"
+import { libraryChoices, libraryFilterDefaults, type LibraryViewOptions, type TagData, type LibraryChip } from "@/bridge-types"
 
 type Change = (value: Partial<LibraryViewOptions>) => void
 export function LibraryChoice({ name, label, options, onChange }: { name: keyof typeof libraryChoices; label: string; options: LibraryViewOptions; onChange: Change }) {
@@ -15,8 +15,7 @@ export function LibraryChoice({ name, label, options, onChange }: { name: keyof 
 }
 
 export function clearLibraryFilters(options: LibraryViewOptions): LibraryViewOptions {
-  return { ...options, query: "", tags: [], viewing: "", original: "", translated: "", external: false, highlights: false, missing: false,
-    added_preset: "", added_from: "", added_to: "", viewed_preset: "", viewed_from: "", viewed_to: "" }
+  return { ...options, ...libraryFilterDefaults, tags: [...libraryFilterDefaults.tags] }
 }
 
 export function LibraryFilters({ options, tags, onChange }: { options: LibraryViewOptions; tags: TagData[]; onChange: Change }) {
@@ -49,12 +48,8 @@ export function LibraryFilters({ options, tags, onChange }: { options: LibraryVi
 
 export function LibraryFilterChips({ chips, options, onChange }: { chips: LibraryChip[]; options: LibraryViewOptions; onChange: Change }) {
   if (!chips.length) return null
-  function remove(key: string) {
-    if (key.startsWith('tag:')) onChange({ tags: options.tags.filter(id => id !== Number(key.slice(4))) })
-    else onChange({ [key]: typeof options[key as keyof LibraryViewOptions] === 'boolean' ? false : '' })
-  }
   return <div aria-label="적용한 검색 조건" className="flex shrink-0 items-center gap-2 overflow-x-auto pb-1">
-    {chips.map(chip => <Button key={chip.key} variant="secondary" size="xs" title={chip.label} aria-label={`${chip.label} 지우기`} onClick={() => remove(chip.key)}><span className="max-w-48 truncate">{chip.label}</span><X /></Button>)}
+    {chips.map(chip => <Button key={chip.key} variant="secondary" size="xs" title={chip.label} aria-label={`${chip.label} 지우기`} onClick={() => onChange(chip.reset)}><span className="max-w-48 truncate">{chip.label}</span><X /></Button>)}
     <Button variant="ghost" size="xs" onClick={() => onChange(clearLibraryFilters(options))}>모두 지우기</Button>
   </div>
 }

@@ -39,6 +39,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.options = self.core.library_view_options()
         self.index = None
         self.tags = []
+        self.pending_thumbnails = set()
         self.library_controls = LibraryControls(window)
         self.hidden_gems = GemDialogs(self)
         self.bridge = LibraryBridge(self)
@@ -109,7 +110,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
 
     def refresh_details(self, changed_video_id=None):
         # 자막·번역·하이라이트 변경은 현재 조건의 결과에도 즉시 반영한다.
-        if self.snapshot is not None:
+        if changed_video_id is not None and self.snapshot is not None:
             self.index = self.core.library_view_index(self.snapshot)
             self.apply_filters()
             for card in self.cards:
@@ -117,12 +118,22 @@ class WebLibraryPage(LibraryOperations, WebPageController):
             self.bridge.libraryChanged.emit(encode(self.payload()))
         if self.selected_id is not None and (changed_video_id is None or changed_video_id == self.selected_id):
             self.bridge.libraryDetailsChanged.emit(self.selected_id)
+        self.flush_thumbnails()
 
     def refresh_thumbnails(self, video_ids):
         for card in self.cards:
             if card['id'] in video_ids:
                 card['thumbnail'] = f"mvm-thumb://video/{card['id']}?v=640"
-        self.bridge.libraryChanged.emit(encode(self.payload()))
+        self.pending_thumbnails.update(video_ids)
+        self.flush_thumbnails()
+
+    def flush_thumbnails(self):
+        if self.is_active() and self.pending_thumbnails:
+            self.bridge.thumbnailsChanged.emit(encode(sorted(self.pending_thumbnails)))
+            self.pending_thumbnails.clear()
+
+    def activated(self):
+        self.flush_thumbnails()
 
     def selection_changed(self):
         self.bridge.libraryChanged.emit(encode(self.payload()))

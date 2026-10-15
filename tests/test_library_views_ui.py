@@ -44,3 +44,34 @@ def test_card_resize_rebuilds_virtual_offsets_and_keyboard_scroll(window_factory
             wait_for(lambda: page.selected_id == next_id)
             wait_for(lambda: js(f"!!document.getElementById('video-{next_id}')"))
         assert js("document.getElementById('library-grid').scrollTop") > 0
+
+
+def test_composition_survives_library_change_and_thumbnail_skips_details(window_factory, core, monkeypatch):
+    window = window_factory()
+    page, host = window.library_page, window.web_host
+    def js(code):
+        result = []
+        host.engine_page.runJavaScript(code, result.append)
+        wait_for(lambda: bool(result))
+        return result[0]
+    wait_for(lambda: js("!!document.querySelector('input[aria-label]')"))
+    QTest.qWait(200)
+    js("""(()=>{const e=document.querySelector('input[aria-label]');e.focus();
+        e.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'한');
+        e.dispatchEvent(new Event('input',{bubbles:true}));})()""")
+    page.selection_changed()
+    QTest.qWait(150)
+    assert js("document.querySelector('input[aria-label]').value") == '한'
+    requests = []
+    original = core.library_details
+    def details(*args, **kwargs):
+        requests.append(args)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(core, 'library_details', details)
+    page.refresh_thumbnails(page.video_ids)
+    QTest.qWait(150)
+    assert requests == []
+    assert js("document.querySelector('input[aria-label]').value") == '한'
+    js("document.querySelector('input[aria-label]').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}))")
+    wait_for(lambda: page.options['query'] == '한')

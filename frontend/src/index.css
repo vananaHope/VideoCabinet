@@ -67,7 +67,7 @@
 }
 @utility virtual-row { position: absolute; inset-inline: 0; top: var(--virtual-top); height: var(--grid-row-height); display: grid; grid-template-columns: repeat(var(--virtual-columns), minmax(0, 1fr)); }
 
-@utility library-grid-small { --grid-card-width: var(--library-card-small); --grid-row-height: var(--library-row-small); }
-@utility library-grid-medium { --grid-card-width: var(--library-card-medium); --grid-row-height: var(--library-row-medium); }
-@utility library-grid-large { --grid-card-width: var(--library-card-large); --grid-row-height: var(--library-row-large); }
+@utility library-grid-small { --grid-card-width: var(--library-card-small); }
+@utility library-grid-medium { --grid-card-width: var(--library-card-medium); }
+@utility library-grid-large { --grid-card-width: var(--library-card-large); }
 @utility folder-tree-row { padding-left: calc((1 + var(--folder-depth) * 2) * var(--spacing)); }

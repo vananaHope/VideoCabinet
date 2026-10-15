@@ -20,7 +20,7 @@ export function viewing(video: VideoData) {
   return video.missing ? "파일 없음" : video.finished ? "다 봄" : video.abandoned ? `보다 만 ${Math.round(video.stoppedPercent ?? 0)}%` : "아직 안 봄"
 }
 const thumbnailVariants = cva("relative flex w-full shrink-0 items-center justify-center overflow-hidden bg-muted", {
-  variants: { variant: { default: "aspect-video", card: "h-24", medium: "h-36", large: "h-48", gem: "h-16", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
+  variants: { variant: { default: "aspect-video", card: "aspect-video", medium: "aspect-video", large: "aspect-video", gem: "h-16", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
 })
 export function Thumbnail({ video, variant }: { video: VideoData } & VariantProps<typeof thumbnailVariants>) {
   return <div className={thumbnailVariants({ variant })}>
@@ -44,7 +44,7 @@ function VideoStatistics({ video }: { video: VideoData }) {
 export function VideoCard({ video, variant, cardSize = "medium", ...props }: Props) {
   return <button {...props} className={cardVariants({ variant })} title={video.title}>
     <Thumbnail video={video} variant={cardSize === "large" ? "large" : cardSize === "small" ? "card" : "medium"} />
-    <div className="flex min-h-0 w-full flex-1 flex-col gap-0.5 p-2">
+    <div className="flex h-40 w-full shrink-0 flex-col gap-0.5 p-2">
       <span className="shrink-0 truncate leading-5 font-medium">{video.title}</span>
       <span className="flex flex-wrap items-center gap-1">
         <span className="text-xs text-muted-foreground tabular-nums">{duration(video.duration)}</span>

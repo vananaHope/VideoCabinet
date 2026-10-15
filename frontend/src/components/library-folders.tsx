@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type CSSProperties } from "react"
+import { useMemo, type KeyboardEvent, type CSSProperties } from "react"
 import { ChevronDown, ChevronRight, Folder } from "lucide-react"
 import { cva } from "class-variance-authority"
 import type { LibraryFolder } from "@/bridge-types"
@@ -6,8 +6,8 @@ import type { LibraryFolder } from "@/bridge-types"
 const row = cva("folder-tree-row flex w-full min-w-0 items-center gap-1 rounded-md py-2 pr-2 text-left text-xs", {
   variants: { selected: { true: "bg-accent text-accent-foreground", false: "text-muted-foreground hover:bg-muted" } },
 })
-export function LibraryFolders({ folders, selected, onSelect }: { folders: LibraryFolder[]; selected: string; onSelect: (id: string) => void }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+export function LibraryFolders({ folders, selected, onSelect, collapsedIds, onCollapse }: { collapsedIds: string[]; onCollapse: (ids: string[]) => void; folders: LibraryFolder[]; selected: string; onSelect: (id: string) => void }) {
+  const collapsed = useMemo(() => new Set(collapsedIds), [collapsedIds])
   const all = useMemo(() => [{ id: '', parent: '', name: '모든 폴더', path: '모든 폴더', count: 0, depth: -1 }, ...folders], [folders])
   const positions = useMemo(() => new Map(all.map((node, index) => [node.id, index])), [all])
   const visible = useMemo(() => {
@@ -26,7 +26,7 @@ export function LibraryFolders({ folders, selected, onSelect }: { folders: Libra
         node = all.find(n => n.id === node?.parent)
       }
     }
-    setCollapsed(previous => { const next = new Set(previous); if (collapse) next.add(id); else next.delete(id); return next })
+    const next = new Set(collapsed); if (collapse) next.add(id); else next.delete(id); onCollapse([...next])
   }
   function choose(id: string) {
     onSelect(id)

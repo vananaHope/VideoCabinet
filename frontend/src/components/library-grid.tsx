@@ -34,8 +34,12 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
       const css = getComputedStyle(element)
       const rootSize = parseFloat(getComputedStyle(document.documentElement).fontSize)
       const cardWidth = parseFloat(css.getPropertyValue("--grid-card-width")) * rootSize
-      const rowHeight = parseFloat(css.getPropertyValue("--grid-row-height")) * rootSize
-      setDimensions({ columns: Math.max(1, Math.floor(element.clientWidth / cardWidth)), rowHeight })
+      const available = element.clientWidth - 8
+      const columns = Math.max(1, Math.floor((available + 12) / (cardWidth + 12)))
+      const width = (available - (columns - 1) * 12) / columns
+      const rowHeight = (width - 2) * 9 / 16 + 10 * rootSize + 14
+      element.style.setProperty('--grid-row-height', `${rowHeight / rootSize}rem`)
+      setDimensions({ columns, rowHeight })
     }
     const observer = new ResizeObserver(measure)
     observer.observe(element)

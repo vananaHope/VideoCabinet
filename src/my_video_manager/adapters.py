@@ -72,7 +72,7 @@ class FFmpegMediaReader:
 
     def capture(self, path: Path, destination: Path, seconds: float) -> None:
         result = self._run([self.ffmpeg, "-v", "error", "-nostdin", "-y", "-ss", str(seconds),
-                            "-i", str(path), "-map", "0:V:0", "-frames:v", "1", "-vf", "scale=640:-2",
+                            "-i", str(path), "-map", "0:V:0", "-frames:v", "1", "-vf", "scale='min(640,iw)':-2",
                             "-update", "1", str(destination)])
         if result.returncode or not destination.is_file():
             raise RuntimeError(result.stderr.strip() or "썸네일을 캡처할 수 없습니다.")
@@ -81,7 +81,7 @@ class FFmpegMediaReader:
         flags = (subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS) if sys.platform == 'win32' else 0
         process = subprocess.Popen([self.ffmpeg, '-v', 'error', '-nostdin', '-y', '-threads', '1',
                                     '-ss', str(seconds), '-i', str(path), '-map', '0:V:0', '-frames:v', '1',
-                                    '-vf', 'scale=640:-2', '-threads', '1', '-update', '1', str(destination)],
+                                    '-vf', "scale='min(640,iw)':-2", '-threads', '1', '-update', '1', str(destination)],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    encoding='utf-8', errors='replace', creationflags=flags)
         deadline = time.monotonic() + 120
