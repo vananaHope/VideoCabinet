@@ -44,6 +44,10 @@ class SubtitleControls(QObject):
             if video_id is None:
                 return
         existing = self.core.transcript(video_id)
+        from .web_dialogs_host import web_dialogs
+        if dialogs := web_dialogs(self.window):
+            dialogs.run('subtitles', video_id=video_id)
+            return
         languages = ["자동 감지", "ko", "en", "ja", "zh", "de", "fr", "es"]
         initial = existing.spoken_language if existing and existing.language_specified else "자동 감지"
         if initial not in languages:

@@ -20,6 +20,12 @@ def _button(text, callback):
 
 
 class TagManager(QDialog):
+    def exec(self):
+        from .web_dialogs_host import web_dialogs
+        if dialogs := web_dialogs(self):
+            return dialogs.run('tag-manager')
+        return super().exec()
+
     def __init__(self, core, parent):
         super().__init__(parent)
         self.core = core
@@ -79,11 +85,18 @@ class TagManager(QDialog):
 
 
 class TagEditor(QDialog):
+    def exec(self):
+        from .web_dialogs_host import web_dialogs
+        if dialogs := web_dialogs(self):
+            return dialogs.run('tags', **self.web_context)
+        return super().exec()
+
     def __init__(self, core, *, video_id=None, highlight_id=None, parent=None):
         super().__init__(parent)
         self.core = core
         if (video_id is None) == (highlight_id is None):
             raise ValueError("영상 또는 하이라이트 하나를 지정하세요.")
+        self.web_context = dict(video_id=video_id, highlight_id=highlight_id)
         if video_id is not None:
             self.identifier = video_id
             self.list_tags, self.add_tag, self.remove_tag = core.video_tags, core.add_video_tag, core.remove_video_tag

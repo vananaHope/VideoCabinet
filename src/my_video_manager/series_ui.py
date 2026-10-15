@@ -9,6 +9,12 @@ from .dialog_ui import dialog_buttons, space_layout
 
 
 class SeriesEditor(QDialog):
+    def exec(self):
+        from .web_dialogs_host import web_dialogs
+        if dialogs := web_dialogs(self):
+            return dialogs.run('series')
+        return super().exec()
+
     def __init__(self, core, parent=None):
         super().__init__(parent)
         self.core = core

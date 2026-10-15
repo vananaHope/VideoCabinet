@@ -3,6 +3,8 @@ import { pages } from "@/pages"
 import { connectBridge, request, type ShellBridge } from "@/bridge"
 import { tabs, type Tab, type ShellData } from "@/bridge-types"
 import { Tabs } from "@/components/page-parts"
+import DialogsLayer from "@/dialogs/DialogsLayer"
+import ShellModals from "@/dialogs/ShellModals"
 
 export default function App() {
   const [bridge, setBridge] = useState<ShellBridge | null>(null)
@@ -41,5 +43,7 @@ export default function App() {
     {status && <p role="status" aria-label="작업 알림" className="shrink-0 border-b px-4 py-2 text-sm text-muted-foreground">{status}</p>}
     {error && <p role="alert" className="p-3 text-destructive">{error}</p>}
     {Object.entries(pages).map(([name, Page]) => Page && <div key={name} hidden={tab !== name} className="min-h-0 flex-1"><Page /></div>)}
+    <DialogsLayer />
+    <ShellModals />
   </div>
 }

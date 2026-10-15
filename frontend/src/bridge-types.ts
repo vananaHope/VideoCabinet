@@ -382,6 +382,65 @@ export function publicStatisticsBridge(raw: StatisticsBridge): StatisticsBridge 
   })
 }
 
+export interface DialogRow {
+  id: string
+  title: string
+  detail: string
+  status: string
+  start: number
+  end: number | null
+}
+
+export interface DialogValues {
+  name: string
+  text: string
+  start: number
+  end: number
+  range: boolean
+  choice: string
+  members: Array<string>
+}
+
+export interface DialogData {
+  id: string
+  kind: string
+  title: string
+  description: string
+  rows: Array<DialogRow>
+  available: Array<DialogRow>
+  choices: Array<DialogRow>
+  values: DialogValues
+  maximum: number
+  locked: boolean
+  warning: string
+  confirmation: string
+  confirm_title: string
+  confirm_destructive: boolean
+}
+
+export interface DialogSnapshot {
+  dialog: DialogData | null
+}
+
+export interface DialogsBridge {
+  snapshot: (reply: Reply) => void
+  modalState: (open: number, reply: Reply) => void
+  contentSize: (id: string, width: number, height: number, reply: Reply) => void
+  act: (id: string, action: string, payload: string, reply: Reply) => void
+  candidates: (prefix: string, reply: Reply) => void
+  dialogsChanged: Signal<string>
+}
+export function publicDialogsBridge(raw: DialogsBridge): DialogsBridge {
+  return Object.freeze({
+    snapshot: raw.snapshot.bind(raw),
+    modalState: raw.modalState.bind(raw),
+    contentSize: raw.contentSize.bind(raw),
+    act: raw.act.bind(raw),
+    candidates: raw.candidates.bind(raw),
+    dialogsChanged: Object.freeze({ connect: raw.dialogsChanged.connect.bind(raw.dialogsChanged), disconnect: raw.dialogsChanged.disconnect.bind(raw.dialogsChanged) }),
+  })
+}
+
 export interface Bridges {
   readonly shell: ShellBridge
   readonly library: LibraryBridge
@@ -389,6 +448,7 @@ export interface Bridges {
   readonly reel: ReelBridge
   readonly search: SearchBridge
   readonly statistics: StatisticsBridge
+  readonly dialogs: DialogsBridge
 }
 export function publicBridges(raw: Bridges): Bridges {
   return Object.freeze({
@@ -398,5 +458,6 @@ export function publicBridges(raw: Bridges): Bridges {
     reel: publicReelBridge(raw.reel),
     search: publicSearchBridge(raw.search),
     statistics: publicStatisticsBridge(raw.statistics),
+    dialogs: publicDialogsBridge(raw.dialogs),
   })
 }

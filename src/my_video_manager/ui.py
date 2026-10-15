@@ -121,10 +121,14 @@ class MainWindow(QMainWindow):
         # 트레이의 showNormal 등 창 바깥 경로도 실제 창 상태와 표시를 맞춘다.
         if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "playback_page"):
             self.fullscreen_settings_shortcut.setEnabled(self.isFullScreen())
+            if self.web_ui:
+                self.web_host.dialogs.sync_shortcut()
             self.menuBar().setVisible(not self.isFullScreen() and not self.web_ui)
             self.playback_page.set_fullscreen(self.isFullScreen())
 
     def show_fullscreen_settings_menu(self):
+        if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
+            return
         self.playback_page.close_help()
         if self.web_ui:
             self.web_host.popup_settings_menu()
@@ -341,6 +345,8 @@ class MainWindow(QMainWindow):
             return super().eventFilter(watched, event)
         if (event.modifiers() == Qt.KeyboardModifier.ControlModifier
                 and Qt.Key.Key_1 <= event.key() <= (Qt.Key.Key_7 if self.web_ui else Qt.Key.Key_6)):
+            if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
+                return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
                 if self.web_ui:
                     from .web_contract import TABS
@@ -349,6 +355,8 @@ class MainWindow(QMainWindow):
                     self.navigate(event.key() - Qt.Key.Key_1)
             return True
         if event.modifiers() == Qt.KeyboardModifier.AltModifier and event.key() == Qt.Key.Key_S:
+            if self.web_ui and self.web_host.dialogs.blocks_shell_actions:
+                return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
                 if self.web_ui:
                     self.web_host.popup_settings_menu()
