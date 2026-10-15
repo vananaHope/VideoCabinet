@@ -10,6 +10,7 @@ from test_web_library_page import window_factory
 from test_web_library_data import core
 from my_video_manager.web_contract import CONTRACTS, TABS
 from qt_wait import wait_for
+from wait_helpers import UI_READY_TIMEOUT
 
 
 def wait_frontend_ready(host, tab):
@@ -182,7 +183,7 @@ def test_tray_restore_preserves_rendered_settings_category_and_scroll(window_fac
             loop.quit()
 
         host.engine_page.runJavaScript(source, received)
-        timer.start(30000)
+        timer.start(int(UI_READY_TIMEOUT * 1000))
         loop.exec()
         timer.stop()
         assert results, 'JavaScript 응답 시간 초과'
