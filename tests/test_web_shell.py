@@ -11,6 +11,127 @@ from test_web_library_data import core
 from my_video_manager.web_contract import CONTRACTS, TABS
 
 
+@pytest.mark.parametrize('tab', [tab for tab, _ in TABS])
+@pytest.mark.parametrize('destination', ['restore', 'queue', 'playback', 'fullscreen'])
+def test_tray_restore_activates_only_destination(window_factory, core, monkeypatch, tab, destination):
+    from PySide6.QtWidgets import QSystemTrayIcon
+    from test_library_return_ui import Player
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    window.player_factory = Player
+    host = window.web_host
+    assert TABS and set(host.controllers) == {name for name, _ in TABS}
+    window.navigate_web_tab(tab)
+    events = []
+    for name, controller in host.controllers.items():
+        for method in ('activated', 'deactivated'):
+            original = getattr(controller, method)
+
+            def record(name=name, method=method, original=original):
+                events.append((name, method))
+                original()
+
+            monkeypatch.setattr(controller, method, record)
+    transitions = []
+    host.bridge.shellChanged.connect(lambda state: transitions.append(json.loads(state)['tab']))
+    controllers = dict(host.controllers)
+    playing = destination in ('playback', 'fullscreen')
+    if playing:
+        window.play(core.videos()[0].id)
+        if destination == 'fullscreen':
+            window.set_playback_fullscreen(True)
+        events.clear()
+    window.close()
+    assert not window.isVisible()
+    assert core.playback.session is None
+    assert events == ([] if playing else [(tab, 'deactivated')])
+    events.clear()
+    transitions.clear()
+    if destination == 'queue':
+        window.tray.show_queue()
+    else:
+        window.tray.open()
+    expected = {'restore': tab, 'queue': 'queue', 'playback': 'library', 'fullscreen': 'library'}[destination]
+    assert window.isVisible()
+    assert window.pages.currentWidget() is host
+    assert host.active_tab == expected
+    assert events == [(expected, 'activated')]
+    assert transitions == (['queue'] if destination == 'queue' else [])
+    assert host.controllers == controllers
+    # 열린 창에서 다시 열기를 눌러도 페이지 수명을 다시 시작하지 않는다.
+    window.tray.open()
+    assert events == [(expected, 'activated')]
+
+
+def test_tray_restore_preserves_library_filter_and_selection(window_factory, monkeypatch):
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    library = window.library_page
+    library.bridge.filter('Python', 0)
+    selected = library.visible_ids[-1]
+    library.bridge.select(selected)
+    focus_requests = []
+    library.bridge.libraryFocusRequested.connect(focus_requests.append)
+    window.close()
+    window.tray.open()
+    assert library.query == 'Python'
+    assert library.selected_video_id() == selected
+    assert focus_requests == []
+
+
+def test_tray_restore_preserves_rendered_settings_category_and_scroll(window_factory, monkeypatch):
+    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtWidgets import QSystemTrayIcon
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    window = window_factory()
+    host = window.web_host
+
+    def js(source):
+        loop = QEventLoop()
+        results = []
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+
+        def received(value):
+            results.append(value)
+            loop.quit()
+
+        host.engine_page.runJavaScript(source, received)
+        timer.start(10000)
+        loop.exec()
+        timer.stop()
+        assert results, 'JavaScript 응답 시간 초과'
+        return results[0]
+
+    def wait_js(source):
+        for _ in range(100):
+            if js(source):
+                return
+            loop = QEventLoop()
+            QTimer.singleShot(50, loop.quit)
+            loop.exec()
+        pytest.fail(source)
+
+    window.navigate_web_tab('settings')
+    wait_js('!!document.querySelector("[data-category=keys]")')
+    js('document.querySelector("[data-category=keys]").click()')
+    wait_js('document.querySelector("[data-category=keys]").getAttribute("aria-current") === "true"')
+    js("""window.trayScroll = document.querySelector('table[aria-label="명령별 키 배치"]').parentElement;
+          window.trayScroll.scrollTop = 180""")
+    before = js('window.trayScroll.scrollTop')
+    assert before > 0
+    window.close()
+    window.tray.open()
+    assert host.active_tab == 'settings'
+    assert js('document.querySelector("[data-category=keys]").getAttribute("aria-current")') == 'true'
+    assert js('window.trayScroll.scrollTop') == before
+
+
 def test_tab_routes_keep_one_web_view_and_native_numbering(window_factory):
     from PySide6.QtWebEngineWidgets import QWebEngineView
     window = window_factory()
