@@ -1,4 +1,4 @@
-"""자막 요청과 작업자 연결. 자막 정책은 AppCore 공개 메서드에 맡긴다."""
+"""웹 자막 요청 진입과 작업자·대기열 연결. 자막 정책은 AppCore에 맡긴다."""
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import QMessageBox
@@ -30,8 +30,6 @@ class SubtitleControls(QObject):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.process_queue)
         self.timer.start(500)
-
-
 
     def request(self):
         session = self.core.playback.session

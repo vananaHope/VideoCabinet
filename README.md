@@ -373,7 +373,7 @@ Tab으로 버튼 사이를 이동하고 Space로 실행할 수 있습니다.
 - 받아쓰기: 영상별 원어 지정과 자동 규칙 안내, 자막 대기열로 이동. 새 모델·GPU 설정은 추가하지 않습니다.
 
 웹 셸에서 Alt+S는 설정 탭으로 이동합니다. 재생 중에는 전체 화면에서도 기존 설정 메뉴를 열고, 닫으면 같은 재생 세션으로 돌아갑니다.
-태그 관리·번역 CLI 선택 대화상자는 기존 Python 진입점을 사용하며 #53에서 교체됩니다.
+태그 관리·번역 CLI 선택은 Python 진입점에서 공용 웹 대화상자를 엽니다.
 설정의 완전 종료는 공용 `ConfirmDialog`의 `destructive` 확인을 거칩니다.
 
 검사와 비교 이미지(실제 데스크톱 없이 1100×720, 웹 기본 상태):
@@ -928,7 +928,7 @@ Esc·Tab·Enter는 해당 모달이 처리합니다. 탐색·재생 진입·웹 
 .venv/Scripts/python C:/Users/Rho/orca/projects/my-video-manager/.local/orchestration/desktop_lock.py run --owner issue-53 -- .venv/Scripts/python scripts/check_web_dialogs.py --real
 ```
 
-1100×720 비교 화면과 검사 JSON은 `.local/screens-53/`에 남습니다. 실창 검사는
+1100×720 웹 화면과 검사 JSON은 `.local/screens-53/`에 남습니다. 실창 검사는
 mpv 진행·재생 키 복귀·단일 뷰·라이브러리 선택/스크롤·Windows 저장창 열기/취소와
 working set, 재부모화, DOM 커밋·레이아웃·프레임 시점을 측정합니다. 프레임 콜백은
 화면 출력 기회이므로 모니터에 실제로 표시된 첫 픽셀이나 순간 깜빡임을 증명하지 않습니다.
@@ -945,6 +945,7 @@ OS가 자동화 키를 전달하지 않는 환경에서는 이 검사가 실패�
 - `library_operations.py`, `library_controls.py`: 검사 작업자·라이브러리 관리 명령·파일 선택 연결.
 - `reel_controls.py`: 모아보기 재생 엔진 전환과 재생 화면 상태 연결.
 - `qt_keys.py`: 재생과 웹 설정 키 캡처가 공유하는 Qt 키 이름 변환.
+- `time_display.py`: 웹 대화상자와 네이티브 재생 화면이 공유하는 시각 표시.
 - `ui.py`: 페이지 연결, 창 내부 키 전달, 재생 시작·종료와 트레이 연결을 담당하는 메인 셸.
 - `theme.py`: 웹 토큰 기반 네이티브 재생·트레이·공용 경고의 팔레트와 스타일.
 - `library_details.py`: 선택 영상의 상세 요약 결과. `AppCore.library_details`는 자막·번역·하이라이트 소유 모듈에서 한 영상만 조회한다.
@@ -971,10 +972,10 @@ OS가 자동화 키를 전달하지 않는 환경에서는 이 검사가 실패�
 - `subtitle_queue.py`: 자동 자막 규칙, 요청 순서·앞당기기와 영상별 대기열 상태.
 - `transcription.py`: 별도 프로세스의 faster-whisper large-v3 GPU 어댑터.
 - `windows_job.py`: 앱 종료 시 받아쓰기 프로세스 트리를 정리하는 Windows Job 어댑터.
-- `subtitle_controls.py`: 자막 요청 입력, 백그라운드 처리, 완료된 자막의 플레이어 연결.
+- `subtitle_controls.py`: 웹 자막 요청 진입, 백그라운드 처리, 완료된 자막의 플레이어 연결.
 - `translation.py`: 번역 자막과 줄별 참조, 묶음 진행 저장·원자적 교체, 보류·재시도, 재생 중 언어 선택.
 - `translation_cli.py`: 읽기 전용 구독 CLI 어댑터, 구조화 응답 검증과 오류 판정 순수 함수.
-- `translation_controls.py`: 번역 작업자와 최소 CLI 선택·재시도 입력.
+- `translation_controls.py`: 번역 작업자와 웹 CLI 선택·재시도 진입.
 - `review.py`: 원어·번역 검수, 구간 재생성·보호와 SRT 내보내기.
 - `key_bindings.py`: 명령 목록·키 정규화·충돌 검사와 키 배치 변경분 저장.
 - `key_display.py`: 방향키 기호 등 화면 표시용 키 이름 변환. 한 글자 기호 키는 이름을 함께 보여 준다(예: `' (작은따옴표)`).
@@ -1166,5 +1167,4 @@ Windows 플레이어가 한글을 ANSI로 오인하지 않도록 **UTF-8 BOM**�
 사람이 직접 확인합니다. 합성 composition 검사는 조합 중 저장 방지만 확인합니다.
 
 자동 규칙 확인 중 페이지가 비활성화되면 확인창을 닫고 저장하지 않습니다. 편집하던 대상·원어는
-보존하며, 복귀해 다시 저장할 수 있습니다. 확인창의 공용 셸 단축키 차단은 대화상자 전환(#53)에서
-통합합니다.
+보존하며, 복귀해 다시 저장할 수 있습니다. 확인창이 열려 있는 동안에는 공용 대화상자 계층이 셸 단축키를 차단합니다.

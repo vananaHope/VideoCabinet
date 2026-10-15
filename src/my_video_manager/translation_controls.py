@@ -1,4 +1,4 @@
-"""번역 작업자와 최소 CLI 설정 입력. 정책은 AppCore에 둔다."""
+"""번역 작업자·대기열과 웹 CLI 선택·재시도 진입. 정책은 AppCore에 둔다."""
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
@@ -31,8 +31,6 @@ class TranslationControls(QObject):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.process_queue)
         self.timer.start(500)
-
-
 
     def settings(self):
         self.window.web_host.dialogs.run('translation')

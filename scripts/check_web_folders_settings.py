@@ -1,4 +1,4 @@
-"""#51 화면 비교와 실제 Qt/WebEngine 포커스 검사 (독립 임시 라이브러리).
+"""웹 폴더·설정 화면과 실제 Qt/WebEngine 포커스 검사 (독립 임시 라이브러리).
 
 스크린샷: python scripts/check_web_folders_settings.py --offscreen
 실창: desktop_lock.py run --owner issue-51 -- python scripts/check_web_folders_settings.py

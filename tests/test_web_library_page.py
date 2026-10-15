@@ -18,7 +18,9 @@ def window_factory(core, monkeypatch):
     app = QApplication.instance() or QApplication([])
     windows = []
 
-    def create():
+    def create(mode='1'):
+        if mode != '1':
+            raise ValueError("window_factory는 웹 기본 모드 '1'만 지원합니다.")
         window = MainWindow(core)
         windows.append(window)
         window.show()
@@ -32,11 +34,17 @@ def window_factory(core, monkeypatch):
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def test_library_is_web_by_default(window_factory):
+@pytest.mark.parametrize('args', [(), ('1',)])
+def test_library_is_web_by_default(window_factory, args):
     from my_video_manager.web_library_page import WebLibraryPage
 
-    window = window_factory()
+    window = window_factory(*args)
     assert isinstance(window.library_page, WebLibraryPage)
+
+
+def test_window_factory_rejects_removed_qt_mode(window_factory):
+    with pytest.raises(ValueError, match="웹 기본 모드 '1'만 지원"):
+        window_factory('0')
 
 
 def test_real_web_snapshot_filter_tag_deletion_and_count(window_factory, core):

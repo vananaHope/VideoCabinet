@@ -24,8 +24,6 @@ class TrayControls(QObject):
         self.timer.timeout.connect(self.notify_completion)
         self.timer.start(750)
 
-
-
     def open(self):
         was_hidden = not self.window.isVisible()
         self.window.showNormal()

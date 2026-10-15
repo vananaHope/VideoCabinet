@@ -25,5 +25,3 @@ def key_name(event):
         (Qt.KeyboardModifier.ControlModifier, "Ctrl"), (Qt.KeyboardModifier.AltModifier, "Alt"),
         (Qt.KeyboardModifier.ShiftModifier, "Shift"), (Qt.KeyboardModifier.MetaModifier, "Meta"),
     ) if modifiers & modifier) + name
-
-
