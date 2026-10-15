@@ -611,7 +611,6 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
             pass
 
     monkeypatch.setattr(sys, "argv", ["my-video-manager", "--data-dir", str(core.database.parent)])
-    monkeypatch.delenv("MVM_WEB_UI", raising=False)
     monkeypatch.setattr(QtWidgets, "QApplication", Application)
     monkeypatch.setattr(theme, "apply_theme", lambda app: None)
     monkeypatch.setattr(single_instance, "SingleInstance", Instance)
@@ -631,6 +630,7 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
             assert "디스크 공간을 확보한 뒤 다시 시작하면 예약된 백업 복원이 적용" in message
             assert str(core.database.with_name(core.database.name + ".restore-pending.zip")) in message
             assert "[Errno" not in message
+            assert "file is not a database" in message
             continue
         assert __main__.main() == 0
         assert public_records(started[-1]) == expected
@@ -843,7 +843,7 @@ def test_valid_backup_restores_damaged_current_database(core, tmp_path, damage):
     assert result.safety_backup.read_bytes() == original
 
 
-@pytest.mark.parametrize("failure", ["raw_copy", "sidecar_move", "database_replace"])
+@pytest.mark.parametrize("failure", ["raw_copy", "wal_copy", "journal_copy", "sidecar_move", "database_replace"])
 def test_damaged_database_restore_failure_keeps_original_and_pending(core, tmp_path, monkeypatch, failure):
     expected = public_records(core)
     core.request_backup_restore(core.create_backup(tmp_path / "healthy.zip").path)
@@ -856,7 +856,8 @@ def test_damaged_database_restore_failure_keeps_original_and_pending(core, tmp_p
     import shutil
     copyfile, replace_file = shutil.copyfile, os.replace
     def copy(source, target, *args, **kwargs):
-        if failure == "raw_copy" and Path(source) == core.database:
+        if failure in ("raw_copy", "wal_copy", "journal_copy") and Path(source) == Path(str(core.database) + {"raw_copy": "", "wal_copy": "-wal", "journal_copy": "-journal"}[failure]):
+            Path(target).write_bytes(Path(source).read_bytes()[:5])
             raise OSError(errno.ENOSPC, "disk full")
         return copyfile(source, target, *args, **kwargs)
     def move(source, target):
@@ -867,12 +868,64 @@ def test_damaged_database_restore_failure_keeps_original_and_pending(core, tmp_p
     with monkeypatch.context() as patch:
         patch.setattr(shutil, "copyfile", copy)
         patch.setattr(os, "replace", move)
-        result = apply(core.database)
+        for _ in range(2):
+            result = apply(core.database)
+            copies = list((core.database.parent / "backups").glob("damaged-*"))
+            assert len(copies) == (0 if failure.endswith("copy") else 3)
+            assert not list(core.database.parent.glob(".restore-*"))
     assert result.status == "deferred"
-    assert result.error_kind == ("disk_full" if failure == "raw_copy" else "file_in_use")
+    assert result.error_kind == ("disk_full" if failure.endswith("copy") else "file_in_use")
     assert not result.error_message.startswith("[Errno")
     for path, contents in originals.items():
         assert path.read_bytes() == contents
     assert core.pending_backup_restore() is not None
     assert apply(core.database).status == "applied"
     assert public_records(open_core(core.database)) == expected
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows 읽기 전용 파일 속성")
+def test_readonly_database_defers_without_accumulating_backups(core, tmp_path):
+    import stat
+    core.request_backup_restore(core.create_backup(tmp_path / "healthy.zip").path)
+    original = core.database.read_bytes()
+    core.database.chmod(stat.S_IREAD)
+    try:
+        for _ in range(2):
+            result = apply(core.database)
+            assert result.status == "deferred"
+            assert result.error_kind == "file_in_use"
+            assert core.automatic_backups() == ()
+            assert core.database.read_bytes() == original
+            assert core.pending_backup_restore() is not None
+    finally:
+        core.database.chmod(stat.S_IREAD | stat.S_IWRITE)
+    assert apply(core.database).status == "applied"
+
+
+@pytest.mark.parametrize("changed_suffix", ["", "-wal", "-journal"])
+def test_changed_damaged_original_gets_new_safety_copy(core, tmp_path, monkeypatch, changed_suffix):
+    core.request_backup_restore(core.create_backup(tmp_path / "healthy.zip").path)
+    for suffix in ("", "-wal", "-journal"):
+        Path(str(core.database) + suffix).write_bytes(b"damaged original")
+    replace_file = os.replace
+    def blocked(source, target):
+        if Path(target) == core.database:
+            raise PermissionError(errno.EACCES, "in use")
+        return replace_file(source, target)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", blocked)
+        assert apply(core.database).status == "deferred"
+        first, = (core.database.parent / "backups").glob("damaged-*.sqlite3")
+        changed = Path(str(core.database) + changed_suffix)
+        previous = changed.stat()
+        changed.write_bytes(b"changed original")
+        os.utime(changed, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+        assert apply(core.database).status == "deferred"
+        assert apply(core.database).status == "deferred"
+        copies = list((core.database.parent / "backups").glob("damaged-*.sqlite3"))
+        assert len(copies) == 2
+        assert Path(str(first) + changed_suffix).read_bytes() == b"damaged original"
+    result = apply(core.database)
+    assert result.status == "applied"
+    assert result.safety_backup != first
+    assert Path(str(result.safety_backup) + changed_suffix).read_bytes() == b"changed original"

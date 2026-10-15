@@ -357,6 +357,8 @@ def _check_replace_available(database):
     for path in (database, *(Path(str(database) + suffix) for suffix in ("-wal", "-journal", "-shm"))):
         if not path.exists():
             continue
+        if path.stat().st_file_attributes & 0x1:  # FILE_ATTRIBUTE_READONLY
+            raise PermissionError(errno.EACCES, "읽기 전용 파일의 속성을 해제한 뒤 다시 시도하세요.", str(path))
         # DELETE | GENERIC_READ, 공유 없음, OPEN_EXISTING. 내용을 읽거나 바꾸지 않는다.
         handle = create(str(path), 0x00010000 | 0x80000000, 0, None, 3, 0, None)
         if handle == wintypes.HANDLE(-1).value:
@@ -368,14 +370,37 @@ def _preserve_damaged_database(database):
     """손상 사본은 자동 ZIP 5개 정리에서 제외하고 사용자가 정리할 때까지 보존한다."""
     directory = database.parent / "backups"
     directory.mkdir(exist_ok=True)
+    suffixes = ("", "-wal", "-journal")
+    sources = {suffix: Path(str(database) + suffix) for suffix in suffixes}
+    fingerprints = {suffix: (source.stat().st_size, _sha256(source))
+                    for suffix, source in sources.items() if source.exists()}
+    # 늦은 교체 실패 뒤에는 완성 사본을 재사용한다. 동반 파일도 모두 같아야 한다.
+    for candidate in directory.glob("damaged-*.sqlite3"):
+        matches = True
+        for suffix in suffixes:
+            saved = Path(str(candidate) + suffix)
+            if saved.is_symlink() or saved.exists() != (suffix in fingerprints):
+                matches = False
+                break
+            if suffix in fingerprints and (saved.stat().st_size, _sha256(saved)) != fingerprints[suffix]:
+                matches = False
+                break
+        if matches:
+            return candidate
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     target = directory / f"damaged-{stamp}-{uuid4().hex}.sqlite3"
-    for suffix in ("", "-wal", "-journal"):
-        source = Path(str(database) + suffix)
-        if source.exists():
+    try:
+        for suffix in fingerprints:
             copy = Path(str(target) + suffix)
-            shutil.copyfile(source, copy)
+            shutil.copyfile(sources[suffix], copy)
             _sync(copy)
+    except BaseException:
+        for suffix in suffixes:
+            try:
+                Path(str(target) + suffix).unlink(missing_ok=True)
+            except OSError:
+                pass  # 다른 동반 파일도 정리하고 원래 복사 오류를 유지한다.
+        raise
     return target
 
 

@@ -41,7 +41,7 @@ def main():
     except Exception as error:
         message = str(error)
         if restore_result is not None and restore_result.status == "deferred":
-            message = restore_result.error_message + "\n\n" + restore_result.guidance
+            message = restore_result.error_message + "\n\n" + restore_result.guidance + "\n\n" + str(error)
         QMessageBox.critical(None, "시작 실패", message)
         return 1
     window.show()
