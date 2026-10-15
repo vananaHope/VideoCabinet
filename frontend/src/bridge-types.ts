@@ -191,15 +191,115 @@ export function publicQueueBridge(raw: QueueBridge): QueueBridge {
   })
 }
 
+export interface ReelEntryData {
+  id: number
+  videoId: number
+  title: string
+  thumbnail: string | null
+  start: number
+  end: number | null
+  lastRevisited: string | null
+  note: string
+  tags: Array<TagData>
+  playable: boolean
+  missing: boolean
+}
+
+export interface ReelData {
+  entries: Array<ReelEntryData>
+  tags: Array<TagData>
+  tagId: number
+  selectedId: number | null
+  emptyTitle: string
+  emptyDescription: string
+  status: string
+}
+
+export interface ReelBridge {
+  ready: (reply: Reply) => void
+  snapshot: (reply: Reply) => void
+  refresh: (reply: Reply) => void
+  filter: (tagId: number, reply: Reply) => void
+  select: (highlightId: number, reply: Reply) => void
+  play: (highlightId: number, reply: Reply) => void
+  changed: Signal<string>
+  focusRequested: Signal<string>
+  error: Signal<string>
+}
+export function publicReelBridge(raw: ReelBridge): ReelBridge {
+  return Object.freeze({
+    ready: raw.ready.bind(raw),
+    snapshot: raw.snapshot.bind(raw),
+    refresh: raw.refresh.bind(raw),
+    filter: raw.filter.bind(raw),
+    select: raw.select.bind(raw),
+    play: raw.play.bind(raw),
+    changed: Object.freeze({ connect: raw.changed.connect.bind(raw.changed), disconnect: raw.changed.disconnect.bind(raw.changed) }),
+    focusRequested: Object.freeze({ connect: raw.focusRequested.connect.bind(raw.focusRequested), disconnect: raw.focusRequested.disconnect.bind(raw.focusRequested) }),
+    error: Object.freeze({ connect: raw.error.connect.bind(raw.error), disconnect: raw.error.disconnect.bind(raw.error) }),
+  })
+}
+
+export interface SearchTextData {
+  text: string
+  matched: boolean
+}
+
+export interface SearchResultData {
+  videoId: number
+  title: Array<SearchTextData>
+  source: string
+  text: Array<SearchTextData>
+  start: number | null
+  missing: boolean
+}
+
+export interface SearchData {
+  query: string
+  results: Array<SearchResultData>
+  selectedIndex: number
+  state: string
+  truncated: boolean
+  error: string
+  limit: number
+}
+
+export interface SearchBridge {
+  ready: (reply: Reply) => void
+  snapshot: (reply: Reply) => void
+  find: (query: string, reply: Reply) => void
+  select: (index: number, reply: Reply) => void
+  play: (index: number, reply: Reply) => void
+  changed: Signal<string>
+  focusRequested: Signal<string>
+  error: Signal<string>
+}
+export function publicSearchBridge(raw: SearchBridge): SearchBridge {
+  return Object.freeze({
+    ready: raw.ready.bind(raw),
+    snapshot: raw.snapshot.bind(raw),
+    find: raw.find.bind(raw),
+    select: raw.select.bind(raw),
+    play: raw.play.bind(raw),
+    changed: Object.freeze({ connect: raw.changed.connect.bind(raw.changed), disconnect: raw.changed.disconnect.bind(raw.changed) }),
+    focusRequested: Object.freeze({ connect: raw.focusRequested.connect.bind(raw.focusRequested), disconnect: raw.focusRequested.disconnect.bind(raw.focusRequested) }),
+    error: Object.freeze({ connect: raw.error.connect.bind(raw.error), disconnect: raw.error.disconnect.bind(raw.error) }),
+  })
+}
+
 export interface Bridges {
   readonly shell: ShellBridge
   readonly library: LibraryBridge
   readonly queue: QueueBridge
+  readonly reel: ReelBridge
+  readonly search: SearchBridge
 }
 export function publicBridges(raw: Bridges): Bridges {
   return Object.freeze({
     shell: publicShellBridge(raw.shell),
     library: publicLibraryBridge(raw.library),
     queue: publicQueueBridge(raw.queue),
+    reel: publicReelBridge(raw.reel),
+    search: publicSearchBridge(raw.search),
   })
 }

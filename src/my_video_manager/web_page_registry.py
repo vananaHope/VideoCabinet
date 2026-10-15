@@ -3,6 +3,8 @@
 from .web_library_page import WebLibraryPage
 from .web_queue_page import WebQueuePage
 from .web_statistics_page import WebStatisticsPage
+from .web_reel_page import WebReelPage
+from .web_search_page import WebSearchPage
 from .web_shell import WebShellHost
 
 
@@ -10,6 +12,8 @@ WEB_PAGES = (
     WebLibraryPage,
     WebQueuePage,
     WebStatisticsPage,
+    WebReelPage,
+    WebSearchPage,
 )
 # 기존 Qt 페이지의 고정 번호표. 웹 페이지를 추가할 때는 이 표를 수정하지 않는다.
 QT_PAGE_INDEX = {
