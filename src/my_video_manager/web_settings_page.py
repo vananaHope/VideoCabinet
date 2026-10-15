@@ -17,6 +17,7 @@ from .web_page import WebPageController
 
 
 class SettingsBridge(QObject):
+    backupChanged = SETTINGS.signal('backupChanged')
     settingsChanged = SETTINGS.signal('settingsChanged')
     settingsFocusRequested = SETTINGS.signal('settingsFocusRequested')
     keyCaptured = SETTINGS.signal('keyCaptured')
@@ -35,6 +36,14 @@ class SettingsBridge(QObject):
     @SETTINGS.slot('snapshot')
     def snapshot(self):
         return encode(self.page.payload())
+
+    @SETTINGS.slot('backupSnapshot')
+    def backupSnapshot(self):
+        return encode(self.page.backups.state)
+
+    @SETTINGS.slot('backupAction')
+    def backupAction(self, name, target, includeThumbnails):
+        return self.page.backups.action(name, target, includeThumbnails)
 
     @SETTINGS.slot('saveKeys')
     def saveKeys(self, draft):
@@ -121,6 +130,8 @@ class WebSettingsPage(WebPageController):
         self.capture_command = None
         self.last_payload = None
         self.bridge = SettingsBridge(self)
+        from .web_backup import BackupControls
+        self.backups = BackupControls(self)
         self.focus_requested = self.bridge.settingsFocusRequested
         self.library.refreshed.connect(self.refresh)
         self.library.scan_state_changed.connect(lambda _: self.refresh())

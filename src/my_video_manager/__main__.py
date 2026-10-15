@@ -30,30 +30,42 @@ def main():
     from .theme import apply_theme
     apply_theme(app)
     app.setQuitOnLastWindowClosed(False)
-    restore_result = None
+    instance = None
     try:
         data_directory = args.data_dir or default_data_directory()
         instance = SingleInstance(data_directory, app)
         if not instance.start():
             return 0
-        from .backup import apply_pending_backup_restore
-        restore_result = apply_pending_backup_restore(data_directory / "library.sqlite3", instance=instance)
-        core = AppCore(media=FFmpegMediaReader(), clock=lambda: datetime.now(timezone.utc),
+        from .backup_recovery import open_with_backup_recovery
+        core = open_with_backup_recovery(data_directory / "library.sqlite3", instance,
+            lambda: AppCore(media=FFmpegMediaReader(), clock=lambda: datetime.now(timezone.utc),
                        transcriber=FasterWhisperTranscriber(data_directory / "models"),
                        translator=SubscriptionCLITranslator(data_directory),
-                       database=args.data_dir / "library.sqlite3" if args.data_dir else None)
-        core.set_backup_restore_startup_result(restore_result)
+                       database=args.data_dir / "library.sqlite3" if args.data_dir else None))
+        if core is None:
+            instance.close()
+            return 1
         window = MainWindow(core)
         instance.activated.connect(window.tray.open)
         app.aboutToQuit.connect(instance.close)
     except Exception as error:
         message = str(error)
-        if restore_result is not None and restore_result.status == "deferred":
-            message = restore_result.error_message + "\n\n" + restore_result.guidance + "\n\n" + str(error)
         QMessageBox.critical(None, "시작 실패", message)
+        if instance is not None:
+            instance.close()
         return 1
     window.show()
-    return app.exec()
+    status = app.exec()
+    if app.property('backupRestartRequested'):
+        from PySide6.QtCore import QProcess
+        from .backup_recovery import restart_command
+        instance.close()
+        program, arguments = restart_command(data_directory)
+        if not QProcess.startDetached(program, arguments)[0]:
+            QMessageBox.critical(None, '재시작 실패',
+                                 '앱을 다시 실행해 주세요. 백업 복원 예약은 그대로 남아 있습니다.')
+            return 1
+    return status
 
 
 if __name__ == "__main__":

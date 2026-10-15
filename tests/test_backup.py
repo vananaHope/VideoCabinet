@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 import time
 from types import SimpleNamespace
 import zipfile
@@ -18,6 +20,7 @@ from PySide6.QtCore import QLockFile
 from my_video_manager.backup import (
     AUTO_BACKUP_KEEP, BackupError, BackupBusyError, BackupStorageError, MAX_BACKUP_RESTARTS,
     apply_pending_backup_restore, backup_before_migration,
+    backup_error_message,
     create_automatic_backup, create_backup, inspect_backup, request_backup_restore,
 )
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
@@ -27,6 +30,86 @@ from my_video_manager.translation import TranslatedLine
 
 
 NOW = datetime(2026, 10, 15, tzinfo=timezone.utc)
+
+
+def test_missing_backup_is_distinct_from_unavailable_device(tmp_path):
+    with pytest.raises(FileNotFoundError) as caught:
+        inspect_backup(tmp_path / 'removed.zip')
+    message = backup_error_message(caught.value)
+    assert '찾을 수 없습니다' in message and '지워졌거나 옮겨졌습니다' in message
+    assert '저장 장치' not in message
+    assert str(tmp_path) not in message
+    assert '저장 장치' in backup_error_message(OSError(errno.ENODEV, 'device removed'))
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows 파일 공유 및 ACL 동작')
+def test_open_destination_reports_usage_and_permissions(core, tmp_path, caplog):
+    destination = tmp_path / 'opened.zip'
+    destination.write_bytes(b'original')
+    with destination.open('rb'):
+        with pytest.raises(OSError) as caught:
+            core.create_backup(destination)
+    message = backup_error_message(caught.value)
+    assert '사용 중' in message and '권한' in message and '프로그램을 닫고' in message
+    assert f'오류 코드 {caught.value.winerror}' in message
+    assert str(tmp_path) not in message
+    assert str(caught.value) in caplog.text
+    assert destination.read_bytes() == b'original'
+    assert not list(tmp_path.glob('.backup-*'))
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows 파일 공유 및 ACL 동작')
+@pytest.mark.parametrize('operation', ['create', 'automatic', 'request', 'apply'])
+def test_directory_creation_denied_finishes_promptly(core, tmp_path, operation):
+    archive = core.create_backup(tmp_path / 'source.zip').path
+    database = core.database
+    if operation == 'apply':
+        core.request_backup_restore(archive)
+    directory = (tmp_path / 'destination' if operation == 'create' else
+                 database.parent / 'backups' if operation == 'automatic' else database.parent)
+    directory.mkdir(exist_ok=True)
+    # AD denies only child-directory creation; ordinary file creation still works.
+    user = os.environ['USERNAME']
+    script = '''
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from PySide6.QtCore import QLockFile
+from my_video_manager.backup import *
+database, archive, directory = map(Path, sys.argv[1:4])
+operation = sys.argv[4]
+try:
+    if operation == 'create': create_backup(database, directory / 'out.zip')
+    elif operation == 'automatic': create_automatic_backup(database)
+    elif operation == 'request': request_backup_restore(database, archive)
+    else:
+        lock_path = database.parent / 'acl-test.lock'
+        lock = QLockFile(str(lock_path))
+        assert lock.tryLock(0)
+        try:
+            result = apply_pending_backup_restore(database, instance=SimpleNamespace(lock=lock, lock_path=lock_path))
+            assert result.status == 'deferred'
+            assert '권한' in result.error_message and '사용 중' in result.error_message
+            assert '오류 코드 5' in result.error_message
+        finally: lock.unlock()
+except OSError as error:
+    message = backup_error_message(error)
+    assert '권한' in message and '오류 코드 5' in message
+else:
+    assert operation == 'apply', '백업 작업이 거부 ACL을 무시했습니다'
+'''
+    try:
+        subprocess.run(['icacls', str(directory), '/deny', f'{user}:(AD)'], check=True, capture_output=True)
+        probe = directory / 'file-creation-allowed'
+        probe.write_bytes(b'ok')
+        probe.unlink()
+        completed = subprocess.run([sys.executable, '-c', script, str(database), str(archive),
+                                    str(directory), operation], capture_output=True, timeout=10)
+        assert completed.returncode == 0, completed.stderr.decode(errors='replace')
+    finally:
+        subprocess.run(['icacls', str(directory), '/remove:d', user], check=True, capture_output=True)
+    assert not list(directory.glob('.backup-*'))
+    assert not list(directory.glob('.restore-*'))
 
 
 class Media:
@@ -270,6 +353,25 @@ def test_revalidates_pending_request_at_startup(core, tmp_path):
     assert core.automatic_backups() == ()
 
 
+def test_newer_database_backup_rejects_preview_and_schedule_preserving_pending(core, tmp_path):
+    from my_video_manager.library import LIBRARY_DB_VERSION
+
+    current = core.create_backup(tmp_path / 'current.zip').path
+    core.request_backup_restore(current)
+    pending_before = core.pending_backup_restore()
+    before = core.database.read_bytes()
+    future_db = tmp_path / 'future.sqlite3'
+    with closing(sqlite3.connect(core.database)) as source, closing(sqlite3.connect(future_db)) as target:
+        source.backup(target)
+        target.execute(f'PRAGMA user_version={LIBRARY_DB_VERSION + 1}')
+    future = create_backup(future_db, tmp_path / 'future.zip').path
+    for operation in (core.inspect_backup, core.request_backup_restore):
+        with pytest.raises(BackupError, match='더 최신 DB 버전.*업데이트'):
+            operation(future)
+    assert core.database.read_bytes() == before
+    assert core.pending_backup_restore() == pending_before
+
+
 def test_cancel_backup_restore_and_require_correct_instance_ownership(core, tmp_path):
     archive = tmp_path / "backup.zip"
     core.create_backup(archive)
@@ -396,11 +498,40 @@ def test_automatic_retention_keeps_latest_five_and_never_removes_manual_zip(core
     assert all(core.inspect_backup(path).db_version == 3 for path in core.automatic_backups())
 
 
+def test_v2_backup_restores_records_and_upgrades_before_reopening(core, tmp_path):
+    from test_resolution import downgrade_v2
+
+    video = core.videos()[0]
+    core.add_video_tag(video.id, 'v2 기록')
+    downgrade_v2(core.database)
+    archive = create_backup(core.database, tmp_path / 'v2.zip').path
+    upgraded = open_core(core.database)
+    upgraded.rename_video(video.id, 'v3에서 바꾼 제목')
+    upgraded.request_backup_restore(archive)
+    assert upgraded.pending_backup_restore().db_version == 2
+    assert upgraded.video(video.id).title == 'v3에서 바꾼 제목'
+
+    result = apply(core.database)
+    assert result.status == 'applied' and result.metadata.db_version == 2
+    # 시작 경로는 임시 DB의 이전이 성공해야 교체한다. AppCore를 열기 전부터 v3다.
+    with closing(sqlite3.connect(core.database)) as db:
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 3
+    reopened = open_core(core.database)
+    assert reopened.video(video.id).title == video.title
+    assert reopened.video_tags(video.id)[0].name == 'v2 기록'
+    assert reopened.video(video.id).width is None
+    assert reopened.statistics_dashboard(30).inventory.resolution_pending_count == len(reopened.videos())
+    assert reopened.pending_backup_restore() is None
+    assert inspect_backup(result.safety_backup).db_version == 3
+
+
 def test_fake_next_migration_backs_up_before_ddl_and_survives_rollback(core):
     # 다음 버전의 실패하는 가짜 이전으로 공개 연결 지점을 검증한다.
     with closing(sqlite3.connect(core.database)) as db:
         saved = backup_before_migration(db, 4)
         assert saved.metadata.db_version == 3
+        with zipfile.ZipFile(saved.path) as archive:
+            assert json.loads(archive.read('manifest.json'))['reason'] == 'before_migration'
         with pytest.raises(RuntimeError), db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("ALTER TABLE videos ADD COLUMN fake_migration TEXT")
@@ -587,6 +718,8 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
             self.aboutToQuit = Signal()
         def setQuitOnLastWindowClosed(self, value):
             pass
+        def property(self, name):
+            return None
         def exec(self):
             for callback in self.aboutToQuit.callbacks:
                 callback()
@@ -620,13 +753,23 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
     monkeypatch.setattr(translation_cli, "SubscriptionCLITranslator", lambda path: Translator())
     errors = []
     monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *args: errors.append(args))
+    from my_video_manager import backup_recovery
+    recovery_messages = []
+    class Recovery:
+        def __init__(self, database, result, error):
+            recovery_messages.append(result.error_message + '\n' + result.guidance + '\n' + str(error))
+        def exec(self):
+            return 0
+        def deleteLater(self):
+            pass
+    monkeypatch.setattr(backup_recovery, 'BackupRecoveryDialog', Recovery)
     for attempt in range(2):
         if failure == "damaged_and_full":
             assert __main__.main() == 1
             assert started == []
             assert core.database.read_bytes() == b"damaged header"
             assert core.pending_backup_restore() is not None
-            message = errors[-1][2]
+            message = recovery_messages[-1]
             assert "디스크 공간을 확보한 뒤 다시 시작하면 예약된 백업 복원이 적용" in message
             assert str(core.database.with_name(core.database.name + ".restore-pending.zip")) in message
             assert "[Errno" not in message
@@ -642,11 +785,11 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
         else:
             assert state is None
     if failure == "damaged_and_full":
-        assert len(errors) == 2
+        assert len(recovery_messages) == 2 and not errors
         monkeypatch.setattr(shutil, "copyfile", real_copy)
         assert __main__.main() == 0
         assert started[-1].backup_restore_status().status == "applied"
-        assert len(errors) == 2
+        assert len(recovery_messages) == 2 and not errors
         return
     assert errors == []
     if failure == "disk_full":
@@ -894,6 +1037,7 @@ def test_readonly_database_defers_without_accumulating_backups(core, tmp_path):
             result = apply(core.database)
             assert result.status == "deferred"
             assert result.error_kind == "file_in_use"
+            assert "읽기 전용" in result.error_message
             assert core.automatic_backups() == ()
             assert core.database.read_bytes() == original
             assert core.pending_backup_restore() is not None

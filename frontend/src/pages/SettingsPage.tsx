@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog, PageHeader, StatusBadge } from "@/components/page-parts"
 import { MinimumDuration } from "@/components/minimum-duration"
 import { KeyBindingsEditor } from "@/components/key-bindings-editor"
+import { BackupSettings } from "@/components/backup-settings"
 
-const categories = [['general', '일반'], ['keys', '키 배치'], ['translation', '번역'], ['transcription', '받아쓰기']] as const
+const categories = [['general', '일반'], ['keys', '키 배치'], ['translation', '번역'], ['transcription', '받아쓰기'], ['backup', '백업']] as const
 
 export default function SettingsPage() {
   const [bridge, setBridge] = useState<SettingsBridge | null>(null)
@@ -48,6 +49,7 @@ export default function SettingsPage() {
     <div className="flex min-h-0 flex-1 gap-6">
       <nav id="settings-category" aria-label="설정 분류" className="flex w-40 shrink-0 flex-col gap-2">{categories.map(([id, label]) => <Button key={id} variant={category === id ? 'secondary' : 'ghost'} aria-current={category === id ? 'true' : undefined} data-category={id} onClick={() => setCategory(id)}>{label}</Button>)}</nav>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+        <BackupSettings bridge={bridge} active={category === 'backup'} />
         <section hidden={category !== 'general'} className="space-y-6" aria-label="일반 설정">
           <h2 className="text-lg font-semibold">일반</h2>
           <section className="space-y-3 rounded-xl border bg-card p-4"><h3 className="font-semibold">My Video Manager · {data.version}</h3><Button variant="link" title={data.releasesUrl} onClick={() => action('releases')}>GitHub Release에서 버전 보기 ↗</Button></section>
