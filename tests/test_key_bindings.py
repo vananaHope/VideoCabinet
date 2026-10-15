@@ -40,7 +40,7 @@ def test_translation_toggle_has_korean_label_and_period_default(tmp_path):
     core = open_core(tmp_path)
     command = Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE)
     row = next(row for row in core.key_bindings() if row.command == command)
-    assert row.label == "원어 / 번역 자막 전환"
+    assert row.label == "원어 / 번역·다듬은 자막 전환"
     assert row.keys == row.default_keys == (".",)
     assert core.command_for_key(".") == command
 
@@ -84,7 +84,7 @@ def test_translation_key_conflict_preserves_both_commands(tmp_path, kind, key):
     bindings[Command(kind)] = (key,)
     with pytest.raises(ValueError) as error:
         core.save_key_bindings(bindings)
-    assert "원어 / 번역 자막 전환" in str(error.value)
+    assert "원어 / 번역·다듬은 자막 전환" in str(error.value)
     assert "재생 / 일시정지" in str(error.value)
     for app in (core, open_core(tmp_path)):
         assert app.command_for_key(".") == Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE)
