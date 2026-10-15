@@ -36,6 +36,7 @@ class TranslationError(RuntimeError):
             "configuration": "모델을 쓸 수 없음: 모델 이름 또는 추론 강도를 확인하세요.",
             "missing_key": "OpenCode Go 키가 등록되지 않았습니다.",
             "connection": "OpenCode Go에 연결하지 못했습니다.",
+            "response_timeout": "OpenCode Go 응답 시간이 초과되었습니다.",
             "key_storage": "OpenCode Go 저장된 키를 읽지 못했습니다.",
             "request_rejected": "OpenCode Go가 요청을 거부했습니다.",
             "format": "응답의 줄 ID 또는 형식이 올바르지 않습니다.",
@@ -578,7 +579,7 @@ class Translations:
                                            response.glossary if isinstance(response, TranslationResponse) else ())
             except TranslationError as error:
                 progress.successes = 0
-                if error.kind != 'format':
+                if error.kind not in ('format', 'response_timeout'):
                     raise
                 if cancellation.is_set():
                     raise TranslationCancelled

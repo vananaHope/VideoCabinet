@@ -8,6 +8,7 @@ import time
 import socket
 from importlib.metadata import version
 import traceback
+from urllib.error import URLError
 
 import pytest
 
@@ -77,6 +78,33 @@ def test_remaining_batch_reuses_contract_headers_and_stable_session():
     assert '"id": "one"' not in json.loads(http.calls[-1][2]["body"])["messages"][0]["content"]
 
 
+def test_translation_defaults_allow_ten_minutes_but_checks_stay_short():
+    http = FakeHTTP()
+    translator = adapter(http)
+    translator.translate(LINES, "en")
+    assert http.calls[-1][2]["timeout"] == 600
+    assert UrllibTransport().read_timeout == 600
+    assert UrllibTransport().connect_timeout == 10
+    translator.check_key()
+    assert 0 < http.calls[-1][2]["timeout"] <= 60
+    http.response = HTTPResponse(200, {}, b'{"data":[]}')
+    translator.models()
+    assert 0 < http.calls[-1][2]["timeout"] <= 60
+
+
+@pytest.mark.parametrize("failure", [TimeoutError(KEY), socket.timeout(KEY), URLError(TimeoutError(KEY))])
+def test_injected_timeout_is_safe_shrinkable_and_logged_once(failure, caplog):
+    with pytest.raises(OpenCodeGoError) as raised:
+        adapter(FakeHTTP(error=failure)).translate(LINES, "en")
+    assert raised.value.kind == "response_timeout"
+    assert str(raised.value) == "OpenCode Go 응답 시간이 초과되었습니다."
+    assert str(TranslationError("response_timeout", "safe detail")) == str(raised.value)
+    assert raised.value.shrinkable
+    assert raised.value.__context__ is None
+    assert KEY not in "".join(traceback.format_exception(raised.value)) + caplog.text
+    assert len(caplog.records) == 1
+
+
 @pytest.mark.parametrize("status,payload,kind", [
     (429, {}, "usage_limit"), (401, {"error": KEY}, "authentication"),
     (403, {"error": "usage_limit " + KEY}, "authentication"),
@@ -93,6 +121,7 @@ def test_http_errors_are_safe_and_usage_limit_matches_queue(status, payload, kin
     assert KEY not in str(error) + repr(error) + error.detail + caplog.text
     assert error.__context__ is None
     assert len(http.calls) == 1
+    assert len(caplog.records) == 1
 
 
 @pytest.mark.parametrize("headers,payload,expected", [
@@ -231,7 +260,14 @@ def server():
                 self.server.release.wait(5)
                 body = body[1:]
             try:
-                self.wfile.write(body)
+                if getattr(self.server, "delay", None) == "drip":
+                    for byte in body:
+                        self.wfile.write(bytes([byte]))
+                        self.wfile.flush()
+                        if self.server.release.wait(0.05):
+                            break
+                else:
+                    self.wfile.write(body)
             except OSError:
                 pass
         do_GET = do_POST
@@ -277,16 +313,20 @@ def test_real_http_transport_with_local_fake_server(server, status, body, kind):
     assert server.requests[0][0] == "/v1/chat/completions"
 
 
-def test_real_transport_connection_failure_and_redirect_does_not_forward_key(server):
+@pytest.mark.parametrize("timeout", [1, 10])
+def test_real_transport_connection_failure_and_redirect_does_not_forward_key(server, caplog, timeout):
     server.reply = 307, {"Location": f"http://127.0.0.1:{server.server_port}/stolen"}, b""
     with pytest.raises(OpenCodeGoError) as raised:
         adapter(LocalTransport(server.server_port)).models()
     assert raised.value.kind == "other" and len(server.requests) == 1
     server.shutdown()
     server.server_close()
+    caplog.clear()
     with pytest.raises(OpenCodeGoError) as raised:
-        adapter(LocalTransport(server.server_port), timeout=1).models()
+        adapter(LocalTransport(server.server_port), timeout=timeout).models()
     assert raised.value.kind == "connection"
+    assert not raised.value.shrinkable
+    assert len(caplog.records) == 1
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="실제 Windows 사용자 DPAPI")
@@ -426,7 +466,8 @@ def test_local_server_request_rejections_and_limits_are_not_retried(server, stat
         assert raised.value.retry_at == datetime(2026, 10, 15, 2, 0, 30, tzinfo=timezone.utc)
 
 
-def test_cancel_during_tls_handshake_closes_socket_without_sending_credentials():
+@pytest.mark.parametrize("stop", ["cancel", "deadline", "connect_timeout"])
+def test_tls_handshake_stop_closes_socket_without_sending_credentials(stop, caplog):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen()
@@ -448,8 +489,10 @@ def test_cancel_during_tls_handshake_closes_socket_without_sending_credentials()
     server_thread.start()
     def request():
         try:
-            UrllibTransport().request("POST", f"https://127.0.0.1:{listener.getsockname()[1]}/v1/test",
-                headers={"Authorization": "Bearer " + KEY}, body=b"subtitle", timeout=60, cancellation=cancel)
+            transport = UrllibTransport(connect_timeout=0.2 if stop == "connect_timeout" else 10)
+            transport.request("POST", f"https://127.0.0.1:{listener.getsockname()[1]}/v1/test",
+                headers={"Authorization": "Bearer " + KEY}, body=b"subtitle",
+                timeout=0.5 if stop == "deadline" else 60, cancellation=cancel)
         except Exception as error:
             errors.append(error)
         finally:
@@ -459,11 +502,19 @@ def test_cancel_during_tls_handshake_closes_socket_without_sending_credentials()
     try:
         assert received.wait(2)
         started = time.monotonic()
-        cancel.set()
+        if stop == "cancel":
+            cancel.set()
         assert finished.wait(0.9)
         assert time.monotonic() - started < 1
         assert closed.wait(0.5)
-        assert isinstance(errors[0], TranslationCancelled)
+        if stop == "cancel":
+            assert isinstance(errors[0], TranslationCancelled)
+            assert not caplog.records
+        else:
+            assert isinstance(errors[0], OpenCodeGoError)
+            assert errors[0].kind == "connection"
+            assert not errors[0].shrinkable
+            assert len(caplog.records) == 1
         assert KEY.encode() not in b"".join(traffic)
         assert not any(thread.name == "opencode-go-http" for thread in threads())
     finally:
@@ -473,16 +524,51 @@ def test_cancel_during_tls_handshake_closes_socket_without_sending_credentials()
         server_thread.join(1)
 
 
-@pytest.mark.parametrize("phase", ["headers", "body"])
-def test_delayed_server_respects_total_deadline_without_retries(server, phase):
+@pytest.mark.parametrize("phase", ["headers", "body", "drip"])
+def test_delayed_server_respects_total_deadline_without_retries(server, phase, caplog):
     server.reply = 200, {}, json.dumps(completion()).encode()
     server.delay = phase
     started = time.monotonic()
     with pytest.raises(OpenCodeGoError) as raised:
         adapter(LocalTransport(server.server_port), timeout=0.2).translate(LINES, "en")
-    assert raised.value.kind == "connection"
+    assert raised.value.kind == "response_timeout"
+    assert raised.value.shrinkable
     assert time.monotonic() - started < 1
     assert len(server.requests) == 1
+    assert len(caplog.records) == 1
+    assert not any(thread.name == "opencode-go-http" for thread in threads())
+
+
+@pytest.mark.parametrize("phase", ["headers", "body"])
+def test_read_timeout_is_distinct_from_connection_and_logs_once(server, phase, tmp_path):
+    import logging
+    from my_video_manager.app_logging import file_log_handler
+
+    class ShortReadTransport:
+        def request(self, method, url, **kwargs):
+            return UrllibTransport(read_timeout=0.1).request(
+                method, url.replace(BASE_URL, f"http://127.0.0.1:{server.server_port}"), **kwargs)
+
+    server.reply = 200, {}, json.dumps(completion()).encode()
+    server.delay = phase
+    path = tmp_path / "app.log"
+    handler = file_log_handler(path)
+    logger = logging.getLogger("my_video_manager")
+    logger.addHandler(handler)
+    try:
+        with pytest.raises(OpenCodeGoError) as raised:
+            adapter(ShortReadTransport()).translate(LINES, "en")
+        assert raised.value.kind == "response_timeout"
+        assert raised.value.shrinkable
+        assert raised.value.__context__ is None
+        assert not any(thread.name == "opencode-go-http" for thread in threads())
+        lines = path.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1
+        assert "OpenCode Go 응답 시간이 초과되었습니다." in lines[0]
+        assert KEY not in lines[0]
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
 
 @pytest.mark.parametrize('status,payload,kind', [
     (400, {'error': {'message': 'bad request'}}, 'request_rejected'),
