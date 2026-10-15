@@ -1,11 +1,11 @@
 ---
 name: orchestrate-issues
-description: GitHub 이슈를 Orca 위에서 "Codex 구현 → Claude 교차 검토 → PR·병합" 흐름으로 지휘한다. 이슈 구현·다음 이슈 진행·다음 묶음(wave) 진행을 요청받았을 때 사용.
+description: GitHub 이슈를 Orca 위에서 "Codex 구현 → Claude 교차 검토 → PR·병합"(UI 작업은 Claude 구현 → Codex 검토) 흐름으로 지휘한다. 이슈 구현·다음 이슈 진행·다음 묶음(wave) 진행을 요청받았을 때 사용.
 ---
 
 # 이슈 지휘
 
-너는 **관리자**다. 코드는 직접 쓰지 않는다. 이슈를 작업 명세로 바꿔 Codex 작업자에게 맡기고, Claude 검토자로 교차 검토하고, 판정하고, 병합한다.
+너는 **관리자**다. 코드는 직접 쓰지 않는다. 이슈를 작업 명세로 바꿔 Codex 작업자에게 맡기고, Claude 검토자로 교차 검토하고, 판정하고, 병합한다. UI 관련 이슈는 반대로 Claude가 구현하고 Codex가 검토한다(고정 규칙 참고).
 
 Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처음 쓰기 전에 `orchestration` 스킬을 불러 그 안내대로 `orca skills get orchestration`을 읽는다(버전에 맞는 안내가 그쪽에 있다).
 
@@ -24,7 +24,10 @@ Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처�
   - 실창은 창 활성화, 실제 키보드 포커스, mpv 재생 왕복처럼 꼭 필요한 검사에만 쓴다. 작업 마지막에 한 번 몰아서 한다.
   - 실창은 잠금을 잡고 띄운다: `python <메인 저장소>/.local/orchestration/desktop_lock.py run --owner issue-<n> -- <실창 검사 명령>`. 다른 작업자가 쓰는 중이면 자동으로 기다린다. 15분이 지난 잠금은 넘겨받는다. 잠금 밖에서 실창을 띄우지 않는다.
 - **구현은 Codex, 검토는 Claude.** 구현한 쪽과 다른 에이전트가 검토하는 것이 교차 검토다.
-  - 예외: **UI 다듬기**(사용자 요청, 2026-10-14)는 관리자(Claude)가 직접 한다. 시점은 그 화면 묶음의 Codex 구현 이슈가 모두 병합된 뒤다. 작업은 별도 worktree에서 offscreen 스크린샷을 보며 하고, 교차 검토는 Codex 검토자가 맡는다. 사용자에게는 전후 스크린샷을 보고한다.
+  - 예외: **UI 관련 작업은 무조건 Claude가 한다**(사용자 결정, 2026-10-15. 이전에는 UI 다듬기만 예외였다). 화면 배치, `frontend/` 변경, 대화상자, 알림·안내 표기처럼 사용자가 보는 화면을 바꾸는 이슈가 해당한다.
+    - UI 구현 이슈는 Claude 작업자(`--agent claude`)에게 맡기고, 교차 검토는 Codex 검토자(`--agent codex`)가 한다. 수정 작업자도 Claude다.
+    - 한 이슈에 코어와 UI가 섞여 있으면 UI 쪽을 Claude가 맡는다. 코어만 먼저 떼어 Codex에게 맡길 수 있으면 나눠도 된다.
+    - **UI 다듬기**는 지금처럼 관리자(Claude)가 직접 한다. 시점은 그 화면 묶음의 구현 이슈가 모두 병합된 뒤다. 작업은 별도 worktree에서 offscreen 스크린샷을 보며 하고, 교차 검토는 Codex 검토자가 맡는다. 사용자에게는 전후 스크린샷을 보고한다.
 - **웹 UI 이슈(ADR-0004)의 완료 조건**
   - `npm run lint`(@shadcn/lint 6규칙, 인라인 비활성 금지), `typecheck`, `build`가 통과해야 한다.
   - 기본 창 1100×720 스크린샷을 남긴다. #55(Qt 화면 정리)가 병합되기 전에는 Qt 화면과 나란히 찍는다. **#55 병합 뒤에는 비교할 Qt 화면이 없으므로 웹 화면만 찍는다**(사용자 결정, 2026-10-15). 이미 쓴 명세와 이슈 본문에 "Qt 대비 스크린샷"이 있어도 #55 병합 뒤에는 웹 화면만 찍으면 충족으로 본다.
@@ -80,7 +83,7 @@ Orca 명령의 정확한 사용법은 이 문서에 없다. Orca 명령을 처�
 
 ### 4. 교차 검토
 
-구현 작업자가 끝나면 그 작업자를 `worker-retain`으로 남겨 둔다(수정 지시에 재사용). 그다음 [review-template.md](review-template.md)를 채워 새 Claude 작업자를 **같은 worktree**(`--worktree "id:<worktree id>"`, `--agent claude`)에 띄운다.
+구현 작업자가 끝나면 그 작업자를 `worker-retain`으로 남겨 둔다(수정 지시에 재사용). 그다음 [review-template.md](review-template.md)를 채워 새 Claude 작업자를 **같은 worktree**(`--worktree "id:<worktree id>"`, `--agent claude`)에 띄운다. UI 관련 이슈라면 구현자가 Claude이므로 검토자는 Codex(`--agent codex`)로 띄운다.
 
 **완료 기준**: 검토 보고서 파일이 생겼고, 결론이 "통과" 또는 "수정 필요"다.
 
