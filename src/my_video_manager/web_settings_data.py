@@ -12,6 +12,8 @@ class SettingKeyData(TypedDict):
 
 
 class SettingsData(TypedDict):
+    version: str
+    releasesUrl: str
     bindings: list[SettingKeyData]
     minimum: float
     scanning: bool

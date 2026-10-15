@@ -36,10 +36,16 @@ def prepare_cuda_runtime(data_directory: Path | None = None):
     return tuple(os.add_dll_directory(str(path)) for path in paths)
 
 
+def child_command() -> tuple[str, ...]:
+    if getattr(sys, "frozen", False):
+        return (sys.executable, "transcription")
+    return (sys.executable, "-m", "my_video_manager.transcription")
+
+
 class FasterWhisperTranscriber:
     def __init__(self, model_directory: Path, *, command: tuple[str, ...] | None = None):
         self.model_directory = Path(model_directory).resolve()
-        self.command = command or (sys.executable, "-m", "my_video_manager.transcription")
+        self.command = command or child_command()
 
     def transcribe(self, path: Path, spoken_language: str | None, *,
                    cancellation: Event | None = None, progress=None, start: float = 0,
@@ -178,17 +184,23 @@ def probe_cuda_device() -> bool:
     return ctranslate2.get_cuda_device_count() > 0
 
 
-if __name__ == "__main__":
+def main(arguments=None):
+    arguments = sys.argv[1:] if arguments is None else arguments
     try:
-        if sys.argv[1:] == ["--probe-cuda"]:
+        if arguments == ["--probe-cuda"]:
             print(json.dumps({"available": probe_cuda_device()}))
-            raise SystemExit(0)
-        transcript = transcribe_on_gpu(Path(sys.argv[1]), Path(sys.argv[2]),
-                                       None if sys.argv[3] == "auto" else sys.argv[3], progress=report_progress,
-                                       start=float(sys.argv[4]) if len(sys.argv) > 4 else 0,
-                                       duration=float(sys.argv[5]) if len(sys.argv) > 5 else None)
+            return 0
+        transcript = transcribe_on_gpu(Path(arguments[0]), Path(arguments[1]),
+                                       None if arguments[2] == "auto" else arguments[2], progress=report_progress,
+                                       start=float(arguments[3]) if len(arguments) > 3 else 0,
+                                       duration=float(arguments[4]) if len(arguments) > 4 else None)
         print(json.dumps(asdict(transcript), ensure_ascii=False))
+        return 0
     except Exception as error:
         failure = error if isinstance(error, TranscriberError) else TranscriberError("other", str(error))
         print(json.dumps({"kind": failure.kind, "detail": failure.detail}, ensure_ascii=False), file=sys.stderr)
-        raise SystemExit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

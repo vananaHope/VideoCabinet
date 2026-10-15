@@ -37,14 +37,8 @@ if (-not $InnoCompiler) {
 if (-not $InnoCompiler -or -not (Test-Path -LiteralPath $InnoCompiler)) {
     throw 'Inno Setup 6의 ISCC.exe가 필요합니다. https://jrsoftware.org/isdl.php 에서 설치하거나 -InnoCompiler 경로를 지정하세요.'
 }
-if (-not $SkipPyInstaller) {
-    # #55의 웹 셸 전환·Qt 코드 정리 뒤 onedir 및 자식 프로세스 진입점을 확정한다.
-    throw 'PyInstaller 포장은 #62 마무리 범위입니다. 준비된 실행 폴더가 있으면 -SkipPyInstaller -AppDirectory 경로를 지정하세요.'
-}
-if (-not (Test-Path -LiteralPath (Join-Path $AppDirectory 'my-video-manager.exe'))) {
-    throw '실행 폴더에 my-video-manager.exe가 없습니다. 이번 단계는 포장을 만들지 않습니다. 컴파일 시험에만 더미 파일을 사용할 수 있습니다.'
-}
-$AppDirectory = (Resolve-Path -LiteralPath $AppDirectory).Path
+if (-not [IO.Path]::IsPathRooted($AppDirectory)) { $AppDirectory = Join-Path (Get-Location) $AppDirectory }
+$AppDirectory = [IO.Path]::GetFullPath($AppDirectory)
 if (-not [IO.Path]::IsPathRooted($OutputDirectory)) {
     $OutputDirectory = Join-Path (Get-Location) $OutputDirectory
 }
@@ -77,8 +71,22 @@ try {
 # 2. 생성 검사: 생성 파일은 여기서 변경하지 않는다.
 & $Python scripts/generate_web_types.py --check
 Confirm-Exit 'Generated contracts'
-# 3. PyInstaller 자리: #55 병합 뒤 구현. 위에서 -SkipPyInstaller를 명시해야 한다.
-Write-Host 'PyInstaller skipped: supplied application directory will be used.'
+# 3. onedir: CUDA는 제외하고 Qt WebEngine·웹·미디어 도구를 동봉한다.
+if (-not $SkipPyInstaller) {
+    & $Python -m PyInstaller --version
+    Confirm-Exit 'PyInstaller (pip install -e .[build])'
+    & $Python scripts/prepare_bundle.py --version $Version
+    Confirm-Exit 'Bundle assets'
+    & $Python -m PyInstaller --noconfirm --clean --distpath (Split-Path $AppDirectory) installer/my-video-manager.spec
+    Confirm-Exit 'PyInstaller'
+    $BuiltDirectory = Join-Path (Split-Path $AppDirectory) 'my-video-manager'
+    if ($AppDirectory -ne $BuiltDirectory) { throw 'PyInstaller 출력 폴더 이름은 my-video-manager여야 합니다.' }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $AppDirectory 'my-video-manager.exe'))) {
+    throw '실행 폴더에 my-video-manager.exe가 없습니다.'
+}
+& $Python scripts/check_bundle.py $AppDirectory
+Confirm-Exit 'Bundle contents'
 # 4. Inno Setup. 버전 원본은 pyproject.toml 하나다.
 & $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" installer/my-video-manager.iss
 Confirm-Exit 'Inno Setup'

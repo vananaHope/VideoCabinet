@@ -5,6 +5,10 @@ import sys
 
 
 def main():
+    # Qt, 단일 인스턴스, 데이터 복원보다 먼저 격리된 자식 명령을 분기한다.
+    if sys.argv[1:2] == ["transcription"]:
+        from .transcription import main as transcription_main
+        return transcription_main(sys.argv[2:])
     parser = argparse.ArgumentParser(description="개인 영상 라이브러리")
     parser.add_argument("--data-dir", type=Path, help="데이터를 저장할 폴더 (기본: 사용자 프로필/.my-video-manager)")
     args = parser.parse_args()
@@ -19,6 +23,10 @@ def main():
     from .web_thumbnail import register_thumbnail_scheme
     register_thumbnail_scheme()
     app = QApplication(sys.argv[:1])
+    from PySide6.QtGui import QIcon
+    icon = Path(__file__).with_name('app.ico')
+    if icon.is_file():
+        app.setWindowIcon(QIcon(str(icon)))
     from .theme import apply_theme
     apply_theme(app)
     app.setQuitOnLastWindowClosed(False)

@@ -14,6 +14,16 @@ class QueueRowData(TypedDict):
     message: str
 
 
+class PreparationData(TypedDict):
+    state: str
+    message: str
+    phase: str
+    asset: str
+    completed: int
+    total: int
+    kind: str
+
+
 class QueueCountData(TypedDict):
     state: str
     label: str

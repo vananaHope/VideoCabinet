@@ -15,6 +15,38 @@ from my_video_manager.subtitles import TranscriberCancelled, TranscriberError
 from my_video_manager.transcription import FasterWhisperTranscriber
 
 
+@pytest.mark.parametrize('frozen', [False, True])
+def test_child_command_uses_same_executable(monkeypatch, tmp_path, frozen):
+    monkeypatch.setattr(sys, 'frozen', frozen, raising=False)
+    expected = (sys.executable, 'transcription') if frozen else (sys.executable, '-m', 'my_video_manager.transcription')
+    assert FasterWhisperTranscriber(tmp_path).command == expected
+
+
+def test_gpu_probe_cancellation_terminates_child(tmp_path):
+    from threading import Timer
+    from my_video_manager.cuda_runtime import cuda_gpu_available, PreparationError
+    signal = Event()
+    timer = Timer(0.3, signal.set)
+    timer.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(PreparationError) as caught:
+            cuda_gpu_available(command=(sys.executable, '-c', 'import time; time.sleep(30)'), cancellation=signal)
+        assert caught.value.kind == 'cancelled'
+        assert time.monotonic() - started < 3
+    finally:
+        timer.join()
+
+
+def test_application_dispatches_child_before_qt(monkeypatch):
+    from my_video_manager import __main__, transcription
+    calls = []
+    monkeypatch.setattr(sys, 'argv', ['app.exe', 'transcription', '--probe-cuda'])
+    monkeypatch.setattr(transcription, 'main', lambda args: calls.append(args) or 7)
+    assert __main__.main() == 7
+    assert calls == [['--probe-cuda']]
+
+
 def adapter(tmp_path, script):
     worker = tmp_path / "가짜 받아쓰기.py"
     worker.write_text(script, encoding="utf-8")

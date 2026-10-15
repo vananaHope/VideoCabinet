@@ -140,22 +140,24 @@ SETTINGS = BridgeContract(name='settings', interface='SettingsBridge', slots={
     'action': (Argument('name', str, 'SettingsAction'),),
 }, signals={'settingsChanged': str, 'settingsFocusRequested': str,
             'keyCaptured': str, 'settingsError': str},
-    aliases=(TypeAlias('SettingsAction', ('translation', 'quit')),),
+    aliases=(TypeAlias('SettingsAction', ('translation', 'quit', 'releases')),),
     data_types=(web_settings_data.SettingKeyData, web_settings_data.SettingsData,
                 web_settings_data.CapturedKeyData))
 
 # 새 페이지는 독립 묶음을 선언한 뒤 여기에 한 줄 등록한다.
 QUEUE = BridgeContract(name='queue', interface='QueueBridge', slots={
     'ready': (), 'snapshot': (), 'rulesSnapshot': (),
+    'preparationSnapshot': (), 'preparationAction': (Argument('action', str, 'string'),),
     'action': (Argument('name', str, 'QueueAction'), Argument('videoId', int, 'number')),
     'candidates': (Argument('target', str, 'string'),),
     'saveRule': (Argument('target', str, 'string'), Argument('language', str, 'string'),
                  Argument('includeExisting', bool, 'boolean')),
     'removeRule': (Argument('ruleId', int, 'number'),),
-}, signals={'queueChanged': str, 'rulesChanged': str, 'queueFocusRequested': str, 'queueDeactivated': str},
+}, signals={'queueChanged': str, 'rulesChanged': str, 'queueFocusRequested': str, 'queueDeactivated': str,
+            'preparationChanged': str},
     aliases=(TypeAlias('QueueAction', ('promote', 'remove', 'retryFailed', 'retryHeld')),),
     constants=(Constant('queueStates', tuple(web_queue_data.STATES.items())),),
-    data_types=(web_queue_data.QueueRowData, web_queue_data.QueueCountData, web_queue_data.QueueDeltaData,
+    data_types=(web_queue_data.PreparationData, web_queue_data.QueueRowData, web_queue_data.QueueCountData, web_queue_data.QueueDeltaData,
                 web_queue_data.QueueTargetData, web_queue_data.QueueRuleData, web_queue_data.QueueRulesData))
 DIALOGS = BridgeContract(
     name='dialogs', interface='DialogsBridge',

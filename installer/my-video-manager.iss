@@ -22,6 +22,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 Uninstallable=yes
 UninstallDisplayIcon={app}\my-video-manager.exe
+SetupIconFile={#AppDirectory}\my_video_manager\app.ico
 OutputDir={#InstallerOutput}
 OutputBaseFilename=MyVideoManager-Setup-{#AppVersion}
 Compression=lzma2

@@ -87,13 +87,13 @@ def test_prepare_and_reuse_via_public_core_api(tmp_path, server):
     assert not list(ready.cuda_directories[0].rglob("*.h"))
     assert (ready.model_directory / "model.bin").read_bytes() == b"fake whisper"
     assert ready.model_directory.is_relative_to(tmp_path / "models")
-    assert {event.phase for event in events} == {"download", "verify", "extract", "ready"}
+    assert {event.phase for event in events} == {"probe", "download", "verify", "extract", "ready"}
     assert all(0 <= event.completed <= event.total for event in events)
     requests = server[0].requests[:]
     events.clear()
     assert core.prepare_subtitle_support(preparation=preparation(tmp_path, server), progress=events.append) == ready
     assert server[0].requests == requests
-    assert {event.phase for event in events} == {"reuse", "ready"}
+    assert {event.phase for event in events} == {"probe", "reuse", "ready"}
 
 
 def test_network_disconnect_keeps_partial_then_retry_cleans_it(tmp_path, server):
@@ -246,9 +246,13 @@ def test_matching_hf_cache_is_hashed_and_reused_without_model_download(tmp_path,
     cached = tmp_path / "models/models--Systran--faster-whisper-large-v3/snapshots/test-revision"
     cached.mkdir(parents=True)
     (cached / "model.bin").write_bytes(server[0].bodies["/model.bin"])
+    partial = tmp_path / 'models/large-v3/test-revision.partial'
+    partial.mkdir(parents=True)
+    (partial / 'model.bin.part').write_bytes(b'incomplete')
     events = []
     result = service.prepare(progress=events.append)
     assert result.model_directory == cached
+    assert not partial.exists()
     assert (cached / "ready.json").is_file()
     assert any(event.phase == "verify" and event.asset == "model.bin" for event in events)
     assert "/model.bin" not in server[0].requests

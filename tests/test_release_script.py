@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 
 import pytest
 
@@ -19,13 +20,19 @@ def git(repository, *arguments):
 
 
 @pytest.fixture
-def repository(tmp_path):
+def repository(request):
+    # Git의 receive-pack/PowerShell 5.1은 긴 pytest basetemp에서 MAX_PATH에 걸린다.
+    # 이 통합 테스트의 저장소만 짧고 독립적인 OS 임시 경로에 둔다.
+    temporary = tempfile.TemporaryDirectory(prefix='mvm-rel-')
+    request.addfinalizer(temporary.cleanup)
+    tmp_path = Path(temporary.name)
     repo = tmp_path / "release repo"
     repo.mkdir()
     git(repo, "init", "-b", "main")
     git(repo, "config", "user.name", "릴리스 검사")
     git(repo, "config", "user.email", "release-test@example.invalid")
     git(repo, "config", "commit.gpgsign", "false")
+    git(repo, "config", "core.longpaths", "true")
     git(repo, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
     (repo / "scripts").mkdir()
     shutil.copyfile(ROOT / "scripts/release.ps1", repo / "scripts/release.ps1")
@@ -38,6 +45,10 @@ if (-not $Version) {
 if ($env:RELEASE_TEST_DIRTY_BUILD -eq '1') {
     [IO.File]::WriteAllText((Join-Path (Get-Location) 'build-change.txt'), 'preserve me')
 }
+if ($env:RELEASE_TEST_HEAD_BUILD -eq '1') {
+    git commit --allow-empty -m '빌드 중 사용자 작업'
+    throw 'HEAD 변경 뒤 빌드 실패'
+}
 if ($env:RELEASE_TEST_BUILD_FAIL -eq '1') { throw '가짜 빌드 실패' }
 New-Item -ItemType Directory -Force dist/installer | Out-Null
 [IO.File]::WriteAllText((Join-Path (Get-Location) "dist/installer/MyVideoManager-Setup-$Version.exe"), $Version)
@@ -47,6 +58,7 @@ $global:LASTEXITCODE = 0
     git(repo, "commit", "-m", "첫 구현")
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "clone", "--bare", str(repo), str(remote)], check=True, capture_output=True)
+    git(remote, "config", "core.longpaths", "true")
     url = "https://github.com/release-tests/my-video-manager.git"
     git(repo, "remote", "add", "origin", url)
     # 원격 읽기와 실패 복구 시험의 push 모두 임시 bare 저장소로만 보낸다.
@@ -55,13 +67,15 @@ $global:LASTEXITCODE = 0
     return repo, remote
 
 
-def run_release(repository, *, build=False, status="404", build_fail=False, dry_run=True, dirty_build=False):
+def run_release(repository, *, build=False, status="404", build_fail=False, dry_run=True, dirty_build=False,
+                head_build=False, redirect=False):
     repo, _ = repository
     env = {**os.environ, "RELEASE_TEST_SCRIPT": str(repo / "scripts/release.ps1"),
            "RELEASE_TEST_STATUS": status, "RELEASE_TEST_BUILD": str(int(build)),
            "RELEASE_TEST_BUILD_FAIL": str(int(build_fail)),
            "RELEASE_TEST_DRY_RUN": str(int(dry_run)),
-           "RELEASE_TEST_DIRTY_BUILD": str(int(dirty_build))}
+           "RELEASE_TEST_DIRTY_BUILD": str(int(dirty_build)),
+           "RELEASE_TEST_HEAD_BUILD": str(int(head_build)), "RELEASE_TEST_REDIRECT": str(int(redirect))}
     # Python을 거쳐 상속된 PowerShell 7 모듈 경로로 5.1 기본 모듈이 가려지지 않게 한다.
     env = {key: value for key, value in env.items() if key.lower() != "psmodulepath"}
     # 함수가 실제 gh를 가린다. 발행 명령이 오면 즉시 실패하며 네트워크는 사용하지 않는다.
@@ -88,7 +102,11 @@ function global:gh {
     }
 }
 try {
-    & $env:RELEASE_TEST_SCRIPT -Version '0.2.0' -DryRun:($env:RELEASE_TEST_DRY_RUN -eq '1') -Build:($env:RELEASE_TEST_BUILD -eq '1')
+    if ($env:RELEASE_TEST_REDIRECT -eq '1') {
+        & $env:RELEASE_TEST_SCRIPT -Version '0.2.0' -DryRun:($env:RELEASE_TEST_DRY_RUN -eq '1') -Build:($env:RELEASE_TEST_BUILD -eq '1') *>&1 | ForEach-Object { Write-Output $_ }
+    } else {
+        & $env:RELEASE_TEST_SCRIPT -Version '0.2.0' -DryRun:($env:RELEASE_TEST_DRY_RUN -eq '1') -Build:($env:RELEASE_TEST_BUILD -eq '1')
+    }
     $ResultCode = 0
 } catch { Write-Output $_; $ResultCode = 1 }
 Write-Output "RESTORED_ENCODING=$([Console]::OutputEncoding.CodePage)"
@@ -231,7 +249,9 @@ def test_build_changes_are_preserved_with_exact_recovery_commands(repository):
     assert git(repo, "rev-parse", "HEAD") != before[0]
     assert git(remote, "show-ref") == before[3]
     assert "git stash push --include-untracked" in result.stdout
-    assert f"git reset --keep {before[0]}" in result.stdout
+    assert f"git log --oneline {before[0]}..HEAD" in result.stdout
+    assert 'git revert' in result.stdout
+    assert f"git reset --keep {before[0]}" not in result.stdout
 
 
 def test_release_failure_preserves_pushed_refs_and_prints_manual_completion(repository):
@@ -248,3 +268,25 @@ def test_release_failure_preserves_pushed_refs_and_prints_manual_completion(repo
     assert "--notes-file" in result.stdout
     assert "gh release upload v0.2.0" in result.stdout
     assert git(repo, "status", "--porcelain") == ""
+
+
+def test_head_change_preserves_user_commit_and_never_suggests_reset(repository):
+    repo, remote = repository
+    before = snapshot(repository)
+    result = run_release(repository, dry_run=False, head_build=True)
+    assert result.returncode != 0
+    assert git(repo, 'log', '-1', '--format=%s') == '빌드 중 사용자 작업'
+    assert git(repo, 'rev-list', '--count', f'{before[0]}..HEAD') == '2'
+    assert git(remote, 'show-ref') == before[3]
+    assert 'git revert' in result.stdout
+    assert 'git reset --keep' not in result.stdout
+
+
+def test_redirected_git_stderr_warning_does_not_leave_index_lock(repository):
+    repo, _ = repository
+    git(repo, 'config', 'core.autocrlf', 'true')
+    before = snapshot(repository)
+    result = run_release(repository, dry_run=False, build_fail=True, redirect=True)
+    assert result.returncode != 0
+    assert snapshot(repository) == before
+    assert not (repo / '.git/index.lock').exists()

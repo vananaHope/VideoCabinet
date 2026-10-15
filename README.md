@@ -71,41 +71,54 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 직렬 실행은 `-n auto`를 빼고 `.venv/Scripts/python -m pytest`로 실행합니다.
 건너뛴 테스트와 이유까지 비교하려면 직렬·병렬 명령에 각각 `-rs`를 붙입니다.
 
-## 설치 파일 만들기 (앞부분, #62)
+## 설치 파일 만들기
 
-현재는 빌드 흐름과 사용자 단위 Inno Setup 스크립트까지 준비되어 있습니다.
-PyInstaller onedir 포장과 실행 파일의 받아쓰기 하위 명령은 #55 병합 뒤 구현합니다.
-이 단계의 출력은 실제 배포·설치 검증이 끝난 제품이 아닙니다.
-
-README의 환경 준비를 마친 뒤 [Inno Setup 6.3 이상](https://jrsoftware.org/isdl.php)을 설치합니다.
+README의 환경 준비를 마친 뒤 빌드 extra와 [Inno Setup 6.5.4](https://jrsoftware.org/files/is6.5-whatsnew.htm)를 설치합니다.
+Inno Setup 6.5.4는 2025-09-24 공개된 고정 버전입니다.
 `ISCC.exe`를 PATH에 넣거나 `-InnoCompiler '설치 경로/ISCC.exe'`로 지정할 수 있습니다.
-준비된 실행 폴더를 대상으로 다음 명령을 실행합니다.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -SkipPyInstaller -AppDirectory dist/my-video-manager
+.venv/Scripts/python -m pip install -e '.[build]'
+winget install --id JRSoftware.InnoSetup --version 6.5.4 --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 ```
 
-웹 빌드 → 생성 검사 → PyInstaller 건너뛰기 → Inno Setup 순서입니다.
+웹 빌드 → 생성 검사 → PyInstaller 6.16.0 onedir → Inno Setup 순서입니다.
 버전은 `pyproject.toml`에서 읽고 `dist/installer/MyVideoManager-Setup-<version>.exe`로 만듭니다.
-컴파일 시험만 할 때는 별도 `.local/installer-smoke/` 폴더에 빈 `my-video-manager.exe`를 놓고
-`-AppDirectory .local/installer-smoke -OutputDirectory .local/installer-output`을 지정하세요.
-더미 파일로 만든 설치 프로그램은 실행 가능한 앱이 아닙니다.
+실행 폴더는 `dist/my-video-manager/`이며 웹·디자인 토큰·아이콘·Qt WebEngine 리소스와 로캘,
+libmpv·FFmpeg·ffprobe를 포함합니다. CUDA·Whisper 모델은 넣지 않습니다.
+`-Version 0.2.0`은 소스를 바꾸지 않고 설치 파일과 앱 표시 버전을 함께 지정합니다(Release DryRun용).
+이미 만든 실행 폴더로 설치 파일만 다시 만들 때는 `-SkipPyInstaller -AppDirectory <실행 폴더>`를 사용합니다.
+
+## 설치해서 쓰기
 
 설치 위치는 사용자별 `%LOCALAPPDATA%/Programs/MyVideoManager`이고 관리자 권한을 요구하지 않습니다.
 시작 메뉴 바로가기와 제거 프로그램을 등록하며 바탕화면 바로가기는 선택입니다.
+Release에서 받은 설치 파일을 실행한 뒤 시작 메뉴의 **My Video Manager**로 엽니다.
+코드 서명을 하지 않아 Windows SmartScreen 경고가 표시될 수 있습니다.
+Python·Node·7-Zip은 설치판 실행에 필요하지 않습니다. 번역 CLI와 NVIDIA 드라이버는 사용자가 설치합니다.
 동봉 FFmpeg·ffprobe는 실행 파일 옆 `ffmpeg/`, libmpv는 `mpv/`에서 찾습니다.
 소스 실행의 PATH/WinGet FFmpeg와 `.runtime/mpv` 검색은 유지됩니다.
 데이터 폴더(`~/.my-video-manager`, `--data-dir`)는 설치·제거 대상에 포함하지 않습니다.
+업데이트·제거 전에는 트레이에서 **완전 종료**하세요. 새 판을 같은 위치에 덮어쓰거나
+제거한 뒤 다시 설치해도 라이브러리·시청 기록·하이라이트·키 배치와 받은 모델은 남습니다.
+설정의 **일반**에 현재 버전과 브라우저로 여는 GitHub Release 링크가 있습니다.
+
+첫 자동 자막 요청 때 **자막 기능 준비**가 웹 화면 위에 나타납니다. GPU 확인 뒤 CUDA와
+Whisper large-v3를 내려받고 검증합니다. 진행률·취소·다시 시도를 제공하며,
+실패·취소하면 대기열을 보존하고 명시적으로 다시 시도할 때까지 기다립니다.
+네트워크 무응답 중 취소는 최대 10초, GPU 탐지 취소는 약 0.1초 간격으로 확인합니다.
+준비가 끝난 뒤 재설치해도 완료 파일을 재사용하며 다시 내려받지 않습니다.
 
 ### 자막 기능 준비 API
 
-화면 연결은 후속 작업입니다. 작업자 스레드에서
+작업자 스레드에서
 `AppCore.prepare_subtitle_support(cancellation=Event(), progress=callback)`을 호출하면
 CUDA와 Whisper large-v3를 같은 흐름에서 준비합니다.
 독립 어댑터 `SubtitlePreparation(data_directory, adapter=RuntimeDownloadAdapter(), gpu_available=...)`도
 사용할 수 있으며 `prepare()`가 CUDA 디렉터리들과 모델 경로를 반환합니다.
 콜백은 `PreparationProgress(phase, asset, completed, total)`을 받습니다.
-download/verify/extract는 파일별 바이트, reuse/ready는 완료 개수입니다.
+download/verify/extract는 파일별 바이트, reuse/ready는 완료 개수, probe는 GPU 확인입니다.
 취소 토큰은 청크마다 검사하며 네트워크 무응답 제한 시간은 10초입니다.
 **진행률 콜백은 예외를 던지지 않아야 합니다.** 화면 갱신 실패 등 콜백 내부의 오류는 호출자가 처리합니다.
 
@@ -114,7 +127,7 @@ download/verify/extract는 파일별 바이트, reuse/ready는 완료 개수입�
 NVIDIA 드라이버는 사용자가 설치해야 합니다.
 다운로드·해시 검증·추출과 공간 검사는 어댑터에서 주입할 수 있습니다.
 GPU 감지는 최대 15초의 별도 Python 자식(`transcription --probe-cuda`)에서 실행하므로 앱 프로세스에
-`ctranslate2`를 올리지 않습니다. 설치 실행 파일의 탐지 하위 명령 연결은 #62 마무리에서 합니다.
+`ctranslate2`를 올리지 않습니다. 설치판은 같은 실행 파일의 `transcription --probe-cuda`를 사용합니다.
 frozen 받아쓰기 자식은 `prepared()`로 완료 결과만 읽고, 없으면 `preparation_required`로 바로 실패합니다.
 준비 다운로드는 명시적인 `prepare_subtitle_support()` 흐름에서만 실행합니다.
 
@@ -126,6 +139,11 @@ CUDA는 `data_directory/runtime/cuda/<wheel-sha256>/`에 DLL만,
 고정 파일 전체의 크기와 SHA-256을 한 번 확인해 `ready.json`을 만들고 그 경로를 그대로 재사용합니다.
 맞지 않는 HF 캐시는 보존하고 앱 전용 폴더에 다시 받습니다.
 반쯤 받은 `.part`와 추출 중 `.partial` 폴더는 다음 시도에서 지웁니다.
+HF 캐시를 재사용할 때도 현재 revision의 앱 전용 `.partial`은 먼저 정리합니다.
+이전 버전의 완료 런타임·모델은 실행 중인 DLL과 구버전으로 되돌리기를 보호하기 위해 자동 삭제하지 않습니다.
+고정 버전을 바꾼 뒤 새 판 받아쓰기까지 확인했다면, 모든 앱을 완전히 종료하고
+`runtime/cuda/<이전 wheel-sha256>`와 `models/large-v3/<이전 revision>` 및 이전 `.partial`만 수동으로 지울 수 있습니다.
+현재 해시·revision은 `runtime_assets.py`가 원본입니다. 공유 Hugging Face 캐시는 자동으로 정리하지 않습니다.
 완료 표시와 파일 크기가 맞으면 다시 받지 않으며, 같은 데이터 폴더의 준비 작업은 프로세스 사이에서도 직렬화합니다.
 소스 받아쓰기는 기존 `.venv` CUDA와 Hugging Face 모델 캐시를 계속 사용합니다.
 
@@ -138,16 +156,13 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
 `scripts/release.ps1`은 로컬 릴리스용입니다. Git for Windows, GitHub CLI의 `gh auth login`,
 README의 빌드 환경이 필요합니다. `main`에서만 실행하며 작업 트리가 깨끗하고 `main`,
 `origin/main`, 실제 원격 main이 모두 같아야 합니다. 기존 로컬/원격 태그나 GitHub Release가 있으면 멈춥니다.
-현재는 PyInstaller 포장이 후속 범위이므로 실제 릴리스는 #62 마무리 이후에 실행합니다.
-`-DryRun -Build`도 PyInstaller가 연결되기 전까지는 실패합니다. 빌드 뼈대만 확인하려면
-`scripts/build.ps1 -SkipPyInstaller -AppDirectory <준비한 실행 폴더>`를 직접 실행하세요.
 
 ```powershell
 # 검사와 계획 출력만: 버전·커밋·태그·원격·원격 추적 ref를 바꾸지 않음
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0 -DryRun
 # 위 동작에 빌드 추가: pyproject.toml 수정 없이 -Version을 build.ps1에 전달
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0 -DryRun -Build
-# 실제 릴리스 (#62 마무리 뒤)
+# 실제 릴리스
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0
 ```
 
@@ -161,6 +176,9 @@ powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0
 다른 파일 변경이나 불확실한 원격 상태가 있으면 보존하고 복구 명령을 안내합니다.
 push 뒤 Release 생성이 실패하면 원격 main과 태그를 유지하며 Release 확인·생성·자산 추가 명령을 안내합니다.
 자동 재발행하지 않으므로 안내에 따라 상태를 확인하세요.
+Ctrl+C로 빌드를 중단하면 PowerShell이 실패 복구 catch를 건너뛸 수 있습니다.
+`git status`와 `git log --oneline`으로 확인하고, 보존할 작업을 저장한 뒤 이번 버전 커밋만
+`git revert <버전 커밋>`으로 되돌리세요. 다른 작업 이후의 HEAD를 시작 커밋으로 reset하지 마세요.
 `-DryRun -Build`의 빌드 산출물은 Git에서 제외된 폴더에 남으며 tracked 파일과 커밋은 그대로입니다.
 
 ## 외부 자막 (#66)
@@ -1037,10 +1055,14 @@ OS가 자동화 키를 전달하지 않는 환경에서는 이 검사가 실패�
 - `subtitles.py`: 영속 자막 대기열, 원어·원어 자막 저장, 받아쓰기 Protocol과 SRT 변환.
 - `subtitle_queue.py`: 자동 자막 규칙, 요청 순서·앞당기기와 영상별 대기열 상태.
 - `transcription.py`: 별도 프로세스의 faster-whisper large-v3 GPU 어댑터.
+- `cuda_runtime.py`: 첫 자막 요청의 CUDA·Whisper 다운로드, 해시 검증, 취소와 완료 파일 재사용.
 - `windows_job.py`: 앱 종료 시 받아쓰기 프로세스 트리를 정리하는 Windows Job 어댑터.
 - `subtitle_controls.py`: 웹 자막 요청 진입, 백그라운드 처리, 완료된 자막의 플레이어 연결.
 - `translation.py`: 번역 자막과 줄별 참조, 묶음 진행 저장·원자적 교체, 보류·재시도, 재생 중 언어 선택.
 - `translation_cli.py`: 읽기 전용 구독 CLI 어댑터, 구조화 응답 검증과 오류 판정 순수 함수.
+- `opencode_go.py`: OpenCode Go 연결과 번역 요청 어댑터.
+- `secret_store.py`: Windows 사용자별 DPAPI로 비밀 값을 암호화해 데이터 폴더에 보관.
+- `translation_models.py`: 번역 모델 목록과 모델 선택 계약.
 - `translation_controls.py`: 번역 작업자와 웹 CLI 선택·재시도 진입.
 - `review.py`: 원어·번역 검수, 구간 재생성·보호와 SRT 내보내기.
 - `key_bindings.py`: 명령 목록·키 정규화·충돌 검사와 키 배치 변경분 저장.
