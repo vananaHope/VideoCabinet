@@ -265,4 +265,3 @@ with tempfile.TemporaryDirectory(prefix='mvm-73-ui-') as temporary:
         window.deleteLater()
         app.processEvents()
         settle(300)
-
