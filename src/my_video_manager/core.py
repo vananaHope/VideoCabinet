@@ -27,7 +27,7 @@ from .review import Review, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
 from .statistics import StatisticsReader, VideoViewingStatistics, ViewingStatistics
 from .statistics import StatisticsDashboard
-from .external_subtitles import ExternalSubtitleFile
+from .external_subtitles import ExternalSubtitleFile, ExternalSubtitleFileSummary
 
 
 class CommandType(str, Enum):
@@ -593,6 +593,10 @@ class AppCore:
     def external_subtitles(self, video_id: int) -> tuple[ExternalSubtitleFile, ...]:
         """영상 옆에서 가져온 파일의 언어별 줄과 읽기 경고를 반환한다."""
         return self._library.external_subtitles.files(video_id)
+
+    def external_subtitle_summaries(self, video_id: int) -> tuple[ExternalSubtitleFileSummary, ...]:
+        """상세 화면에서 쓸 파일 이름·언어·줄 수·경고를 반환한다."""
+        return self._library.external_subtitles.summaries(video_id)
 
     def reconnect_video(self, video_id: int, path: Path) -> None:
         self._library.reconnect_video(video_id, path)

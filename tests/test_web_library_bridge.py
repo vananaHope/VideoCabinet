@@ -64,6 +64,35 @@ def test_slots_serialize_core_data_filter_and_selection(bridge):
     assert 'error' in json.loads(bridge.details(999999))
 
 
+def test_details_include_external_tracks_partial_success_and_failure(bridge, monkeypatch):
+    bridge, page, app = bridge
+    core = page.core
+    video = core.videos()[0]
+    path = video.locations[0].path
+    assert json.loads(bridge.details(video.id))['externalSubtitles'] == []
+    path.with_suffix('.smi').write_text(
+        '<SYNC Start=1000><P Class=KRCC>한국어<P Class=ENCC>English', encoding='utf-8')
+    path.with_suffix('.srt').write_text(
+        '1\n00:00:01,000 --> 00:00:02,000\n부분 성공\n\n깨진 블록', encoding='utf-8')
+    path.with_suffix('.broken.vtt').write_bytes(b'\xff\xfeX')
+    core.scan()
+    monkeypatch.setattr(core, 'external_subtitles', lambda *_: pytest.fail('본문 조회는 불필요'))
+    data = json.loads(bridge.details(video.id))
+    files = {file['name']: file for file in data['externalSubtitles']}
+    assert len(files) == 3
+    tracks = files[path.with_suffix('.smi').name]['subtitles']
+    assert [(s['language'], s['languageLabel'], s['lineCount']) for s in tracks] == [
+        ('ko', '한국어', 1), ('en', '영어', 1)]
+    partial = files[path.with_suffix('.srt').name]
+    assert partial['warning'] == '외부 자막: 1개 블록을 건너뜀'
+    assert partial['subtitles'][0]['languageLabel'] == '언어 모름'
+    assert partial['subtitles'][0]['lineCount'] == 1
+    failure = files[path.with_suffix('.broken.vtt').name]
+    assert failure['warning'] and failure['subtitles'] == []
+    assert str(path.parent) not in json.dumps(data)
+    assert data['original_lines'] == data['translated_lines'] == 0
+
+
 def test_action_rejects_arbitrary_methods_and_missing_ids(bridge):
     bridge, page, app = bridge
     video_id = page.selected_id

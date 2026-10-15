@@ -4,6 +4,8 @@ from dataclasses import asdict
 from typing import TypedDict
 from urllib.parse import urlsplit
 
+from .web_external_subtitle_data import language_label
+
 
 class TagData(TypedDict):
     id: int
@@ -43,6 +45,20 @@ class GemData(TypedDict):
     reason: str
 
 
+class ExternalSubtitleTrackData(TypedDict):
+    language: str | None
+    languageLabel: str
+    languageClass: str
+    lineCount: int
+
+
+class ExternalSubtitleFileData(TypedDict):
+    id: int
+    name: str
+    warning: str | None
+    subtitles: list[ExternalSubtitleTrackData]
+
+
 class DetailsData(TypedDict):
     has_transcript: bool
     spoken_language: str | None
@@ -51,6 +67,7 @@ class DetailsData(TypedDict):
     subtitle_state: str | None
     translation_state: str | None
     highlight_count: int
+    externalSubtitles: list[ExternalSubtitleFileData]
 
 
 class LibraryData(TypedDict):
@@ -101,8 +118,13 @@ def filter_ids(videos: list[VideoData], query: str, tag_id: int | None) -> list[
             and (tag_id is None or any(t['id'] == tag_id for t in v['tags']))]
 
 
-def details_data(details) -> DetailsData:
-    return DetailsData(**asdict(details))
+def details_data(details, external_subtitles=()) -> DetailsData:
+    return DetailsData(**asdict(details), externalSubtitles=[ExternalSubtitleFileData(
+        id=file.id, name=file.name, warning=file.warning,
+        subtitles=[ExternalSubtitleTrackData(language=track.language,
+            languageLabel=language_label(track.language), languageClass=track.language_class,
+            lineCount=track.line_count) for track in file.subtitles],
+    ) for file in external_subtitles])
 
 
 def thumbnail_video_id(url: str) -> int | None:

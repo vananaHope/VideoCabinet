@@ -3,6 +3,7 @@ from typing import TypedDict
 
 from .search import SOURCE_LABELS
 from .search_matching import match_spans
+from .web_external_subtitle_data import language_label
 
 
 class SearchTextData(TypedDict):
@@ -14,6 +15,8 @@ class SearchResultData(TypedDict):
     videoId: int
     title: list[SearchTextData]
     source: str
+    language: str | None
+    languageLabel: str | None
     text: list[SearchTextData]
     start: float | None
     missing: bool
@@ -42,4 +45,6 @@ def matched_parts(text, query) -> list[SearchTextData]:
 def result_data(result, query) -> SearchResultData:
     return dict(videoId=result.video_id, title=matched_parts(result.title, query),
                 source=SOURCE_LABELS[result.source], text=matched_parts(result.text, query),
+                language=result.language,
+                languageLabel=language_label(result.language) if result.source == 'external' else None,
                 start=result.start, missing=result.missing)

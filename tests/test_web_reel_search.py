@@ -209,6 +209,38 @@ def test_search_scene_return_keeps_query_results_selection_and_playlist(window_f
     assert snapshot(page) == expected
 
 
+@pytest.mark.parametrize('suffix,language,label', [('.ko.srt', 'ko', '한국어'), ('.srt', None, '언어 모름')])
+def test_external_search_scene_language_and_return(window_factory, core, suffix, language, label):
+    video = core.videos()[0]
+    video.locations[0].path.with_suffix(suffix).write_text(
+        '1\n00:00:12,125 --> 00:00:15,000\n외부 장면', encoding='utf-8')
+    core.scan()
+    core.prepare_search()
+    window = window_factory()
+    window.player_factory = Player
+    window.show_search()
+    page = window.web_host.controllers['search']
+    page.bridge.find('외부장면')
+    expected = snapshot(page)
+    result, = expected['results']
+    assert (result['source'], result['language'], result['languageLabel']) == ('외부 자막', language, label)
+    assert [p['text'] for p in result['text'] if p['matched']] == ['외부 장면']
+    assert json.loads(page.bridge.play(0)) == {'ok': True}
+    QApplication.processEvents()
+    assert core.playback.position == 12.125
+    window.back_to_list()
+    assert window.web_host.active_tab == 'search'
+    assert snapshot(page) == expected
+
+
+@pytest.mark.parametrize('source', ['transcript', 'translation'])
+def test_original_and_translation_results_do_not_gain_language_chip(source):
+    from my_video_manager.web_search_data import result_data
+
+    result = result_data(SearchResult(1, '영상', source, '자막', 1, False), '자막')
+    assert result['languageLabel'] is None
+
+
 def test_search_preparing_empty_no_results_limit_and_missing(window_factory, core, monkeypatch):
     core.prepare_search()
     window = window_factory()

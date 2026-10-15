@@ -45,7 +45,8 @@ class LibraryBridge(QObject):
         try:
             if video_id not in self.page.video_ids:
                 raise ValueError('현재 라이브러리에 없는 영상입니다.')
-            return encode(details_data(self.page.core.library_details(video_id)))
+            return encode(details_data(self.page.core.library_details(video_id),
+                                       self.page.core.external_subtitle_summaries(video_id)))
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
 
