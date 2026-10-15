@@ -37,6 +37,7 @@ class QueueCountData(TypedDict):
 
 
 class QueueDeltaData(TypedDict):
+    canRetryFailed: bool
     rows: list[QueueRowData]
     removed: list[int]
     order: list[int] | None

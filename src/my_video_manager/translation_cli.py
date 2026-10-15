@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
-from tempfile import TemporaryDirectory
+from uuid import uuid4
 from threading import Event
 import time
 
@@ -127,8 +127,9 @@ class SubscriptionCLITranslator:
                 raise TranslationError("missing_cli", f"{cli} 실행 파일을 PATH에서 찾을 수 없습니다.")
             command = (executable,)
         self.directory.mkdir(parents=True, exist_ok=True)
-        with TemporaryDirectory(prefix=f"{cli}-", dir=self.directory) as temporary:
-            directory = Path(temporary)
+        directory = self.directory / f"{cli}-{uuid4().hex}"
+        directory.mkdir()
+        try:
             schema = translation_schema(lines)
             response = directory / "response.json"
             if cli == "codex":
@@ -177,6 +178,8 @@ class SubscriptionCLITranslator:
                 except (ValueError, TypeError, KeyError, AttributeError) as error:
                     raise TranslationError("format", f"claude 응답 형식: {error}") from error
             return parse_translation_response(output, lines, spoken_language=spoken_language)
+        finally:
+            shutil.rmtree(directory)
 
     def _run(self, arguments, directory, prompt, cancellation):
         job, process = None, None

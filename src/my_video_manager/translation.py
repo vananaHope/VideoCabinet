@@ -545,6 +545,7 @@ class Translations:
             raise TranslationError('missing_cli', '번역 어댑터가 설정되지 않았습니다.')
         ceiling = self._batch_size or provider(cli).batch_size
         progress = self._batch_progress.setdefault((queue_id, cli), BatchProgress(ceiling))
+        positions = {line.id: i for i, line in enumerate(transcript.lines)}
         attempt = 0
         while True:
             if cancellation.is_set():
@@ -556,6 +557,18 @@ class Translations:
             if not current:
                 raise TranslationCancelled
             lines = remaining[:progress.size]
+            # 떨어진 각 구간에 적어도 가장 가까운 앞 줄 하나를 줄 수 있게
+            # 맥락 예산을 넘는 구간은 다음 호출로 넘긴다. 연속 묶음 크기는 유지한다.
+            groups = 0
+            previous = -1
+            for offset, line in enumerate(lines):
+                index = positions[line.id]
+                if index > previous + 1:
+                    groups += 1
+                if groups > CONTEXT_LIMIT:
+                    lines = lines[:offset]
+                    break
+                previous = index
             with self._connect() as db:
                 context = self._context(db, transcript, lines, queue_id)
             try:

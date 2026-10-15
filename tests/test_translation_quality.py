@@ -454,3 +454,61 @@ def test_go_transport_format_errors_retry_three_times_without_shrinking(quality,
     result = core.process_next_translation()
     assert result.state == 'failed'
     assert calls == [100, 100, 100]
+
+
+@pytest.mark.parametrize('term,text,used', [
+    ('민수', '민수는 왔다', True), ('太郎', '太郎が来た', True),
+    ('小明', '今天小明来了', True), ('Dr.', 'Dr. Smith', True),
+    ('Al', 'Alright', False), ('Al', 'Hello Al!', True),
+    ('Dr.', 'OtherDr. Smith', False), ('Al', 'Pal Alright', False),
+])
+def test_glossary_recency_respects_term_edges(term, text, used):
+    entries = (GlossaryEntry(term, '이름'), GlossaryEntry('unused', '미사용'))
+    result = Glossary(entries).updated((TranscriptLine('x', 0, 1, text),))
+    assert result.entries[-1].source == (term if used else 'unused')
+
+
+@pytest.mark.parametrize('language', ['en', 'ko'])
+def test_sparse_context_batches_cover_every_target_and_resume(quality, language):
+    create, adapter, _ = quality
+    core = create(1500)
+    video = core.videos()[0].id
+    transcript = source(core, video, language)
+    core.remove_from_subtitle_queue(video)
+    indices = list(range(20, 1450, 12))
+    targets = [transcript.lines[i].id for i in indices]
+    core.request_translation(video, line_ids=targets)
+    first = core.process_next_translation()
+    assert first.completed_lines == 100
+    assert [line.id for line in adapter.calls[-1][0]] == targets[:100]
+    assert {line.id for line in adapter.calls[-1][1]['context']} == {
+        transcript.lines[i - 1].id for i in indices[:100]}
+    # 진행 저장 뒤 같은 요청을 이어가며 앞 묶음을 다시 보내지 않는다.
+    core.process_next_translation()
+    lines, kwargs = adapter.calls[-1]
+    assert [line.id for line in lines] == targets[100:]
+    assert len(kwargs['context']) <= 100
+    assert {transcript.lines[i - 1].id for i in indices[100:]}.issubset(
+        {line.id for line in kwargs['context']})
+    assert core.translation_ready() is False
+
+
+@pytest.mark.parametrize('mode', ['cancel', 'regenerate'])
+def test_sparse_split_discards_cancelled_or_replaced_response(quality, mode):
+    create, adapter, _ = quality
+    core = create(1500)
+    video = core.videos()[0].id
+    transcript = source(core, video)
+    core.remove_from_subtitle_queue(video)
+    core.request_translation(video, line_ids=[line.id for line in transcript.lines[20:1450:12]])
+    def action(lines, kwargs):
+        assert len(lines) == 100
+        if mode == 'cancel':
+            core.stop_translation_processing()
+        else:
+            core.request_subtitles(video)
+    adapter.action = action
+    core.process_next_translation()
+    assert len(adapter.calls) == 1
+    assert core.translation(video) is None
+    assert all(entry.completed_lines == 0 for entry in core.translation_queue())
