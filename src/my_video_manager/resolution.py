@@ -29,12 +29,17 @@ class ResolutionBackfill:
             return ResolutionResult(None, 'retry')
         try:
             return self._step(cancellation)
+        except sqlite3.OperationalError as error:
+            if 'locked' not in str(error).lower() and 'busy' not in str(error).lower():
+                raise
+            return ResolutionResult(None, 'retry', str(error))
         finally:
             self._lock.release()
 
     def _step(self, cancellation):
         started = perf_counter()
         with self._connect() as db:
+            db.execute('PRAGMA busy_timeout=50')
             row = db.execute('SELECT id, fingerprint FROM videos WHERE resolution_checked=0 ORDER BY id LIMIT 1').fetchone()
             if row is None:
                 return ResolutionResult(None, 'exhausted')

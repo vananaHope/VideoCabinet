@@ -5,6 +5,7 @@ import os
 import shutil
 import sqlite3
 from threading import Event, Thread
+from time import perf_counter
 import zipfile
 
 import pytest
@@ -174,13 +175,15 @@ def test_probe_failure_finishes_once_and_scan_retries_without_losing_location(tm
     assert not core.videos()[0].missing
 
 
-def test_busy_database_yields_and_retries(tmp_path):
+@pytest.mark.parametrize('lock', ['IMMEDIATE', 'EXCLUSIVE'])
+def test_busy_database_yields_and_retries(tmp_path, lock):
     core = legacy(tmp_path, 1)
     with closing(sqlite3.connect(core.database)) as db:
-        db.execute('BEGIN IMMEDIATE')
+        db.execute(f'BEGIN {lock}')
+        started = perf_counter()
         result = core.fill_next_resolution(cancellation=Event())
         assert result.state == 'retry'
-        assert result.write_seconds < 0.5
+        assert perf_counter() - started < 0.5
         db.rollback()
     assert core.fill_next_resolution(cancellation=Event()).state == 'completed'
 
