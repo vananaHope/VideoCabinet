@@ -423,6 +423,10 @@ try:
             js(f'window.dialogProbe({json.dumps(kind)})')
             settle()
             assert dialogs.web_modal == expected, kind
+            if kind == 'confirm':
+                window.showFullScreen()
+                settle()
+                assert not window.fullscreen_settings_shortcut.isEnabled()
             if expected:
                 js("window.probeKeys = []; document.addEventListener('keydown', e => window.probeKeys.push(e.key), {capture:true})")
                 QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
@@ -433,6 +437,10 @@ try:
                 assert '2' in keys and 's' in keys.lower(), keys
             js("window.dialogProbe('close')")
             wait(lambda: not dialogs.web_modal)
+            if kind == 'confirm':
+                assert window.fullscreen_settings_shortcut.isEnabled()
+                window.showNormal()
+                settle()
         metrics['checks'].append('실제 ConfirmDialog·modal Dialog 차단 / nonmodal Dialog·Popover 허용 / 키 이벤트 전달')
 
         if args.offscreen:

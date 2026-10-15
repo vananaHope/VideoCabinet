@@ -797,6 +797,9 @@ dict의 중복 키가 조용히 덮어써질 수 있으므로 계약 파일에 u
 숨겨진 경우에는 같은 웹 뷰를 메인 창 소유의 window-modal `QDialog`에 잠시 옮깁니다.
 mpv는 계속 재생하며 검수 장면 이동도 가능합니다. 닫으면 뷰를 원래 레이아웃에 돌려놓고
 페이지 상태를 복원하며, 재생 중이면 `PlaybackPage.focus_content()`를 호출합니다.
+React가 보고한 콘텐츠 크기로 컨테이너를 맞추고 메인 창 크기를 넘지 않습니다.
+숨은 페이지의 레이아웃 크기는 고정해 가상화 격자의 재측정·스크롤 이동을 막습니다.
+셸이 다시 보이면 열린 대화상자를 유지한 채 뷰를 즉시 셸로 돌려놓습니다.
 추가 `QWebEngineView`, 프로필, 페이지를 만들지 않습니다.
 
 `ShellModals`는 페이지 구현을 수정하지 않고 열린 `dialog`·`alertdialog`를 감지해
@@ -805,6 +808,8 @@ Esc·Tab·Enter는 해당 모달이 처리합니다. 탐색·재생 진입·웹 
 `highlight-range`는 웹 구간 표시와 Qt 재생 진행 막대가 함께 쓰는 의미 색 토큰입니다.
 
 검사는 독립 합성 데이터만 만들며 사용자 라이브러리를 변경하지 않습니다.
+생성한 임시 영상·DB는 종료 시 정리합니다. 공용 모달 검사는 `frontend/checks/`에서
+실제 Radix Dialog·Popover와 `ConfirmDialog`를 별도로 빌드해 사용하며 제품 번들에는 포함하지 않습니다.
 
 ```powershell
 .venv/Scripts/python scripts/check_web_dialogs.py --offscreen --mode qt

@@ -335,6 +335,7 @@ def test_review_export_keeps_confirmed_snapshot_and_native_save(review_window, m
     def check():
         result = act(dialogs, 'export-translation')
         assert '미번역' in result['confirmation']
+        assert result['confirm_title'] == '자막 검수' and not result['confirm_destructive']
         finish(core)
         act(dialogs, 'confirm')
         QTest.qWait(30)
@@ -353,6 +354,7 @@ def test_subtitle_entry_warns_before_replacing_reviewed_lines(review_window):
     def check():
         warning = act(dialogs, 'save', choice='ja')
         assert '1줄' in warning['confirmation']
+        assert warning['confirm_title'] == '원어 자막 다시 생성' and warning['confirm_destructive']
         act(dialogs, 'cancel-confirm')
         assert core.subtitle_queue() == before
         act(dialogs, 'save', choice='ja')
