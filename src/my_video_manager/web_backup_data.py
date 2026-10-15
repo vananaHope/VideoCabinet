@@ -8,6 +8,7 @@ class BackupMetadataData(TypedDict):
     created_at: str
     video_count: int
     includes_thumbnails: bool
+    version_message: str
 
 
 class AutomaticBackupData(TypedDict):

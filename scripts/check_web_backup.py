@@ -335,8 +335,9 @@ try:
         with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(old_archive), '')):
             assert button('백업 파일 선택')
             finished()
-        assert 'DB 버전은 2입니다' in content('[aria-label="백업 미리보기"]')
-        assert '현재 DB 버전 3으로 올린 뒤 복원' in content('[aria-label="백업 미리보기"]')
+        assert 'DB 버전 2입니다' in content('[aria-label="백업 미리보기"]')
+        assert '현재 버전 3에 맞춰 바꾼 뒤 복원' in content('[aria-label="백업 미리보기"]')
+        assert '복원 전 지금 라이브러리는 자동 백업으로 남습니다' in content('[aria-label="백업 미리보기"]')
         capture('backup-v2-preview')
         assert button('이 백업으로 복원 예약')
         wait(lambda: host.dialogs.blocks_shell_actions)
@@ -346,6 +347,19 @@ try:
         assert button('예약 취소')
         finished()
         checks.append('DB v2 백업의 v3 이전 안내·복원 예약·취소')
+        with closing(sqlite3.connect(old_database)) as future:
+            future.execute('PRAGMA user_version=4')
+        future_archive = create_backup(old_database, workspace / 'future.zip').path
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(future_archive), '')):
+            assert button('백업 파일 선택')
+            finished()
+        assert '더 최신 DB 버전' in content('[aria-label="백업 설정"] [role=alert]')
+        assert '업데이트' in content('[aria-label="백업 설정"] [role=alert]')
+        assert not backup_state()['preview']
+        assert not button('이 백업으로 복원 예약')
+        assert not core.pending_backup_restore()
+        capture('backup-newer-rejected')
+        checks.append('새 DB 버전 백업의 업데이트 안내와 복원 예약 차단')
         for index in range(5):
             automatic = create_automatic_backup(core.database, reason='before_migration' if index % 2 else 'before_restore')
         with zipfile.ZipFile(automatic.path) as bundle:

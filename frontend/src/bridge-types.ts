@@ -597,6 +597,7 @@ export interface BackupMetadataData {
   created_at: string
   video_count: number
   includes_thumbnails: boolean
+  version_message: string
 }
 
 export interface AutomaticBackupData {

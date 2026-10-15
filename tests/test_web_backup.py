@@ -66,6 +66,7 @@ def test_native_pickers_preview_schedule_cancel_keep_current_records(window_fact
     result = action(bridge, 'choose')
     assert result['preview']['video_count'] == len(before)
     assert result['preview']['db_version'] == LIBRARY_DB_VERSION
+    assert result['preview']['version_message'] == f'현재 DB 버전 {LIBRARY_DB_VERSION}과 같은 버전의 백업입니다.'
     assert result['preview']['created_at'] and result['preview']['app_version']
     assert saved[0][1] == '백업 만들기' and opened[0][1] == '백업 복원 파일 선택'
     assert Path(saved[0][2]).parent == Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation))
@@ -104,6 +105,9 @@ def test_v2_migration_backup_is_listed_previewed_and_scheduled_in_v3(window_fact
     assert result['automatic'][0]['reason'] == 'DB 버전 올리기 전'
     result = action(bridge, 'preview', str(saved))
     assert result['preview']['db_version'] == 2
+    assert result['preview']['version_message'] == (
+        '이 백업은 DB 버전 2입니다. 다시 시작하면 현재 버전 3에 맞춰 바꾼 뒤 복원합니다. '
+        '복원 전 지금 라이브러리는 자동 백업으로 남습니다.')
     assert result['preview']['video_count'] == len(upgraded.videos())
     before = upgraded.videos()
     assert action(bridge, 'schedule')['pending']
@@ -190,6 +194,27 @@ def test_changed_preview_and_invalid_zip_cannot_schedule(window_factory, core, t
     result = action(bridge, 'choose')
     assert result['failure'] and result['preview'] is None and not result['busy']
     assert action(bridge, 'schedule')['failure'] and not core.backup_inventory().pending
+
+
+def test_newer_backup_clears_preview_and_blocks_schedule_with_update_guidance(window_factory, core, tmp_path, monkeypatch):
+    from contextlib import closing
+    from my_video_manager.backup import create_backup
+
+    current = core.create_backup(tmp_path / 'current.zip').path
+    future_db = tmp_path / 'future.sqlite3'
+    with closing(sqlite3.connect(core.database)) as source, closing(sqlite3.connect(future_db)) as target:
+        source.backup(target)
+        target.execute(f'PRAGMA user_version={LIBRARY_DB_VERSION + 1}')
+    future = create_backup(future_db, tmp_path / 'future.zip').path
+    bridge = bridge_for(window_factory())
+    monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *args: (str(current), ''))
+    assert action(bridge, 'choose')['preview']
+    monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *args: (str(future), ''))
+    result = action(bridge, 'choose')
+    assert '더 최신 DB 버전' in result['failure'] and '업데이트' in result['failure']
+    assert result['preview'] is None and not result['previewPath']
+    assert action(bridge, 'schedule')['failure']
+    assert core.pending_backup_restore() is None
 
 
 def test_preview_discard_and_auto_backup_picker(window_factory, core):

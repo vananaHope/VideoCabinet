@@ -158,7 +158,16 @@ class BackupControls(QObject):
             name = self.state['operation']
             result, inventory, warning = worker.result
             if name in ('choose', 'preview'):
-                self.state.update(preview=asdict(result), previewPath=str(self.preview_path))
+                current_version = self.state['dbVersion']
+                # inspect_backup가 더 최신 버전은 거부하므로 검증된 미리보기만 안내한다.
+                if result.db_version < current_version:
+                    version_message = (f'이 백업은 DB 버전 {result.db_version}입니다. 다시 시작하면 '
+                                       f'현재 버전 {current_version}에 맞춰 바꾼 뒤 복원합니다. '
+                                       '복원 전 지금 라이브러리는 자동 백업으로 남습니다.')
+                else:
+                    version_message = f'현재 DB 버전 {current_version}과 같은 버전의 백업입니다.'
+                self.state.update(preview=dict(asdict(result), version_message=version_message),
+                                  previewPath=str(self.preview_path))
             elif name == 'create':
                 self.state['message'] = '백업을 만들었습니다: ' + str(result.path)
             elif name == 'schedule':

@@ -353,6 +353,25 @@ def test_revalidates_pending_request_at_startup(core, tmp_path):
     assert core.automatic_backups() == ()
 
 
+def test_newer_database_backup_rejects_preview_and_schedule_preserving_pending(core, tmp_path):
+    from my_video_manager.library import LIBRARY_DB_VERSION
+
+    current = core.create_backup(tmp_path / 'current.zip').path
+    core.request_backup_restore(current)
+    pending_before = core.pending_backup_restore()
+    before = core.database.read_bytes()
+    future_db = tmp_path / 'future.sqlite3'
+    with closing(sqlite3.connect(core.database)) as source, closing(sqlite3.connect(future_db)) as target:
+        source.backup(target)
+        target.execute(f'PRAGMA user_version={LIBRARY_DB_VERSION + 1}')
+    future = create_backup(future_db, tmp_path / 'future.zip').path
+    for operation in (core.inspect_backup, core.request_backup_restore):
+        with pytest.raises(BackupError, match='더 최신 DB 버전.*업데이트'):
+            operation(future)
+    assert core.database.read_bytes() == before
+    assert core.pending_backup_restore() == pending_before
+
+
 def test_cancel_backup_restore_and_require_correct_instance_ownership(core, tmp_path):
     archive = tmp_path / "backup.zip"
     core.create_backup(archive)

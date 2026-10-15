@@ -88,9 +88,7 @@ export function BackupSettings({ bridge, active }: { bridge: SettingsBridge; act
     {data.preview && <section aria-label="백업 미리보기" className="space-y-3 rounded-xl border bg-card p-4">
       <h3 tabIndex={-1} data-backup-preview className="font-semibold">백업 미리보기</h3><p className="break-all text-xs text-muted-foreground">{data.previewPath}</p>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm"><div><dt className="text-muted-foreground">만든 시각</dt><dd>{date(data.preview.created_at)}</dd></div><div><dt className="text-muted-foreground">영상 수</dt><dd>{data.preview.video_count.toLocaleString()}개</dd></div><div><dt className="text-muted-foreground">앱 / DB 버전</dt><dd>{data.preview.app_version} / {data.preview.db_version}</dd></div><div><dt className="text-muted-foreground">썸네일</dt><dd>{data.preview.includes_thumbnails ? '포함' : '제외'}</dd></div></dl>
-      <p role="status" className="text-sm text-muted-foreground">{data.preview.db_version < data.dbVersion
-        ? `이 백업의 DB 버전은 ${data.preview.db_version}입니다. 다시 시작하면 현재 DB 버전 ${data.dbVersion}으로 올린 뒤 복원합니다.`
-        : `현재 DB 버전 ${data.dbVersion}과 같은 버전의 백업입니다.`}</p>
+      <p role="status" className="text-sm text-muted-foreground">{data.preview.version_message}</p>
       <div className="flex gap-2"><Button ref={confirmTrigger} variant="destructive" disabled={busy} onClick={() => setConfirm(true)}>이 백업으로 복원 예약</Button><Button variant="outline" disabled={busy} onClick={() => void action('discard')}>선택 취소</Button></div>
     </section>}
     <section className="space-y-3 rounded-xl border bg-card p-4" aria-label="자동 백업">
