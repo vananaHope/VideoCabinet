@@ -95,6 +95,12 @@ class LibrarySnapshot:
 
 
 class AppCore:
+    def prepare_subtitle_support(self, *, cancellation=None, progress=None, preparation=None):
+        """작업자 스레드용 자막 준비 API. 화면 연결은 설치판 마무리에서 한다."""
+        from .cuda_runtime import SubtitlePreparation
+        service = preparation if preparation is not None else SubtitlePreparation(self.database.parent)
+        return service.prepare(cancellation=cancellation, progress=progress)
+
     def __init__(
         self,
         *,

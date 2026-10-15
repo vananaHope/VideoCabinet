@@ -47,6 +47,60 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 
 테스트는 `tests/conftest.py`가 `--disable-gpu`를 기본으로 켜며, 사용자가 지정한 `QTWEBENGINE_CHROMIUM_FLAGS` 값은 유지합니다.
 
+## 설치 파일 만들기 (앞부분, #62)
+
+현재는 빌드 흐름과 사용자 단위 Inno Setup 스크립트까지 준비되어 있습니다.
+PyInstaller onedir 포장과 실행 파일의 받아쓰기 하위 명령은 #55 병합 뒤 구현합니다.
+이 단계의 출력은 실제 배포·설치 검증이 끝난 제품이 아닙니다.
+
+README의 환경 준비를 마친 뒤 [Inno Setup 6](https://jrsoftware.org/isdl.php)을 설치합니다.
+`ISCC.exe`를 PATH에 넣거나 `-InnoCompiler '설치 경로/ISCC.exe'`로 지정할 수 있습니다.
+준비된 실행 폴더를 대상으로 다음 명령을 실행합니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -SkipPyInstaller -AppDirectory dist/my-video-manager
+```
+
+웹 빌드 → 생성 검사 → PyInstaller 건너뛰기 → Inno Setup 순서입니다.
+버전은 `pyproject.toml`에서 읽고 `dist/installer/MyVideoManager-Setup-<version>.exe`로 만듭니다.
+컴파일 시험만 할 때는 별도 `.local/installer-smoke/` 폴더에 빈 `my-video-manager.exe`를 놓고
+`-AppDirectory .local/installer-smoke -OutputDirectory .local/installer-output`을 지정하세요.
+더미 파일로 만든 설치 프로그램은 실행 가능한 앱이 아닙니다.
+
+설치 위치는 사용자별 `%LOCALAPPDATA%/Programs/MyVideoManager`이고 관리자 권한을 요구하지 않습니다.
+시작 메뉴 바로가기와 제거 프로그램을 등록하며 바탕화면 바로가기는 선택입니다.
+동봉 FFmpeg·ffprobe는 실행 파일 옆 `ffmpeg/`, libmpv는 `mpv/`에서 찾습니다.
+소스 실행의 PATH/WinGet FFmpeg와 `.runtime/mpv` 검색은 유지됩니다.
+데이터 폴더(`~/.my-video-manager`, `--data-dir`)는 설치·제거 대상에 포함하지 않습니다.
+
+### 자막 기능 준비 API
+
+화면 연결은 후속 작업입니다. 작업자 스레드에서
+`AppCore.prepare_subtitle_support(cancellation=Event(), progress=callback)`을 호출하면
+CUDA와 Whisper large-v3를 같은 흐름에서 준비합니다.
+독립 어댑터 `SubtitlePreparation(data_directory, adapter=RuntimeDownloadAdapter(), gpu_available=...)`도
+사용할 수 있으며 `prepare()`가 CUDA 디렉터리들과 모델 경로를 반환합니다.
+콜백은 `PreparationProgress(phase, asset, completed, total)`을 받습니다.
+download/verify/extract는 파일별 바이트, reuse/ready는 완료 개수입니다.
+취소 토큰은 청크마다 검사하며 네트워크 무응답 제한 시간은 10초입니다.
+
+`PreparationError.kind`는 `gpu_unavailable`, `network`, `hash_mismatch`, `disk_full`,
+`cancelled`, `invalid_archive`, `storage`를 구별하고 한국어 안내와 별도 `detail`을 제공합니다.
+NVIDIA 드라이버는 사용자가 설치해야 합니다.
+다운로드·해시 검증·추출과 공간 검사는 어댑터에서 주입할 수 있습니다.
+
+CUDA 버전은 기존 `cuda` extra와 같고 Windows x64 공식 PyPI 휠 URL·SHA-256은
+`runtime_assets.py`에 고정했습니다. Whisper도 같은 파일의 revision과 SHA-256으로 검증합니다.
+CUDA는 `data_directory/runtime/cuda/<wheel-sha256>/`에 DLL만,
+모델은 기존 `data_directory/models/` 아래 `large-v3/<revision>/`에 둡니다.
+반쯤 받은 `.part`와 추출 중 `.partial` 폴더는 다음 시도에서 지웁니다.
+완료 표시와 파일 크기가 맞으면 다시 받지 않으며, 같은 데이터 폴더의 준비 작업은 프로세스 사이에서도 직렬화합니다.
+소스 받아쓰기는 기존 `.venv` CUDA와 Hugging Face 모델 캐시를 계속 사용합니다.
+
+공식 CUDA 휠 실측(2026-10-15): cuBLAS 567,544,208바이트 / DLL 788,719,104바이트,
+cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
+모델 파일과 다운로드·추출 중 임시 공간은 별도로 필요합니다.
+
 ## 실행과 사용
 
 ```powershell

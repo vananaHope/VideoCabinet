@@ -14,6 +14,10 @@ from .media import parse_ffprobe_result
 
 
 def executable(name: str) -> str:
+    if getattr(sys, "frozen", False) and name in ("ffmpeg", "ffprobe"):
+        bundled = Path(sys.executable).resolve().parent / "ffmpeg" / f"{name}.exe"
+        if bundled.is_file():
+            return str(bundled)
     found = shutil.which(name)
     if found:
         return found
@@ -54,7 +58,8 @@ class FFmpegMediaReader:
 @lru_cache(maxsize=1)
 def _prepare_mpv_runtime():
     if sys.platform == "win32":
-        runtime = Path(__file__).resolve().parents[2] / ".runtime/mpv"
+        runtime = (Path(sys.executable).resolve().parent / "mpv" if getattr(sys, "frozen", False)
+                   else Path(__file__).resolve().parents[2] / ".runtime/mpv")
         if runtime.is_dir():
             # python-mpv의 ctypes.find_library 검색에는 PATH도 필요하다.
             # 캐시에 DLL 핸들을 보관해 등록을 유지하고, 프로세스당 한 번만 설정한다.

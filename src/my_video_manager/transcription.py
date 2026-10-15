@@ -13,18 +13,25 @@ from threading import Event
 from .subtitles import TranscriberCancelled, TranscriberError, TranscriberResult, TranscriptSegment
 
 
-@lru_cache(maxsize=1)
-def prepare_cuda_runtime():
+@lru_cache(maxsize=None)
+def prepare_cuda_runtime(data_directory: Path | None = None):
     if sys.platform != "win32":
         return ()
-    # NVIDIA 공식 Windows wheels의 DLL을 이 프로세스에서만 등록한다.
+    # 등록 핸들은 프로세스가 끝날 때까지 보관한다. 소스는 .venv 경로를 유지한다.
     from importlib.metadata import distribution
 
     paths = []
-    for package in ("nvidia-cublas-cu12", "nvidia-cudnn-cu12"):
-        dist = distribution(package)
-        paths.extend({Path(dist.locate_file(file)).parent for file in dist.files
-                      if str(file).endswith(".dll")})
+    if getattr(sys, "frozen", False):
+        from .core import default_data_directory
+        from .cuda_runtime import cuda_runtime_directories
+        paths.extend(cuda_runtime_directories(data_directory if data_directory is not None else default_data_directory()))
+        if len(paths) != 2:
+            raise RuntimeError("CUDA 런타임 준비가 필요합니다.")
+    else:
+        for package in ("nvidia-cublas-cu12", "nvidia-cudnn-cu12"):
+            dist = distribution(package)
+            paths.extend(sorted({Path(dist.locate_file(file)).parent for file in dist.files
+                                 if str(file).endswith(".dll")}))
     os.environ["PATH"] = os.pathsep.join(map(str, paths)) + os.pathsep + os.environ.get("PATH", "")
     return tuple(os.add_dll_directory(str(path)) for path in paths)
 
@@ -100,8 +107,16 @@ class FasterWhisperTranscriber:
 
 def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | None, *,
                       progress=None, start: float = 0, duration: float | None = None) -> TranscriberResult:
+    prepared = None
+    if getattr(sys, "frozen", False):
+        from .cuda_runtime import PreparationError, SubtitlePreparation
+        try:
+            prepared = SubtitlePreparation(model_directory.parent).prepare()
+        except PreparationError as error:
+            kind = "gpu_unavailable" if error.kind == "gpu_unavailable" else "model_download"
+            raise TranscriberError(kind, f"{error.kind}: {error}") from error
     try:
-        prepare_cuda_runtime()
+        prepare_cuda_runtime(model_directory.parent)
         import ctranslate2
         from faster_whisper import WhisperModel
         from faster_whisper.audio import decode_audio
@@ -126,7 +141,8 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
     except Exception as error:
         raise TranscriberError("decode", str(error)) from error
     try:
-        model_path = download_model("large-v3", cache_dir=str(model_directory))
+        model_path = (str(prepared.model_directory) if prepared else
+                      download_model("large-v3", cache_dir=str(model_directory)))
     except Exception as error:
         raise TranscriberError("model_download", str(error)) from error
     try:
