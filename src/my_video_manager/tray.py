@@ -45,7 +45,10 @@ class TrayControls(QObject):
 
     def show_queue(self):
         self.open()
-        self.window.navigate(QUEUE_PAGE_INDEX)
+        if getattr(self.window, 'web_host', None) is not None:
+            self.window.navigate_web_tab('queue')
+        else:
+            self.window.navigate(QUEUE_PAGE_INDEX)
 
     def notify_completion(self):
         counts = self.core.take_subtitle_queue_completion()

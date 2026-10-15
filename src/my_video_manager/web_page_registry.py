@@ -1,12 +1,14 @@
 """앱의 웹 페이지 조립 지점. 호스트는 구체적인 페이지 모듈을 알지 못한다."""
 
 from .web_library_page import WebLibraryPage
+from .web_queue_page import WebQueuePage
 from .web_statistics_page import WebStatisticsPage
 from .web_shell import WebShellHost
 
 
 WEB_PAGES = (
     WebLibraryPage,
+    WebQueuePage,
     WebStatisticsPage,
 )
 # 기존 Qt 페이지의 고정 번호표. 웹 페이지를 추가할 때는 이 표를 수정하지 않는다.

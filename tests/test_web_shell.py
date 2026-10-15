@@ -63,6 +63,7 @@ def test_actual_qt_public_slots_and_signals_match_generator_contract(window_fact
                for i in range(meta.methodOffset(), meta.methodCount())}
     assert set(methods) == set(contract.slots) | set(contract.signals)
     names = {str: 'QString', int: 'int'}
+    names[bool] = 'bool'
     for name, arguments in contract.slots.items():
         method = methods[name]
         assert method.methodType() == QMetaMethod.MethodType.Slot
