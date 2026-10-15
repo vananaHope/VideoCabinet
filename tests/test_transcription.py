@@ -22,7 +22,9 @@ def adapter(tmp_path, script):
 
 
 def wait_file(path):
-    deadline = time.monotonic() + 10
+    # 낮은 우선순위의 자식 준비는 xdist 부하에서 늦을 수 있다.
+    # 준비만 기다리며 취소 후 프로세스 종료 제한은 별도로 유지한다.
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if path.exists() and path.stat().st_size:
             return path.read_text()
