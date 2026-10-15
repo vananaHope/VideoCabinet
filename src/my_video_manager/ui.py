@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         self.refresh()
         from .resolution_controls import ResolutionControls
         self.resolutions = ResolutionControls(self)
+        self.thumbnails = ResolutionControls(self, kind='thumbnail')
 
     def page_changed(self, _index):
         page = self.pages.currentWidget()

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { Sparkles } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { NativeSelect } from "@/components/ui/native-select"
+import { LibraryChoice, LibraryFilters, LibraryFilterChips } from "@/components/library-filters"
+import { LibraryFolders } from "@/components/library-folders"
 import { Button } from "@/components/ui/button"
 import { GemCard } from "@/components/gem-card"
 import { VideoMenu } from "@/components/video-menu"
@@ -9,7 +10,7 @@ import { LibraryGrid, openKeyboardMenu } from "@/components/library-grid"
 import type { HighlightSnapshot } from "@/components/highlight-panel"
 import { DetailPanel } from "@/components/detail-panel"
 import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
-import type { LibraryData, DetailsData, HighlightData } from "@/bridge-types"
+import type { LibraryData, DetailsData, HighlightData, LibraryViewOptions } from "@/bridge-types"
 
 export default function LibraryPage() {
   const [bridge, setBridge] = useState<LibraryBridge | null>(null)
@@ -20,8 +21,7 @@ export default function LibraryPage() {
   const detailVideo = useRef<number | null>(null)
   const highlightReturn = useRef(false)
   const gemRow = useRef<HTMLDivElement>(null)
-  const [query, setQuery] = useState("")
-  const [tag, setTag] = useState(0)
+  const optionsRef = useRef<LibraryViewOptions | null>(null)
   const [error, setError] = useState("")
   const [gemId, setGemId] = useState<number | null>(null)
   const [detailRevision, setDetailRevision] = useState(0)
@@ -36,7 +36,7 @@ export default function LibraryPage() {
     let disconnect = () => {}
     connectBridge().then(async ({ library: api, shell }) => {
       if (disposed) return
-      const changed = (json: string) => { setData(JSON.parse(json)); setDetailRevision(n => n + 1) }
+      const changed = (json: string) => { const next: LibraryData = JSON.parse(json); optionsRef.current = next.options; setData(next); setDetailRevision(n => n + 1) }
       const detailsChanged = () => setDetailRevision(n => n + 1)
       const shellChanged = (json: string) => {
         if (JSON.parse(json).tab !== 'library' && !savedScroll.current) {
@@ -77,6 +77,7 @@ export default function LibraryPage() {
       const initial = await getSnapshot(api)
       if (disposed) return
       setBridge(api)
+      optionsRef.current = initial.options
       setData(initial)
     }).catch(showError)
     return () => { disposed = true; disconnect() }
@@ -109,7 +110,6 @@ export default function LibraryPage() {
   const visible = useMemo(() => data?.visibleIds.flatMap(id => byId.get(id) ?? []) ?? [], [data?.visibleIds, byId])
   const gems = data?.gems ?? []
   const activeGem = gems.some(g => g.videoId === gemId) ? gemId : gems[0]?.videoId
-  const activeTag = data?.tags.some(t => t.id === tag) ? tag : 0
   useEffect(() => {
     const row = gemRow.current
     if (!row) return
@@ -123,12 +123,18 @@ export default function LibraryPage() {
     return () => row.removeEventListener("wheel", wheel)
   }, [gems.length])
 
-  function filter(text: string, tagId: number) {
-    if (!bridge) return
+  function filter(patch: Partial<LibraryViewOptions>) {
+    if (!bridge || !optionsRef.current) return
+    const previous = optionsRef.current
+    const next = { ...previous, ...patch }
+    optionsRef.current = next
+    setData(data => data && { ...data, options: next })
     const revision = ++filterRevision.current
-    request<Pick<LibraryData, "visibleIds" | "selectedId">>(reply => bridge.filter(text, tagId, reply)).then(result => {
-      if (revision === filterRevision.current) setData(previous => previous && { ...previous, ...result })
-    }).catch(showError)
+    request<Pick<LibraryData, "visibleIds" | "selectedId" | "options" | "chips">>(reply => bridge.view(JSON.stringify(next), reply)).then(result => {
+      if (revision === filterRevision.current) { optionsRef.current = result.options; setData(data => data && { ...data, ...result }) }
+    }).catch(error => {
+      if (revision === filterRevision.current) { optionsRef.current = previous; setData(data => data && { ...data, options: previous }); showError(error) }
+    })
   }
   function select(id: number) {
     if (!bridge) return
@@ -198,17 +204,22 @@ export default function LibraryPage() {
   }
 
   return <main aria-label="라이브러리" className="flex h-full flex-col gap-2 p-2">
-    <div className="flex items-center gap-3">
-      <div className="min-w-0 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목으로 빠른 검색" value={query}
-        onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter(event.currentTarget.value, activeTag) }}
-        onChange={event => { setQuery(event.target.value); if (!composing.current) filter(event.target.value, activeTag) }} /></div>
-      <label className="flex items-center gap-2 text-xs text-muted-foreground">태그
-        <NativeSelect aria-label="라이브러리 태그 필터" value={activeTag} onChange={event => { const value = Number(event.target.value); setTag(value); filter(query, value) }}>
-          <option value={0}>모든 태그</option>{data?.tags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
-        </NativeSelect>
-      </label>
-      <p aria-label="라이브러리 등록·표시 개수" className="shrink-0 text-xs text-muted-foreground">등록 영상 {data?.videos.length ?? 0}개 · 표시 {data?.visibleIds.length ?? 0}개</p>
-    </div>
+    {data && <>
+      <div className="flex shrink-0 items-center justify-between gap-3">
+        <LibraryChoice name="mode" label="보기" options={data.options} onChange={filter} />
+        <LibraryChoice name="card_size" label="카드 크기" options={data.options} onChange={filter} />
+        <LibraryChoice name="sort" label="정렬" options={data.options} onChange={filter} />
+        <Button size="sm" variant="outline" aria-label="정렬 방향" onClick={() => filter({ descending: !data.options.descending })}>{data.options.descending ? "내림차순 ↓" : "오름차순 ↑"}</Button>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        <div className="min-w-0 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목으로 빠른 검색" value={data.options.query}
+          onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter({ query: event.currentTarget.value }) }}
+          onChange={event => { const query = event.target.value; if (!composing.current) filter({ query }); else { optionsRef.current = { ...data.options, query }; setData({ ...data, options: { ...data.options, query } }) } }} /></div>
+        <LibraryFilters options={data.options} tags={data.tags} onChange={filter} />
+        <p aria-label="라이브러리 등록·표시 개수" className="shrink-0 text-xs text-muted-foreground">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
+      </div>
+      <LibraryFilterChips options={data.options} chips={data.chips} onChange={filter} />
+    </>}
     {error && <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-destructive p-3 text-destructive"><span>{error}</span><Button variant="outline" size="sm" onClick={() => setError("")}>닫기</Button></div>}
     <section aria-label="숨겨진 보석" className="flex shrink-0 flex-col gap-1">
       <div className="flex items-center gap-2"><Sparkles className="size-4 text-primary-text" aria-hidden="true" /><h2 className="text-sm font-semibold">숨겨진 보석 · {gems.length}개</h2><span className="text-xs text-muted-foreground">{data?.gemError ? `불러오지 못했어요: ${data.gemError}` : gems.length ? "←/→ 선택 · Enter 재생 · Backspace 관심 없음" : "지금은 추천할 영상이 없어요"}</span></div>
@@ -220,7 +231,8 @@ export default function LibraryPage() {
       </div>}
     </section>
     <div className="flex min-h-0 flex-1 gap-2">
-      <LibraryGrid videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} />
+      {data?.options.mode === 'folders' && <LibraryFolders folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
+      <LibraryGrid cardSize={data?.options.card_size ?? 'medium'} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} />
       <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} />
     </div>
   </main>

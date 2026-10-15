@@ -52,7 +52,7 @@ def test_snapshot_preserves_core_status_tags_and_json_without_file_paths(core):
     assert video['abandoned'] and video['resumePoint'] == 40
     assert video['stoppedPercent'] == 40
     assert video['tags'] == [{'id': tag.id, 'name': '강의'}]
-    assert video['thumbnail'] == f'mvm-thumb://video/{first.id}'
+    assert video['thumbnail'] == f'mvm-thumb://video/{first.id}?v=640'
     assert video['viewingCount'] == 1
     assert video['watchedSeconds'] == 40
     assert video['lastViewedAt'] == core.video_viewing_statistics()[first.id].last_viewed_at
@@ -90,6 +90,8 @@ def test_thumbnail_url_rejects_paths_and_non_ids(url):
 
 
 def test_thumbnail_url_accepts_only_positive_id():
+    assert thumbnail_video_id('mvm-thumb://video/123?v=640') == 123
+    assert thumbnail_video_id('mvm-thumb://video/123?v=640&path=secret') is None
     assert thumbnail_video_id('mvm-thumb://video/123') == 123
     assert thumbnail_video_id('mvm-thumb://video/123/') is None
 

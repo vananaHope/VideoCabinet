@@ -20,7 +20,7 @@ export function viewing(video: VideoData) {
   return video.missing ? "파일 없음" : video.finished ? "다 봄" : video.abandoned ? `보다 만 ${Math.round(video.stoppedPercent ?? 0)}%` : "아직 안 봄"
 }
 const thumbnailVariants = cva("relative flex w-full shrink-0 items-center justify-center overflow-hidden bg-muted", {
-  variants: { variant: { default: "aspect-video", card: "h-14", gem: "h-16", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
+  variants: { variant: { default: "aspect-video", card: "h-24", medium: "h-36", large: "h-48", gem: "h-16", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
 })
 export function Thumbnail({ video, variant }: { video: VideoData } & VariantProps<typeof thumbnailVariants>) {
   return <div className={thumbnailVariants({ variant })}>
@@ -29,7 +29,7 @@ export function Thumbnail({ video, variant }: { video: VideoData } & VariantProp
   </div>
 }
 
-type Props = Omit<ComponentProps<"button">, "className"> & VariantProps<typeof cardVariants> & { video: VideoData }
+type Props = Omit<ComponentProps<"button">, "className"> & VariantProps<typeof cardVariants> & { video: VideoData; cardSize?: string }
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" })
 function lastViewed(value: string | null) {
   return value ? dateFormatter.format(new Date(value)) : "기록 없음"
@@ -41,9 +41,9 @@ function VideoStatistics({ video }: { video: VideoData }) {
     <span className="flex min-w-0 flex-col"><span className="truncate text-muted-foreground" title={glanceOnly ? "틀어보기는 시청 횟수·시간에 넣지 않습니다" : undefined}>{glanceOnly ? "마지막 틀어보기" : "마지막 시청"}</span><span className="truncate tabular-nums" title={lastViewed(video.lastViewedAt)}>{lastViewed(video.lastViewedAt)}</span></span>
   </span>
 }
-export function VideoCard({ video, variant, ...props }: Props) {
+export function VideoCard({ video, variant, cardSize = "medium", ...props }: Props) {
   return <button {...props} className={cardVariants({ variant })} title={video.title}>
-    <Thumbnail video={video} variant="card" />
+    <Thumbnail video={video} variant={cardSize === "large" ? "large" : cardSize === "small" ? "card" : "medium"} />
     <div className="flex min-h-0 w-full flex-1 flex-col gap-0.5 p-2">
       <span className="shrink-0 truncate leading-5 font-medium">{video.title}</span>
       <span className="flex flex-wrap items-center gap-1">

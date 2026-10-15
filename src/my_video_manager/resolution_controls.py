@@ -21,14 +21,17 @@ class _PauseOnPlayback:
 
 
 class ResolutionControls(QObject):
-    def __init__(self, window):
+    def __init__(self, window, *, kind='resolution'):
         super().__init__(window)
         self.window, self.core = window, window.core
         self.future = None
         self.closed = False
         self.changed = False
+        self.kind = kind
+        self.label = '썸네일' if kind == 'thumbnail' else '해상도'
+        self.completed_ids = set()
         self.cancellation = Event()
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='resolution')
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=kind)
         cancellation, executor = self.cancellation, self.executor
         self.destroyed.connect(lambda: (cancellation.set(), executor.shutdown(wait=False)))
         self.core.playback.subscribe(_PauseOnPlayback(cancellation))
@@ -62,15 +65,17 @@ class ResolutionControls(QObject):
             try:
                 result = self.future.result()
             except Exception as error:
-                self.window.show_status(f'해상도 채우기 실패: {error} · 다시 검사하면 재시도합니다.')
+                self.window.show_status(f'{self.label} 채우기 실패: {error} · 다시 검사하면 재시도합니다.')
                 self.refresh_statistics()
                 self.timer.stop()
                 return
             finally:
                 self.future = None
             if result.message and result.state == 'unknown':
-                self.window.show_status(f'해상도를 읽지 못했습니다: {result.message} · 다시 검사하면 재시도합니다.')
+                self.window.show_status(f'{self.label}을 읽지 못했습니다: {result.message} · 다시 검사하면 재시도합니다.')
             self.changed = self.changed or result.state == 'completed'
+            if result.state == 'completed':
+                self.completed_ids.add(result.video_id)
             if result.state == 'exhausted' or monotonic() - self.last_refresh >= 10:
                 self.refresh_statistics()
             if result.state == 'exhausted':
@@ -78,11 +83,16 @@ class ResolutionControls(QObject):
                 return
         if not busy:
             self.cancellation.clear()
-            self.future = self.executor.submit(self.core.fill_next_resolution, cancellation=self.cancellation)
+            step = self.core.fill_next_thumbnail if self.kind == 'thumbnail' else self.core.fill_next_resolution
+            self.future = self.executor.submit(step, cancellation=self.cancellation)
 
     def refresh_statistics(self):
         if self.changed:
-            self.window.web_host.controllers['statistics'].refresh()
+            if self.kind == 'thumbnail':
+                self.window.library_page.refresh_thumbnails(self.completed_ids)
+            else:
+                self.window.web_host.controllers['statistics'].refresh()
+            self.completed_ids.clear()
             self.changed = False
             self.last_refresh = monotonic()
 

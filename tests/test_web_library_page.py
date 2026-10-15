@@ -83,6 +83,44 @@ def test_focus_request_survives_until_frontend_ready(window_factory):
     assert targets == ['grid']
 
 
+def test_view_channel_composes_filters_persists_and_refreshes_presence(window_factory, core):
+    from my_video_manager.library_views import default_options
+    window = window_factory()
+    page = window.library_page
+    video = core.videos()[0]
+    tag = core.add_video_tag(video.id, '고른 태그')
+    page.refresh()
+    options = {**default_options(), 'mode': 'folders', 'folder': 'direct', 'tags': [tag.id],
+               'card_size': 'large', 'sort': 'added', 'descending': True}
+    result = json.loads(page.bridge.view(json.dumps(options)))
+    assert result['visibleIds'] == [video.id]
+    assert result['chips'] == [{'key': f'tag:{tag.id}', 'label': tag.name}]
+    assert core.library_view_options() == options
+    assert 'error' in json.loads(page.bridge.view('{broken'))
+    assert 'error' in json.loads(page.bridge.view(json.dumps({'sort': 'invalid'})))
+    assert page.options == options
+    page.return_from_playback()
+    assert page.visible_ids == [video.id] and page.options == options
+    core.delete_tag(tag.id)
+    page.refresh()
+    assert page.options['tags'] == [] and len(page.visible_ids) == 3
+
+
+def test_subtitle_or_highlight_change_reapplies_current_filter(window_factory, core):
+    from my_video_manager.library_views import default_options
+    from my_video_manager.core import Command, CommandType
+    window = window_factory()
+    page = window.library_page
+    page.bridge.view(json.dumps({**default_options(), 'highlights': True}))
+    assert page.visible_ids == []
+    video = core.videos()[0]
+    core.playback.start(video.id, 5)
+    core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
+    core.playback.end()
+    page.refresh_details(video.id)
+    assert page.visible_ids == [video.id]
+
+
 
 
 def test_completed_subtitles_refresh_unselected_card_badge(window_factory, core):

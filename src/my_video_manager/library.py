@@ -271,7 +271,8 @@ class Library:
                            (str(path), *signature, info.duration if info else None, fingerprint))
             return self._not_added(path, "영상이 아닙니다(GIF 포함)." if info is None
                                    else f"최소 길이({minimum:g}초) 미만입니다.")
-        thumbnail = self._thumbnails / (fingerprint.split(":")[-1] + ".jpg")
+        from .thumbnails import THUMBNAIL_SUFFIX
+        thumbnail = self._thumbnails / (fingerprint.split(":")[-1] + THUMBNAIL_SUFFIX)
         if not existing:
             self._media.capture(path, thumbnail, min(10, info.duration / 10))
         self._check_unchanged(path, signature)

@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 
 from .web_external_subtitle_data import subtitle_file_data
 from .translation_kind import translation_task
+from .library_views import LibraryViewOptions, LibraryFolder, LibraryChip, matches_title_tags
 
 
 class TagData(TypedDict):
@@ -82,6 +83,9 @@ class LibraryData(TypedDict):
     visibleIds: list[int]
     selectedId: int | None
     scanning: bool
+    options: LibraryViewOptions
+    folders: list[LibraryFolder]
+    chips: list[LibraryChip]
 
 
 def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
@@ -94,7 +98,7 @@ def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
         result.append(VideoData(
             id=video.id, title=video.title, duration=video.duration,
             # 숫자 host는 Chromium이 IP로 정규화하므로 고정 host 아래에 ID를 둔다.
-            thumbnail=f"mvm-thumb://video/{video.id}" if video.thumbnail else None,
+            thumbnail=(f"mvm-thumb://video/{video.id}" + ('?v=640' if video.thumbnail.name.endswith('.640.jpg') else '')) if video.thumbnail else None,
             missing=video.missing, locationCount=len(video.locations),
             finished=status.finished, abandoned=status.abandoned, favorite=status.favorite,
             resumePoint=status.resume_point, stoppedPercent=status.stopped_percent,
@@ -118,8 +122,8 @@ def highlights_data(core, video_id) -> list[HighlightData]:
 
 def filter_ids(videos: list[VideoData], query: str, tag_id: int | None) -> list[int]:
     query = query.strip().casefold()
-    return [v['id'] for v in videos if query in v['title'].casefold()
-            and (tag_id is None or any(t['id'] == tag_id for t in v['tags']))]
+    return [v['id'] for v in videos if matches_title_tags(v['title'].casefold(),
+            {t['id'] for t in v['tags']}, query, {tag_id} if tag_id is not None else set())]
 
 
 def details_data(details, external_subtitles=()) -> DetailsData:
@@ -137,7 +141,7 @@ def thumbnail_video_id(url: str) -> int | None:
     identifier = parsed.path.removeprefix('/')
     if (parsed.scheme != 'mvm-thumb' or parsed.netloc != 'video'
             or len(identifier) > 10 or not identifier.isascii() or not identifier.isdecimal()
-            or parsed.query or parsed.fragment):
+            or parsed.query not in ('', 'v=640') or parsed.fragment):
         return None
     video_id = int(identifier)
     return video_id if 0 < video_id < 2**31 else None

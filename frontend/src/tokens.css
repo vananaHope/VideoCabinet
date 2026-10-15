@@ -33,6 +33,12 @@
   --grid-row-height: 15.5rem;
   --grid-card-width: 14rem;
   --dialog-list-max-height: 18rem;
+  --library-card-small: 14rem;
+  --library-card-medium: 19rem;
+  --library-card-large: 26rem;
+  --library-row-small: 18rem;
+  --library-row-medium: 21rem;
+  --library-row-large: 24rem;
 }
 @theme {
   --font-sans: "Malgun Gothic", sans-serif;

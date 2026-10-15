@@ -58,6 +58,42 @@ export interface GemData {
   reason: string
 }
 
+export interface LibraryViewOptions {
+  query: string
+  mode: string
+  folder: string
+  tags: Array<number>
+  viewing: string
+  original: string
+  translated: string
+  external: boolean
+  highlights: boolean
+  missing: boolean
+  added_preset: string
+  added_from: string
+  added_to: string
+  viewed_preset: string
+  viewed_from: string
+  viewed_to: string
+  sort: string
+  descending: boolean
+  card_size: string
+}
+
+export interface LibraryFolder {
+  id: string
+  parent: string
+  name: string
+  path: string
+  count: number
+  depth: number
+}
+
+export interface LibraryChip {
+  key: string
+  label: string
+}
+
 export interface ExternalSubtitleTrackData {
   language: string | null
   languageLabel: string
@@ -102,15 +138,20 @@ export interface LibraryData {
   visibleIds: Array<number>
   selectedId: number | null
   scanning: boolean
+  options: LibraryViewOptions
+  folders: Array<LibraryFolder>
+  chips: Array<LibraryChip>
 }
 
 export type Action = "play" | "tags" | "subtitles" | "review" | "series" | "rename" | "reconnect" | "exclude" | "playGem" | "dismiss"
 export const actions = [["play", "재생"], ["tags", "태그 편집"], ["subtitles", "자막 만들기 / 원어 지정"], ["review", "자막 검수 / SRT 내보내기"], ["series", "시리즈 편집"], ["rename", "제목 변경"], ["reconnect", "파일 다시 연결"], ["exclude", "제외"]] as const
 export const scanLockedActions: readonly Action[] = ["rename", "reconnect", "exclude"]
+export const libraryChoices = {"mode": [["all", "영상 전체"], ["folders", "폴더별"]], "viewing": [["", "모든 시청 상태"], ["unwatched", "안 봄"], ["abandoned", "보다 만"], ["finished", "다 봄"], ["favorite", "즐겨 보는 영상"]], "original": [["", "원어 자막 전체"], ["yes", "원어 자막 있음"], ["no", "원어 자막 없음"]], "translated": [["", "번역·다듬은 자막 전체"], ["yes", "번역·다듬은 자막 있음"], ["no", "번역·다듬은 자막 없음"]], "added_preset": [["", "추가일 전체"], ["today", "오늘"], ["7", "최근 7일"], ["30", "최근 30일"], ["custom", "직접 지정"]], "viewed_preset": [["", "마지막 시청 전체"], ["today", "오늘"], ["7", "최근 7일"], ["30", "최근 30일"], ["custom", "직접 지정"]], "sort": [["title", "제목"], ["added", "추가일"], ["viewed", "마지막 시청"], ["duration", "길이"], ["count", "시청 횟수"]], "card_size": [["small", "작게"], ["medium", "보통"], ["large", "크게"]]} as const
 export interface LibraryBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void
   filter: (query: string, tag: number, reply: Reply) => void
+  view: (options: string, reply: Reply) => void
   select: (id: number, reply: Reply) => void
   details: (id: number, reply: Reply) => void
   action: (name: Action, id: number, reply: Reply) => void
@@ -127,6 +168,7 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
     ready: raw.ready.bind(raw),
     snapshot: raw.snapshot.bind(raw),
     filter: raw.filter.bind(raw),
+    view: raw.view.bind(raw),
     select: raw.select.bind(raw),
     details: raw.details.bind(raw),
     action: raw.action.bind(raw),
