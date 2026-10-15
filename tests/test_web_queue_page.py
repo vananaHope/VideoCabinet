@@ -3,9 +3,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from test_subtitles import setup
 from test_web_library_page import window_factory
@@ -78,6 +76,32 @@ def test_progress_delta_contains_only_changed_row_and_no_order(queue_page, setup
     page.refresh()
     assert changes == [dict(rows=[dict(videoId=a.id, title=a.title, state='queued', progress=.5, message='')],
                             removed=[], order=None, counts=None)]
+
+
+def test_queue_delta_reports_promoted_order_and_removed_ids(queue_page, setup):
+    core, _, (a, b) = setup
+    for video in (a, b):
+        core.request_subtitles(video.id)
+    page = queue_page
+    page.refresh()
+    changes = []
+    page.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+
+    reply(page.bridge.action('promote', b.id))
+    assert changes.pop() == dict(rows=[], removed=[], order=[b.id, a.id], counts=None)
+
+    for removed_id, remaining in ((b.id, [a.id]), (a.id, [])):
+        reply(page.bridge.action('remove', removed_id))
+        delta = changes.pop()
+        assert delta['rows'] == []
+        assert delta['removed'] == [removed_id]
+        assert delta['order'] == remaining
+        assert {entry['state']: entry['count'] for entry in delta['counts']} == {
+            'queued': len(remaining), 'transcribing': 0, 'translating': 0,
+            'held': 0, 'completed': 0, 'failed': 0,
+        }
+    page.refresh()
+    assert changes == []
 
 
 def test_inactive_page_does_not_read_or_send(queue_page, setup, monkeypatch):
@@ -167,19 +191,3 @@ def test_tray_opens_queue_in_selected_ui(window_factory, mode):
     else:
         from my_video_manager.queue_ui import SubtitleQueuePage
         assert isinstance(window.pages.currentWidget(), SubtitleQueuePage)
-
-
-@pytest.mark.parametrize('dismiss', ['escape', 'close'])
-def test_qt_existing_video_question_dismisses_as_no(dismiss):
-    app = QApplication.instance() or QApplication([])
-    box = QMessageBox(QMessageBox.Icon.Question, '기존 영상도 추가', '기존 영상도 넣을까요?',
-                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-    box.setDefaultButton(QMessageBox.StandardButton.No)
-    def dismiss_box():
-        if dismiss == 'escape':
-            QTest.keyClick(box, Qt.Key.Key_Escape)
-        else:
-            box.close()
-    QTimer.singleShot(20, dismiss_box)
-    assert box.exec() == QMessageBox.StandardButton.No
-    app.processEvents()

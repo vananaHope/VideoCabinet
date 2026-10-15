@@ -67,8 +67,7 @@ export default function QueuePage() {
     {error && <p role="alert" className="shrink-0 text-sm text-destructive">{error}</p>}
     <section hidden={tab !== "status"} className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-center justify-between gap-4"><NativeSelect aria-label="대기열 상태 필터" value={filter} onChange={event => setFilter(event.target.value)}><option value="">모든 상태</option>{queueStates.map(([state, label]) => <option key={state} value={state}>{label}</option>)}</NativeSelect><p className="text-xs text-muted-foreground">↑ / ↓ 선택 · Tab 버튼 이동 · Space 실행</p></div>
-      <QueueList store={store} ids={ids} selected={active} onSelect={select} />
-      {!ids.length && <EmptyState title={meta.order.length ? "이 상태의 항목이 없습니다" : "자막 대기열이 비어 있습니다"} description={meta.order.length ? "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다." : "라이브러리 상세 패널의 '자막 만들기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요."} />}
+      <QueueList store={store} ids={ids} selected={active} onSelect={select} emptyState={<EmptyState variant="page" title={meta.order.length ? "이 상태의 항목이 없습니다" : "자막 대기열이 비어 있습니다"} description={meta.order.length ? "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다." : "라이브러리 상세 패널의 '자막 만들기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요."} />} />
       <p aria-label="상태별 개수" className="text-xs text-muted-foreground">{meta.counts.map(item => `${item.label} ${item.count}개`).join(" · ")}</p>
       <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={active === null || busy} onClick={() => action("promote")}>앞당기기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("remove")}>빼기</Button><Button disabled={!bridge || busy} onClick={() => action("retryFailed")}>실패 항목 모두 재시도</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("retryHeld")}>선택한 번역 보류 재시도</Button></div>
       {message && <p role="status" className="max-h-24 overflow-auto whitespace-pre-wrap text-sm">{message}</p>}

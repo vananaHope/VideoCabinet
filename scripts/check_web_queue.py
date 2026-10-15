@@ -46,7 +46,9 @@ if args.offscreen:
     for font in ('malgun.ttf', 'malgunbd.ttf'):
         QFontDatabase.addApplicationFont(str(Path(os.environ['WINDIR']) / 'Fonts' / font))
 args.output.mkdir(parents=True, exist_ok=True)
-directory = Path(tempfile.mkdtemp(prefix='queue-', dir=args.output))
+temporary_library = tempfile.TemporaryDirectory(prefix='queue-', dir=args.output)
+directory = Path(temporary_library.name).resolve()
+assert directory.parent == args.output.resolve() and directory.name.startswith('queue-')
 
 
 class Media:
@@ -161,6 +163,8 @@ try:
     settle(300)
     page.timer.stop()
     assert js("document.body.innerText.includes('자막 대기열이 비어 있습니다')")
+    assert js("document.querySelectorAll('#queue-list [role=columnheader]').length") == 0
+    assert js("document.querySelectorAll('#queue-list h2').length") == 1
     capture('empty')
 
     if args.verify:
@@ -292,6 +296,27 @@ try:
     assert js("document.querySelector('[aria-label=\"상태별 개수\"]').textContent.includes('대기 50개')")
     capture('300')
     assert js('document.querySelectorAll("[data-queue-row]").length') == 300
+    js("document.getElementById('queue-list').focus()")
+    page_size = int(js("""(() => {
+      const list = document.getElementById('queue-list');
+      const header = list.querySelector('[role=columnheader]').parentElement.getBoundingClientRect().height;
+      return Math.max(1, Math.floor((list.clientHeight - header) / list.querySelector('[data-queue-row]').getBoundingClientRect().height));
+    })()"""))
+    def selected_row():
+        return js("document.getElementById('queue-list').getAttribute('aria-activedescendant')")
+    keys(Qt.Key.Key_Home)
+    keys(Qt.Key.Key_PageDown)
+    assert selected_row() == f'queue-row-{videos[page_size].id}'
+    keys(Qt.Key.Key_PageUp)
+    assert selected_row() == f'queue-row-{videos[0].id}'
+    keys(Qt.Key.Key_PageUp)
+    assert selected_row() == f'queue-row-{videos[0].id}'
+    keys(Qt.Key.Key_End)
+    keys(Qt.Key.Key_PageDown)
+    assert selected_row() == f'queue-row-{videos[-1].id}'
+    keys(Qt.Key.Key_PageUp)
+    assert selected_row() == f'queue-row-{videos[-1 - page_size].id}'
+    metrics['checks'].append(f'PageUp/PageDown 표시 행 {page_size}개만큼 이동 및 양 끝 경계')
     click_text('자동 자막 규칙')
     qt_page.tabs.setCurrentIndex(1)
     capture('rules-empty')
@@ -473,7 +498,10 @@ try:
     result_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(metrics, ensure_ascii=False), flush=True)
 finally:
-    window.tray.quit()
-    window.deleteLater()
-    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    app.processEvents()
+    try:
+        window.tray.quit()
+        window.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+    finally:
+        temporary_library.cleanup()

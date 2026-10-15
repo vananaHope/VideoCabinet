@@ -1,4 +1,4 @@
-import { memo, useCallback, useSyncExternalStore, type KeyboardEvent } from "react"
+import { memo, useCallback, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { cva } from "class-variance-authority"
 import { queueStates } from "@/bridge-types"
 import { StatusBadge } from "@/components/page-parts"
@@ -6,6 +6,7 @@ import { QueueStore } from "./queue-store"
 
 const rowClass = cva("grid grid-cols-4 items-center gap-4 border-b px-4 py-3 text-sm", { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
 const labels = Object.fromEntries(queueStates)
+const listClass = cva("min-h-0 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border" } } })
 const badges = { completed: "success", failed: "destructive", transcribing: "info", translating: "info", held: "highlight", queued: "muted" } as const
 
 const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { store: QueueStore; id: number; selected: boolean; onSelect: (id: number) => void }) {
@@ -20,18 +21,25 @@ const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { sto
   </div>
 })
 
-export function QueueList({ store, ids, selected, onSelect }: { store: QueueStore; ids: number[]; selected: number | null; onSelect: (id: number) => void }) {
+export function QueueList({ store, ids, selected, onSelect, emptyState }: { store: QueueStore; ids: number[]; selected: number | null; onSelect: (id: number) => void; emptyState: ReactNode }) {
   function keyDown(event: KeyboardEvent) {
     if (event.nativeEvent.isComposing || event.ctrlKey || event.altKey || event.metaKey || !ids.length) return
     const index = Math.max(0, ids.indexOf(selected ?? -1))
-    const next = event.key === "ArrowDown" ? Math.min(index + 1, ids.length - 1) : event.key === "ArrowUp" ? Math.max(index - 1, 0) : event.key === "Home" ? 0 : event.key === "End" ? ids.length - 1 : -1
+    let next = event.key === "ArrowDown" ? Math.min(index + 1, ids.length - 1) : event.key === "ArrowUp" ? Math.max(index - 1, 0) : event.key === "Home" ? 0 : event.key === "End" ? ids.length - 1 : -1
+    if (event.key === "PageDown" || event.key === "PageUp") {
+      const list = event.currentTarget
+      const headerHeight = list.querySelector('[role="columnheader"]')?.parentElement?.getBoundingClientRect().height ?? 0
+      const rowHeight = list.querySelector('[data-queue-row]')?.getBoundingClientRect().height ?? 1
+      const pageSize = Math.max(1, Math.floor((list.clientHeight - headerHeight) / rowHeight))
+      next = Math.max(0, Math.min(ids.length - 1, index + (event.key === "PageDown" ? pageSize : -pageSize)))
+    }
     if (next < 0) return
     event.preventDefault()
     onSelect(ids[next])
     document.getElementById(`queue-row-${ids[next]}`)?.scrollIntoView({ block: "nearest" })
   }
-  return <div id="queue-list" role="grid" aria-label="자막 대기열" aria-activedescendant={selected === null ? undefined : `queue-row-${selected}`} tabIndex={0} onKeyDown={keyDown} className="min-h-0 flex-1 overflow-auto rounded-lg border focus-visible:outline-2 focus-visible:outline-ring">
-    <div role="row" className="sticky top-0 z-10 grid grid-cols-4 gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">{["영상", "상태", "진행률", "안내"].map(label => <div key={label} role="columnheader">{label}</div>)}</div>
+  return <div id="queue-list" role={ids.length ? "grid" : "region"} aria-label="자막 대기열" aria-activedescendant={selected === null ? undefined : `queue-row-${selected}`} tabIndex={0} onKeyDown={keyDown} className={listClass({ empty: !ids.length })}>
+    {!ids.length ? emptyState : <div role="row" className="sticky top-0 z-10 grid grid-cols-4 gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">{["영상", "상태", "진행률", "안내"].map(label => <div key={label} role="columnheader">{label}</div>)}</div>}
     {ids.map(id => <QueueRow key={id} store={store} id={id} selected={id === selected} onSelect={onSelect} />)}
   </div>
 }
