@@ -3,7 +3,8 @@
 from PySide6.QtCore import Signal
 from .library_operations import LibraryOperations
 from .library_controls import LibraryControls
-from .web_library_data import snapshot_data, filter_ids
+from .web_library_data import snapshot_data
+from .library_views import filter_chips
 from .web_library_bridge import LibraryBridge
 from .web_json import encode
 from .web_page import WebPageController
@@ -35,8 +36,10 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.gems, self.gem_ids = [], []
         self.gem_error = ''
         self.selected_id = None
-        self.query, self.tag_id = '', None
+        self.options = self.core.library_view_options()
+        self.index = None
         self.tags = []
+        self.pending_thumbnails = set()
         self.library_controls = LibraryControls(window)
         self.hidden_gems = GemDialogs(self)
         self.bridge = LibraryBridge(self)
@@ -47,15 +50,43 @@ class WebLibraryPage(LibraryOperations, WebPageController):
 
     def payload(self):
         return dict(videos=self.cards, tags=self.tags, gems=self.gems, gemError=self.gem_error,
-                    visibleIds=self.visible_ids, selectedId=self.selected_id, scanning=self.worker is not None)
+                    scanning=self.worker is not None, folders=self.index.folders if self.index else [],
+                    **self.view_payload())
+
+    def view_payload(self):
+        return dict(visibleIds=self.visible_ids, selectedId=self.selected_id, options=self.options,
+                    chips=filter_chips(self.options, {t['id']: t['name'] for t in self.tags}))
+
+    def set_view(self, options):
+        self.options = self.core.save_library_view_options(options)
+        self.apply_filters()
+
+    # 이전 공개 filter 슬롯도 동일한 코어 판정으로 통한다.
+    @property
+    def query(self):
+        return self.options['query']
+
+    @query.setter
+    def query(self, value):
+        self.options['query'] = value
+
+    @property
+    def tag_id(self):
+        return next(iter(self.options['tags']), None)
+
+    @tag_id.setter
+    def tag_id(self, value):
+        self.options['tags'] = [value] if value is not None else []
 
     def refresh(self, *, focus_gems=None):
         self.snapshot = self.core.library_snapshot()
-        self.cards = snapshot_data(self.snapshot, self.core.subtitled_video_ids())
+        self.index = self.core.library_view_index(self.snapshot)
+        self.cards = snapshot_data(self.snapshot, self.index.original)
         self.video_ids = {v['id'] for v in self.cards}
         self.tags = [dict(id=t.id, name=t.name) for t in self.core.tags()]
-        if self.tag_id not in {t['id'] for t in self.tags}:
-            self.tag_id = None
+        self.options['tags'] = [tid for tid in self.options['tags'] if tid in {t['id'] for t in self.tags}]
+        if self.options['folder'] not in self.index.members:
+            self.options['folder'] = ''
         try:
             self.gems = [dict(videoId=g.video.id, reason=g.reason)
                          for g in self.core.hidden_gems(snapshot=self.snapshot)]
@@ -70,7 +101,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
             self.request_focus('gems' if focus_gems and self.gems else 'grid')
 
     def apply_filters(self):
-        self.visible_ids = filter_ids(self.cards, self.query, self.tag_id)
+        self.visible_ids = self.core.library_view_ids(self.options, index=self.index) if self.index else []
         if self.selected_id not in self.visible_ids:
             self.selected_id = next(iter(self.visible_ids), None)
 
@@ -78,15 +109,31 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.refresh(focus_gems=focus_gems)
 
     def refresh_details(self, changed_video_id=None):
-        if changed_video_id is not None:
-            card = next((card for card in self.cards if card['id'] == changed_video_id), None)
-            if card is not None:
-                has_subtitles = self.core.has_transcript(changed_video_id)
-                if card['hasSubtitles'] != has_subtitles:
-                    card['hasSubtitles'] = has_subtitles
-                    self.bridge.libraryChanged.emit(encode(self.payload()))
+        # 자막·번역·하이라이트 변경은 현재 조건의 결과에도 즉시 반영한다.
+        if changed_video_id is not None and self.snapshot is not None:
+            self.index = self.core.library_view_index(self.snapshot)
+            self.apply_filters()
+            for card in self.cards:
+                card['hasSubtitles'] = card['id'] in self.index.original
+            self.bridge.libraryChanged.emit(encode(self.payload()))
         if self.selected_id is not None and (changed_video_id is None or changed_video_id == self.selected_id):
             self.bridge.libraryDetailsChanged.emit(self.selected_id)
+        self.flush_thumbnails()
+
+    def refresh_thumbnails(self, video_ids):
+        for card in self.cards:
+            if card['id'] in video_ids:
+                card['thumbnail'] = f"mvm-thumb://video/{card['id']}?v=640"
+        self.pending_thumbnails.update(video_ids)
+        self.flush_thumbnails()
+
+    def flush_thumbnails(self):
+        if self.is_active() and self.pending_thumbnails:
+            self.bridge.thumbnailsChanged.emit(encode(sorted(self.pending_thumbnails)))
+            self.pending_thumbnails.clear()
+
+    def activated(self):
+        self.flush_thumbnails()
 
     def selection_changed(self):
         self.bridge.libraryChanged.emit(encode(self.payload()))

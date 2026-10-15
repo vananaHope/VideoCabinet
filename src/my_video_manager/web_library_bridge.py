@@ -1,6 +1,7 @@
 """라이브러리 전용 QWebChannel 객체. 웹에는 JSON 값과 제한된 작업 이름만 공개한다."""
 
 from PySide6.QtCore import QObject, QTimer
+import json
 
 from .web_library_data import details_data, highlights_data
 from .web_contract import MENU_ACTIONS, GEM_ACTIONS, SCAN_LOCKED_ACTIONS, LIBRARY
@@ -8,6 +9,7 @@ from .web_json import encode
 
 
 class LibraryBridge(QObject):
+    thumbnailsChanged = LIBRARY.signal('thumbnailsChanged')
     libraryChanged = LIBRARY.signal('libraryChanged')
     libraryDetailsChanged = LIBRARY.signal('libraryDetailsChanged')
     libraryFocusRequested = LIBRARY.signal('libraryFocusRequested')
@@ -32,6 +34,14 @@ class LibraryBridge(QObject):
         self.page.query, self.page.tag_id = query, tag_id if tag_id > 0 else None
         self.page.apply_filters()
         return encode({'visibleIds': self.page.visible_ids, 'selectedId': self.page.selected_id})
+
+    @LIBRARY.slot('view')
+    def view(self, options):
+        try:
+            self.page.set_view(json.loads(options))
+            return encode(self.page.view_payload())
+        except (ValueError, TypeError, OSError) as error:
+            return encode({'error': str(error)})
 
     @LIBRARY.slot('select')
     def select(self, video_id):

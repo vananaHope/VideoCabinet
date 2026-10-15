@@ -5,6 +5,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 from . import web_library_data, web_shell_data
+from .library_views import CHOICES, FILTER_DEFAULTS, LibraryViewOptions, LibraryFolder, LibraryChip
 from . import web_queue_data
 from . import web_reel_data, web_search_data
 from . import web_statistics_data
@@ -85,18 +86,22 @@ SHELL = BridgeContract(
 LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
     'ready': (), 'snapshot': (),
     'filter': (Argument('query', str, 'string'), Argument('tag', int, 'number')),
+    'view': (Argument('options', str, 'string'),),
     'select': (Argument('id', int, 'number'),), 'details': (Argument('id', int, 'number'),),
     'action': (Argument('name', str, 'Action'), Argument('id', int, 'number')),
     'highlights': (Argument('videoId', int, 'number'),),
     'playHighlight': (Argument('videoId', int, 'number'), Argument('highlightId', int, 'number')),
     'editHighlight': (Argument('videoId', int, 'number'), Argument('highlightId', int, 'number')),
 }, signals={
-    'libraryChanged': str, 'libraryDetailsChanged': int,
+    'thumbnailsChanged': str, 'libraryChanged': str, 'libraryDetailsChanged': int,
     'libraryFocusRequested': str, 'libraryError': str,
 }, aliases=(TypeAlias('Action', (*MENU_ACTIONS, *GEM_ACTIONS)),), constants=(
     Constant('actions', tuple(MENU_ACTIONS.items())),
     Constant('scanLockedActions', SCAN_LOCKED_ACTIONS, 'readonly Action[]'),
+    Constant('libraryChoices', CHOICES),
+    Constant('libraryFilterDefaults', FILTER_DEFAULTS),
 ), data_types=(web_library_data.TagData, web_library_data.VideoData, web_library_data.GemData,
+               LibraryViewOptions, LibraryFolder, LibraryChip,
                web_library_data.ExternalSubtitleTrackData, web_library_data.ExternalSubtitleFileData,
                web_library_data.DetailsData, web_library_data.HighlightData, web_library_data.LibraryData))
 

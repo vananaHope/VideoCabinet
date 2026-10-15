@@ -120,3 +120,18 @@ def test_reel_return_does_not_reuse_previous_gem_focus(library_window, app, retu
     app.processEvents()
     assert len(window.library_page.gems) == 1
     assert window.web_host._pending_focus == 'grid' or window.web_host.view.hasFocus()
+
+
+def test_playback_return_builds_library_index_once(library_window, app, monkeypatch):
+    import my_video_manager.core as core_module
+    window, core, video = library_window
+    window.play_video(video.id)
+    calls = []
+    original = core_module.build_index
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(core_module, 'build_index', counted)
+    window.show_library()
+    app.processEvents()
+    assert len(calls) == 1

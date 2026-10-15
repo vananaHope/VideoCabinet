@@ -29,6 +29,8 @@ from .statistics import StatisticsReader, VideoViewingStatistics, ViewingStatist
 from .statistics import StatisticsDashboard
 from .external_subtitles import ExternalSubtitleFile, ExternalSubtitleFileSummary
 from .resolution import ResolutionBackfill, ResolutionResult
+from .library_views import build_index, default_options, normalize_options
+from .thumbnails import ThumbnailBackfill
 
 
 class CommandType(str, Enum):
@@ -162,10 +164,32 @@ class AppCore:
         self.playback.subscribe(self._reel)
         self._search = Search(self._connect)
         self._resolution = ResolutionBackfill(self._connect, media)
+        self._thumbnail_backfill = ThumbnailBackfill(self._connect, media, self._thumbnails, self.settings)
+
+    def fill_next_thumbnail(self, *, cancellation):
+        return self._thumbnail_backfill.step(cancellation)
 
     def fill_next_resolution(self, *, cancellation) -> ResolutionResult:
         """작업자용 API. 한 영상 처리 후 반환하며 취소 시 다음 호출에서 이어진다."""
         return self._resolution.step(cancellation)
+
+    def library_view_options(self):
+        try:
+            return normalize_options(self.settings.get('library.view', {}))
+        except (ValueError, TypeError):
+            return default_options()
+
+    def save_library_view_options(self, options):
+        options = normalize_options(options)
+        self.settings.set('library.view', options)
+        return options
+
+    def library_view_index(self, snapshot=None):
+        return build_index(snapshot if snapshot is not None else self.library_snapshot(),
+                           self.watched_folders(), self._connect)
+
+    def library_view_ids(self, options, *, index=None):
+        return (index if index is not None else self.library_view_index()).select(options, self._clock())
 
     def prepare_subtitle_support(self, *, cancellation=None, progress=None, preparation=None):
         """작업자 스레드용 자막 준비 API. progress 콜백은 예외를 던지지 않아야 한다."""
@@ -646,6 +670,7 @@ class AppCore:
 
     def add_file(self, path: Path) -> ScanResult:
         result = self._library.add_file(path)
+        self._thumbnail_backfill.retry_unavailable()
         self._series.regroup(self.videos() + self.excluded_videos())
         return result
 
@@ -659,6 +684,7 @@ class AppCore:
 
     def reconnect_video(self, video_id: int, path: Path) -> None:
         self._library.reconnect_video(video_id, path)
+        self._thumbnail_backfill.retry_unavailable()
         self._series.regroup(self.videos() + self.excluded_videos())
 
     def rename_video(self, video_id: int, title: str) -> None:
@@ -726,6 +752,7 @@ class AppCore:
     def scan(self) -> ScanResult:
         rules = self._auto_subtitle_rules.list()
         result = self._library.scan(on_registered=lambda video_id: self._auto_subtitle_rules.apply(video_id, rules=rules))
+        self._thumbnail_backfill.retry_unavailable()
         self._series.regroup(self.videos() + self.excluded_videos())
         return result
 

@@ -72,10 +72,34 @@ class FFmpegMediaReader:
 
     def capture(self, path: Path, destination: Path, seconds: float) -> None:
         result = self._run([self.ffmpeg, "-v", "error", "-nostdin", "-y", "-ss", str(seconds),
-                            "-i", str(path), "-map", "0:V:0", "-frames:v", "1", "-vf", "scale=320:-2",
+                            "-i", str(path), "-map", "0:V:0", "-frames:v", "1", "-vf", "scale='min(640,iw)':-2",
                             "-update", "1", str(destination)])
         if result.returncode or not destination.is_file():
             raise RuntimeError(result.stderr.strip() or "썸네일을 캡처할 수 없습니다.")
+
+    def capture_background(self, path, destination, seconds, *, cancellation):
+        flags = (subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS) if sys.platform == 'win32' else 0
+        process = subprocess.Popen([self.ffmpeg, '-v', 'error', '-nostdin', '-y', '-threads', '1',
+                                    '-ss', str(seconds), '-i', str(path), '-map', '0:V:0', '-frames:v', '1',
+                                    '-vf', "scale='min(640,iw)':-2", '-threads', '1', '-update', '1', str(destination)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                   encoding='utf-8', errors='replace', creationflags=flags)
+        deadline = time.monotonic() + 120
+        try:
+            while not cancellation.is_set():
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('썸네일 캡처 제한 시간(120초)을 초과했습니다.')
+                try:
+                    _, error = process.communicate(timeout=0.05)
+                    if process.returncode or not destination.is_file():
+                        raise RuntimeError(error.strip() or '썸네일을 캡처할 수 없습니다.')
+                    return
+                except subprocess.TimeoutExpired:
+                    pass
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.communicate()
 
 
 @lru_cache(maxsize=1)

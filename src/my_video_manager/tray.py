@@ -89,6 +89,7 @@ class TrayControls(QObject):
             return
         if self.quitting:
             window.resolutions.shutdown()
+            window.thumbnails.shutdown()
             self.timer.stop()
             self.icon.hide()
             QApplication.instance().removeEventFilter(window)

@@ -107,6 +107,17 @@ TanStack Virtual은 행 단위 가상화·overscan·scrollToIndex를 제공하�
 
 ### 라이브러리 화면 검증
 
+폴더·복합 필터·카드 크기는 `scripts/check_web_library_views.py --offscreen --count 5000`으로
+1100×720 화면과 캐시 조건 판정/Settings 저장·JSON 응답을 포함한 브리지 시간을 확인합니다.
+`--count 0`은 빈 상태, `--source <읽기 전용 영상 파일>`은 실제 320px/640px 디스크 크기 비교를 추가합니다.
+`--verify --source <영상 파일>`은 데스크톱 잠금 안에서 실창 트리 키보드·mpv Enter/Esc 왕복 상태를 검사합니다.
+앱 데이터는 worktree 밖 임시 폴더이고 출력은 `.local/screens-114/`입니다.
+조건은 `library_views.py`에서 `LibrarySnapshot`의 공용 시청 결과와 자막 존재 인덱스를 사용합니다.
+웹은 생성 계약의 보기 조건을 보내고 결과 ID·칩·폴더 트리를 표시합니다. 조건 변경은 자막 본문이나
+영상 상세를 읽지 않으며 목록 갱신에서 만든 인덱스를 재사용합니다.
+썸네일 크기 버전은 `.640.jpg` 파일명, 실패 진행 커서는 공용 Settings의 `thumbnail.cursor`에 저장합니다.
+기존 `videos.thumbnail` 열과 Settings 형식은 그대로이며 대기 대상 부분 인덱스만 추가하므로 DB 버전은 v4를 유지합니다.
+
 화면 검증과 대량 목록 측정은 Windows에서 `scripts/check_web_library.py`를 사용합니다.
 `--prepare --count 24 --source <테스트 영상 폴더>`는 원본을 `.local/issue46/`로 복사하고 데모 데이터를 등록합니다.
 `--prepare --count 5000`은 합성 영상 5,000개를 공개 코어 API로 등록합니다.
