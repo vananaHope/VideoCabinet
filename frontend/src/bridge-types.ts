@@ -145,6 +145,10 @@ export interface PreparationData {
   completed: number
   total: number
   kind: string
+  summary: string
+  percent: number | null
+  percentLabel: string
+  guidance: string
 }
 
 export interface QueueRowData {

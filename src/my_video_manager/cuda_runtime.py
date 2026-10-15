@@ -1,6 +1,6 @@
 """화면과 독립된 자막 기능 준비. 작업자 스레드에서 호출하고 Event로 취소한다."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from contextlib import contextmanager
 import errno
 import hashlib
@@ -42,6 +42,10 @@ class PreparationProgress:
     asset: str
     completed: int
     total: int
+    file_index: int = 0
+    file_count: int = 0
+    overall_completed: int = 0
+    overall_total: int = 0
 
 
 Progress = Callable[[PreparationProgress], None]
@@ -103,7 +107,7 @@ class RuntimeDownloadAdapter:
             response = urllib.request.urlopen(asset.url, timeout=10)
         except (OSError, http.client.HTTPException) as error:
             _check_cancel(cancellation)
-            raise PreparationError("network", str(error)) from error
+            raise PreparationError("network", f"{asset.name}: {error}") from error
         with response, target.open("wb") as output:
             count = 0
             while True:
@@ -113,7 +117,7 @@ class RuntimeDownloadAdapter:
                     chunk = response.read1(_CHUNK)
                 except (OSError, http.client.HTTPException) as error:
                     _check_cancel(cancellation)
-                    raise PreparationError("network", str(error)) from error
+                    raise PreparationError("network", f"{asset.name}: {error}") from error
                 if not chunk:
                     break
                 if count + len(chunk) > asset.size:
@@ -263,6 +267,55 @@ class SubtitlePreparation:
         self.model_revision = model_revision
 
     def prepare(self, *, cancellation: Event | None = None, progress: Progress | None = None) -> PreparedSubtitles:
+        from .subtitle_preparation_state import PreparationHistory
+        history = PreparationHistory(self.data_directory)
+        assets = self.cuda_assets + self.model_assets
+        completed = dict.fromkeys((asset.name for asset in assets), 0)
+        index = 0
+
+        def report(value):
+            nonlocal index
+            for position, asset in enumerate(assets, 1):
+                if value.asset == asset.name:
+                    index = position
+                    amount = min(asset.size, value.completed) if value.phase == 'download' else asset.size
+                    completed[asset.name] = max(completed[asset.name], amount)
+                    break
+            if progress:
+                progress(replace(value, file_index=index, file_count=len(assets),
+                                 overall_completed=sum(completed.values()),
+                                 overall_total=sum(asset.size for asset in assets)))
+
+        try:
+            # 강제 종료도 다음 시작에서 자동 다운로드로 이어지지 않게 한다.
+            history.save('cancelled', '이전 준비가 끝나기 전에 앱이 종료되었습니다.')
+            result = self._prepare(cancellation=cancellation, progress=report)
+            history.save('ready')
+            return result
+        except PreparationError as error:
+            history.failed(error.kind, str(error), error.detail)
+            raise
+        except OSError as error:
+            failure = PreparationError('storage', str(error))
+            history.failed(failure.kind, str(failure), failure.detail)
+            raise failure from error
+        except Exception as error:
+            history.failed('other', '자막 기능 준비에 실패했습니다.', str(error))
+            raise
+
+    def status(self):
+        """이전 실패와 완료 manifest를 읽기만 한다. 다운로드는 시작하지 않는다."""
+        from .subtitle_preparation_state import PreparationHistory
+        previous = PreparationHistory(self.data_directory).read()
+        if previous and previous['kind'] != 'ready':
+            return previous
+        try:
+            self.prepared()
+        except PreparationError:
+            return dict(kind='idle', message='', detail='')
+        return dict(kind='ready', message='', detail='')
+
+    def _prepare(self, *, cancellation: Event | None = None, progress: Progress | None = None) -> PreparedSubtitles:
         cancellation = cancellation if cancellation is not None else Event()
         _check_cancel(cancellation)
         while not _preparation_lock.acquire(timeout=0.1):
@@ -314,7 +367,8 @@ class SubtitlePreparation:
         if _is_ready(target, self.model_assets):
             return self._prepare_group(target, self.model_assets, False, cancellation, progress)
         if _is_ready(cached, self.model_assets):
-            _report(progress, cancellation, "reuse", str(cached), 1, 1)
+            for asset in self.model_assets:
+                _report(progress, cancellation, "reuse", asset.name, 1, 1)
             return cached
         if all((cached / asset.name).is_file() and (cached / asset.name).stat().st_size == asset.size
                for asset in self.model_assets):
@@ -332,7 +386,8 @@ class SubtitlePreparation:
                 partial = cached / "ready.json.part"
                 partial.write_text(json.dumps(manifest), encoding="utf-8")
                 partial.replace(cached / "ready.json")
-                _report(progress, cancellation, "reuse", str(cached), 1, 1)
+                for asset in self.model_assets:
+                    _report(progress, cancellation, "reuse", asset.name, 1, 1)
                 return cached
         return self._prepare_group(target, self.model_assets, False, cancellation, progress)
 
@@ -342,7 +397,8 @@ class SubtitlePreparation:
         if stage.exists():
             shutil.rmtree(stage)
         if _is_ready(target, assets):
-            _report(progress, cancellation, "reuse", target.name, 1, 1)
+            for asset in assets:
+                _report(progress, cancellation, "reuse", asset.name, 1, 1)
             return target
         stage.mkdir(parents=True)
         for asset in assets:

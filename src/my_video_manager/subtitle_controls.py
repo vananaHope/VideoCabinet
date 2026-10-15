@@ -5,7 +5,7 @@ import sys
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import QMessageBox
 
-from .subtitle_preparation_ui import PreparationWorker, preparation_state
+from .subtitle_preparation_ui import PreparationWorker, preparation_state, failure_message
 
 
 class SubtitleWorker(QThread):
@@ -35,6 +35,9 @@ class SubtitleControls(QObject):
         self.preparation_worker = None
         self.preparation = preparation_state()
         self.support_ready = not getattr(sys, 'frozen', False)
+        self.previous_preparation = self.core.subtitle_support_status() if not self.support_ready else None
+        if self.previous_preparation and self.previous_preparation['kind'] == 'ready':
+            self.support_ready = True
         self.stopping = False
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.process_queue)
@@ -50,10 +53,17 @@ class SubtitleControls(QObject):
         if self.stopping or self.worker or self.preparation_worker:
             return
         if not any(entry.state == "queued" for entry in self.core.subtitle_queue()):
+            if self.preparation['state'] == 'failed':
+                self.set_preparation(preparation_state())
             return
         if not self.support_ready:
             if self.preparation['state'] == 'idle':
-                self.prepare()
+                previous = self.previous_preparation
+                if previous and previous['kind'] not in ('idle', 'ready'):
+                    self.set_preparation(preparation_state('failed', kind=previous['kind'],
+                        message=failure_message(**previous)))
+                else:
+                    self.prepare()
             return
         self.worker = SubtitleWorker(self.core, self)
         self.worker.completed.connect(self.completed)
@@ -67,7 +77,10 @@ class SubtitleControls(QObject):
         self.preparation_changed.emit(value)
 
     def prepare(self):
-        if self.preparation_worker or self.support_ready:
+        if self.stopping or self.preparation_worker or self.support_ready:
+            return
+        if not any(entry.state == 'queued' for entry in self.core.subtitle_queue()):
+            self.set_preparation(preparation_state())
             return
         self.set_preparation(preparation_state('preparing', message='자막 기능 준비 중…'))
         self.preparation_worker = PreparationWorker(self.core, self)
@@ -81,10 +94,13 @@ class SubtitleControls(QObject):
         if self.preparation['state'] == 'cancelling':
             return
         self.set_preparation(preparation_state('preparing', phase=value.phase, asset=value.asset,
-                            completed=value.completed, total=value.total))
+                            completed=value.completed, total=value.total, file_index=value.file_index,
+                            file_count=value.file_count, overall_completed=value.overall_completed,
+                            overall_total=value.overall_total))
 
     def preparation_result(self, kind, message):
         self.support_ready = kind == 'ready'
+        self.previous_preparation = dict(kind=kind, message=message, detail='')
         self.set_preparation(preparation_state('ready' if self.support_ready else 'failed',
                                               kind=kind, message=message))
 

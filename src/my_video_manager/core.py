@@ -177,6 +177,19 @@ class AppCore:
     def translation_cli(self) -> str:
         return self._translations.cli
 
+    def subtitle_support_status(self):
+        """준비의 영속 결과와 완료 파일만 읽으며 탐지나 다운로드는 하지 않는다."""
+        from .cuda_runtime import SubtitlePreparation
+        return SubtitlePreparation(self.database.parent).status()
+
+    def subtitle_preparation_notice(self):
+        """첫 요청에 표시할 준비 다운로드 안내. 소스 실행과 완료된 준비는 생략한다."""
+        import sys
+        from .runtime_assets import preparation_download_label
+        if not getattr(sys, 'frozen', False) or self.subtitle_support_status()['kind'] == 'ready':
+            return ''
+        return f'자막 기능 준비에 CUDA와 Whisper 모델 {preparation_download_label()}를 내려받습니다. 준비 중 취소할 수 있습니다.'
+
     def create_backup(self, destination: Path, *, include_thumbnails=False):
         from .backup import create_backup
         session = self.playback.session

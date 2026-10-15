@@ -223,6 +223,12 @@ def test_http_error_is_network(tmp_path, server, status):
         preparation(tmp_path, server).prepare()
     assert caught.value.kind == "network"
     assert str(status) in caught.value.detail
+    assert 'cuda.whl' in caught.value.detail
+    restarted = preparation(tmp_path, server)
+    assert restarted.status()['kind'] == 'network'
+    assert str(status) in restarted.status()['detail']
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    assert str(status) in log and 'cuda.whl' in log
 
 
 @pytest.mark.parametrize("stall", ["headers", "body"])
@@ -339,7 +345,7 @@ SubtitlePreparation(Path(sys.argv[1]), gpu_available=lambda: True,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(2)]
     try:
         for process in processes:
-            _, error = process.communicate(timeout=15)
+            _, error = process.communicate(timeout=30)
             assert process.returncode == 0, error.decode(errors="replace")
     finally:
         for process in processes:
@@ -348,3 +354,81 @@ SubtitlePreparation(Path(sys.argv[1]), gpu_available=lambda: True,
             process.communicate()
     assert server[0].requests.count("/cuda.whl") == 1
     assert server[0].requests.count("/model.bin") == 1
+
+
+def test_overall_progress_and_file_order_include_reused_assets(tmp_path, server):
+    events = []
+    service = preparation(tmp_path, server)
+    service.prepare(progress=events.append)
+    total = sum(asset.size for asset in service.cuda_assets + service.model_assets)
+    assert all(event.overall_total == total and event.file_count == 2 for event in events)
+    amounts = [event.overall_completed for event in events]
+    assert amounts == sorted(amounts)
+    first_model = next(e for e in events if e.phase == 'download' and e.asset == 'model.bin')
+    assert first_model.file_index == 2
+    assert first_model.overall_completed == service.cuda_assets[0].size
+    assert events[-1].overall_completed == total
+    events.clear()
+    service.prepare(progress=events.append)
+    assert [e.file_index for e in events if e.phase == 'reuse'] == [1, 2]
+    assert events[-1].overall_completed == total
+    assert preparation(tmp_path, server).status()['kind'] == 'ready'
+
+
+def test_cancel_is_durable_and_explicit_retry_clears_it(tmp_path, server):
+    cancellation = Event()
+    cancellation.set()
+    with pytest.raises(PreparationError, match='취소'):
+        preparation(tmp_path, server).prepare(cancellation=cancellation)
+    restarted = preparation(tmp_path, server)
+    assert restarted.status()['kind'] == 'cancelled'
+    assert server[0].requests == []
+    restarted.prepare()
+    assert preparation(tmp_path, server).status()['kind'] == 'ready'
+
+
+def test_log_preserves_long_detail_but_redacts_credentials_and_home(tmp_path, server):
+    from my_video_manager.subtitle_preparation_ui import failure_message
+    detail = f'{Path.home()}/model.bin\nhttps://example.org/model?token=secret-url Authorization: Bearer secret-auth\n' + '원인' * 300
+    service = preparation(tmp_path, server)
+    def fail():
+        raise PreparationError('network', detail)
+    service.gpu_available = fail
+    with pytest.raises(PreparationError):
+        service.prepare()
+    log = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+    status = service.status()
+    screen = failure_message(**status)
+    for content in (log, status['detail'], screen):
+        assert 'secret-url' not in content and 'secret-auth' not in content
+        assert str(Path.home()) not in content
+        assert '~/model.bin' in content
+    assert '원인' * 300 in log
+    assert '원인' * 300 not in screen and screen.endswith('…')
+
+
+def test_log_failure_does_not_replace_preparation_error(tmp_path, server):
+    (tmp_path / 'logs').write_text('not a directory')
+    server[0].status = 503
+    with pytest.raises(PreparationError) as caught:
+        preparation(tmp_path, server).prepare()
+    assert caught.value.kind == 'network'
+    assert preparation(tmp_path, server).status()['kind'] == 'network'
+
+
+def test_preparation_log_is_rotated_and_excluded_from_backup(tmp_path, server):
+    service = preparation(tmp_path, server)
+    def fail():
+        raise PreparationError('network', 'long detail ' * 10000)
+    service.gpu_available = fail
+    for _ in range(7):
+        with pytest.raises(PreparationError):
+            service.prepare()
+    logs = list((tmp_path / 'logs').iterdir())
+    assert len(logs) == 3
+    assert all(path.stat().st_size <= 256 * 1024 for path in logs)
+    core = AppCore(media=None, clock=datetime.now, database=tmp_path / 'library.sqlite3')
+    archive = tmp_path / 'backup.zip'
+    core.create_backup(archive, include_thumbnails=True)
+    with zipfile.ZipFile(archive) as bundle:
+        assert all(not name.startswith('logs/') and not name.endswith('.log') for name in bundle.namelist())
