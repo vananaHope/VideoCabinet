@@ -34,13 +34,14 @@ def verified(path):
 
 
 @contextmanager
-def cache_lock(cache, timeout=300, *, name=NAME):
+def cache_lock(cache, timeout=None, *, name=NAME):
     # OS 잠금은 프로세스 강제 종료에도 해제된다. 잠금 파일은 지우지 않는다.
     with (cache / f"{name}.lock").open("a+b") as lock:
         if lock.tell() == 0:
             lock.write(b"\0")
             lock.flush()
-        deadline = time.monotonic() + timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
+        next_notice = time.monotonic()
         while True:
             lock.seek(0)
             try:
@@ -54,8 +55,12 @@ def cache_lock(cache, timeout=300, *, name=NAME):
             except OSError as exc:
                 if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
                     raise
-                if time.monotonic() >= deadline:
+                now = time.monotonic()
+                if deadline is not None and now >= deadline:
                     raise TimeoutError(f"{name} 캐시 잠금 대기 시간이 초과되었습니다.") from exc
+                if now >= next_notice:
+                    print(f"다른 프로세스가 {name} 캐시를 준비 중입니다. 잠금 해제를 기다립니다.", flush=True)
+                    next_notice = now + 30
                 time.sleep(0.1)
         try:
             yield

@@ -1,3 +1,5 @@
+from wait_helpers import UI_READY_TIMEOUT
+
 import json
 import time
 from datetime import datetime
@@ -16,7 +18,7 @@ from my_video_manager.core import AppCore
 
 
 def wait_until(condition):
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + UI_READY_TIMEOUT
     while not condition():
         assert time.monotonic() < deadline
         loop = QEventLoop()

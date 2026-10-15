@@ -7,7 +7,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
@@ -44,8 +44,8 @@ class Player:
 
 
 @pytest.fixture(scope="module")
-def app():
-    return QApplication.instance() or QApplication([])
+def app(qapp):
+    return qapp
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ def library_window(tmp_path, app, monkeypatch):
     yield window, core, video
     window.tray.quit()
     window.deleteLater()
-    app.processEvents()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def test_tray_reopen_updates_finished_viewing_without_refreshing_while_hidden(library_window, app):

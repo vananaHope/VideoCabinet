@@ -1,3 +1,5 @@
+from wait_helpers import UI_READY_TIMEOUT
+
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
@@ -326,7 +328,7 @@ print(json.dumps({"spoken_language": "ko", "segments": []}))
         future = pool.submit(core.process_next_subtitle)
         # 고정 1초 노출은 xdist 부하에서 놓칠 수 있다. 공개 큐에서 실제
         # 진행률을 관찰한 뒤 자식을 풀고, 실패해도 finally로 정리한다.
-        deadline = monotonic() + 30
+        deadline = monotonic() + UI_READY_TIMEOUT
         observed = False
         try:
             while monotonic() < deadline and not future.done():

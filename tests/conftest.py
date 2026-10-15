@@ -23,3 +23,13 @@ def restore_app_logger():
                 handler.close()
         logger.handlers[:] = handlers
         logger.setLevel(level)
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """단독 실행에서도 QWidget보다 먼저 QApplication을 만들고 정리를 마친다."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    yield app
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)

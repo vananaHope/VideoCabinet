@@ -48,33 +48,39 @@ def loaded(window):
     window.subtitles.timer.stop()
     window.translations.timer.stop()
     wait_for(lambda: js(window, '!!document.querySelector("[data-translation-form]")'))
-    QTest.qWait(100)
+    wait_for(lambda: js(window, 'document.activeElement.getAttribute("aria-label")') == '번역 방식')
+
+
+def rendered(window):
+    # 입력/React 갱신이 두 프레임을 통과했는지 확인한다. 고정 시간에 기대지 않는다.
+    js(window, 'window.translationRendered = false; requestAnimationFrame(() => requestAnimationFrame(() => {window.translationRendered = true}))')
+    wait_for(lambda: js(window, 'window.translationRendered'))
 
 
 def click(window, text):
     assert js(window, f"""(() => {{ const e = Array.from(document.querySelectorAll('[role=dialog] button')).find(e => e.textContent === {json.dumps(text)});
         if (!e || e.disabled) return false; e.click(); return true; }})()""")
-    QTest.qWait(60)
+    rendered(window)
 
 
 def input_text(window, label, value):
     js(window, f"""(() => {{ const e = document.querySelector('[aria-label={json.dumps(label)}]');
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, {json.dumps(value)});
         e.dispatchEvent(new Event('input', {{bubbles:true}})); e.focus(); }})()""")
-    QTest.qWait(40)
+    rendered(window)
 
 
 def choose(window, label, value):
     js(window, f"""(() => {{ const e = document.querySelector('[aria-label={json.dumps(label)}]');
         e.value = {json.dumps(value)}; e.dispatchEvent(new Event('change', {{bubbles:true}})); }})()""")
-    QTest.qWait(40)
+    rendered(window)
 
 
 def capture(window, name):
     if output := os.environ.get('MVM_TRANSLATION_SCREEN_DIR'):
         directory = Path(output)
         directory.mkdir(parents=True, exist_ok=True)
-        QTest.qWait(200)
+        rendered(window)
         pixmap = window.grab()
         assert (pixmap.width(), pixmap.height()) == (1100, 720)
         assert pixmap.save(str(directory / (name + '.png')))
@@ -121,10 +127,10 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
         capture(window, f'{provider}-key-{key}-expired-{expired}-long-{long_model}')
         view = window.web_host.view.focusProxy() or window.web_host.view
         QTest.keyClick(view, Qt.Key.Key_Tab)
-        QTest.qWait(40)
+        wait_for(lambda: js(window, 'document.activeElement.getAttribute("aria-label")') == '모델 목록')
         assert js(window, 'document.activeElement.getAttribute("aria-label")') == '모델 목록'
         QTest.keyClick(view, Qt.Key.Key_Tab)
-        QTest.qWait(40)
+        wait_for(lambda: js(window, 'document.activeElement.getAttribute("aria-label")') == '모델 직접 입력')
         assert js(window, 'document.activeElement.getAttribute("aria-label")') == '모델 직접 입력'
         for keycode in range(Qt.Key.Key_1, Qt.Key.Key_7 + 1):
             QTest.keyClick(view, Qt.Key(keycode), Qt.KeyboardModifier.ControlModifier)
@@ -134,10 +140,10 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
         # 합성 IME 조합 중 Esc는 닫지 않고, 조합 종료 뒤 Esc는 초안을 버린다.
         js(window, "document.activeElement.dispatchEvent(new CompositionEvent('compositionstart', {bubbles:true}))")
         QTest.keyClick(view, Qt.Key.Key_Escape)
-        QTest.qWait(30)
+        rendered(window)
         assert dialogs.active
         js(window, "document.activeElement.dispatchEvent(new CompositionEvent('compositionend', {bubbles:true}))")
-        QTest.qWait(30)
+        rendered(window)
         QTest.keyClick(view, Qt.Key.Key_Escape)
         wait_for(lambda: not dialogs.active)
     within(window.translations.settings, dialogs, check)
@@ -224,7 +230,7 @@ def test_explicit_key_check_models_and_settings_status(window_factory, connected
     window.navigate_web_tab('settings')
     wait_for(lambda: js(window, '!!document.querySelector("[data-category=translation]")'))
     js(window, 'document.querySelector("[data-category=translation]").click()')
-    QTest.qWait(100)
+    wait_for(lambda: js(window, '!!document.querySelector("[aria-label=\'번역 설정\']")'))
     text = js(window, 'document.querySelector("[aria-label=\'번역 설정\']").textContent')
     assert 'OpenCode Go (API)' in text and 'deepseek-v4.1-flash' in text
     assert '등록됨 (****1234)' in text and '이어서: 켬' in text
@@ -301,6 +307,6 @@ def test_fallback_notice_and_manual_label_in_real_window(window_factory, connect
         capture(window, 'manual-review-fallback-notice')
     within(lambda: ReviewDialog(core, video.id, window.review_jump, window.review_changed, window).exec(), dialogs, check)
     window.navigate_web_tab('queue')
-    QTest.qWait(200)
+    wait_for(lambda: '사용량 한도' in js(window, 'document.body.textContent'))
     assert '사용량 한도' in js(window, 'document.body.textContent')
     capture(window, 'queue-fallback-notice')

@@ -19,14 +19,7 @@ from my_video_manager.web_dialogs_entries import SeriesEditor
 from my_video_manager.web_dialogs_entries import HighlightEditor, HighlightList
 from my_video_manager.web_dialogs_entries import ReviewDialog
 from my_video_manager.web_dialogs_models import DialogModel
-
-
-def wait_for(predicate):
-    for _ in range(300):
-        if predicate():
-            return
-        QTest.qWait(20)
-    assert predicate()
+from qt_wait import wait_for
 
 
 def state(dialogs):
@@ -43,7 +36,7 @@ def within(entry, dialogs, callback):
     loaded = QSignalSpy(dialogs.host.view.loadFinished)
     if dialogs.host.engine_page.isLoading():
         # 여러 xdist 작업자의 WebEngine 초기 로드에 CPU 시간을 허용한다.
-        assert loaded.wait(30000)
+        wait_for(lambda: loaded.count() > 0)
     errors = []
     def run():
         try:
@@ -211,6 +204,10 @@ def test_program_navigation_keeps_dialog_as_shell_overlay(window_factory, core, 
     window = window_factory()
     host, dialogs = window.web_host, window.web_host.dialogs
     navigate = {'reel': window.reel.open, 'queue': window.tray.show_queue, 'search': window.show_search}[target]
+    # 숨은 WebEngine은 초기 로드가 지연될 수 있다. 전환 계약을 검사하기 전에
+    # 보이는 셸의 준비를 기다리고, 그 뒤 실제 재생 화면으로 전환한다.
+    # 셸 로드 완료 뒤의 전환을 검사한다. 로드 전 전환 경로는 범위 밖이다.
+    wait_for(lambda: host._loaded_notified)
     window.pages.setCurrentWidget(window.playback_page)
     def check():
         wait_for(lambda: dialogs.container is not None)

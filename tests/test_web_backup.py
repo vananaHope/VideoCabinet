@@ -1,4 +1,6 @@
 """공개 설정 브리지와 AppCore로 백업 화면의 작업·예약·실패 수명을 확인한다."""
+from wait_helpers import UI_READY_TIMEOUT
+
 import errno
 import json
 from pathlib import Path
@@ -33,7 +35,7 @@ def tick():
 
 
 def wait(bridge):
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + UI_READY_TIMEOUT
     while state(bridge)['busy']:
         assert time.monotonic() < deadline
         tick()
@@ -317,7 +319,7 @@ def test_snapshot_does_not_reread_catalog_or_extract_zip(window_factory, core, m
     assert calls == [{'include_automatic': False}, {}]
 
 
-def test_recovery_dialog_cancel_failure_retry_focus_and_folder(core, tmp_path, monkeypatch):
+def test_recovery_dialog_cancel_failure_retry_focus_and_folder(core, tmp_path, monkeypatch, qapp):
     from my_video_manager.backup_recovery import BackupRecoveryDialog, QDesktopServices
     core.request_backup_restore(core.create_backup(tmp_path / 'source.zip').path)
     app = QApplication.instance() or QApplication([])
@@ -349,7 +351,7 @@ def test_restart_command_preserves_data_directory(tmp_path, monkeypatch):
     assert restart_command(tmp_path)[1] == ['--data-dir', str(tmp_path)]
 
 
-def test_recovery_cancel_failure_preserves_reservation_and_retry_uses_same_lock(core, tmp_path, monkeypatch):
+def test_recovery_cancel_failure_preserves_reservation_and_retry_uses_same_lock(core, tmp_path, monkeypatch, qapp):
     from my_video_manager import backup_recovery
     from my_video_manager.backup_recovery import BackupRecoveryDialog, open_with_backup_recovery
     from test_backup import ownership
@@ -441,7 +443,7 @@ def test_os_errors_have_actionable_messages_without_internal_paths(window_factor
     assert all(raw not in result['failure'] for raw in ('[Errno', '[WinError', '.backup-', 'raw OS'))
 
 
-def test_recovery_startup_error_is_not_a_backup_error(core, tmp_path):
+def test_recovery_startup_error_is_not_a_backup_error(core, tmp_path, qapp):
     from my_video_manager.backup_recovery import BackupRecoveryDialog
     error = PermissionError(errno.EACCES, 'Access is denied', str(tmp_path / 'private'))
     dialog = BackupRecoveryDialog(core.database, None, error)
@@ -455,7 +457,7 @@ def test_recovery_startup_error_is_not_a_backup_error(core, tmp_path):
 
 
 @pytest.mark.parametrize('next_status', [None, 'applied', 'rejected'])
-def test_recovery_retry_shows_current_result_after_initial_failure(core, monkeypatch, next_status):
+def test_recovery_retry_shows_current_result_after_initial_failure(core, monkeypatch, next_status, qapp):
     from my_video_manager import backup_recovery as recovery
     failure = BackupRestoreResult(None, False, status='deferred', error_message='지난 실패', guidance='지난 예약 안내')
     current = (BackupRestoreResult(None, False, status=next_status, error_message='이번 결과', guidance='이번 안내')

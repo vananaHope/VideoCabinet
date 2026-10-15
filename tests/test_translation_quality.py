@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta, timezone
 import json
 
+from wait_helpers import CHILD_READY_TIMEOUT
+
 import pytest
 
 from my_video_manager.core import AppCore
@@ -181,7 +183,7 @@ else:
             server.reply = 200, {}, json.dumps(completion(json.dumps(result))).encode()
             return super().request(method, url, **kwargs)
 
-    core = create(500, translator=fake_cli(tmp_path, script, cli=identifier, timeout=30),
+    core = create(500, translator=fake_cli(tmp_path, script, cli=identifier, timeout=CHILD_READY_TIMEOUT),
                   transport=RespondingTransport(server.server_port))
     if identifier == 'opencode_go':
         core.save_translation_settings(identifier, core.translation_settings()['selections'], False,
