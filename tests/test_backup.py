@@ -16,8 +16,9 @@ import pytest
 from PySide6.QtCore import QLockFile
 
 from my_video_manager.backup import (
-    AUTO_BACKUP_KEEP, BackupError, apply_pending_restore, backup_before_migration,
-    create_automatic_backup, create_backup, inspect_backup, request_restore,
+    AUTO_BACKUP_KEEP, BackupError, BackupBusyError, BackupStorageError, MAX_BACKUP_RESTARTS,
+    apply_pending_backup_restore, backup_before_migration,
+    create_automatic_backup, create_backup, inspect_backup, request_backup_restore,
 )
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
 from my_video_manager.library import migrate_library
@@ -66,7 +67,7 @@ def ownership(database):
 
 def apply(database):
     with ownership(database) as instance:
-        return apply_pending_restore(database, instance=instance)
+        return apply_pending_backup_restore(database, instance=instance)
 
 
 @pytest.fixture
@@ -159,16 +160,16 @@ def test_round_trip_all_public_user_data_and_unsaved_viewing(core, tmp_path, thu
         core.playback.report(60)
         core.playback.end()
     core.rename_video(video_id, "백업 뒤 바뀐 제목")
-    request = core.request_restore(archive)
+    request = core.request_backup_restore(archive)
     assert request.restart_required
     assert "내용 지문" in request.guidance
     assert core.video(video_id).title == "백업 뒤 바뀐 제목"
-    assert core.pending_restore() == result.metadata
+    assert core.pending_backup_restore() == result.metadata
     archive.unlink()  # 예약은 원본 파일에 의존하지 않는다.
     restored = apply(core.database)
     assert not restored.restart_required
     assert restored.safety_backup in core.automatic_backups()
-    assert core.pending_restore() is None
+    assert core.pending_backup_restore() is None
     assert apply(core.database) is None
     reopened = open_core(core.database)
     assert public_records(reopened) == expected
@@ -213,8 +214,8 @@ def rewrite_archive(archive, *, change_manifest=None, change_files=None):
 def test_rejects_invalid_backup_without_changing_data_or_pending_request(core, tmp_path, damage):
     archive = tmp_path / "backup.zip"
     core.create_backup(archive)
-    core.request_restore(archive)
-    pending_before = core.pending_restore()
+    core.request_backup_restore(archive)
+    pending_before = core.pending_backup_restore()
     before = core.database.read_bytes()
     if damage == "not_zip":
         archive.write_bytes(b"broken")
@@ -249,42 +250,41 @@ def test_rejects_invalid_backup_without_changing_data_or_pending_request(core, t
     else:
         with zipfile.ZipFile(archive, "w") as bundle:
             bundle.writestr("manifest.json", "[")
-    for action in (core.inspect_backup, core.request_restore):
+    for action in (core.inspect_backup, core.request_backup_restore):
         with pytest.raises(BackupError):
             action(archive)
     assert core.database.read_bytes() == before
-    assert core.pending_restore() == pending_before
+    assert core.pending_backup_restore() == pending_before
     assert not (tmp_path / "outside").exists()
 
 
 def test_revalidates_pending_request_at_startup(core, tmp_path):
     archive = tmp_path / "backup.zip"
     core.create_backup(archive)
-    core.request_restore(archive)
+    core.request_backup_restore(archive)
     pending, = core.database.parent.glob("*.restore-pending.zip")
     pending.write_bytes(b"corrupted after request")
     before = core.database.read_bytes()
-    with pytest.raises(BackupError):
-        apply(core.database)
+    assert apply(core.database).status == "rejected"
     assert core.database.read_bytes() == before
     assert core.automatic_backups() == ()
 
 
-def test_cancel_restore_and_require_correct_instance_ownership(core, tmp_path):
+def test_cancel_backup_restore_and_require_correct_instance_ownership(core, tmp_path):
     archive = tmp_path / "backup.zip"
     core.create_backup(archive)
-    core.request_restore(archive)
+    core.request_backup_restore(archive)
     lock = QLockFile(str(core.database.parent / "instance.lock"))
     fake = SimpleNamespace(lock=lock, lock_path=core.database.parent / "instance.lock")
     with pytest.raises(RuntimeError, match="잠금"):
-        apply_pending_restore(core.database, instance=fake)
+        apply_pending_backup_restore(core.database, instance=fake)
     other = tmp_path / "other"
     other.mkdir()
     with ownership(other / "library.sqlite3") as instance, pytest.raises(RuntimeError, match="잠금"):
-        apply_pending_restore(core.database, instance=instance)
-    core.cancel_restore()
-    core.cancel_restore()
-    assert core.pending_restore() is None
+        apply_pending_backup_restore(core.database, instance=instance)
+    core.cancel_backup_restore()
+    core.cancel_backup_restore()
+    assert core.pending_backup_restore() is None
     assert apply(core.database) is None
 
 
@@ -295,7 +295,7 @@ def test_restore_failure_leaves_original_database_and_thumbnails(core, tmp_path,
     video = core.videos()[0]
     core.rename_video(video.id, "원래 상태")
     video.thumbnail.write_bytes(b"current thumbnail")
-    core.request_restore(archive)
+    core.request_backup_restore(archive)
     before = public_records(core)
     thumbnails_before = {p.name: p.read_bytes() for p in video.thumbnail.parent.iterdir()}
     replace_file, copy_file = os.replace, __import__("shutil").copyfileobj
@@ -312,12 +312,13 @@ def test_restore_failure_leaves_original_database_and_thumbnails(core, tmp_path,
     monkeypatch.setattr(os, "replace", fail_replace)
     if failure == "disk_full_prepare":
         monkeypatch.setattr("shutil.copyfileobj", fail_copy)
-    with pytest.raises(OSError):
-        apply(core.database)
+    result = apply(core.database)
+    assert result.status == "deferred"
+    assert result.error_kind in ("file_in_use", "disk_full")
     monkeypatch.setattr("shutil.copyfileobj", copy_file)
     assert public_records(core) == before
     assert {p.name: p.read_bytes() for p in video.thumbnail.parent.iterdir()} == thumbnails_before
-    assert core.pending_restore() is not None
+    assert core.pending_backup_restore() is not None
     if failure == "replace":
         assert len(core.automatic_backups()) == 1
     monkeypatch.setattr(os, "replace", replace_file)
@@ -350,7 +351,7 @@ def test_missing_locations_reconnect_by_fingerprint_on_other_pc(core, tmp_path):
     new_folder = tmp_path / "new-pc-videos"
     video.locations[0].path.parent.rename(new_folder)
     target = open_core(tmp_path / "new-pc-data" / "library.sqlite3")
-    target.request_restore(archive)
+    target.request_backup_restore(archive)
     result = apply(target.database)
     target = open_core(target.database)
     assert all(v.missing for v in target.videos() + target.excluded_videos())
@@ -374,7 +375,7 @@ def test_old_backup_is_migrated_before_replacement(core, tmp_path, old_version):
     database, path = legacy_database(old_dir, old_version)
     archive = tmp_path / "legacy.zip"
     create_backup(database, archive)
-    core.request_restore(archive)
+    core.request_backup_restore(archive)
     apply(core.database)
     reopened = open_core(core.database)
     assert reopened.video(42).title == "옛 제목"
@@ -435,7 +436,7 @@ def test_wal_snapshot_and_restore_include_committed_wal(core, tmp_path):
         assert Path(str(core.database) + "-wal").exists()
         core.create_backup(archive)
     core.rename_video(core.videos()[0].id, "백업 뒤 제목")
-    core.request_restore(archive)
+    core.request_backup_restore(archive)
     apply(core.database)
     assert "WAL에 저장한 제목" in {v.title for v in open_core(core.database).videos()}
 
@@ -452,7 +453,14 @@ def test_backup_allows_viewing_and_subtitle_writes_while_copying(core, tmp_path)
             core.playback.report(position)
             core.settings.set("concurrent-write", position)
             time.sleep(0.002)
-        result = future.result(timeout=10)
+        try:
+            result = future.result(timeout=10)
+        except BackupBusyError as error:
+            # 쓰기 빈도가 복사보다 높으면 이제 명확히 중단한다. 쓰기가
+            # 멎은 뒤 재시도는 성공하며, 시청/자막 작업은 계속 보존된다.
+            assert error.reason == "source_changed"
+            assert error.restart_count == MAX_BACKUP_RESTARTS
+            result = core.create_backup(tmp_path / "concurrent.zip")
     assert core.transcript(video_id).lines[0].text == "hello"
     assert core.viewings(video_id)[-1].last_position == 10
     assert core.settings.get("concurrent-write") == 10
@@ -462,23 +470,24 @@ def test_backup_allows_viewing_and_subtitle_writes_while_copying(core, tmp_path)
 def test_failed_staged_migration_does_not_touch_current_library(core, tmp_path, monkeypatch):
     archive = tmp_path / "backup.zip"
     core.create_backup(archive)
-    core.request_restore(archive)
+    core.request_backup_restore(archive)
     before = core.database.read_bytes()
 
     def fail_migration(db, **kwargs):
         raise RuntimeError("migration failed")
 
     monkeypatch.setattr("my_video_manager.library.migrate_library", fail_migration)
-    with pytest.raises(RuntimeError, match="migration failed"):
-        apply(core.database)
+    result = apply(core.database)
+    assert result.status == "rejected"
+    assert "이전" in result.error_message
     assert core.database.read_bytes() == before
-    assert core.pending_restore() is not None
+    assert core.pending_backup_restore() is None
 
 
 def test_post_commit_cleanup_failure_never_reapplies_restore(core, tmp_path, monkeypatch):
     archive = tmp_path / "backup.zip"
     core.create_backup(archive)
-    core.request_restore(archive)
+    core.request_backup_restore(archive)
     original_unlink = Path.unlink
 
     def fail_cleanup(path, *args, **kwargs):
@@ -493,3 +502,278 @@ def test_post_commit_cleanup_failure_never_reapplies_restore(core, tmp_path, mon
     reopened.rename_video(video_id, "되돌리기 이후 새 기록")
     assert apply(core.database) is None
     assert open_core(core.database).video(video_id).title == "되돌리기 이후 새 기록"
+
+
+def test_review_corrupt_request_does_not_block_startup(core, tmp_path):
+    core.create_backup(tmp_path / "backup.zip")
+    core.request_backup_restore(tmp_path / "backup.zip")
+    pending, = core.database.parent.glob("*.restore-pending.zip")
+    pending.write_bytes(b"corrupt")
+    before = public_records(core)
+    result = apply(core.database)
+    assert result.status == "rejected"
+    assert not pending.exists()
+    assert list(core.database.parent.glob("*.rejected"))
+    assert public_records(open_core(core.database)) == before
+    assert apply(core.database) is None
+
+
+def test_review_locked_old_backup_does_not_block_new_backup(core, monkeypatch):
+    for _ in range(AUTO_BACKUP_KEEP):
+        create_automatic_backup(core.database)
+    oldest = core.automatic_backups()[-1]
+    unlink = Path.unlink
+
+    def locked(path, *args, **kwargs):
+        if path == oldest:
+            raise PermissionError("archive in use")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    latest = create_automatic_backup(core.database)
+    assert latest.path.is_file()
+    assert oldest.exists()
+    monkeypatch.setattr(Path, "unlink", unlink)
+    create_automatic_backup(core.database)
+    assert not oldest.exists()
+    assert len(core.automatic_backups()) == AUTO_BACKUP_KEEP
+
+
+@pytest.mark.parametrize("failure", ["corrupt", "migration", "disk_full"])
+def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, monkeypatch, failure):
+    """실제 main → 복원 → AppCore 시작 순서. 화면/엔진 대신 관찰용 경계만 주입한다."""
+    import sys
+    from PySide6 import QtWidgets
+    from my_video_manager import __main__, adapters, single_instance, theme, transcription, translation_cli, ui
+
+    archive = core.create_backup(tmp_path / "backup.zip").path
+    core.request_backup_restore(archive)
+    video_id = core.videos()[0].id
+    core.rename_video(video_id, "지금 라이브러리")
+    expected = public_records(core)
+    if failure == "corrupt":
+        pending, = core.database.parent.glob("*.restore-pending.zip")
+        pending.write_bytes(b"bad")
+    elif failure == "migration":
+        real_migration = migrate_library
+        def fail_staging(db, **kwargs):
+            if kwargs.get("before_upgrade"):
+                raise RuntimeError("invalid migration")
+            return real_migration(db, **kwargs)
+        monkeypatch.setattr("my_video_manager.library.migrate_library", fail_staging)
+    else:
+        def full_disk(*args, **kwargs):
+            raise OSError(errno.ENOSPC, "disk full")
+        monkeypatch.setattr("shutil.copyfileobj", full_disk)
+
+    class Signal:
+        def __init__(self):
+            self.callbacks = []
+        def connect(self, callback):
+            self.callbacks.append(callback)
+
+    class Application:
+        def __init__(self, *args):
+            self.aboutToQuit = Signal()
+        def setQuitOnLastWindowClosed(self, value):
+            pass
+        def exec(self):
+            for callback in self.aboutToQuit.callbacks:
+                callback()
+            return 0
+
+    class Instance:
+        def __init__(self, directory, parent):
+            self.lock_path = directory / "instance.lock"
+            self.lock = QLockFile(str(self.lock_path))
+            self.activated = Signal()
+        def start(self):
+            return self.lock.tryLock(0)
+        def close(self):
+            self.lock.unlock()
+
+    started = []
+    class Window:
+        def __init__(self, opened):
+            started.append(opened)
+            self.tray = SimpleNamespace(open=lambda: None)
+        def show(self):
+            pass
+
+    monkeypatch.setattr(sys, "argv", ["my-video-manager", "--data-dir", str(core.database.parent)])
+    monkeypatch.delenv("MVM_WEB_UI", raising=False)
+    monkeypatch.setattr(QtWidgets, "QApplication", Application)
+    monkeypatch.setattr(theme, "apply_theme", lambda app: None)
+    monkeypatch.setattr(single_instance, "SingleInstance", Instance)
+    monkeypatch.setattr(ui, "MainWindow", Window)
+    monkeypatch.setattr(adapters, "FFmpegMediaReader", Media)
+    monkeypatch.setattr(transcription, "FasterWhisperTranscriber", lambda path: Transcriber())
+    monkeypatch.setattr(translation_cli, "SubscriptionCLITranslator", lambda path: Translator())
+    errors = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *args: errors.append(args))
+    for attempt in range(2):
+        assert __main__.main() == 0
+        assert public_records(started[-1]) == expected
+        state = started[-1].backup_restore_status()
+        if failure == "disk_full":
+            assert state.status == "deferred" and state.error_kind == "disk_full"
+        elif attempt == 0:
+            assert state.status == "rejected"
+        else:
+            assert state is None
+    assert errors == []
+    if failure == "disk_full":
+        started[-1].cancel_backup_restore()
+        assert started[-1].backup_restore_status() is None
+        assert started[-1].pending_backup_restore() is None
+
+
+@pytest.mark.parametrize("operation", ["restore", "migration"])
+def test_retention_failure_does_not_block_restore_or_migration(core, tmp_path, monkeypatch, operation):
+    for _ in range(AUTO_BACKUP_KEEP):
+        create_automatic_backup(core.database)
+    oldest = core.automatic_backups()[-1]
+    unlink = Path.unlink
+    def locked(path, *args, **kwargs):
+        if path == oldest:
+            raise PermissionError("old backup open")
+        return unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", locked)
+    if operation == "restore":
+        core.request_backup_restore(core.create_backup(tmp_path / "restore.zip").path)
+        assert apply(core.database).status == "applied"
+    else:
+        from test_library import legacy_database
+        legacy = tmp_path / "legacy"
+        legacy.mkdir()
+        database, _ = legacy_database(legacy, 1)
+        # 이전 대상과 같은 데이터 폴더의 보존 목록을 사용한다.
+        os.replace(database, core.database)
+        reopened = open_core(core.database)
+        assert reopened.video(42).title == "옛 제목"
+        assert inspect_backup(reopened.automatic_backups()[0]).db_version == 1
+    assert oldest.exists()
+
+
+def test_successful_legacy_migration_has_one_pre_upgrade_backup(tmp_path):
+    from test_library import legacy_database
+    database, _ = legacy_database(tmp_path, 1)
+    core = open_core(database)
+    saved, = core.automatic_backups()
+    assert core.inspect_backup(saved).db_version == 1
+    assert core.video(42).title == "옛 제목"
+    assert open_core(database).automatic_backups() == (saved,)
+
+
+def test_automatic_backup_disk_full_is_actionable_and_still_blocks_migration(tmp_path, monkeypatch):
+    from test_library import legacy_database
+    database, _ = legacy_database(tmp_path, 1)
+    def full_disk(*args, **kwargs):
+        raise OSError(errno.ENOSPC, "disk full")
+    monkeypatch.setattr(zipfile.ZipFile, "write", full_disk)
+    with pytest.raises(BackupStorageError) as caught:
+        open_core(database)
+    assert caught.value.kind == "disk_full"
+    assert "공간" in str(caught.value)
+    # AppCore가 settings 테이블을 준비하는 기존 시작 동작 외 이전은 실행되지 않는다.
+    with closing(sqlite3.connect(database)) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("SELECT title FROM videos WHERE id=42").fetchone()[0] == "옛 제목"
+
+
+def test_repeated_source_writes_fail_with_count_and_guidance(core, tmp_path, monkeypatch):
+    core.settings.set("large-fixture", "x" * (4 * 1024 * 1024))
+    archive = core.create_backup(tmp_path / "backup.zip").path
+    original = archive.read_bytes()
+    connect = sqlite3.connect
+    class UpdatingSource(sqlite3.Connection):
+        def backup(self, target, *, progress, **kwargs):
+            steps = 0
+            def progress_and_write(status, remaining, total):
+                nonlocal steps
+                progress(status, remaining, total)
+                steps += 1
+                if status == sqlite3.SQLITE_OK and steps % 2 == 0:
+                    core.settings.set("force-restart", steps)
+            return super().backup(target, progress=progress_and_write, **kwargs)
+    def instrument(database, *args, **kwargs):
+        if str(database).startswith(core.database.as_uri()) and kwargs.get("uri"):
+            kwargs["factory"] = UpdatingSource
+        return connect(database, *args, **kwargs)
+    monkeypatch.setattr(sqlite3, "connect", instrument)
+    with pytest.raises(BackupBusyError) as caught:
+        core.create_backup(archive)
+    assert caught.value.restart_count == MAX_BACKUP_RESTARTS
+    assert caught.value.reason == "source_changed"
+    assert "재생" in str(caught.value) and "다시 시도" in str(caught.value)
+    assert archive.read_bytes() == original
+
+
+@pytest.mark.parametrize("invalid", ["case_collision", "thumbnail_too_large", "insufficient_space"])
+def test_extract_preflight_rejects_before_writing_members(core, tmp_path, monkeypatch, invalid):
+    archive = core.create_backup(tmp_path / "backup.zip").path
+    if invalid == "case_collision":
+        def add_twins(files, manifest):
+            manifest["includes_thumbnails"] = True
+            for name in ("thumbnails/x.jpg", "thumbnails/X.jpg"):
+                files[name] = name.encode()
+                manifest["files"][name] = hashlib.sha256(files[name]).hexdigest()
+        rewrite_archive(archive, change_files=add_twins)
+    elif invalid == "thumbnail_too_large":
+        def oversized(files, manifest):
+            manifest["includes_thumbnails"] = True
+            files["thumbnails/large.jpg"] = b"x" * (8 * 1024 * 1024 + 1)
+            manifest["files"]["thumbnails/large.jpg"] = hashlib.sha256(files["thumbnails/large.jpg"]).hexdigest()
+        rewrite_archive(archive, change_files=oversized)
+    else:
+        monkeypatch.setattr("shutil.disk_usage", lambda path: SimpleNamespace(free=1))
+    def must_not_extract(*args, **kwargs):
+        pytest.fail("preflight must reject before extracting")
+    monkeypatch.setattr("shutil.copyfileobj", must_not_extract)
+    with pytest.raises(BackupStorageError if invalid == "insufficient_space" else BackupError):
+        core.inspect_backup(archive)
+
+
+def test_offline_drive_location_is_missing_and_guidance_explains_exception(core, tmp_path):
+    video = core.videos()[0]
+    archive = core.create_backup(tmp_path / "backup.zip").path
+    video.locations[0].path.unlink()
+    core.request_backup_restore(archive)
+    result = apply(core.database)
+    assert open_core(core.database).video(video.id).missing
+    assert "외장 드라이브" in result.guidance
+    assert "다시 검사" in result.guidance
+
+
+def test_startup_cleans_only_old_internal_restore_artifacts(core):
+    directory = core.database.parent
+    stale = directory / ".restore-old"
+    stale.mkdir()
+    (stale / "partial.sqlite3").write_bytes(b"temporary")
+    applying = directory / "library.sqlite3.restore-pending.zip.applying"
+    applying.write_bytes(b"consumed request")
+    fresh = directory / ".restore-fresh"
+    fresh.mkdir()
+    rejected = directory / "library.sqlite3.restore-pending.zip.saved.rejected"
+    rejected.write_bytes(b"keep rejected backup")
+    for path in (stale, applying, rejected):
+        os.utime(path, (0, 0))
+    assert apply(core.database) is None
+    assert not stale.exists() and not applying.exists()
+    assert fresh.exists() and rejected.exists()
+
+
+def test_open_delete_journal_database_defers_restore_with_actionable_error(core, tmp_path):
+    archive = core.create_backup(tmp_path / "backup.zip").path
+    core.request_backup_restore(archive)
+    expected = public_records(core)
+    with closing(sqlite3.connect(core.database)) as writer:
+        writer.execute("BEGIN IMMEDIATE")
+        result = apply(core.database)
+        assert result.status == "deferred"
+        assert result.error_kind == "file_in_use"
+        assert "사용" in result.error_message
+        writer.rollback()
+    assert public_records(open_core(core.database)) == expected
+    assert core.pending_backup_restore() is not None
+    assert apply(core.database).status == "applied"

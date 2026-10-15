@@ -27,12 +27,13 @@ def main():
         instance = SingleInstance(data_directory, app)
         if not instance.start():
             return 0
-        from .backup import apply_pending_restore
-        apply_pending_restore(data_directory / "library.sqlite3", instance=instance)
+        from .backup import apply_pending_backup_restore
+        restore_result = apply_pending_backup_restore(data_directory / "library.sqlite3", instance=instance)
         core = AppCore(media=FFmpegMediaReader(), clock=lambda: datetime.now(timezone.utc),
                        transcriber=FasterWhisperTranscriber(data_directory / "models"),
                        translator=SubscriptionCLITranslator(data_directory),
                        database=args.data_dir / "library.sqlite3" if args.data_dir else None)
+        core.set_backup_restore_startup_result(restore_result)
         window = MainWindow(core)
         instance.activated.connect(window.tray.open)
         app.aboutToQuit.connect(instance.close)

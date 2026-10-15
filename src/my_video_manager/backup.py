@@ -1,8 +1,9 @@
-"""라이브러리 스냅샷과 다음 시작 시 되돌리기. 화면이나 실행 중 코어를 소유하지 않는다."""
+"""라이브러리 스냅샷과 다음 시작 시 백업 복원. 화면이나 실행 중 코어를 소유하지 않는다."""
 
 from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import errno
 import hashlib
 from importlib.metadata import version
 import json
@@ -20,9 +21,13 @@ import zipfile
 APPLICATION = "my-video-manager"
 FORMAT_VERSION = 1
 AUTO_BACKUP_KEEP = 5
+MAX_BACKUP_RESTARTS = 3
+MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024
+STALE_RESTORE_SECONDS = 24 * 60 * 60
 DATABASE_NAME = "library.sqlite3"
-RESTORE_GUIDANCE = (
-    "영상 파일은 백업에 포함되지 않습니다. 다른 PC에서 되돌린 뒤 파일 없음으로 보이면 "
+BACKUP_RESTORE_GUIDANCE = (
+    "영상 파일은 백업에 포함되지 않습니다. 백업 복원 시 연결되지 않은 외장 드라이브 등 "
+    "존재하지 않는 위치는 파일 없음으로 바뀝니다. 해당 드라이브를 연결하거나 "
     "새 영상 폴더를 감시 폴더로 추가하고 다시 검사하세요. 내용 지문이 같은 영상은 "
     "기존 태그·자막·하이라이트·시청 기록에 다시 연결됩니다."
 )
@@ -30,6 +35,39 @@ RESTORE_GUIDANCE = (
 
 class BackupError(ValueError):
     """검사에서 거부한 백업. 현재 라이브러리는 바꾸지 않는다."""
+
+    def __init__(self, message, *, kind="invalid_backup"):
+        self.kind = kind
+        super().__init__(message)
+
+
+class BackupBusyError(TimeoutError):
+    """작업자에서 화면으로 전달할 수 있는 제한된 재시도 결과."""
+
+    def __init__(self, restart_count, reason):
+        self.restart_count, self.reason = restart_count, reason
+        super().__init__("다른 작업의 DB 쓰기로 백업이 지연되었습니다. "
+                         "재생과 자막 처리를 멈추고 다시 시도하세요.")
+
+
+class BackupStorageError(OSError):
+    """공간/파일 사용 문제. 예약을 거부하지 않고 다음 시작에서 재시도한다."""
+
+    def __init__(self, code, message, kind):
+        self.kind = kind
+        super().__init__(code, message)
+
+
+def _storage_error(error):
+    if isinstance(error, BackupStorageError):
+        return error
+    if getattr(error, "errno", None) == errno.ENOSPC or getattr(error, "winerror", None) == 112:
+        return BackupStorageError(errno.ENOSPC, "백업 공간이 부족합니다. 저장 공간을 확보한 뒤 다시 시도하세요.", "disk_full")
+    if isinstance(error, PermissionError) or getattr(error, "errno", None) in (errno.EACCES, errno.EBUSY):
+        return BackupStorageError(errno.EACCES, "백업 복원 파일 또는 DB가 사용 중이거나 접근할 수 없습니다. "
+                                  "파일을 사용하는 프로그램을 닫고 접근 권한을 확인하세요.", "file_in_use")
+    return BackupStorageError(getattr(error, "errno", None),
+                              "백업 저장 장치에 접근할 수 없습니다. 연결과 쓰기 권한을 확인하세요.", "storage_error")
 
 
 @dataclass(frozen=True)
@@ -48,14 +86,20 @@ class BackupResult:
     snapshot_seconds: float
     # backup_step 호출 사이의 경과 시간: 실제 잠금 시간보다 큰 상한 추정치다.
     max_step_seconds: float
+    restart_count: int = 0
 
 
 @dataclass(frozen=True)
-class RestoreResult:
-    metadata: BackupMetadata
+class BackupRestoreResult:
+    metadata: BackupMetadata | None
     restart_required: bool
-    guidance: str = RESTORE_GUIDANCE
+    guidance: str = BACKUP_RESTORE_GUIDANCE
     safety_backup: Path | None = None
+    status: str = "scheduled"
+    error_kind: str | None = None
+    error_message: str | None = None
+    rejected_path: Path | None = None
+    restart_count: int = 0
 
 
 def _readonly(path):
@@ -76,25 +120,33 @@ def _sync(path):
 
 
 def _snapshot(database, destination):
-    started = previous = time.monotonic()
+    started = previous = time.perf_counter()
     max_step = 0.0
+    previous_remaining = None
+    restarts = 0
 
     def progress(status, remaining, total):
-        nonlocal previous, max_step
-        now = time.monotonic()
+        nonlocal previous, max_step, previous_remaining, restarts
+        now = time.perf_counter()
         if status in (sqlite3.SQLITE_OK, sqlite3.SQLITE_DONE):
             max_step = max(max_step, now - previous)
+            if previous_remaining is not None and remaining > previous_remaining:
+                restarts += 1
+            previous_remaining = remaining
+        if restarts >= MAX_BACKUP_RESTARTS:
+            # 453 MiB에서 pages=-1 전환은 UI 시청 저장을 3초 넘게 막았다.
+            raise BackupBusyError(restarts, "source_changed")
         if now - started > 30:
-            raise TimeoutError("백업이 오래 지연되어 중단했습니다. 잠시 뒤 다시 시도하세요.")
+            raise BackupBusyError(restarts, "deadline_exceeded")
         # SQLite가 progress 전에 원본의 읽기 잠금을 해제한다. Windows에서
         # 매 단계 sleep을 넣으면 타이머 해상도 때문에 복사가 길어져,
         # 주기적 시청 저장마다 스냅샷이 처음부터 반복될 수 있다.
-        previous = time.monotonic()
+        previous = time.perf_counter()
 
     with closing(_readonly(database)) as source, closing(sqlite3.connect(destination)) as target:
         source.backup(target, pages=128, progress=progress, sleep=0.01)
         target.execute("PRAGMA journal_mode=DELETE")
-    return time.monotonic() - started, max_step
+    return time.perf_counter() - started, max_step, restarts
 
 
 def _database_metadata(path):
@@ -115,12 +167,12 @@ def create_backup(database: Path, destination: Path, *, include_thumbnails=False
     database, destination = Path(database).resolve(), Path(destination).resolve()
     if destination.suffix.lower() != ".zip":
         raise BackupError("백업 파일의 확장자는 .zip이어야 합니다.")
-    if destination == database or destination == pending_restore_path(database):
-        raise BackupError("라이브러리 또는 되돌리기 요청을 백업 대상으로 쓸 수 없습니다.")
+    if destination == database or destination == pending_backup_restore_path(database):
+        raise BackupError("라이브러리 또는 백업 복원 요청을 백업 대상으로 쓸 수 없습니다.")
     with tempfile.TemporaryDirectory(prefix=".backup-", dir=destination.parent) as temporary:
         stage = Path(temporary)
         snapshot = stage / DATABASE_NAME
-        elapsed, max_step = _snapshot(database, snapshot)
+        elapsed, max_step, restarts = _snapshot(database, snapshot)
         # 저장 주기 전 진행분도 담되, 복사하는 동안 더 최신 저장/종료가
         # 들어왔다면 그 기록을 과거 진행분으로 덮어쓰지 않는다.
         if active_viewings:
@@ -155,7 +207,7 @@ def create_backup(database: Path, destination: Path, *, include_thumbnails=False
             bundle.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False))
         _sync(archive)
         os.replace(archive, destination)
-    return BackupResult(destination, metadata, elapsed, max_step)
+    return BackupResult(destination, metadata, elapsed, max_step, restarts)
 
 
 def _valid_member(name):
@@ -169,7 +221,7 @@ def _extract_checked(archive, stage):
         with zipfile.ZipFile(archive) as bundle:
             members = bundle.infolist()
             names = [member.filename for member in members]
-            if len(names) != len(set(names)) or "manifest.json" not in names:
+            if len(names) != len({name.casefold() for name in names}) or "manifest.json" not in names:
                 raise BackupError("중복 파일이 있거나 manifest.json이 없습니다.")
             if bundle.getinfo("manifest.json").file_size > 1024 * 1024:
                 raise BackupError("백업 메타데이터가 너무 큽니다.")
@@ -190,9 +242,17 @@ def _extract_checked(archive, stage):
                 raise BackupError("백업 파일 목록이 일치하지 않습니다.")
             if not metadata.includes_thumbnails and len(files) != 1:
                 raise BackupError("썸네일 포함 정보가 일치하지 않습니다.")
+            # 파일을 쓰기 전에 경로와 선언된 크기를 모두 확인한다.
             for name, digest in files.items():
                 if not _valid_member(name) or not isinstance(digest, str) or not re.fullmatch("[0-9a-f]{64}", digest):
                     raise BackupError("백업 파일 경로나 해시가 올바르지 않습니다.")
+                if name.startswith("thumbnails/") and bundle.getinfo(name).file_size > MAX_THUMBNAIL_BYTES:
+                    raise BackupError("썸네일 파일이 허용 크기 8 MiB를 넘습니다.")
+            if sum(member.file_size for member in members) > shutil.disk_usage(stage).free:
+                raise BackupStorageError(errno.ENOSPC,
+                                         "백업을 검사할 임시 저장 공간이 부족합니다. 공간을 확보한 뒤 다시 시도하세요.",
+                                         "disk_full")
+            for name, digest in files.items():
                 target = stage / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with bundle.open(name) as source, target.open("wb") as output:
@@ -215,12 +275,12 @@ def inspect_backup(archive: Path) -> BackupMetadata:
         return _extract_checked(archive, Path(temporary))
 
 
-def pending_restore_path(database: Path) -> Path:
+def pending_backup_restore_path(database: Path) -> Path:
     database = Path(database).resolve()
     return database.with_name(database.name + ".restore-pending.zip")
 
 
-def request_restore(database: Path, archive: Path) -> RestoreResult:
+def request_backup_restore(database: Path, archive: Path) -> BackupRestoreResult:
     """원본 ZIP이 이동되어도 유지되는 검증된 사본 하나를 원자적으로 예약한다."""
     database = Path(database).resolve()
     with tempfile.TemporaryDirectory(prefix=".restore-request-", dir=database.parent) as temporary:
@@ -228,12 +288,12 @@ def request_restore(database: Path, archive: Path) -> RestoreResult:
         shutil.copyfile(archive, candidate)
         metadata = inspect_backup(candidate)
         _sync(candidate)
-        os.replace(candidate, pending_restore_path(database))
-    return RestoreResult(metadata, restart_required=True)
+        os.replace(candidate, pending_backup_restore_path(database))
+    return BackupRestoreResult(metadata, restart_required=True)
 
 
-def cancel_restore(database: Path) -> None:
-    pending_restore_path(database).unlink(missing_ok=True)
+def cancel_backup_restore(database: Path) -> None:
+    pending_backup_restore_path(database).unlink(missing_ok=True)
 
 
 def automatic_backups(database: Path) -> tuple[Path, ...]:
@@ -246,12 +306,24 @@ def automatic_backups(database: Path) -> tuple[Path, ...]:
 
 def create_automatic_backup(database: Path, *, include_thumbnails=False) -> BackupResult:
     directory = Path(database).resolve().parent / "backups"
-    directory.mkdir(exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    result = create_backup(database, directory / f"auto-{stamp}-{uuid4().hex}.zip",
-                           include_thumbnails=include_thumbnails)
+    try:
+        directory.mkdir(exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        result = create_backup(database, directory / f"auto-{stamp}-{uuid4().hex}.zip",
+                               include_thumbnails=include_thumbnails)
+    except BackupBusyError:
+        raise
+    except OSError as error:
+        raise _storage_error(error) from error
+    except sqlite3.OperationalError as error:
+        if "full" in str(error).lower():
+            raise _storage_error(OSError(errno.ENOSPC, str(error))) from error
+        raise
     for path in automatic_backups(database)[AUTO_BACKUP_KEEP:]:
-        path.unlink()
+        try:
+            path.unlink()
+        except OSError:
+            pass  # 새 백업은 완성됐다. 잠긴 오래된 ZIP은 다음 생성 때 다시 정리한다.
     return result
 
 
@@ -267,18 +339,13 @@ def backup_before_migration(db, target_version: int) -> BackupResult | None:
     return create_automatic_backup(Path(filename)) if filename else None
 
 
-def apply_pending_restore(database: Path, *, instance) -> RestoreResult | None:
+def _apply_backup_restore(database: Path) -> BackupRestoreResult:
     """SingleInstance 잠금 확보 뒤, AppCore/작업자/DB 연결을 만들기 전에만 호출한다.
 
     썸네일은 기존 파일을 덮어쓰지 않는다. 준비와 이전을 마친 DB의 replace가
-    유일한 커밋 지점이며, 그 뒤의 청소 실패는 되돌리기 실패로 취급하지 않는다.
+    유일한 커밋 지점이며, 그 뒤의 청소 실패는 백업 복원 실패로 취급하지 않는다.
     """
-    database = Path(database).resolve()
-    if not instance.lock.isLocked() or instance.lock_path.parent.resolve() != database.parent:
-        raise RuntimeError("되돌리기에는 이 데이터 폴더의 단일 인스턴스 잠금이 필요합니다.")
-    pending = pending_restore_path(database)
-    if not pending.exists():
-        return None
+    pending = pending_backup_restore_path(database)
     from .library import migrate_library
 
     added_thumbnails = []
@@ -292,7 +359,15 @@ def apply_pending_restore(database: Path, *, instance) -> RestoreResult | None:
             snapshot = stage / DATABASE_NAME
             # 실제 라이브러리를 건드리기 전에 이전까지 성공하는지 확인한다.
             with closing(sqlite3.connect(snapshot)) as db, db:
-                migrate_library(db, before_upgrade=lambda db, target: None)
+                try:
+                    migrate_library(db, before_upgrade=lambda db, target: None)
+                except OSError:
+                    raise
+                except Exception as error:
+                    if isinstance(error, sqlite3.OperationalError) and "full" in str(error).lower():
+                        raise _storage_error(OSError(errno.ENOSPC, str(error))) from error
+                    raise BackupError("백업 DB 이전에 실패했습니다. 앱을 업데이트하거나 다른 백업을 선택하세요.",
+                                      kind="migration_failed") from error
                 for (path,) in db.execute("SELECT path FROM locations").fetchall():
                     try:
                         Path(path).stat()
@@ -316,10 +391,12 @@ def apply_pending_restore(database: Path, *, instance) -> RestoreResult | None:
             _sync(snapshot)
             safety = create_automatic_backup(database, include_thumbnails=True).path if database.exists() else None
             if database.exists():
-                # 중단된 WAL도 SQLite로 회수한다. 외부 연결이 남으면 교체하지 않는다.
+                # WAL은 SQLite로 회수한다. DELETE 모드의 열린 연결은 아래
+                # Windows os.replace의 파일 사용 오류가 실제 교체를 막는다.
                 with closing(sqlite3.connect(database, timeout=1)) as db:
                     if db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
-                        raise BackupError("사용 중인 DB 연결이 있어 되돌릴 수 없습니다.")
+                        raise BackupStorageError(errno.EBUSY, "사용 중인 DB 연결을 닫은 뒤 백업 복원을 다시 시도하세요.",
+                                                 "file_in_use")
                     db.execute("PRAGMA journal_mode=DELETE")
             os.replace(pending, consumed)
             try:
@@ -328,11 +405,14 @@ def apply_pending_restore(database: Path, *, instance) -> RestoreResult | None:
                 os.replace(consumed, pending)
                 raise
             committed = True
-            result = RestoreResult(metadata, restart_required=False, safety_backup=safety)
+            result = BackupRestoreResult(metadata, restart_required=False, safety_backup=safety, status="applied")
     finally:
         if not committed:
             for path in added_thumbnails:
-                path.unlink(missing_ok=True)
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         else:
             # 이미 교체된 DB가 다음 시작 때 다시 과거로 덮이지 않도록 요청은
             # 커밋 전에 소비했다. 비정상 종료의 .applying도 재적용하지 않는다.
@@ -341,3 +421,56 @@ def apply_pending_restore(database: Path, *, instance) -> RestoreResult | None:
             except OSError:
                 pass
     return result
+
+
+def _cleanup_stale_restore_files(database):
+    """해당 폴더 잠금 아래 오래된 내부 임시 파일만 최선 노력으로 청소한다."""
+    directory = database.parent.resolve()
+    pending = pending_backup_restore_path(database)
+    candidates = [*directory.glob(".restore-*"), pending.with_name(pending.name + ".applying")]
+    for path in candidates:
+        try:
+            # 정션/심볼릭 링크로 데이터 폴더 밖을 청소하지 않는다.
+            if path.is_symlink() or path.resolve() != path.absolute() or path.resolve().parent != directory:
+                continue
+            if time.time() - path.stat().st_mtime < STALE_RESTORE_SECONDS:
+                continue
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except OSError:
+            pass
+
+
+def apply_pending_backup_restore(database: Path, *, instance) -> BackupRestoreResult | None:
+    """시작 결과를 반환한다. 복원 실패는 현재 라이브러리의 정상 시작을 막지 않는다."""
+    database = Path(database).resolve()
+    if not instance.lock.isLocked() or instance.lock_path.parent.resolve() != database.parent:
+        raise RuntimeError("백업 복원에는 이 데이터 폴더의 단일 인스턴스 잠금이 필요합니다.")
+    _cleanup_stale_restore_files(database)
+    pending = pending_backup_restore_path(database)
+    if not pending.exists():
+        return None
+    try:
+        return _apply_backup_restore(database)
+    except BackupError as error:
+        rejected = pending.with_name(pending.name + f".{uuid4().hex}.rejected")
+        try:
+            os.replace(pending, rejected)
+        except OSError as quarantine_error:
+            failure = _storage_error(quarantine_error)
+            return BackupRestoreResult(None, False, status="deferred", error_kind=failure.kind,
+                                       error_message=str(failure))
+        return BackupRestoreResult(None, False, status="rejected", error_kind=error.kind,
+                                   error_message=str(error), rejected_path=rejected)
+    except BackupBusyError as error:
+        return BackupRestoreResult(None, False, status="deferred", error_kind=error.reason,
+                                   error_message=str(error), restart_count=error.restart_count)
+    except (OSError, sqlite3.OperationalError) as error:
+        if isinstance(error, sqlite3.OperationalError):
+            code = errno.ENOSPC if "full" in str(error).lower() else errno.EBUSY
+            error = OSError(code, str(error))
+        failure = _storage_error(error)
+        return BackupRestoreResult(None, False, status="deferred", error_kind=failure.kind,
+                                   error_message=str(failure))
