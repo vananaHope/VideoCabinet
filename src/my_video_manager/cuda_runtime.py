@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
+import time
 from threading import Event, Lock
 from typing import Callable
 import urllib.request
@@ -166,24 +167,54 @@ class RuntimeDownloadAdapter:
             raise PreparationError("disk_full", f"{target}: {size} bytes required")
 
 
-def cuda_gpu_available(*, command: tuple[str, ...] | None = None, timeout: float = 15) -> bool:
+def cuda_gpu_available(*, command: tuple[str, ...] | None = None, timeout: float = 15,
+                       cancellation: Event | None = None) -> bool:
     """네이티브 CUDA 탐지는 별도 프로세스에서만 실행한다."""
     if command is None:
-        if getattr(sys, "frozen", False):
-            # #62 마무리: 실행 파일 하위 명령을 구현한 뒤 --probe-cuda로 연결한다.
-            raise PreparationError("gpu_unavailable", "설치판 GPU 탐지 하위 명령이 아직 연결되지 않았습니다.")
-        command = (sys.executable, "-m", "my_video_manager.transcription", "--probe-cuda")
+        from .transcription import child_command
+        command = (*child_command(), "--probe-cuda")
+    cancellation = cancellation if cancellation is not None else Event()
+    _check_cancel(cancellation)
+    job, process = None, None
     try:
-        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                timeout=timeout, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
-        if result.returncode:
-            raise PreparationError("gpu_unavailable", result.stderr.strip() or f"종료 코드 {result.returncode}")
-        available = json.loads(result.stdout)["available"]
+        flags = 0
+        if sys.platform == "win32":
+            from .windows_job import WindowsJob
+            job = WindowsJob()
+            flags = subprocess.CREATE_NO_WINDOW | 0x4
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   text=True, encoding="utf-8", errors="replace", creationflags=flags)
+        if job:
+            job.attach_and_resume(process.pid)
+        deadline = time.monotonic() + timeout
+        while True:
+            _check_cancel(cancellation)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            try:
+                output, error = process.communicate(timeout=min(0.1, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        _check_cancel(cancellation)
+        if process.returncode:
+            raise PreparationError("gpu_unavailable", error.strip() or f"종료 코드 {process.returncode}")
+        available = json.loads(output)["available"]
         if not isinstance(available, bool):
             raise ValueError("GPU 탐지 응답은 bool이어야 합니다.")
         return available
     except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as error:
         raise PreparationError("gpu_unavailable", str(error)) from error
+    finally:
+        if job:
+            job.close()
+        if process:
+            if process.poll() is None:
+                process.kill()
+            process.communicate()
+            process.stdout.close()
+            process.stderr.close()
 
 
 def _manifest(assets):
@@ -222,7 +253,7 @@ class SubtitlePreparation:
     """
 
     def __init__(self, data_directory: Path, *, adapter: RuntimeDownloadAdapter | None = None,
-                 gpu_available: Callable[[], bool] = cuda_gpu_available,
+                 gpu_available: Callable[[], bool] | None = None,
                  cuda_assets=CUDA_WHEELS, model_assets=WHISPER_FILES,
                  model_revision: str = WHISPER_REVISION):
         self.data_directory = Path(data_directory).resolve()
@@ -239,7 +270,9 @@ class SubtitlePreparation:
         try:
             _check_cancel(cancellation)
             try:
-                available = self.gpu_available()
+                _report(progress, cancellation, "probe", "NVIDIA GPU", 0, 0)
+                available = (self.gpu_available() if self.gpu_available is not None else
+                             cuda_gpu_available(cancellation=cancellation))
             except PreparationError:
                 raise
             except Exception as error:
@@ -275,6 +308,9 @@ class SubtitlePreparation:
 
     def _prepare_model(self, cancellation, progress):
         target, cached = self._model_directories()
+        stage = target.with_name(target.name + ".partial")
+        if stage.exists():
+            shutil.rmtree(stage)
         if _is_ready(target, self.model_assets):
             return self._prepare_group(target, self.model_assets, False, cancellation, progress)
         if _is_ready(cached, self.model_assets):

@@ -137,6 +137,16 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
   })
 }
 
+export interface PreparationData {
+  state: string
+  message: string
+  phase: string
+  asset: string
+  completed: number
+  total: number
+  kind: string
+}
+
 export interface QueueRowData {
   videoId: number
   title: string
@@ -181,6 +191,8 @@ export interface QueueBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void
   rulesSnapshot: (reply: Reply) => void
+  preparationSnapshot: (reply: Reply) => void
+  preparationAction: (action: string, reply: Reply) => void
   action: (name: QueueAction, videoId: number, reply: Reply) => void
   candidates: (target: string, reply: Reply) => void
   saveRule: (target: string, language: string, includeExisting: boolean, reply: Reply) => void
@@ -189,12 +201,15 @@ export interface QueueBridge {
   rulesChanged: Signal<string>
   queueFocusRequested: Signal<string>
   queueDeactivated: Signal<string>
+  preparationChanged: Signal<string>
 }
 export function publicQueueBridge(raw: QueueBridge): QueueBridge {
   return Object.freeze({
     ready: raw.ready.bind(raw),
     snapshot: raw.snapshot.bind(raw),
     rulesSnapshot: raw.rulesSnapshot.bind(raw),
+    preparationSnapshot: raw.preparationSnapshot.bind(raw),
+    preparationAction: raw.preparationAction.bind(raw),
     action: raw.action.bind(raw),
     candidates: raw.candidates.bind(raw),
     saveRule: raw.saveRule.bind(raw),
@@ -203,6 +218,7 @@ export function publicQueueBridge(raw: QueueBridge): QueueBridge {
     rulesChanged: Object.freeze({ connect: raw.rulesChanged.connect.bind(raw.rulesChanged), disconnect: raw.rulesChanged.disconnect.bind(raw.rulesChanged) }),
     queueFocusRequested: Object.freeze({ connect: raw.queueFocusRequested.connect.bind(raw.queueFocusRequested), disconnect: raw.queueFocusRequested.disconnect.bind(raw.queueFocusRequested) }),
     queueDeactivated: Object.freeze({ connect: raw.queueDeactivated.connect.bind(raw.queueDeactivated), disconnect: raw.queueDeactivated.disconnect.bind(raw.queueDeactivated) }),
+    preparationChanged: Object.freeze({ connect: raw.preparationChanged.connect.bind(raw.preparationChanged), disconnect: raw.preparationChanged.disconnect.bind(raw.preparationChanged) }),
   })
 }
 
@@ -506,6 +522,8 @@ export interface SettingKeyData {
 }
 
 export interface SettingsData {
+  version: string
+  releasesUrl: string
   bindings: Array<SettingKeyData>
   minimum: number
   scanning: boolean
@@ -523,7 +541,7 @@ export interface CapturedKeyData {
   continuing: boolean
 }
 
-export type SettingsAction = "translation" | "quit"
+export type SettingsAction = "translation" | "quit" | "releases"
 export interface SettingsBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void

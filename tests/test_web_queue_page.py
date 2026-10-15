@@ -27,6 +27,9 @@ def queue_page(setup):
     host = Host()
     host.window = host
     host.core = setup[0]
+    from my_video_manager.subtitle_controls import SubtitleControls
+    host.subtitles = SubtitleControls(host)
+    host.subtitles.timer.stop()  # 큐 도메인은 각 테스트에서 명시적으로 처리한다.
     host.show()
     page = WebQueuePage(host)
     page.activated()

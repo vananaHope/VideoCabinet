@@ -11,6 +11,8 @@ try {
     Set-Location (Join-Path $PSScriptRoot '..')
 
     function Get-Git([string[]]$Arguments) {
+        # Windows PowerShell 5.1의 재지정된 stderr 경고는 종료 코드로 판정한다.
+        $ErrorActionPreference = 'Continue'
         $Result = & git @Arguments
         if ($LASTEXITCODE -ne 0) { throw "git $($Arguments -join ' ') 실패 ($LASTEXITCODE)" }
         return ($Result -join "`n").Trim()
@@ -164,7 +166,8 @@ try {
                 Write-Warning 'git status와 git diff를 확인하고 보존할 변경을 먼저 저장하세요.'
                 Write-Warning '변경 보관: git stash push --include-untracked'
                 if ($CreatedTag) { Write-Warning "이번 태그인지 확인 후 삭제: git update-ref -d refs/tags/$Tag $CreatedTag" }
-                Write-Warning "시작 커밋으로 복구: git reset --keep $HeadCommit"
+                Write-Warning "추가 커밋과 현재 브랜치 확인: git log --oneline $HeadCommit..HEAD"
+                Write-Warning "현재 HEAD와 작업을 보존한 뒤 이번 버전 커밋($VersionCommit)만 git revert 등으로 정리하세요. 다른 커밋까지 reset하지 마세요."
             }
         }
         throw $Failure

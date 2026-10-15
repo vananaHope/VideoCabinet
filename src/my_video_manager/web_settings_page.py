@@ -3,7 +3,10 @@ import json
 import math
 import sqlite3
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices
+
+from .app_version import current_version, RELEASES_URL
 
 from .key_bindings import KeyBindings, RESERVED_KEYS, normalize_key
 from .key_display import display_keys
@@ -85,7 +88,7 @@ class SettingsBridge(QObject):
 
     @SETTINGS.slot('action')
     def action(self, name):
-        if name not in ('translation', 'quit') or self.busy:
+        if name not in ('translation', 'quit', 'releases') or self.busy:
             return encode({'error': '진행 중인 작업이 끝난 뒤 다시 시도하세요.'})
         self.busy = True
         QTimer.singleShot(0, lambda: self.perform(name))
@@ -93,7 +96,10 @@ class SettingsBridge(QObject):
 
     def perform(self, name):
         try:
-            if name == 'translation':
+            if name == 'releases':
+                if not QDesktopServices.openUrl(QUrl(RELEASES_URL)):
+                    raise RuntimeError('브라우저에서 GitHub Release 페이지를 열지 못했습니다.')
+            elif name == 'translation':
                 self.page.window.translations.settings()
                 self.page.refresh()
                 self.page.focus_content()
@@ -127,7 +133,8 @@ class WebSettingsPage(WebPageController):
 
     def payload(self):
         queue = self.core.translation_queue()
-        return dict(bindings=[dict(id=KeyBindings.identifier(row.command), label=row.label,
+        return dict(version=current_version(), releasesUrl=RELEASES_URL,
+                    bindings=[dict(id=KeyBindings.identifier(row.command), label=row.label,
                     keys=list(row.keys), defaults=list(row.default_keys), display=display_keys(row.keys),
                     defaultDisplay=display_keys(row.default_keys)) for row in self.core.key_bindings()],
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,

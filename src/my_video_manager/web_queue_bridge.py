@@ -13,10 +13,27 @@ class QueueBridge(QObject):
     rulesChanged = QUEUE.signal('rulesChanged')
     queueFocusRequested = QUEUE.signal('queueFocusRequested')
     queueDeactivated = QUEUE.signal('queueDeactivated')
+    preparationChanged = QUEUE.signal('preparationChanged')
 
     def __init__(self, page):
         super().__init__(page)
         self.page = page
+        page.window.subtitles.preparation_changed.connect(lambda value: self.preparationChanged.emit(encode(value)))
+
+    @QUEUE.slot('preparationSnapshot')
+    def preparationSnapshot(self):
+        return encode(self.page.window.subtitles.preparation)
+
+    @QUEUE.slot('preparationAction')
+    def preparationAction(self, action):
+        controls = self.page.window.subtitles
+        if action == 'cancel':
+            controls.cancel_preparation()
+        elif action == 'retry':
+            controls.prepare()
+        else:
+            return encode({'error': '지원하지 않는 준비 작업입니다.'})
+        return encode({'ok': True})
 
     @QUEUE.slot('ready')
     def ready(self):

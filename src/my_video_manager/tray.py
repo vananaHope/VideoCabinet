@@ -48,6 +48,7 @@ class TrayControls(QObject):
             self.icon.showMessage("자막 대기열 처리 종료", f"이번 처리: 완료 {completed}개 · 실패 {failed}개")
 
     def resume(self):
+        self.window.subtitles.stopping = False
         self.core.resume_subtitle_processing()
         self.window.subtitles.timer.start(500)
         self.window.translations.timer.start(500)
