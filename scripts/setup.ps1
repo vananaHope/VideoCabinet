@@ -78,7 +78,7 @@ Confirm-Exit 'FFmpeg check'
 & .venv/Scripts/python.exe -c "from my_video_manager.transcription import prepare_cuda_runtime; prepare_cuda_runtime(); import ctranslate2; print('CUDA GPUs:', ctranslate2.get_cuda_device_count()); print('CUDA compute types:', ctranslate2.get_supported_compute_types('cuda'))"
 Confirm-Exit 'CUDA runtime check (NVIDIA GPU and current driver required; see README)'
 if (-not $Worktree) {
-    & .venv/Scripts/python.exe -m pytest
+    & .venv/Scripts/python.exe -m pytest -n auto
     Confirm-Exit 'pytest'
 }
 Write-Host 'Ready: .venv/Scripts/python.exe -m my_video_manager'
