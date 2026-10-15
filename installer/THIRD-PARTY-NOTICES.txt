@@ -11,7 +11,9 @@ libmpv: shinchiro mpv-dev-x86_64-20261013-git-9d144e57b6.
 Copyright (c) the mpv, MPlayer, mplayer2 and dependency contributors.
 mpv defaults to GNU GPL version 2 or later; this distribution uses the GPL
 build, not an LGPL-only build. Linked dependencies can require GPL version 3;
-see the GPLv3 text in ffmpeg/LICENSE.txt and upstream Copyright/license files.
+see the GPLv3 text in licenses/GPL-3.0.txt and upstream Copyright/license files.
+Includes statically linked FFmpeg N-127491-g0eeb79fcc and other libraries
+(including rubberband, libbluray and libssh); see the build recipes below.
 The pinned binary archive contains headers and libraries, but no license file.
 Source: https://github.com/mpv-player/mpv/tree/9d144e57b6
 Licensing: https://github.com/mpv-player/mpv/blob/9d144e57b6/Copyright
@@ -20,7 +22,7 @@ Binary distribution: https://github.com/shinchiro/mpv-winbuild-cmake/releases/ta
 
 Qt / PySide6 / Shiboken6 6.10.2: GNU LGPL version 3 (open-source distribution).
 Copyright (c) The Qt Company Ltd. and other contributors.
-LGPL text: licenses/LGPL-3.0.txt; its GPLv3 terms: ffmpeg/LICENSE.txt.
+LGPL text: licenses/LGPL-3.0.txt; its GPLv3 terms: licenses/GPL-3.0.txt.
 Sources: https://download.qt.io/archive/qt/6.10/6.10.2/single/
 Qt for Python sources: https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.10.2-src/
 License notices: https://doc.qt.io/qtforpython-6/licenses.html
@@ -52,3 +54,10 @@ PyInstaller bootloader: GPLv2+ with the bootloader distribution exception;
 
 CUDA libraries and Whisper models are not included in this installer.
 Their download sources and terms apply separately when subtitle preparation runs.
+
+Complete collected Python license texts: licenses/python/<package>/.
+The manifest lists the distributions actually included by PyInstaller.
+Each package has a NOTICE.txt with version, license and upstream URLs;
+metadata_only entries identify installed distributions without original texts.
+Web production dependency texts: licenses/web/; see THIRD-PARTY-WEB.txt
+and manifest.json there for versions, paths and hashes (including transitive dependencies).

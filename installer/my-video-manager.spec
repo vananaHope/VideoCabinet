@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
@@ -41,6 +42,10 @@ def keep_data(entry):
     return True
 
 a.datas = [entry for entry in a.datas if keep_data(entry)]
+# Analysis 이후 실제 동봉 파일과 wheel 메타데이터를 대조한다.
+sys.path.insert(0, str(root / 'scripts'))
+from bundle_licenses import collect_bundle_licenses
+a.datas += collect_bundle_licenses(a, root, stage)
 pyz = PYZ(a.pure)
 # windowed도 부모가 연결한 stdout/stderr 파이프는 유지한다. 설치판 자식 JSON으로 검증한다.
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='my-video-manager',

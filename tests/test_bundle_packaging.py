@@ -132,12 +132,16 @@ def bundle(packaging, tmp_path, monkeypatch):
           'qtwebengine_resources_100p.pak', 'qtwebengine_resources_200p.pak', 'v8_context_snapshot.bin']),
         'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak',
         'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe', 'ffmpeg/LICENSE.txt', 'ffmpeg/README.txt',
-        'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt',
+        'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt', *checker.REQUIRED_LICENSES,
     ]
     for name in files:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b'asset')
+    for kind, file in [('python', 'faster-whisper/metadata/LICENSE'), ('web', 'node_modules/react/LICENSE')]:
+        (tmp_path / 'licenses' / kind / 'manifest.json').write_text(json.dumps([
+            {'name': 'example', 'files': [{'path': file, 'sha256': hashlib.sha256(b'asset').hexdigest()}]}
+        ]))
     (tmp_path / 'ffmpeg/source.json').write_text(json.dumps({
         'version': ffmpeg.VERSION, 'url': ffmpeg.URL, 'sha256': ffmpeg.SHA256,
         'files': {name: ffmpeg.digest(tmp_path / 'ffmpeg' / name) for name in ffmpeg.EXECUTABLES}}))
@@ -153,7 +157,11 @@ def test_bundle_logs_pinned_ffmpeg_version(bundle, capsys):
 
 
 @pytest.mark.parametrize('name', ['THIRD-PARTY-NOTICES.txt', 'ffmpeg/LICENSE.txt',
-    'ffmpeg/README.txt', 'licenses/LGPL-3.0.txt', 'PySide6/QtWebEngineProcess.exe', 'PySide6/resources/v8_context_snapshot.bin',
+    'ffmpeg/README.txt', 'licenses/LGPL-3.0.txt',
+    'licenses/GPL-3.0.txt', 'licenses/python/ctranslate2/NOTICE.txt',
+    'licenses/python/faster-whisper/metadata/LICENSE', 'licenses/python/tokenizers/NOTICE.txt',
+    'licenses/python/av/metadata/licenses/LICENSE.txt',
+    'licenses/web/THIRD-PARTY-WEB.txt', 'licenses/web/node_modules/react/LICENSE', 'PySide6/QtWebEngineProcess.exe', 'PySide6/resources/v8_context_snapshot.bin',
     'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak'])
 def test_bundle_missing_required_runtime_fails(bundle, name):
     checker, directory = bundle
@@ -242,28 +250,188 @@ runpy.run_path(entry, run_name='__main__')
     assert result.stdout == result.stderr == b''
 
 
+def assert_hidden_console(source, label):
+    tree = ast.parse(source)
+    modules = {'subprocess': 'subprocess', 'os': 'os', 'asyncio': 'asyncio'}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in ('subprocess', 'os', 'asyncio'):
+                    modules[alias.asname or alias.name] = alias.name
+        if isinstance(node, ast.ImportFrom):
+            assert node.module != 'subprocess', (label, node.lineno, 'Use qualified subprocess calls')
+            assert not (node.module == 'os' and any(a.name in ('system', '*') for a in node.names)), (label, node.lineno)
+            assert not (node.module == 'asyncio' and any(a.name.startswith('create_subprocess_') or a.name == '*'
+                        for a in node.names)), (label, node.lineno)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    calls = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)):
+            continue
+        module, method = modules.get(node.func.value.id), node.func.attr
+        assert not (module == 'os' and method == 'system'), (label, node.lineno, 'os.system')
+        assert not (module == 'asyncio' and method.startswith('create_subprocess_')), (label, node.lineno)
+        if module != 'subprocess' or method not in (
+                'Popen', 'run', 'call', 'check_call', 'check_output', 'getoutput', 'getstatusoutput'):
+            continue
+        calls.append((label, node.lineno))
+        # Shell convenience functions cannot accept creationflags at all.
+        assert method not in ('getoutput', 'getstatusoutput'), (label, node.lineno, method)
+        flags = next((k.value for k in node.keywords if k.arg == 'creationflags'), None)
+        assert flags is not None, (label, node.lineno, 'creationflags missing')
+        expressions = [flags]
+        if isinstance(flags, ast.Name):
+            scope = parents[node]
+            while not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+                scope = parents[scope]
+            expressions += [n.value for n in ast.walk(scope) if isinstance(n, ast.Assign)
+                            and n.lineno < node.lineno and any(isinstance(t, ast.Name)
+                            and t.id == flags.id for t in n.targets)]
+        assert any(isinstance(n, ast.Attribute) and n.attr == 'CREATE_NO_WINDOW'
+                   and isinstance(n.value, ast.Name) and modules.get(n.value.id) == 'subprocess'
+                   for expr in expressions for n in ast.walk(expr)), (label, node.lineno)
+    return calls
+
+
 def test_source_subprocess_calls_hide_windows_console():
     root = Path(__file__).resolve().parents[1] / 'src'
     calls = []
     for path in root.rglob('*.py'):
-        tree = ast.parse(path.read_text(encoding='utf-8-sig'))
-        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and isinstance(node.func.value, ast.Name) and node.func.value.id == 'subprocess'
-                    and node.func.attr in ('Popen', 'run')):
-                continue
-            calls.append((path, node.lineno))
-            flags = next((k.value for k in node.keywords if k.arg == 'creationflags'), None)
-            assert flags is not None, (path, node.lineno, 'creationflags missing')
-            expressions = [flags]
-            if isinstance(flags, ast.Name):
-                scope = parents[node]
-                while not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
-                    scope = parents[scope]
-                expressions += [n.value for n in ast.walk(scope) if isinstance(n, ast.Assign)
-                                and n.lineno < node.lineno and any(isinstance(t, ast.Name)
-                                and t.id == flags.id for t in n.targets)]
-            assert any(isinstance(n, ast.Attribute) and n.attr == 'CREATE_NO_WINDOW'
-                       for expr in expressions for n in ast.walk(expr)), (path, node.lineno)
+        calls.extend(assert_hidden_console(path.read_text(encoding='utf-8-sig'), path))
     assert calls, 'No subprocess calls were inspected'
+
+
+@pytest.mark.parametrize('source', [
+    *(f"import subprocess\nsubprocess.{method}(['tool'])" for method in
+      ('Popen', 'run', 'call', 'check_call', 'check_output', 'getoutput', 'getstatusoutput')),
+    "from subprocess import Popen\nPopen(['tool'])",
+    "from subprocess import run as launch\nlaunch(['tool'])",
+    "import subprocess as sp\nsp.check_output(['tool'])",
+    "import os\nos.system('tool')",
+    "import os as system\nsystem.system('tool')",
+    "from os import system as launch\nlaunch('tool')",
+    "import asyncio\nasyncio.create_subprocess_exec('tool')",
+    "import asyncio as aio\naio.create_subprocess_shell('tool')",
+    "from asyncio import create_subprocess_exec as launch\nlaunch('tool')",
+    "import subprocess\nflags = 0\nsubprocess.run(['tool'], creationflags=flags)",
+])
+def test_console_guard_rejects_unsafe_forms(source):
+    with pytest.raises(AssertionError):
+        assert_hidden_console(source, 'injected.py')
+
+
+@pytest.mark.parametrize('method', ['Popen', 'run', 'call', 'check_call', 'check_output'])
+def test_console_guard_accepts_hidden_calls_and_module_aliases(method):
+    assert assert_hidden_console(
+        f"import subprocess as sp\nflags = sp.CREATE_NO_WINDOW if True else 0\n"
+        f"sp.{method}(['tool'], creationflags=flags)", 'valid.py')
+
+
+@pytest.fixture
+def licenses(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / 'scripts'))
+    return importlib.import_module('bundle_licenses')
+
+
+def test_python_licenses_follow_analysis_files_not_installed_requirements(licenses, tmp_path, monkeypatch):
+    from importlib.metadata import PathDistribution
+
+    site = tmp_path / 'site-packages'
+    site.mkdir()
+    distributions = []
+    for name in ('pure', 'native', 'data', 'unused', 'nvidia-cublas-cu12', 'pytest', 'no-text'):
+        info = site / f'{name}-1.0.dist-info'
+        info.mkdir()
+        (info / 'METADATA').write_text(
+            f'Metadata-Version: 2.4\nName: {name}\nVersion: 1.0\n'
+            'License-Expression: MIT\nProject-URL: Source, https://example.org/source\n')
+        paths = [f'{name}/module.py', f'{name}/native.pyd', f'{name}/data.bin']
+        if name != 'no-text':
+            paths += [f'{info.name}/licenses/LICENSE', f'{info.name}/licenses/NOTICE',
+                      f'{name}/vendor/COPYING']
+        for relative in paths:
+            path = site / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'original copyright\r\npermission\r\n')
+        (info / 'RECORD').write_text(''.join(f'{path},,\n' for path in paths))
+        distributions.append(PathDistribution(info))
+    monkeypatch.setattr(licenses.metadata, 'distributions', lambda: distributions)
+    entries = [(name, str(site / name / file), kind) for name, file, kind in [
+        ('pure', 'module.py', 'PYMODULE'), ('native', 'native.pyd', 'EXTENSION'),
+        ('data', 'data.bin', 'DATA'), ('no-text', 'module.py', 'PYMODULE')]]
+    target = tmp_path / 'licenses'
+    packages = licenses.python_licenses(entries, target)
+    assert {p['name'] for p in packages} == {'pure', 'native', 'data', 'no-text'}
+    assert sum(len(p['files']) for p in packages) == 9
+    assert (target / 'pure/metadata/licenses/LICENSE').read_bytes() == b'original copyright\r\npermission\r\n'
+    notice = (target / 'no-text/NOTICE.txt').read_text()
+    assert 'MIT' in notice and 'https://example.org/source' in notice and 'no LICENSE' in notice
+    assert next(p for p in packages if p['name'] == 'no-text')['metadata_only']
+    # Rebuilds remove stale notices for packages no longer included by Analysis.
+    licenses.python_licenses(entries[:1], target)
+    assert not (target / 'native').exists()
+
+
+@pytest.fixture
+def npm_tree(tmp_path):
+    frontend = tmp_path / 'frontend'
+    frontend.mkdir()
+    packages = {'': {'dependencies': {'direct': '1.0'}}}
+    for name, flags in [('direct', {}), ('transitive', {}), ('shared', {}),
+                        ('direct/node_modules/nested', {}), ('dev-only', {'dev': True}),
+                        ('optional-dev', {'devOptional': True})]:
+        location = 'node_modules/' + name
+        packages[location] = {'version': '1.0', 'license': 'MIT', **flags}
+        directory = frontend / location
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / 'package.json').write_text(json.dumps({'name': name, 'version': '1.0', 'license': 'MIT'}))
+        (directory / 'LICENSE').write_bytes(b'Copyright original\r\nMIT terms\r\n')
+    (frontend / 'package-lock.json').write_text(json.dumps({'lockfileVersion': 3, 'packages': packages}))
+    return frontend
+
+
+def test_web_licenses_include_production_transitives_and_nested_packages(licenses, npm_tree, tmp_path):
+    target = tmp_path / 'licenses'
+    packages = licenses.web_licenses(npm_tree, target)
+    assert {p['name'] for p in packages} == {'direct', 'transitive', 'shared', 'direct/node_modules/nested', 'optional-dev'}
+    assert sum(len(p['files']) for p in packages) == 5
+    assert (target / 'node_modules/direct/LICENSE').read_bytes() == b'Copyright original\r\nMIT terms\r\n'
+    assert not (target / 'node_modules/dev-only').exists()
+
+
+@pytest.mark.parametrize('failure', ['license', 'empty', 'package', 'version'])
+def test_web_licenses_fail_on_incomplete_or_stale_install(licenses, npm_tree, tmp_path, failure):
+    package = npm_tree / 'node_modules/direct'
+    if failure == 'license':
+        (package / 'LICENSE').unlink()
+    elif failure == 'empty':
+        (package / 'LICENSE').write_bytes(b'')
+    elif failure == 'package':
+        (package / 'package.json').unlink()
+    else:
+        (package / 'package.json').write_text(json.dumps({'name': 'direct', 'version': '2.0'}))
+    with pytest.raises((RuntimeError, FileNotFoundError)):
+        licenses.web_licenses(npm_tree, tmp_path / 'licenses')
+
+
+@pytest.mark.parametrize('change', ['missing', 'modified', 'escape', 'empty'])
+def test_bundle_validates_all_manifest_license_files(bundle, change):
+    checker, directory = bundle
+    path = directory / 'licenses/web/node_modules/react/LICENSE'
+    manifest = directory / 'licenses/web/manifest.json'
+    if change == 'missing':
+        # Use a non-representative file to exercise manifest validation.
+        data = json.loads(manifest.read_text())
+        data[0]['files'][0]['path'] = 'other/LICENSE'
+        manifest.write_text(json.dumps(data))
+    elif change == 'modified':
+        path.write_bytes(b'changed')
+    elif change == 'escape':
+        data = json.loads(manifest.read_text())
+        data[0]['files'][0]['path'] = '../../../ffmpeg/LICENSE.txt'
+        manifest.write_text(json.dumps(data))
+    else:
+        manifest.write_text('[]')
+    with pytest.raises(RuntimeError, match='[Ll]icense'):
+        checker.check_bundle(directory)

@@ -1,2 +1,5 @@
 src/my_video_manager/web_page_registry.py merge=union
 frontend/src/pages/index.ts merge=union
+installer/THIRD-PARTY-NOTICES.txt text eol=lf
+installer/licenses/GPL-3.0.txt -text
+installer/license-sources/**/LICENSE -text

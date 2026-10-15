@@ -113,6 +113,12 @@ FFmpeg 원본 `LICENSE`·`README.txt`도 함께 추출합니다. 번들은 불�
 ## 설치해서 쓰기
 
 제3자 라이선스·소스 안내는 설치 폴더의 `THIRD-PARTY-NOTICES.txt`, `ffmpeg/LICENSE.txt`, `ffmpeg/README.txt`, `licenses/`에 있습니다.
+빌드 시 PyInstaller가 실제 동봉한 Python 배포물의 원문을 `licenses/python/<패키지>/`에,
+npm production 의존성(전이 의존성 포함)의 원문을 `licenses/web/`에 모읍니다.
+각 `manifest.json`에 버전·원문 경로·SHA-256이 있으며, Python 배포물에 원문이 없으면
+`metadata_only`와 해당 패키지의 `NOTICE.txt`에 라이선스 이름·URL을 남깁니다.
+`check_bundle.py`는 대표 원문·고지와 manifest의 모든 원문 해시를 검사합니다.
+GPLv3 원문은 FFmpeg와 독립적인 `licenses/GPL-3.0.txt`에도 있습니다.
 
 설치 위치는 사용자별 `%LOCALAPPDATA%/Programs/MyVideoManager`이고 관리자 권한을 요구하지 않습니다.
 시작 메뉴 바로가기와 제거 프로그램을 등록하며 바탕화면 바로가기는 선택입니다.
