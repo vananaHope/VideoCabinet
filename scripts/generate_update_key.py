@@ -1,9 +1,12 @@
 """Human-operated release key provisioning; private material never goes to stdout."""
 import argparse
+import base64
 import getpass
+import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -12,6 +15,60 @@ from cryptography.exceptions import UnsupportedAlgorithm
 
 PASSWORD_ENV = 'MVM_UPDATE_SIGNING_PASSWORD'
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def windows_acl(path: Path, *, run=subprocess.run) -> dict:
+    """Read SID-based ACL entries without localized icacls output parsing."""
+    literal = str(path).replace("'", "''")
+    script = """
+$ErrorActionPreference = 'Stop'
+$acl = Get-Acl -LiteralPath '%s'
+@{user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  rules = @($acl.Access | ForEach-Object {
+    @{sid = $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+      allow = ($_.AccessControlType -eq 'Allow'); rights = [int]$_.FileSystemRights}
+  })} | ConvertTo-Json -Depth 4 -Compress
+""" % literal
+    result = run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand',
+                  base64.b64encode(script.encode('utf-16-le')).decode('ascii')],
+                 capture_output=True, text=True, timeout=30,
+                 # PowerShell 7's inherited module path can load incompatible
+                 # modules in Windows PowerShell 5.1 started by Python.
+                 env={k: v for k, v in os.environ.items() if k.casefold() != 'psmodulepath'})
+    if result.returncode:
+        raise ValueError(f'Cannot inspect private key ACL: {path}')
+    return json.loads(result.stdout)
+
+
+def restrict_key_directory(path: Path, *, run=subprocess.run, inspect=windows_acl) -> None:
+    if sys.platform != 'win32':
+        return
+    acl = inspect(path)
+    user = acl['user']
+    def apply(args):
+        result = run(['icacls.exe', *args], capture_output=True, text=True, timeout=30)
+        if result.returncode:
+            raise ValueError(f'Cannot restrict private key directory ACL: {path}')
+
+    apply([str(path), '/grant:r', f'*{user}:(OI)(CI)F', '/inheritance:r'])
+    # Re-read after removing inheritance: stale/unresolvable inherited SIDs
+    # need no /remove call (icacls may fail resolving even a now-absent SID).
+    for sid in sorted({rule['sid'] for rule in inspect(path)['rules']} - {user}):
+        apply([str(path), '/remove', f'*{sid}'])
+
+
+def check_key_acl(path: Path, *, inspect=windows_acl) -> None:
+    if sys.platform != 'win32':
+        return
+    for target in (path.parent, path):
+        acl = inspect(target)
+        # Empty/null DACL and unfamiliar ACEs are not accepted as proof of privacy.
+        rules = acl['rules']
+        if (not rules or any(r['sid'] not in {acl['user'], 'S-1-5-18'} for r in rules)
+                or not any(r['sid'] == acl['user'] and r['allow']
+                           and r['rights'] & 0x1F01FF == 0x1F01FF for r in rules)
+                or any(not r['allow'] for r in rules)):
+            raise ValueError(f'Unsafe private key ACL: {target}; key preserved at {path}')
 
 
 def default_key_path() -> Path:
@@ -54,7 +111,11 @@ def generate_key(path: Path, password: bytes | None) -> bytes:
     key = Ed25519PrivateKey.generate()
     encoded = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, encryption)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        raise FileExistsError(path)
+    restrict_key_directory(path.parent)
     # Exclusive creation preserves existing keys, including resolved link targets.
+    # Windows only reflects the read-only bit here; access control uses ACLs.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0), 0o600)
     try:
         with os.fdopen(fd, 'wb') as output:
@@ -62,6 +123,12 @@ def generate_key(path: Path, password: bytes | None) -> bytes:
     except BaseException:
         path.unlink(missing_ok=True)
         raise
+    # A completed key must survive ACL verification failure for manual recovery.
+    try:
+        check_key_acl(path)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        print(f'WARNING: {exc}; key preserved at {path}', file=sys.stderr)
+        raise ValueError(f'Private key ACL verification failed; key preserved at {path}') from None
     return key.public_key().public_bytes_raw()
 
 
@@ -80,8 +147,16 @@ def signing_password(*, confirm: bool = False) -> bytes:
 
 
 def load_signing_key(path: Path) -> Ed25519PrivateKey:
-    data = private_key_path(path).read_bytes()
-    password = signing_password() if b'-----BEGIN ENCRYPTED PRIVATE KEY-----' in data else None
+    path = private_key_path(path)
+    data = path.read_bytes()
+    encrypted = b'-----BEGIN ENCRYPTED PRIVATE KEY-----' in data
+    try:
+        check_key_acl(path)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        print(f'WARNING: {exc}', file=sys.stderr)
+        if not encrypted:
+            raise ValueError(f'Unencrypted signing key requires private ACL: {path}') from None
+    password = signing_password() if encrypted else None
     try:
         key = serialization.load_pem_private_key(data, password=password)
     except (ValueError, TypeError, UnsupportedAlgorithm):
@@ -102,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         if path.exists():
             raise ValueError('Private key already exists; refusing to overwrite')
         public = generate_key(path, None if args.no_password else signing_password(confirm=True))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         parser.exit(1, f'Key generation failed: {exc}\n')
     print(f'Private key saved outside repository: {path}')
     print('Replace the placeholder in src/my_video_manager/update_manifest.py with:')

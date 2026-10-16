@@ -53,7 +53,8 @@ def test_generate_and_verify_release(scripts, artifacts, tmp_path, previous_kind
     manifest = tool.build_manifest(version='1.2.3', runtime=runtime, full=full,
                                    previous_runtime=previous, patch=patch if previous_kind == 'same' else None)
     key = Ed25519PrivateKey.generate()
-    out, sig = tool.write_signed_manifest(manifest, key, tmp_path / 'out' / 'update-manifest.json')
+    out, sig = tool.write_signed_manifest(manifest, key, tmp_path / 'out' / 'update-manifest.json',
+                                           allow_unpinned_key_for_tests=True)
     result = verify_manifest(out.read_bytes(), sig.read_bytes(), public_key=key.public_key().public_bytes_raw())
     assert result == manifest
     assert result.full.size == full.stat().st_size
@@ -86,7 +87,8 @@ def test_existing_outputs_preserved_and_partial_new_output_removed(scripts, arti
     old = output if existing == 'manifest' else sig
     old.write_bytes(b'previous release')
     with pytest.raises(FileExistsError):
-        tool.write_signed_manifest(manifest, Ed25519PrivateKey.generate(), output)
+        tool.write_signed_manifest(manifest, Ed25519PrivateKey.generate(), output,
+                                   allow_unpinned_key_for_tests=True)
     assert old.read_bytes() == b'previous release'
     assert not (sig if existing == 'manifest' else output).exists()
 
@@ -105,7 +107,8 @@ def test_write_failure_cleans_both_new_outputs(scripts, artifacts, tmp_path, mon
 
     monkeypatch.setattr(Path, 'open', failing_open)
     with pytest.raises(OSError, match='simulated'):
-        tool.write_signed_manifest(manifest, Ed25519PrivateKey.generate(), output)
+        tool.write_signed_manifest(manifest, Ed25519PrivateKey.generate(), output,
+                                   allow_unpinned_key_for_tests=True)
     assert not output.exists()
     assert not output.with_name(output.name + '.sig').exists()
 
@@ -257,6 +260,7 @@ def test_command_line_key_and_manifest_roundtrip(artifacts, tmp_path, encrypted)
     assert generated.returncode == 0, generated.stderr
     public = bytes.fromhex(generated.stdout.split("bytes.fromhex('")[1].split("')")[0])
     signed = subprocess.run([sys.executable, str(ROOT / 'scripts/generate_update_manifest.py'),
+                             '--allow-unpinned-key-for-tests',
                              '--version', '1.2.3', '--runtime-fingerprint', str(runtime),
                              '--full', str(full), '--private-key', str(key_path), '--output', str(output)],
                             env=env, capture_output=True, text=True, timeout=30)
@@ -276,3 +280,115 @@ def test_invalid_runtime_file_never_produces_manifest(scripts, artifacts, tmp_pa
     runtime.write_text(json.dumps(document))
     with pytest.raises(ValueError, match='mismatch'):
         scripts[1].build_manifest(version='1.2.3', runtime=runtime, full=full)
+
+
+@pytest.mark.parametrize('pin', ['placeholder', 'other', 'matching'])
+def test_signing_requires_application_key_by_default(scripts, artifacts, tmp_path, monkeypatch, pin):
+    from my_video_manager import update_manifest
+    tool = scripts[1]
+    full, _, runtime = artifacts
+    key = Ed25519PrivateKey.generate()
+    public = {'placeholder': b'', 'other': Ed25519PrivateKey.generate().public_key().public_bytes_raw(),
+              'matching': key.public_key().public_bytes_raw()}[pin]
+    monkeypatch.setattr(update_manifest, 'UPDATE_PUBLIC_KEY', public)
+    monkeypatch.setattr(tool, 'load_signing_key', lambda path: key)
+    output = tmp_path / 'out' / 'manifest.json'
+    args = ['--version', '1.2.3', '--runtime-fingerprint', str(runtime),
+            '--full', str(full), '--output', str(output)]
+    if pin == 'matching':
+        assert tool.main(args) == 0
+        assert verify_manifest(output.read_bytes(), output.with_suffix('.json.sig').read_bytes())
+    else:
+        with pytest.raises(SystemExit) as exc:
+            tool.main(args)
+        assert exc.value.code == 1
+        assert not output.parent.exists()
+
+
+def test_test_only_bypass_warns(scripts, artifacts, tmp_path, monkeypatch, capsys):
+    from my_video_manager import update_manifest
+    monkeypatch.setattr(update_manifest, 'UPDATE_PUBLIC_KEY', b'')
+    full, _, runtime = artifacts
+    tool = scripts[1]
+    manifest = tool.build_manifest(version='1.2.3', runtime=runtime, full=full)
+    tool.write_signed_manifest(manifest, Ed25519PrivateKey.generate(), tmp_path / 'manifest.json',
+                               allow_unpinned_key_for_tests=True)
+    assert 'WARNING: test-only' in capsys.readouterr().err
+
+
+def acl_snapshot(*, foreign=False):
+    rules = [{'sid': 'S-1-5-21-123', 'allow': True, 'rights': 0x1F01FF}]
+    if foreign:
+        rules.append({'sid': 'S-1-5-32-545', 'allow': True, 'rights': 0x120089})
+    return {'user': 'S-1-5-21-123', 'rules': rules}
+
+
+def test_acl_restriction_uses_argument_lists_and_removes_explicit_other_sids(scripts, tmp_path, monkeypatch):
+    tool = scripts[0]
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    tool.restrict_key_directory(tmp_path, run=run, inspect=lambda path: acl_snapshot(foreign=True))
+    assert calls == [
+        ['icacls.exe', str(tmp_path), '/grant:r', '*S-1-5-21-123:(OI)(CI)F', '/inheritance:r'],
+        ['icacls.exe', str(tmp_path), '/remove', '*S-1-5-32-545']]
+
+
+@pytest.mark.parametrize('unsafe_target', ['folder', 'file'])
+def test_generated_key_preserved_and_cli_fails_if_acl_stays_unsafe(
+        scripts, tmp_path, monkeypatch, capsys, unsafe_target):
+    tool = scripts[0]
+    target = tmp_path / 'keys' / 'test.pem'
+    monkeypatch.setattr(tool, 'restrict_key_directory', lambda path: None)
+    original = tool.check_key_acl
+
+    def check(path):
+        monkeypatch.setattr(sys, 'platform', 'win32')
+        original(path, inspect=lambda p: acl_snapshot(
+            foreign=p == (target.parent if unsafe_target == 'folder' else target)))
+
+    monkeypatch.setattr(tool, 'check_key_acl', check)
+    with pytest.raises(SystemExit) as exc:
+        tool.main(['--private-key', str(target), '--no-password'])
+    assert exc.value.code == 1
+    assert target.read_bytes().startswith(b'-----BEGIN PRIVATE KEY-----')
+    error = capsys.readouterr().err
+    assert 'WARNING' in error and str(target) in error
+
+
+@pytest.mark.parametrize('encrypted', [False, True])
+def test_signing_unsafe_acl_blocks_plain_key_but_warns_for_encrypted(
+        scripts, tmp_path, monkeypatch, capsys, encrypted):
+    tool = scripts[0]
+    target = tmp_path / 'keys' / 'test.pem'
+    password = b'temporary-password' if encrypted else None
+    public = tool.generate_key(target, password)
+    monkeypatch.setenv(tool.PASSWORD_ENV, 'temporary-password')
+    original = tool.check_key_acl
+
+    def check(path):
+        monkeypatch.setattr(sys, 'platform', 'win32')
+        original(path, inspect=lambda p: acl_snapshot(foreign=True))
+
+    monkeypatch.setattr(tool, 'check_key_acl', check)
+    if encrypted:
+        assert tool.load_signing_key(target).public_key().public_bytes_raw() == public
+    else:
+        with pytest.raises(ValueError, match='requires private ACL'):
+            tool.load_signing_key(target)
+    assert 'WARNING' in capsys.readouterr().err
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Real Windows ACL in temporary folder only')
+def test_real_windows_key_acl_is_private(scripts, tmp_path):
+    target = tmp_path / 'private-keys' / 'test.pem'
+    tool = scripts[0]
+    tool.generate_key(target, None)
+    tool.check_key_acl(target)
+    for path in (target.parent, target):
+        acl = tool.windows_acl(path)
+        assert {rule['sid'] for rule in acl['rules']} == {acl['user']}

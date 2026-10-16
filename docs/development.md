@@ -219,6 +219,32 @@ Ctrl+C로 빌드를 중단하면 PowerShell이 실패 복구 catch를 건너뛸 
 `--private-key <경로>`로 바꿀 수 있지만 저장소·worktree 안 경로와 UNC·매핑된 네트워크 드라이브는 거부합니다.
 심볼릭 링크·정션을 해석한 실제 경로와 입력 경로를 모두 검사하며 기존 키는 덮어쓰지 않습니다.
 사용자만 접근할 수 있는 로컬 폴더를 선택하고 별도의 안전한 백업을 유지하세요.
+Windows에서는 키 생성 전에 키 전용 폴더의 ACL 상속을 끊고 현재 사용자만 모든 권한을
+갖도록 설정합니다. 기존 폴더를 지정해도 ACL을 변경하므로 다른 용도로 쓰는 폴더는 선택하지 마세요.
+생성 뒤 폴더·파일 ACL 확인에 실패하면 오류로 끝나며 완성된 키는 표시된 경로에 보존합니다.
+`os.open(..., 0o600)`은 Windows에서 읽기 전용 비트만 반영하므로 접근 제어를 대신하지 않습니다.
+
+PowerShell에서 직접 확인·설정하려면 다음 명령을 사용합니다(실제 키 전용 경로로 바꾸세요).
+
+```powershell
+$keyFolder = Join-Path $env:APPDATA 'my-video-manager/release-keys'
+$keyFile = Join-Path $keyFolder 'update-ed25519.pem'
+$keyUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+icacls $keyFolder
+icacls $keyFile
+icacls $keyFolder /grant:r "*${keyUserSid}:(OI)(CI)F" /inheritance:r
+icacls $keyFile /grant:r "*${keyUserSid}:F" /inheritance:r
+# 출력에 다른 주체의 명시적 권한이 남으면 해당 SID마다 실행합니다.
+# icacls $keyFolder /remove '*S-1-5-21-실제SID'
+# icacls $keyFile /remove '*S-1-5-21-실제SID'
+icacls $keyFolder
+icacls $keyFile
+```
+
+현재 사용자(필요하면 SYSTEM) 외 주체가 남지 않았는지 최종 출력을 확인하세요.
+서명 도구도 폴더·파일을 검사하며, 다른 주체가 남거나 확인할 수 없으면 경고합니다.
+암호 없는 키는 오류로 중단하고 암호화된 키는 경고 후 진행합니다.
+`--no-password` 키는 같은 PC의 다른 계정(작업자 샌드박스 포함)이 읽을 수 있으면 키가 노출됩니다.
 
 ```powershell
 # 기본: 암호화 PKCS8 PEM. 터미널에서 암호와 확인 암호를 숨겨 입력합니다.
@@ -258,6 +284,10 @@ Ctrl+C로 빌드를 중단하면 PowerShell이 실패 복구 catch를 건너뛸 
 기본 출력은 `dist/installer/update-manifest.json`과 `update-manifest.json.sig`입니다.
 `--output <매니페스트 경로>`를 바꾸면 서명은 그 경로에 `.sig`를 붙입니다.
 기존 출력은 덮어쓰지 않으며 쓰기 실패 시 이번 실행이 새로 만든 파일만 정리합니다.
+서명 도구는 기본으로 앱 내장 `UPDATE_PUBLIC_KEY`와 서명 키가 일치하는지 확인하고,
+앱의 기본 검증 함수로도 서명을 검증합니다. 자리 표시 값이나 다른 공개 키이면 출력 전에 실패합니다.
+일회성 시험 키로만 작업할 때는 `--allow-unpinned-key-for-tests`로 이 검사를 명시적으로
+우회할 수 있습니다. 이 옵션은 경고를 출력하며 실제 릴리스 발행에는 사용하지 않습니다.
 강제 종료로 파일 하나만 남았으면 그 실행의 산출물을 확인·제거한 뒤 재실행합니다.
 
 schema 1의 필드는 다음과 같습니다. 모르는 필드와 일관되지 않은 조합도 거부합니다.

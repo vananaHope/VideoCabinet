@@ -85,6 +85,19 @@ def test_placeholder_is_fail_closed(document, key, monkeypatch):
     assert exc.value.kind == 'invalid_public_key'
 
 
+def test_committed_public_key_is_placeholder_or_rejects_identity_forgery(document):
+    # No monkeypatch: this guards the real constant when a human replaces it.
+    public = update_manifest.UPDATE_PUBLIC_KEY
+    if public == b'':
+        return
+    assert isinstance(public, bytes) and len(public) == 32
+    assert public != bytes(32)
+    signature = b'\x01' + bytes(63)  # R = identity, S = 0
+    with pytest.raises(ManifestError) as exc:
+        verify_manifest(json.dumps(document).encode(), signature)
+    assert exc.value.kind == 'invalid_signature'
+
+
 def test_default_verifier_uses_embedded_trust_anchor(document, key, monkeypatch):
     monkeypatch.setattr(update_manifest, 'UPDATE_PUBLIC_KEY', key.public_key().public_bytes_raw())
     data = json.dumps(document).encode()
