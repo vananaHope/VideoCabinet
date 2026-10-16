@@ -57,18 +57,33 @@ def restrict_key_directory(path: Path, *, run=subprocess.run, inspect=windows_ac
         apply([str(path), '/remove', f'*{sid}'])
 
 
+def acl_is_private(acl: dict) -> bool:
+    # Empty/null DACL and unfamiliar ACEs are not accepted as proof of privacy.
+    rules = acl['rules']
+    return (bool(rules)
+            and all(r['sid'] in {acl['user'], 'S-1-5-18'} and r['allow'] for r in rules)
+            and any(r['sid'] == acl['user'] and r['allow']
+                    and r['rights'] & 0x1F01FF == 0x1F01FF for r in rules))
+
+
 def check_key_acl(path: Path, *, inspect=windows_acl) -> None:
     if sys.platform != 'win32':
         return
     for target in (path.parent, path):
-        acl = inspect(target)
-        # Empty/null DACL and unfamiliar ACEs are not accepted as proof of privacy.
-        rules = acl['rules']
-        if (not rules or any(r['sid'] not in {acl['user'], 'S-1-5-18'} for r in rules)
-                or not any(r['sid'] == acl['user'] and r['allow']
-                           and r['rights'] & 0x1F01FF == 0x1F01FF for r in rules)
-                or any(not r['allow'] for r in rules)):
+        if not acl_is_private(inspect(target)):
             raise ValueError(f'Unsafe private key ACL: {target}; key preserved at {path}')
+
+
+def check_key_directory_acl(path: Path, *, inspect=windows_acl) -> None:
+    """Reject an existing key directory other principals can read.
+
+    An unencrypted key must never be written into a directory that is already
+    readable, so this runs before the key file is created.
+    """
+    if sys.platform != 'win32':
+        return
+    if not acl_is_private(inspect(path.parent)):
+        raise ValueError(f'Unsafe private key ACL: {path.parent}; key preserved at {path}')
 
 
 def print_acl_guidance() -> None:
@@ -128,6 +143,15 @@ def generate_key(path: Path, password: bytes | None) -> bytes:
     except FileExistsError:
         if not path.parent.is_dir():
             raise
+        # An existing directory is never restricted, so an unencrypted key
+        # must be refused before it is written into a readable one.
+        if password is None:
+            try:
+                check_key_directory_acl(path)
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                print(f'WARNING: {exc}', file=sys.stderr)
+                print_acl_guidance()
+                raise ValueError(f'Private key ACL verification failed; key preserved at {path}') from None
     else:
         restrict_key_directory(path.parent)
     # Exclusive creation preserves existing keys, including resolved link targets.
@@ -143,7 +167,7 @@ def generate_key(path: Path, password: bytes | None) -> bytes:
     try:
         check_key_acl(path)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        print(f'WARNING: {exc}; key preserved at {path}', file=sys.stderr)
+        print(f'WARNING: {exc}', file=sys.stderr)
         print_acl_guidance()
         if password is None:
             raise ValueError(f'Private key ACL verification failed; key preserved at {path}') from None

@@ -195,7 +195,8 @@ def test_key_write_failure_removes_partial_key(scripts, tmp_path, monkeypatch):
             yield Writer()
 
     monkeypatch.setattr(os, 'fdopen', failing_writer)
-    target = tmp_path / 'partial.pem'
+    # A newly created folder is restricted first, so the write path is reached.
+    target = tmp_path / 'keys' / 'partial.pem'
     with pytest.raises(OSError, match='simulated key write failure'):
         scripts[0].generate_key(target, None)
     assert not target.exists()
@@ -424,10 +425,12 @@ def test_existing_key_directory_and_children_keep_acl(scripts, tmp_path, capsys,
     target = folder / 'key.pem'
     if encrypted:
         assert len(tool.generate_key(target, b'disposable-password')) == 32
+        assert target.exists()
     else:
         with pytest.raises(ValueError, match='ACL verification failed'):
             tool.generate_key(target, None)
-    assert target.exists()
+        # The unsafe directory is detected before the key is written.
+        assert not target.exists()
     assert {path: tool.windows_acl(path) for path in targets} == before
     assert child.read_text() == 'unrelated document'
     error = capsys.readouterr().err
@@ -449,3 +452,39 @@ def test_existing_private_directory_is_reused_without_restriction(scripts, tmp_p
     tool.generate_key(second, None)
     tool.check_key_acl(second)
     assert tool.windows_acl(target.parent) == before
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Real Windows ACL in temporary folder only')
+def test_passwordless_key_refused_before_writing_into_inheriting_directory(scripts, tmp_path, capsys):
+    tool = scripts[0]
+    folder = tmp_path / 'existing'
+    folder.mkdir()
+    # Ensure the pre-existing directory is unsafe regardless of the temp root ACL.
+    result = subprocess.run(['icacls.exe', str(folder), '/grant', '*S-1-1-0:(OI)(CI)R'],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    target = folder / 'key.pem'
+    with pytest.raises(ValueError, match='ACL verification failed'):
+        tool.generate_key(target, None)
+    assert not target.exists()
+    error = capsys.readouterr().err
+    assert 'WARNING' in error and 'icacls $keyFolder' in error
+
+
+@pytest.mark.parametrize('encrypted', [False, True])
+def test_unsafe_acl_warning_names_preserved_key_once(scripts, tmp_path, monkeypatch, capsys, encrypted):
+    tool = scripts[0]
+    target = tmp_path / 'keys' / 'test.pem'
+    monkeypatch.setattr(tool, 'restrict_key_directory', lambda path: None)
+
+    def unsafe(path):
+        raise ValueError(f'Unsafe private key ACL: {path.parent}; key preserved at {path}')
+
+    monkeypatch.setattr(tool, 'check_key_acl', unsafe)
+    if encrypted:
+        tool.generate_key(target, b'disposable-password')
+    else:
+        with pytest.raises(ValueError, match='ACL verification failed'):
+            tool.generate_key(target, None)
+    error = capsys.readouterr().err
+    assert error.count(f'key preserved at {target}') == 1
