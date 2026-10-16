@@ -87,6 +87,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $AppDirectory 'my-video-manager.exe'
 }
 & $Python scripts/check_bundle.py $AppDirectory
 Confirm-Exit 'Bundle contents'
+# 기존 실행 폴더는 빌드 당시 지문을 보존하며 현재 환경으로 다시 계산하지 않는다.
+& $Python scripts/bundle_fingerprint.py --check $AppDirectory
+Confirm-Exit 'Runtime fingerprint'
 # 4. Inno Setup. 버전 원본은 pyproject.toml 하나다.
 & $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" installer/my-video-manager.iss
 Confirm-Exit 'Inno Setup'
