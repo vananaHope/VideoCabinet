@@ -50,16 +50,18 @@ def test_previous_release_trust_and_first_release_fallback(tool, monkeypatch, ki
         data = metadata('1.2.2')
     elif kind == 'duplicate-json':
         data = data.replace(b'"schema_version": 1', b'"schema_version": 1, "schema_version": 1')
+    if kind in ('bad-json', 'tag-mismatch', 'duplicate-json'):
+        signature = key.sign(data)
     api = transport(None if kind == 'no-manifest' else data, signature)
     if kind == 'no-release':
         api = lambda *args, **kwargs: None
     result = tool.previous_release('owner/repository', '1.3.0', api=api)
-    assert result['runtime_fingerprint'] == ('a' * 64 if kind in ('unsigned', 'signed') else None)
-    if kind in ('unsigned', 'signed'):
-        assert result['authentication'] == ('verified' if kind == 'signed' else 'unsigned')
+    assert result['runtime_fingerprint'] == ('a' * 64 if kind == 'signed' else None)
+    if kind == 'signed':
+        assert result['authentication'] == 'verified'
     elif kind not in ('no-release', 'no-manifest'):
         assert result['authentication'] == 'invalid'
-        assert '검증 실패' in result['reason']
+        assert ('서명 없음' if kind == 'unsigned' else '검증 실패') in result['reason']
 
 
 @pytest.mark.parametrize('tag', ['v1.3.0', 'v2.0.0', 'other', 'v01.2.3'])
@@ -70,7 +72,7 @@ def test_previous_version_must_be_lower_before_downloading_assets(tool, tag):
 
 @pytest.mark.parametrize('failure', [ValueError('network'), subprocess.TimeoutExpired('gh', 60)])
 def test_asset_download_failure_is_not_legacy_absence(tool, failure):
-    original = transport(metadata())
+    original = transport(metadata(), b'x' * 64)
     def api(endpoint, **kwargs):
         if kwargs.get('binary'):
             raise failure
@@ -99,9 +101,15 @@ def test_signed_invalid_json_is_never_parsed_before_verification(tool, monkeypat
 
 def test_missing_bundle_is_unknown_only_in_dry_run(tool, tmp_path):
     path = tmp_path / 'not-built'
-    assert tool.plan_patch(path, None, allow_missing=True)['patch_available'] is None
+    assert tool.plan_patch(path, None, allow_missing=True)['patch_available'] is False
+    assert tool.plan_patch(path, 'a' * 64, allow_missing=True)['patch_available'] is None
     with pytest.raises(OSError):
         tool.plan_patch(path, None)
     path.mkdir()
     with pytest.raises(OSError):
         tool.plan_patch(path, None, allow_missing=True)
+
+
+def test_unsigned_manifest_is_never_parsed_or_trusted(tool):
+    with pytest.raises(ValueError, match='signature is missing'):
+        tool.read_previous_manifest(metadata(), None)

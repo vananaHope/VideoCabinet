@@ -7,10 +7,10 @@ import re
 import subprocess
 
 from bundle_fingerprint import verify_bundle_fingerprint
-from generate_update_key import default_key_path, load_signing_key
+from generate_update_key import default_key_path, load_signing_key, private_key_path
 from generate_update_manifest import build_manifest, validate_signing_key, write_signed_manifest
 from my_video_manager.update_manifest import (
-    FILENAME, UpdateAsset, UpdateManifest, encode_manifest, verify_manifest,
+    FILENAME, UpdateManifest, verify_manifest,
 )
 
 
@@ -38,27 +38,11 @@ def gh_api(endpoint: str, *, optional: bool = False, binary: bool = False) -> by
     return parts[1]
 
 
-def unique_object(pairs: list) -> dict:
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError('Duplicate JSON key')
-        result[key] = value
-    return result
-
-
 def read_previous_manifest(data: bytes, signature: bytes | None) -> UpdateManifest:
-    if signature is not None:
-        # Verification MUST precede parsing, using only the application's pinned key.
-        return verify_manifest(data, signature)
-    # Legacy unsigned metadata still goes through the producer's shared schema validator.
-    document = json.loads(data.decode('utf-8'), object_pairs_hook=unique_object)
-    document['full'] = UpdateAsset(**document['full'])
-    if document['patch'] is not None:
-        document['patch'] = UpdateAsset(**document['patch'])
-    manifest = UpdateManifest(**document)
-    encode_manifest(manifest)
-    return manifest
+    if signature is None:
+        raise ValueError('Previous manifest signature is missing')
+    # Verification MUST precede parsing, using only the application's pinned key.
+    return verify_manifest(data, signature)
 
 
 def previous_release(repository: str, version: str, *, api=gh_api) -> dict:
@@ -82,6 +66,9 @@ def previous_release(repository: str, version: str, *, api=gh_api) -> dict:
     assets = {asset['name']: asset['id'] for asset in release['assets']}
     if FILENAME not in assets:
         return {**empty, 'reason': '이전 매니페스트 없음: 첫 릴리스로 취급'}
+    if FILENAME + '.sig' not in assets:
+        return {**empty, 'authentication': 'invalid',
+                'reason': '패치 불가(이전 매니페스트 서명 없음): 전체 설치만 발행'}
 
     def download(name: str) -> bytes:
         asset_id = assets[name]
@@ -91,7 +78,7 @@ def previous_release(repository: str, version: str, *, api=gh_api) -> dict:
 
     # Transport failure is not an unsigned legacy release or an absent manifest.
     manifest_data = download(FILENAME)
-    signature = download(FILENAME + '.sig') if FILENAME + '.sig' in assets else None
+    signature = download(FILENAME + '.sig')
     try:
         manifest = read_previous_manifest(manifest_data, signature)
         if manifest.version != tag[1:]:
@@ -100,14 +87,17 @@ def previous_release(repository: str, version: str, *, api=gh_api) -> dict:
         return {**empty, 'authentication': 'invalid',
                 'reason': '패치 불가(이전 매니페스트 검증 실패): 전체 설치만 발행'}
     return {'tag': tag, 'runtime_fingerprint': manifest.runtime_fingerprint,
-            'authentication': 'verified' if signature is not None else 'unsigned',
-            'reason': '이전 매니페스트 서명 검증 완료' if signature is not None else '이전 매니페스트에 서명 없음(스키마 검증 완료)'}
+            'authentication': 'verified',
+            'reason': '이전 매니페스트 서명 검증 완료'}
 
 
 def plan_patch(directory: Path, previous: str | None, *, allow_missing: bool = False) -> dict:
     if previous is not None and not re.fullmatch('[0-9a-f]{64}', previous):
         raise ValueError('Invalid previous runtime fingerprint')
     if allow_missing and not directory.exists():
+        if previous is None:
+            return {'runtime_fingerprint': None, 'patch_available': False,
+                    'reason': '신뢰할 이전 지문 없음: 패치 없음, 전체 설치만'}
         return {'runtime_fingerprint': None, 'patch_available': None,
                 'reason': '새 번들 없음: 미정 (-DryRun -Build로 지문 확인)'}
     current = verify_bundle_fingerprint(directory)
@@ -135,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument('--allow-missing', action='store_true')
     preflight = commands.add_parser('preflight')
     preflight.add_argument('--private-key', type=Path, default=default_key_path())
+    key_info = commands.add_parser('key-info')
+    key_info.add_argument('--private-key', type=Path, default=default_key_path())
     sign = commands.add_parser('sign')
     sign.add_argument('--private-key', type=Path, default=default_key_path())
     sign.add_argument('--version', required=True)
@@ -149,6 +141,9 @@ def main(argv: list[str] | None = None) -> int:
             result = previous_release(args.repository, args.version)
         elif args.command == 'plan':
             result = plan_patch(args.directory, args.previous_fingerprint, allow_missing=args.allow_missing)
+        elif args.command == 'key-info':
+            data = private_key_path(args.private_key).read_bytes()
+            result = {'encrypted': b'-----BEGIN ENCRYPTED PRIVATE KEY-----' in data}
         elif args.command == 'preflight':
             checked_signing_key(args.private_key)
             result = {'signing_key': 'verified'}

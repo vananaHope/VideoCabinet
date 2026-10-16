@@ -6,9 +6,14 @@
 )
 # Windows PowerShell 5.1은 이 인코딩으로 git의 UTF-8 출력을 해독한다.
 $OriginalOutputEncoding = [Console]::OutputEncoding
+$SigningPassword = $null
 try {
     [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
     $ErrorActionPreference = 'Stop'
+    if (-not $DryRun -and $env:MVM_UPDATE_SIGNING_PASSWORD) {
+        $SigningPassword = ConvertTo-SecureString $env:MVM_UPDATE_SIGNING_PASSWORD -AsPlainText -Force
+        Remove-Item Env:MVM_UPDATE_SIGNING_PASSWORD
+    }
     Set-Location (Join-Path $PSScriptRoot '..')
 
     function Get-Git([string[]]$Arguments) {
@@ -22,9 +27,19 @@ try {
     $Python = Join-Path (Get-Location) '.venv/Scripts/python.exe'
     function Get-Metadata([string[]]$Arguments) {
         $ErrorActionPreference = 'Continue'
-        $Result = & $Python -X utf8 "$PSScriptRoot/release_metadata.py" @Arguments
-        if ($LASTEXITCODE -ne 0) { throw '릴리스 메타데이터 검사에 실패했습니다. 위 원인을 확인하세요.' }
-        return ($Result -join "`n" | ConvertFrom-Json)
+        $PasswordPointer = [IntPtr]::Zero
+        try {
+            if ($SigningPassword -and $Arguments[0] -in @('preflight', 'sign')) {
+                $PasswordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SigningPassword)
+                $env:MVM_UPDATE_SIGNING_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($PasswordPointer)
+            }
+            $Result = & $Python -X utf8 "$PSScriptRoot/release_metadata.py" @Arguments
+            if ($LASTEXITCODE -ne 0) { throw '릴리스 메타데이터 검사에 실패했습니다. 위 원인을 확인하세요.' }
+            return ($Result -join "`n" | ConvertFrom-Json)
+        } finally {
+            if (-not $DryRun) { Remove-Item Env:MVM_UPDATE_SIGNING_PASSWORD -ErrorAction SilentlyContinue }
+            if ($PasswordPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($PasswordPointer) }
+        }
     }
     function Get-PatchPlan {
         $Arguments = @('plan', '--directory', $AppDirectory)
@@ -36,6 +51,7 @@ try {
         Write-Host "이전 Release: $($Previous.tag), $($Previous.reason)"
         Write-Host "이전 지문: $(if ($Previous.runtime_fingerprint) { $Previous.runtime_fingerprint } else { '없음/신뢰할 수 없음' })"
         Write-Host "새 지문: $(if ($Plan.runtime_fingerprint) { $Plan.runtime_fingerprint } else { '미정' })"
+        if ($Previous.authentication -eq 'none') { Write-Host '첫 릴리스: 패치 없음, 전체 설치만' }
         Write-Host "패치 가능: $(if ($null -eq $Plan.patch_available) { '미정' } else { $Plan.patch_available }) — $($Plan.reason)"
         Write-Host '생성·업로드 자산:'
         foreach ($Asset in @($Installer, $Checksum, $Manifest, $Signature)) { Write-Host "  $Asset" }
@@ -109,8 +125,14 @@ try {
     $AppDirectory = Join-Path (Get-Location) 'dist/my-video-manager'
     $KeyArguments = @()
     if ($PrivateKey) { $KeyArguments = @('--private-key', $PrivateKey) }
-    # 키/암호 오류는 버전 커밋이나 빌드 전에 멈춘다. 암호는 Python 도구만 읽는다.
+    # 암호는 한 번만 받고 preflight/sign 자식 프로세스 환경에만 잠시 제공한다.
     if (-not $DryRun) {
+        $KeyInfo = Get-Metadata (@('key-info') + $KeyArguments)
+        if ($KeyInfo.encrypted -and -not $SigningPassword) {
+            if ([Console]::IsInputRedirected) { throw '비대화형 실행에는 MVM_UPDATE_SIGNING_PASSWORD가 필요합니다.' }
+            $SigningPassword = Read-Host 'Signing key password' -AsSecureString
+            if ($SigningPassword.Length -eq 0) { throw '서명 키 암호는 비어 있을 수 없습니다.' }
+        }
         Get-Metadata (@('preflight') + $KeyArguments) | Out-Null
         foreach ($Output in @($Manifest, $Signature)) {
             if (Test-Path -LiteralPath $Output) { throw "기존 메타데이터를 덮어쓰지 않습니다: $Output" }
@@ -240,5 +262,7 @@ try {
         throw $Failure
     }
 } finally {
+    if (-not $DryRun) { Remove-Item Env:MVM_UPDATE_SIGNING_PASSWORD -ErrorAction SilentlyContinue }
+    if ($SigningPassword) { $SigningPassword.Dispose() }
     [Console]::OutputEncoding = $OriginalOutputEncoding
 }

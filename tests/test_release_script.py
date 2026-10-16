@@ -79,6 +79,7 @@ import json, os, sys
 from pathlib import Path
 sys.path.insert(0, os.environ['RELEASE_TEST_SOURCE_SCRIPTS'])
 import release_metadata as tool
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from my_video_manager import update_manifest
 update_manifest.UPDATE_PUBLIC_KEY = bytes.fromhex(os.environ['RELEASE_TEST_PUBLIC'])
 original = tool.previous_release
@@ -86,12 +87,20 @@ def api(endpoint, **kwargs):
     kind = os.environ.get('RELEASE_TEST_PREVIOUS', 'first')
     if endpoint.endswith('/latest'):
         assets = [] if kind == 'first' else [{'name': 'update-manifest.json', 'id': 1}]
+        if kind not in ('first', 'unsigned'):
+            assets.append({'name': 'update-manifest.json.sig', 'id': 2})
         return json.dumps({'tag_name': 'v0.1.0', 'draft': False, 'prerelease': False, 'assets': assets}).encode()
     runtime = json.loads(Path('scripts/synthetic-bundle/runtime-fingerprint.json').read_text())
-    fingerprint = runtime['fingerprint'] if kind == 'same' else 'c' * 64
-    return json.dumps({'schema_version': 1, 'version': '0.1.0', 'runtime_fingerprint': fingerprint,
+    fingerprint = runtime['fingerprint'] if kind in ('same', 'unsigned', 'bad-signature') else 'c' * 64
+    data = json.dumps({'schema_version': 1, 'version': '0.1.0', 'runtime_fingerprint': fingerprint,
         'previous_runtime_fingerprint': None, 'patch': None, 'patch_available': False,
         'full': {'filename': 'old.exe', 'size': 10, 'sha256': 'a' * 64}}).encode()
+    if endpoint.endswith('/2'):
+        if kind == 'bad-signature':
+            return b'x' * 64
+        key = load_pem_private_key(Path(os.environ['RELEASE_TEST_PREVIOUS_KEY']).read_bytes(), password=None)
+        return key.sign(data)
+    return data
 tool.previous_release = lambda repository, version: original(repository, version, api=api)
 raise SystemExit(tool.main())
 ''', encoding='utf-8')
@@ -107,6 +116,7 @@ if ($env:RELEASE_TEST_HEAD_BUILD -eq '1') {
     throw 'HEAD 변경 뒤 빌드 실패'
 }
 if ($env:RELEASE_TEST_BUILD_FAIL -eq '1') { throw '가짜 빌드 실패' }
+if ($env:MVM_UPDATE_SIGNING_PASSWORD) { throw '빌드에 암호가 유출됨' }
 New-Item -ItemType Directory -Force dist/installer | Out-Null
 if ($PatchOnly) {
     [IO.File]::WriteAllText((Join-Path (Get-Location) "dist/installer/MyVideoManager-Patch-$Version.exe"), "patch $Version")
@@ -141,6 +151,7 @@ def run_release(repository, *, build=False, status="404", build_fail=False, dry_
            "RELEASE_TEST_HEAD_BUILD": str(int(head_build)), "RELEASE_TEST_REDIRECT": str(int(redirect)),
            'RELEASE_TEST_PREVIOUS': previous, 'RELEASE_TEST_PUBLISH': str(int(publish)),
            'RELEASE_TEST_VERSION': version}
+    env['RELEASE_TEST_PREVIOUS_KEY'] = env['RELEASE_TEST_KEY']
     if key_state == 'missing':
         env['RELEASE_TEST_KEY'] += '.missing'
     elif key_state == 'placeholder':
@@ -155,6 +166,7 @@ $ErrorActionPreference = 'Stop'
 # 한국어 Windows PowerShell 5.1 기본 콘솔을 재현한다. UTF-8 보정은 제품 책임이다.
 [Console]::OutputEncoding = [Text.Encoding]::GetEncoding(949)
 function global:gh {
+    if ($env:MVM_UPDATE_SIGNING_PASSWORD -and $env:RELEASE_TEST_DRY_RUN -ne '1') { throw 'gh에 암호가 유출됨' }
     if ($args[0] -eq 'release' -and $args[1] -eq 'create') {
         [IO.File]::WriteAllText((Join-Path (Get-Location) 'dist/upload-arguments.json'), (ConvertTo-Json @($args)))
         if ($env:RELEASE_TEST_PUBLISH -eq '1') { $global:LASTEXITCODE = 0; return }
@@ -184,6 +196,7 @@ try {
 } catch { Write-Output $_; $ResultCode = 1 }
 Write-Output "RESTORED_ENCODING=$([Console]::OutputEncoding.CodePage)"
 Write-Output "POWERSHELL_MAJOR=$($PSVersionTable.PSVersion.Major)"
+Write-Output "PASSWORD_ENV_CLEARED=$(-not (Test-Path Env:MVM_UPDATE_SIGNING_PASSWORD))"
 exit $ResultCode
 '''
     return subprocess.run([POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", harness],
@@ -366,7 +379,7 @@ def test_redirected_git_stderr_warning_does_not_leave_index_lock(repository):
     assert not (repo / '.git/index.lock').exists()
 
 
-@pytest.mark.parametrize('previous', ['first', 'same', 'changed'])
+@pytest.mark.parametrize('previous', ['first', 'same', 'changed', 'unsigned', 'bad-signature'])
 @pytest.mark.parametrize('build', [False, True])
 def test_dry_run_asset_plan_and_conditional_patch(repository, previous, build):
     repo, _ = repository
@@ -405,7 +418,7 @@ def test_invalid_signing_key_stops_before_commit_build_or_publish(repository, st
     assert not (repository[0] / 'dist').exists()
 
 
-@pytest.mark.parametrize('previous', ['first', 'same', 'changed'])
+@pytest.mark.parametrize('previous', ['first', 'same', 'changed', 'unsigned', 'bad-signature'])
 def test_publication_uploads_only_eligible_assets_with_verified_manifest(repository, previous):
     repo, _ = repository
     # A leftover patch must never be picked up by a glob on a changed runtime release.
@@ -421,6 +434,9 @@ def test_publication_uploads_only_eligible_assets_with_verified_manifest(reposit
     assert manifest.version == '0.2.0'
     assert manifest.patch_available == (previous == 'same')
     assert (manifest.patch is not None) == (previous == 'same')
+    if previous in ('unsigned', 'bad-signature'):
+        assert manifest.previous_runtime_fingerprint is None
+        assert ('서명 없음' if previous == 'unsigned' else '검증 실패') in result.stdout
     arguments = json.loads((repo / 'dist/upload-arguments.json').read_text(encoding='utf-8-sig'))
     assets = {Path(arg).name for arg in arguments[3:arguments.index('--repo')]}
     expected = {'MyVideoManager-Setup-0.2.0.exe', 'MyVideoManager-Setup-0.2.0.exe.sha256',
@@ -438,6 +454,51 @@ def test_patch_assets_are_in_failure_recovery_instructions(repository):
     upload = result.stdout.split('gh release upload v0.2.0', 1)[1]
     for name in ('MyVideoManager-Patch-0.2.0.exe', 'update-manifest.json', 'update-manifest.json.sig'):
         assert name in upload
+
+
+@pytest.mark.parametrize('previous', ['first', 'same', 'unsigned', 'bad-signature'])
+def test_dry_run_without_bundle_has_definite_fallback(repository, previous):
+    before = snapshot(repository)
+    result = run_release(repository, previous=previous, key_state='missing')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert snapshot(repository) == before
+    assert '새 지문: 미정' in result.stdout
+    if previous == 'same':
+        assert '패치 가능: 미정' in result.stdout
+        assert '-DryRun -Build' in result.stdout
+    else:
+        assert '패치 가능: False' in result.stdout
+        assert '조건부:' not in result.stdout
+        assert '패치 생성·업로드 제외' in result.stdout
+        if previous == 'first':
+            assert '첫 릴리스: 패치 없음, 전체 설치만' in result.stdout
+
+
+@pytest.mark.parametrize('outcome', ['success', 'build-failure', 'wrong-password', 'missing-password'])
+def test_encrypted_key_password_is_scoped_and_cleared(repository, monkeypatch, outcome):
+    from cryptography.hazmat.primitives import serialization
+
+    key_path = Path(os.environ['RELEASE_TEST_KEY'])
+    key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+    password = 'synthetic-release-secret'
+    key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                          serialization.BestAvailableEncryption(password.encode())))
+    if outcome == 'missing-password':
+        monkeypatch.delenv('MVM_UPDATE_SIGNING_PASSWORD', raising=False)
+    else:
+        monkeypatch.setenv('MVM_UPDATE_SIGNING_PASSWORD', 'wrong-secret' if outcome == 'wrong-password' else password)
+    before = snapshot(repository)
+    result = run_release(repository, dry_run=False, publish=True, build_fail=outcome == 'build-failure')
+    assert (result.returncode == 0) == (outcome == 'success'), result.stdout + result.stderr
+    assert 'PASSWORD_ENV_CLEARED=True' in result.stdout
+    assert password not in result.stdout + result.stderr
+    assert 'wrong-secret' not in result.stdout + result.stderr
+    if outcome != 'success':
+        assert snapshot(repository) == before
+    else:
+        output = repository[0] / 'dist/installer/0.2.0/update-manifest.json'
+        assert verify_manifest(output.read_bytes(), output.with_suffix('.json.sig').read_bytes(),
+                               public_key=key.public_key().public_bytes_raw()).version == '0.2.0'
 
 
 @pytest.mark.parametrize('damaged', [False, True])
