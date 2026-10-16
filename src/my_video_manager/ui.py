@@ -46,6 +46,13 @@ class MainWindow(QMainWindow):
         from .web_page_registry import create_web_shell
         self.web_host = create_web_shell(self)
         self.library_page = self.web_host.controllers['library']
+        self._startup_frontend_ready = False
+        self._startup_scan_scheduled = False
+        self._startup_scan_timer = QTimer(self)
+        self._startup_scan_timer.setSingleShot(True)
+        self._startup_scan_timer.setInterval(250)
+        self._startup_scan_timer.timeout.connect(self.scan_on_startup)
+        self.web_host.frontend_loaded.connect(self.startup_frontend_loaded)
         self.home_page = self.web_host
         self.pages.addWidget(self.home_page)
         self.playback_page = PlaybackPage(self)
@@ -66,6 +73,28 @@ class MainWindow(QMainWindow):
         from .resolution_controls import ResolutionControls
         self.resolutions = ResolutionControls(self)
         self.thumbnails = ResolutionControls(self, kind='thumbnail')
+
+    def startup_frontend_loaded(self):
+        self._startup_frontend_ready = True
+        self.schedule_startup_scan()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.schedule_startup_scan()
+
+    def schedule_startup_scan(self):
+        if (self._startup_scan_scheduled or not self._startup_frontend_ready
+                or not self.isVisible() or self.tray.quitting):
+            return
+        self._startup_scan_scheduled = True
+        # React 첫 렌더와 창 표시 뒤 Chromium 합성·첫 입력에 시간을 준다.
+        # 트레이 복원이나 웹 재로드에서는 다시 예약하지 않는다.
+        self._startup_scan_timer.start()
+
+    def scan_on_startup(self):
+        """향후 자동 감지 설정도 이 진입점에서 함께 확인한다."""
+        if not self.tray.quitting and self.core.watched_folders():
+            self.library_page.scan(quiet_if_unchanged=True)
 
     def page_changed(self, _index):
         page = self.pages.currentWidget()
@@ -296,3 +325,5 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.tray.close_window(event)
+        if event.isAccepted():
+            self._startup_scan_timer.stop()
