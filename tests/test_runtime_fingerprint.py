@@ -22,6 +22,7 @@ def inputs():
         tools={'pyinstaller': '6.16.0', 'pyinstaller-hooks-contrib': '2026.8'},
         native_files={name: hashlib.sha256(name.encode()).hexdigest() for name in NATIVE_FILES},
         hooks={'hook-PySide6.QtQml.py': hashlib.sha256(b'hook').hexdigest()},
+        bundle_files=['PySide6/Qt6Core.dll', 'faster_whisper/assets/tokenizer.json'],
     )
 
 
@@ -29,7 +30,8 @@ def test_identity_is_order_independent_and_excludes_app_metadata(inputs):
     before = deepcopy(inputs)
     expected = make_runtime_fingerprint(**inputs)
     assert inputs == before
-    reordered = {group: dict(reversed(list(values.items()))) for group, values in inputs.items()}
+    reordered = {group: (list(reversed(values)) if group == 'bundle_files' else
+                         dict(reversed(list(values.items())))) for group, values in inputs.items()}
     reordered['dependencies'].pop('my-video-manager')
     reordered['dependencies']['My_Video.Manager'] = '99.0.0'
     assert make_runtime_fingerprint(**reordered) == expected
@@ -104,7 +106,7 @@ def bundle(tmp_path, monkeypatch):
 
 def test_build_document_survives_app_only_changes_and_relocation(bundle, monkeypatch):
     module, stage, hooks = bundle
-    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks)
+    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
     original = path.read_bytes()
     fingerprint = module.verify_bundle_fingerprint(stage)
     (stage / 'my-video-manager.exe').write_bytes(b'changed application code')
@@ -115,7 +117,7 @@ def test_build_document_survives_app_only_changes_and_relocation(bundle, monkeyp
     packages[0]['version'] = '99.0.0'
     packages[0]['urls'] = ['file:///other/build']
     manifest.write_text(json.dumps(packages))
-    module.write_bundle_fingerprint(stage, stage / 'mpv', hooks)
+    module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
     assert path.read_bytes() == original
     assert str(stage) not in path.read_text()
     assert 'file:///' not in path.read_text()
@@ -131,11 +133,11 @@ def test_build_document_survives_app_only_changes_and_relocation(bundle, monkeyp
 @pytest.mark.parametrize('name', NATIVE_FILES)
 def test_missing_binary_fails_build_and_preserves_previous_document(bundle, name):
     module, stage, hooks = bundle
-    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks)
+    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
     before = path.read_bytes()
     (stage / name).unlink()
     with pytest.raises(FileNotFoundError):
-        module.write_bundle_fingerprint(stage, stage / 'mpv', hooks)
+        module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
     assert path.read_bytes() == before
     assert not path.with_suffix('.json.tmp').exists()
     with pytest.raises(FileNotFoundError):
@@ -145,7 +147,7 @@ def test_missing_binary_fails_build_and_preserves_previous_document(bundle, name
 @pytest.mark.parametrize('name', NATIVE_FILES)
 def test_bundle_check_rejects_changed_native_file(bundle, name):
     module, stage, hooks = bundle
-    module.write_bundle_fingerprint(stage, stage / 'mpv', hooks)
+    module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
     (stage / name).write_bytes(b'changed runtime')
     with pytest.raises(ValueError, match='binary mismatch'):
         module.verify_bundle_fingerprint(stage)
@@ -153,21 +155,71 @@ def test_bundle_check_rejects_changed_native_file(bundle, name):
 
 def test_build_detects_custom_hook_content_change(bundle):
     module, stage, hooks = bundle
-    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks)
+    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
     original = load_runtime_fingerprint(path)['fingerprint']
     (hooks / 'hook-example.py').write_text('collect_runtime = False')
-    module.write_bundle_fingerprint(stage, stage / 'mpv', hooks)
+    module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
     assert load_runtime_fingerprint(path)['fingerprint'] != original
 
 
 def test_write_failure_keeps_previous_fingerprint_and_cleans_temporary(bundle, monkeypatch):
     module, stage, hooks = bundle
-    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks)
+    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
     original = path.read_bytes()
     def fail_replace(*args):
         raise PermissionError('locked')
     monkeypatch.setattr(Path, 'replace', fail_replace)
     with pytest.raises(PermissionError):
-        module.write_bundle_fingerprint(stage, stage / 'mpv', hooks)
+        module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
     assert path.read_bytes() == original
     assert not path.with_suffix('.json.tmp').exists()
+
+
+def test_bundle_paths_ignore_app_owned_changes(bundle):
+    module, stage, hooks = bundle
+    original = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks,
+                                               bundle_files=NATIVE_FILES).read_bytes()
+    app_paths = ['my_video_manager/web/assets/new.js', 'my_video_manager/web_tokens.json',
+                 'my_video_manager-99.0.dist-info/METADATA', 'licenses/python/manifest.json',
+                 'THIRD-PARTY-NOTICES.txt', FILENAME]
+    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks,
+                                           bundle_files=[*NATIVE_FILES, *app_paths])
+    assert path.read_bytes() == original
+    assert load_runtime_fingerprint(path)['inputs']['bundle_files'] == sorted(NATIVE_FILES)
+
+
+@pytest.mark.parametrize('destination', ['PySide6/Qt6Multimedia.dll', 'faster_whisper/assets/extra.json'])
+def test_bundle_runtime_path_addition_and_removal_change_identity(bundle, destination):
+    module, stage, hooks = bundle
+    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
+    original = load_runtime_fingerprint(path)['fingerprint']
+    module.write_bundle_fingerprint(stage, stage / 'mpv', hooks,
+                                    bundle_files=[*NATIVE_FILES, destination])
+    added = load_runtime_fingerprint(path)['fingerprint']
+    assert added != original
+    module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
+    assert load_runtime_fingerprint(path)['fingerprint'] == original
+
+
+def test_bundle_paths_normalize_order_separators_case_and_duplicates(inputs):
+    original = make_runtime_fingerprint(**inputs)
+    inputs['bundle_files'] = [name.upper().replace('/', '\\') for name in reversed(inputs['bundle_files'])] + inputs['bundle_files']
+    assert make_runtime_fingerprint(**inputs) == original
+
+
+def test_hook_line_endings_do_not_change_identity(bundle):
+    module, stage, hooks = bundle
+    hook = hooks / 'hook-example.py'
+    hook.write_bytes(b'collect_runtime = True\n# same policy\n')
+    path = module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
+    original = path.read_bytes()
+    hook.write_bytes(b'collect_runtime = True\r\n# same policy\r\n')
+    module.write_bundle_fingerprint(stage, stage / 'mpv', hooks, bundle_files=NATIVE_FILES)
+    assert path.read_bytes() == original
+
+
+def test_deeply_nested_installation_json_returns_no_identity(tmp_path, monkeypatch):
+    (tmp_path / FILENAME).write_text('[' * 100000 + '0' + ']' * 100000, encoding='utf-8')
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'app.exe'))
+    assert installed_runtime_fingerprint() is None

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import platform
 import sys
+from collections.abc import Sequence
 
 from my_video_manager.runtime_fingerprint import (
     FILENAME, NATIVE_FILES, load_runtime_fingerprint, make_runtime_fingerprint,
@@ -20,7 +21,8 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def write_bundle_fingerprint(stage: Path, mpv_directory: Path, hooks_directory: Path) -> Path:
+def write_bundle_fingerprint(stage: Path, mpv_directory: Path, hooks_directory: Path,
+                             *, bundle_files: Sequence[str]) -> Path:
     """Use the exact media sources and distribution snapshot selected by Analysis."""
     packages = json.loads((stage / 'licenses/python/manifest.json').read_text(encoding='utf-8'))
     native = {name: file_sha256(mpv_directory / Path(name).name if name.startswith('mpv/')
@@ -31,7 +33,9 @@ def write_bundle_fingerprint(stage: Path, mpv_directory: Path, hooks_directory: 
                 'platform': sys.platform, 'machine': platform.machine()},
         tools={name: metadata.version(name) for name in ('pyinstaller', 'pyinstaller-hooks-contrib')},
         native_files=native,
-        hooks={p.name: file_sha256(p) for p in sorted(hooks_directory.glob('*.py'))},
+        hooks={p.name: hashlib.sha256(p.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+               for p in sorted(hooks_directory.glob('*.py'))},
+        bundle_files=bundle_files,
     )
     path = stage / FILENAME
     # All inputs must succeed before replacing a previous build's document.

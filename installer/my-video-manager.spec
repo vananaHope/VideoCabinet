@@ -48,7 +48,8 @@ sys.path.insert(0, str(root / 'scripts'))
 from bundle_licenses import collect_bundle_licenses
 a.datas += collect_bundle_licenses(a, root, stage)
 from bundle_fingerprint import write_bundle_fingerprint
-fingerprint = write_bundle_fingerprint(stage, root / '.runtime' / 'mpv', root / 'installer' / 'hooks')
+fingerprint = write_bundle_fingerprint(stage, root / '.runtime' / 'mpv', root / 'installer' / 'hooks',
+                                       bundle_files=[entry[0] for entry in a.binaries + a.datas])
 a.datas.append((fingerprint.name, str(fingerprint), 'DATA'))
 pyz = PYZ(a.pure)
 # windowed도 부모가 연결한 stdout/stderr 파이프는 유지한다. 설치판 자식 JSON으로 검증한다.
