@@ -83,6 +83,31 @@ def watch(core, callback=None, **options):
     return service, watcher, time, batches
 
 
+def wait_until_watching(events, folder, batch_of=lambda item: item):
+    """start 직후 첫 OS 감시 호출 전의 변경은 잃을 수 있으므로 표식 묶음을 확인한다.
+
+    표식 파일을 새로 만들며 반복하고, 다시 만든 표식의 늦은 묶음까지 비운다.
+    """
+    marker = folder / "watch-ready"
+    marker.mkdir(exist_ok=True)
+    deadline = monotonic() + 10
+    attempt, seen = 0, False
+    while not seen:
+        assert monotonic() < deadline, "실제 감시가 시작되지 않았습니다."
+        attempt += 1
+        (marker / f"ready-{attempt}.txt").write_bytes(b"")
+        try:
+            while not seen:
+                seen = marker in batch_of(events.get(timeout=2))
+        except Empty:
+            pass
+    while True:
+        try:
+            events.get(timeout=0.5)
+        except Empty:
+            return
+
+
 def test_copy_waits_for_size_and_mtime_stability_then_registers_and_deletes(core, tmp_path):
     folder = tmp_path / "watched/nested"
     folder.mkdir(parents=True)
@@ -403,6 +428,7 @@ def test_real_recursive_watcher_delivers_create_move_delete_and_restarts(core, t
 
     try:
         watcher.start()
+        wait_until_watching(events, root)
         source.write_bytes(b"video")
         batch = wait_for(lambda batch: source.parent in batch)
         assert core.scan(folders=batch).added == 1
@@ -418,6 +444,7 @@ def test_real_recursive_watcher_delivers_create_move_delete_and_restarts(core, t
         assert core.video(video.id).missing
         watcher.stop()
         watcher.start()
+        wait_until_watching(events, root)
         source.write_bytes(b"again")
         wait_for(lambda batch: source.parent in batch)
     finally:
@@ -766,6 +793,100 @@ def test_growing_nonvideo_file_does_not_starve_other_folder(core, tmp_path):
     service.stop()
 
 
+def test_expired_batch_does_not_delay_move_split_by_tick(core, tmp_path):
+    recording = video_file(tmp_path / "recordings", "obs.mkv", b"")
+    source = video_file(tmp_path / "a")
+    target = tmp_path / "b" / source.name
+    target.parent.mkdir()
+    for folder in (recording.parent, source.parent, target.parent):
+        core.add_watched_folder(folder)
+    core.scan()
+    video = next(item for item in core.videos() if item.locations[0].path == source)
+    delivered = []
+    service, watcher, time, _ = watch(core, lambda batch: delivered.append((time.now, set(batch))))
+    watcher.emit(recording.parent)
+    for second in range(140):
+        recording.write_bytes(b"x" * (second + 1))
+        if second == 100:
+            source.rename(target)
+            watcher.emit(source.parent)
+            time.advance(0.6)  # delete와 create 사이에 tick이 낀다.
+            watcher.emit(target.parent)
+            time.advance(0.4)
+            continue
+        time.advance(1)
+    (moved_at, batch), = delivered
+    assert batch == {source.parent, target.parent} and moved_at < 110
+    result = core.scan(folders=batch)
+    assert not result.reconnected and not result.issues
+    assert [location.path for location in core.video(video.id).locations] == [target]
+    time.advance(6)
+    assert delivered[-1][1] == {recording.parent}
+    service.stop()
+
+
+def test_expired_folder_waits_for_its_own_events_to_settle(core, tmp_path):
+    movie = video_file(tmp_path / "movies")
+    download = video_file(tmp_path / "downloads")
+    for folder in (movie.parent, download.parent):
+        core.add_watched_folder(folder)
+    service, watcher, time, batches = watch(core)
+    watcher.emit(movie.parent, download.parent)
+    for step in range(320):
+        if step % 10 == 0:
+            (download.parent / f"{step}.part").write_bytes(b"")
+        watcher.emit(download.parent)  # 서명은 같지만 생성 이벤트가 계속 온다.
+        time.advance(0.25)
+    assert batches == [(movie.parent,)]
+    time.advance(1)
+    assert batches == [(movie.parent,), (download.parent,)]
+    service.stop()
+
+
+def test_many_changed_folders_assign_paths_in_linear_time(core, tmp_path):
+    root = tmp_path / "many"
+    root.mkdir()
+    core.add_watched_folder(root)
+    folders = [root / f"folder-{index}" for index in range(300)]
+    signature = {folder / f"video-{index}.mkv": None for folder in folders for index in range(10)}
+    service, watcher, time, batches = watch(core, snapshot=lambda batch: signature)
+    watcher.emit(*folders)
+    started = monotonic()
+    time.advance(7)
+    # 폴더 수 × 파일 수 배정은 이 규모에서 수십 초가 걸렸다.
+    assert monotonic() - started < 1
+    assert len(batches) == 1 and set(batches[0]) == set(folders)
+    service.stop()
+
+
+def test_owner_thread_is_not_blocked_while_tick_assigns_snapshot(core, tmp_path):
+    path = video_file(tmp_path / "watched")
+    core.add_watched_folder(path.parent)
+    assigning, release = Event(), Event()
+
+    class SlowSnapshot(dict):
+        def items(self):
+            assigning.set()
+            release.wait(5)
+            return super().items()
+
+    service, watcher, time, batches = watch(
+        core, snapshot=lambda folders: SlowSnapshot(folder_snapshot(folders)))
+    watcher.emit(path.parent)
+    ticking = Thread(target=time.advance, args=(1,))
+    ticking.start()
+    try:
+        assert assigning.wait(5)
+        started = monotonic()
+        service.set_enabled(False)
+        assert monotonic() - started < 1
+    finally:
+        release.set()
+        ticking.join(5)
+    time.advance(10)
+    assert batches == []
+
+
 @pytest.mark.parametrize("suffix", [".srt", ".vtt", ".smi"])
 def test_external_subtitles_are_included_in_stability(core, tmp_path, suffix):
     path = video_file(tmp_path / "watched", "video" + suffix)
@@ -795,15 +916,18 @@ def test_real_missing_root_does_not_disable_healthy_roots(core, tmp_path):
     try:
         service.start()
         assert adapter.failed_folders == (missing,) == service.failed_folders
+        wait_until_watching(events, healthy)
         video_file(healthy)
         assert events.get(timeout=10) == (healthy,)
         added = tmp_path / "added"
         added.mkdir()
         core.add_watched_folder(added)
+        wait_until_watching(events, added)
         video_file(added)
         assert events.get(timeout=10) == (added,)
         core.set_automatic_detection_enabled(False)
         core.set_automatic_detection_enabled(True)
+        wait_until_watching(events, healthy)
         video_file(healthy, "again.mkv")
         assert events.get(timeout=10) == (healthy,)
         core.remove_watched_folder(missing)
@@ -852,6 +976,7 @@ def test_real_copyfileex_waits_for_copy_completion(core, tmp_path, overwrite):
     worker = Thread(target=copy)
     try:
         service.start()
+        wait_until_watching(events, watched, lambda item: item[0])
         if overwrite:
             (watched / "copy.mkv").write_bytes(b"y" * (4 * 1024 * 1024))
             assert events.get(timeout=10)[0] == (watched,)
