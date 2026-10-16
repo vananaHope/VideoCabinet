@@ -74,6 +74,7 @@ def test_combined_filter_unicode_casefold_and_details_match_public_core(core):
     details = details_data(core.library_details(video.id))
     assert details['original_lines'] == 0 and details['highlight_count'] == 0
     assert details['has_transcript'] is False
+    assert details['no_speech'] is False and details['translation_skip_reason'] is None
 
 
 @pytest.mark.parametrize('url', [

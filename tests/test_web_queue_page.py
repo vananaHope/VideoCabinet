@@ -304,3 +304,26 @@ def test_open_target_list_tab_commits_cursor_and_moves_like_native_select(window
         key(tab, modifiers)
         wait_for(lambda: js('document.activeElement.id') == next_focus)
         assert not js(is_open)
+
+
+def test_no_speech_completion_status_and_tray_notice(setup, qapp, monkeypatch):
+    from PySide6.QtCore import QEvent
+    from my_video_manager.subtitles import TranscriberResult
+    from my_video_manager.ui import MainWindow
+    core, adapter, (a, _) = setup
+    adapter.result = TranscriberResult("nn", (), 0.61)
+    window = MainWindow(core)
+    try:
+        window.subtitles.timer.stop()
+        window.tray.timer.stop()
+        core.request_subtitles(a.id)
+        window.subtitles.completed(core.process_next_subtitle())
+        assert window.statusBar().currentMessage() == "받아쓰기 완료 · 말소리를 찾지 못했습니다."
+        messages = []
+        monkeypatch.setattr(window.tray.icon, 'showMessage', lambda *args: messages.append(args))
+        window.tray.notify_completion()
+        assert messages == [("자막 대기열 처리 종료", "이번 처리: 완료 0개 · 말소리 없음 1개 · 실패 0개")]
+    finally:
+        window.tray.quit()
+        window.deleteLater()
+        qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)

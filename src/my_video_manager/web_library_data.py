@@ -72,6 +72,8 @@ class DetailsData(TypedDict):
     subtitle_state: str | None
     translation_state: str | None
     highlight_count: int
+    no_speech: bool
+    translation_skip_reason: str | None
     externalSubtitles: list[ExternalSubtitleFileData]
 
 

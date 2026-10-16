@@ -12,3 +12,5 @@ class LibraryDetails:
     subtitle_state: str | None = None
     translation_state: str | None = None
     highlight_count: int = 0
+    no_speech: bool = False
+    translation_skip_reason: str | None = None

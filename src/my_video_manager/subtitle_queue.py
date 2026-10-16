@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import re
 from threading import RLock
+from typing import NamedTuple
 
 from .subtitles import normalize_spoken_language
 from .translation_kind import translation_task
@@ -26,6 +27,16 @@ class SubtitleQueueItem:
     progress: float
     error: str | None = None
     task_label: str = "받아쓰기"
+
+
+NO_SPEECH_NOTICE = "말소리를 찾지 못했습니다."
+
+
+class SubtitleQueueCompletion(NamedTuple):
+    """이번 처리의 결과 수. 말소리 없음은 완료와 따로 센다."""
+    completed: int
+    failed: int
+    no_speech: int
 
 
 @dataclass(frozen=True)
@@ -263,8 +274,9 @@ class SubtitleQueue:
             with self.order.connect() as db:
                 if db.execute("SELECT 1 FROM subtitle_queue_hidden WHERE video_id = ?", (result.video_id,)).fetchone():
                     return
-            self._notices[result.video_id] = getattr(result, "notice", "")
-            self._outcomes[result.video_id] = result.state
+            no_speech = getattr(result, "no_speech", False)
+            self._notices[result.video_id] = NO_SPEECH_NOTICE if no_speech else getattr(result, "notice", "")
+            self._outcomes[result.video_id] = "no_speech" if no_speech else result.state
             if result.state == "completed":
                 self._completed.add(result.video_id)
             else:
@@ -280,7 +292,7 @@ class SubtitleQueue:
                                      "OR EXISTS(SELECT 1 FROM translation_queue WHERE state IN ('queued', 'translating', 'held'))").fetchone()[0]
                 if pending:
                     return None
-            counts = (sum(s == "completed" for s in self._outcomes.values()),
-                      sum(s == "failed" for s in self._outcomes.values()))
+            counts = SubtitleQueueCompletion(*(sum(s == state for s in self._outcomes.values())
+                                               for state in ("completed", "failed", "no_speech")))
             self._outcomes.clear()
             return counts

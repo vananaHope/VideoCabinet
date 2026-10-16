@@ -8,7 +8,7 @@ from threading import Event, Lock
 from typing import Protocol
 from uuid import uuid4
 
-from .subtitles import TranscriptLine
+from .subtitles import TranscriptLine, TranscriptSummary
 from .translation_kind import translation_task, TranslationTask
 from .translation_models import DEFAULT_PROVIDER, provider
 from .translation_glossary import GlossaryStore, GlossaryEntry
@@ -128,6 +128,15 @@ class Translation:
 class TranslationSummary:
     translated_lines: int
     queue_state: str | None
+
+
+def translation_skip_reason(original: TranscriptSummary) -> str | None:
+    """번역·다듬기를 등록하지 않은 원어 자막의 이유. enqueue_eligible·request의 거절 조건과 같다."""
+    if original.no_speech:
+        return "no_speech"
+    if original.has_transcript and original.spoken_language is None:
+        return "unknown_language"
+    return None
 
 
 @dataclass(frozen=True)
