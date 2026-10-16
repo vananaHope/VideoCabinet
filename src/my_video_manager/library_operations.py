@@ -48,9 +48,10 @@ class LibraryOperations:
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "감시 폴더", str(error))
 
-    def scan(self, checked=False, *, operation=None):
+    def scan(self, checked=False, *, operation=None, quiet_if_unchanged=False):
         if self.worker is not None:
             return
+        self._quiet_scan = quiet_if_unchanged
         self.worker = ScanWorker(self.core, self, operation)
         self.worker.completed.connect(self.scan_completed)
         self.worker.failed.connect(lambda error: self.report_scan(f"검사 실패: {error}"))
@@ -66,6 +67,9 @@ class LibraryOperations:
 
     def scan_completed(self, result):
         self.refresh()
+        if self._quiet_scan and result.added == 0 and not result.issues:
+            self.report_scan("")
+            return
         summary = f"영상 {result.added}개 등록 · 전체 {len(self.cards)}개 · 안내 {len(result.issues)}개"
         self.scan_message.emit(summary + "\n" + "\n".join(f"{i.path}: {i.message}" for i in result.issues))
         self.window.show_status(summary)
