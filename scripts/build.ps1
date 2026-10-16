@@ -1,6 +1,7 @@
 ﻿param(
     [switch]$SkipPyInstaller,
     [switch]$Patch,
+    [switch]$PatchOnly,
     [string]$AppDirectory = 'dist/my-video-manager',
     [string]$OutputDirectory = 'dist/installer',
     [string]$InnoCompiler = '',
@@ -8,6 +9,7 @@
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
+if ($PatchOnly -and -not $SkipPyInstaller) { throw '-PatchOnly는 -SkipPyInstaller와 함께만 사용합니다.' }
 
 function Confirm-Exit([string]$Step) {
     if ($LASTEXITCODE -ne 0) { throw "$Step failed ($LASTEXITCODE)" }
@@ -60,18 +62,20 @@ if (-not $Version) {
 if ($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { throw "Inno Setup에 사용할 수 없는 버전: $Version" }
 
 # 1. 웹 빌드
-Push-Location frontend
-try {
-    if (-not (Test-Path node_modules)) {
-        npm ci
-        Confirm-Exit 'Frontend dependencies'
-    }
-    npm run build
-    Confirm-Exit 'Frontend build'
-} finally { Pop-Location }
-# 2. 생성 검사: 생성 파일은 여기서 변경하지 않는다.
-& $Python scripts/generate_web_types.py --check
-Confirm-Exit 'Generated contracts'
+if (-not $PatchOnly) {
+    Push-Location frontend
+    try {
+        if (-not (Test-Path node_modules)) {
+            npm ci
+            Confirm-Exit 'Frontend dependencies'
+        }
+        npm run build
+        Confirm-Exit 'Frontend build'
+    } finally { Pop-Location }
+    # 2. 생성 검사: 생성 파일은 여기서 변경하지 않는다.
+    & $Python scripts/generate_web_types.py --check
+    Confirm-Exit 'Generated contracts'
+}
 # 3. onedir: CUDA는 제외하고 Qt WebEngine·웹·미디어 도구를 동봉한다.
 if (-not $SkipPyInstaller) {
     & $Python -m PyInstaller --version
@@ -92,10 +96,12 @@ Confirm-Exit 'Bundle contents'
 & $Python scripts/bundle_fingerprint.py --check $AppDirectory
 Confirm-Exit 'Runtime fingerprint'
 # 4. Inno Setup. 버전 원본은 pyproject.toml 하나다.
-& $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" installer/my-video-manager.iss
-Confirm-Exit 'Inno Setup'
-Write-Host "Created: $OutputDirectory/MyVideoManager-Setup-$Version.exe"
-if ($Patch) {
+if (-not $PatchOnly) {
+    & $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" installer/my-video-manager.iss
+    Confirm-Exit 'Inno Setup'
+    Write-Host "Created: $OutputDirectory/MyVideoManager-Setup-$Version.exe"
+}
+if ($Patch -or $PatchOnly) {
     $PatchInclude = Join-Path (Get-Location) 'build/patch-payload.iss'
     & $Python scripts/patch_payload.py $AppDirectory --output $PatchInclude --version $Version
     Confirm-Exit 'Patch payload'

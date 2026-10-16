@@ -464,11 +464,39 @@ def test_passwordless_key_refused_before_writing_into_inheriting_directory(scrip
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     target = folder / 'key.pem'
-    with pytest.raises(ValueError, match='ACL verification failed'):
+    with pytest.raises(ValueError, match='key not written:'):
         tool.generate_key(target, None)
     assert not target.exists()
     error = capsys.readouterr().err
     assert 'WARNING' in error and 'icacls $keyFolder' in error
+    assert 'key not written:' in error
+    assert 'key preserved' not in error
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows localized ACL subprocess output')
+@pytest.mark.filterwarnings('error::pytest.PytestUnhandledThreadExceptionWarning')
+def test_korean_key_directory_acl_has_no_reader_thread_warnings(scripts, tmp_path):
+    target = tmp_path / '한글 키 전용 폴더' / '시험용.pem'
+    tool = scripts[0]
+    public = tool.generate_key(target, None)
+    assert tool.load_signing_key(target).public_key().public_bytes_raw() == public
+    tool.check_key_acl(target)
+
+
+def test_acl_inspection_decodes_only_utf8_json_and_ignores_diagnostic_encoding(scripts, tmp_path):
+    import base64
+    seen = []
+    def run(args, **kwargs):
+        seen.append((args, kwargs))
+        # Invalid UTF-8 stderr must never be decoded on a subprocess reader thread.
+        return subprocess.CompletedProcess(args, 0, json.dumps(acl_snapshot()).encode('utf-8'), b'\xc0\xfe')
+    assert scripts[0].windows_acl(tmp_path / '한글', run=run) == acl_snapshot()
+    arguments, options = seen[0]
+    source = base64.b64decode(arguments[-1]).decode('utf-16-le')
+    assert '[Console]::OutputEncoding = [Text.Encoding]::UTF8' in source
+    assert 'text' not in options and 'encoding' not in options
+    assert options['env']['MVM_ACL_PATH'] == str(tmp_path / '한글')
+    assert str(tmp_path) not in source
 
 
 @pytest.mark.parametrize('encrypted', [False, True])

@@ -26,15 +26,27 @@ def describe_asset(path: Path) -> UpdateAsset:
 
 
 def build_manifest(*, version: str, runtime: Path, full: Path,
-                   previous_runtime: Path | None = None, patch: Path | None = None) -> UpdateManifest:
+                   previous_runtime: Path | None = None, patch: Path | None = None,
+                   previous_fingerprint: str | None = None) -> UpdateManifest:
     current = load_runtime_fingerprint(runtime)['fingerprint']
-    previous = None if previous_runtime is None else load_runtime_fingerprint(previous_runtime)['fingerprint']
+    if previous_runtime is not None and previous_fingerprint is not None:
+        raise ValueError('Specify only one previous runtime source')
+    previous = (previous_fingerprint if previous_runtime is None else
+                load_runtime_fingerprint(previous_runtime)['fingerprint'])
     compatible = current == previous
     if compatible != (patch is not None):
         raise ValueError('Matching previous runtime requires a patch; first/changed runtime requires no patch')
     manifest = UpdateManifest(SCHEMA_VERSION, version, current, previous,
                               describe_asset(full), None if patch is None else describe_asset(patch), compatible)
     return manifest
+
+
+def validate_signing_key(key: Ed25519PrivateKey) -> None:
+    """The same application trust anchor gates preflight and final signing."""
+    if not update_manifest.UPDATE_PUBLIC_KEY:
+        raise ValueError('앱 공개 키가 설정되지 않았습니다')
+    if key.public_key().public_bytes_raw() != update_manifest.UPDATE_PUBLIC_KEY:
+        raise ValueError('서명 키가 앱 공개 키와 다릅니다')
 
 
 def write_signed_manifest(manifest: UpdateManifest, key: Ed25519PrivateKey, output: Path,
@@ -46,10 +58,7 @@ def write_signed_manifest(manifest: UpdateManifest, key: Ed25519PrivateKey, outp
     if allow_unpinned_key_for_tests:
         print('WARNING: test-only unpinned signing key; not for release publication', file=sys.stderr)
     else:
-        if not update_manifest.UPDATE_PUBLIC_KEY:
-            raise ValueError('앱 공개 키가 설정되지 않았습니다')
-        if key.public_key().public_bytes_raw() != update_manifest.UPDATE_PUBLIC_KEY:
-            raise ValueError('서명 키가 앱 공개 키와 다릅니다')
+        validate_signing_key(key)
         verify_manifest(data, signature)
     signature_path = output.with_name(output.name + '.sig')
     output.parent.mkdir(parents=True, exist_ok=True)

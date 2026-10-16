@@ -155,7 +155,9 @@ libmpv·FFmpeg·ffprobe를 포함합니다. CUDA·Whisper 모델은 넣지 않�
 전체 설치 파일과 함께 `dist/installer/MyVideoManager-Patch-<version>.exe`를 만듭니다.
 기본 빌드는 패치를 추가 압축하지 않습니다. 기존 번들에서는 `-SkipPyInstaller -Patch`를 함께 쓰며,
 `-Version`은 번들의 `my_video_manager/build-version.txt`와 같아야 합니다.
-릴리스 자동화 연결·업데이트 매니페스트·서명·업로드는 별도 작업입니다.
+`release.ps1`은 전체 빌드 후 이전 Release와 지문을 비교하고, 같을 때만
+`-SkipPyInstaller -PatchOnly`로 이미 검증한 번들의 패치를 추가 압축합니다.
+`-PatchOnly`는 전체 설치 파일과 웹/PyInstaller 빌드를 반복하지 않으며 `-SkipPyInstaller`가 필수입니다.
 
 패치는 PYZ를 포함한 exe 전체와 앱 데이터·웹 자산·앱 `.dist-info`·라이선스·지문 문서를 교체합니다.
 파일 경계는 `runtime_fingerprint.py`의 `APP_OWNED_PATHS` 한 곳에서 정의하고
@@ -208,34 +210,69 @@ FFmpeg 원본 `LICENSE`·`README.txt`도 함께 추출합니다. 번들은 불�
 
 ```powershell
 # 검사와 계획 출력만: 버전·커밋·태그·원격·원격 추적 ref를 바꾸지 않음
-powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0 -DryRun
+powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.4.2 -DryRun
 # 위 동작에 빌드 추가: pyproject.toml 수정 없이 -Version을 build.ps1에 전달
-powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0 -DryRun -Build
+powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.4.2 -DryRun -Build
 # 실제 릴리스
-powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0
+powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.4.2
 ```
 
-실제 실행은 `pyproject.toml` 버전을 올려 한국어로 커밋하고 설치 파일을 빌드합니다.
-설치 파일의 SHA-256 파일을 만든 뒤 `v<version>` 태그와 main을 atomic push하고,
-`gh release create --verify-tag`로 설치 파일과 체크섬을 함께 게시합니다.
+실제 실행은 먼저 개인 키를 읽고 앱에 내장된 공개 키와 일치하는지 검사합니다.
+키가 없거나 공개 키가 자리 표시 값이거나 키가 다르면 버전 커밋·빌드 전에 멈춥니다.
+기본 키 경로는 아래 "사람이 한 번 준비할 키"와 같으며 `-PrivateKey <경로>`로 바꿀 수 있습니다.
+암호는 `MVM_UPDATE_SIGNING_PASSWORD` 환경 변수 → 대화형 터미널에서만 질문 순서이며,
+릴리스 스크립트는 암호를 명령줄 인수나 로그에 넣지 않습니다. 서명 시에도 동일 검사를 다시 합니다.
+
+이전 메타데이터는 GitHub의 `releases/latest`가 가리키는 정식(비 draft·비 prerelease)
+Release에서 읽습니다. 태그는 `vX.Y.Z`여야 하며 새 버전 이상이면 발행을 중단합니다.
+매니페스트와 `.sig`가 함께 있으면 앱 내장 공개 키로 정확한 바이트를 검증한 후 읽습니다.
+서명 없는 이전 매니페스트는 스키마를 검사하고 계획에 "서명 없음"을 표시합니다.
+서명·형식·태그와 매니페스트 버전 일치 검증이 실패하면 이전 지문을 신뢰하지 않고
+"패치 불가(이전 매니페스트 검증 실패)" 이유와 함께 전체 설치만 발행합니다.
+접근 거부·네트워크·다운로드 실패는 메타데이터 부재로 간주하지 않고 중단합니다.
+
+이후 `pyproject.toml` 버전을 올려 한국어로 커밋하고 전체 설치 파일을 빌드합니다.
+새 번들의 실제 런타임 지문을 검사해 이전 지문과 같을 때만 패치를 만들고,
+설치 파일 체크섬·`update-manifest.json`·Ed25519 서명을 생성합니다.
+이전 Release나 매니페스트가 없으면 첫 릴리스로 취급해 `patch = null`입니다.
+런타임 지문이 달라져도 패치를 만들거나 업로드하지 않습니다(남아 있는 옛 패치 파일도 제외).
+전체 설치만 가능한 경우 노트에 "이번 버전은 전체 설치 파일로 한 번 설치해야 합니다"를 넣습니다.
+특히 v0.4.1 이전 설치본에는 지문 파일이 없으므로 전체 설치를 한 번 거쳐야 합니다.
+#140에서 `cryptography`를 번들에 포함하는 변경도 실제 지문 비교가 자동으로 감지합니다.
+
+모든 파일 생성·서명이 성공하면 `v<version>` 태그와 main을 atomic push하고,
+`gh release create --verify-tag`로 전체 설치 파일·체크섬·매니페스트·서명과 해당하는 패치를 게시합니다.
 노트는 현재 main에 포함된 가장 높은 버전 태그 이후의 커밋 제목입니다(태그가 없으면 전체).
 설치 파일은 `dist/installer/MyVideoManager-Setup-<version>.exe`, 체크섬은 그 옆의 `.exe.sha256`입니다.
+패치는 `dist/installer/MyVideoManager-Patch-<version>.exe`, 메타데이터는
+`dist/installer/<version>/update-manifest.json`과 `update-manifest.json.sig`에 보존합니다.
+GitHub Release 자산 이름에는 버전 하위 폴더가 붙지 않습니다. 기존 메타데이터가 있으면
+덮어쓰지 않고 중단하므로 실패 후 재시도 전 해당 버전 파일을 확인·보관하세요.
 기존 태그·Release를 덮어쓰거나 강제 push하지 않습니다.
 빌드 실패나 원격에서 거부한 push는 로컬 버전 커밋과 이번에 만든 태그를 자동 복구합니다.
 다른 파일 변경이나 불확실한 원격 상태가 있으면 보존하고 복구 명령을 안내합니다.
 push 뒤 Release 생성이 실패하면 원격 main과 태그를 유지하며 Release 확인·생성·자산 추가 명령을 안내합니다.
+안내된 `gh release upload` 목록에는 매니페스트·서명과 해당하는 패치도 포함됩니다.
+이미 올라간 자산은 그대로 두고 목록에서 **누락된 파일만 골라** 업로드합니다(`--clobber` 사용 안 함).
 자동 재발행하지 않으므로 안내에 따라 상태를 확인하세요.
 Ctrl+C로 빌드를 중단하면 PowerShell이 실패 복구 catch를 건너뛸 수 있습니다.
 `git status`와 `git log --oneline`으로 확인하고, 보존할 작업을 저장한 뒤 이번 버전 커밋만
 `git revert <버전 커밋>`으로 되돌리세요. 다른 작업 이후의 HEAD를 시작 커밋으로 reset하지 마세요.
 `-DryRun -Build`의 빌드 산출물은 Git에서 제외된 폴더에 남으며 tracked 파일과 커밋은 그대로입니다.
+`-DryRun`은 개인 키를 읽거나 암호를 묻지 않고 "실제 발행 시 서명 키 필요"를 표시합니다.
+이전 지문·새 지문·판정 근거·생성 및 업로드할 자산을 출력하며, 빌드 없이 읽은 기존 번들의
+판정은 다음 실제 빌드에서 다시 확인합니다. 번들 폴더가 없으면 새 지문·패치 여부는 "미정"이고
+`-DryRun -Build`를 안내합니다. 폴더가 있는데 지문이 없거나 손상되었으면 중단합니다.
+`-DryRun -Build`는 전체 설치와 조건에 맞는 패치까지 만들지만 매니페스트·서명·체크섬은
+실제 발행 단계에서 생성합니다. 두 DryRun 모두 버전·커밋·태그·원격을 변경하지 않습니다.
 
 
 ## 업데이트 매니페스트와 서명 키 (#138)
 
 `scripts/generate_update_key.py`와 `scripts/generate_update_manifest.py`는 로컬에서
-키·매니페스트·서명을 만드는 독립 도구입니다. 빌드·릴리스 연결과 GitHub 업로드는
-후속 #139의 범위이며, 앱 안 업데이트 확인·다운로드도 아직 연결하지 않습니다.
+키·매니페스트·서명을 만드는 독립 도구입니다. `release.ps1`은 이 도구의 키·서명 검사를
+재사용하고 `release_metadata.py`를 통해 이전 Release 조회·패치 판정·발행 자산 생성을 연결합니다.
+앱 안 업데이트 확인·다운로드는 별도 작업입니다.
 런타임 검증 의존성은 `cryptography==50.0.2`로 고정합니다.
 
 ### 사람이 한 번 준비할 키
