@@ -1,12 +1,14 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import os
+from pathlib import Path
 import shutil
 import sqlite3
 
 import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
+from my_video_manager.library import ScanIssue, ScanResult
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.translation import TranslatedLine
 
@@ -332,6 +334,170 @@ def test_unchanged_nonvideo_and_registered_locations_skip_reading_after_restart(
     core.scan()
     core.scan()
     assert media.reads == []
+
+
+@pytest.mark.parametrize("stage", ["read", "capture"])
+@pytest.mark.parametrize("failure", [ValueError, RuntimeError, TimeoutError, PermissionError])
+def test_scan_retries_failed_files_with_unchanged_signature(tmp_path, stage, failure):
+    class FailingMedia(Media):
+        failing = True
+
+        def read(self, path):
+            info = super().read(path)
+            if self.failing and stage == "read":
+                raise failure("media failed")
+            return info
+
+        def capture(self, path, destination, seconds):
+            if self.failing and stage == "capture":
+                raise failure("media failed")
+            super().capture(path, destination, seconds)
+
+    media = FailingMedia()
+    core = open_core(tmp_path / "data/library.sqlite3", media)
+    path = video_file(tmp_path / "watched")
+    core.add_watched_folder(path.parent)
+    signature = path.stat()
+    for _ in range(2):
+        assert core.scan() == ScanResult(0, (ScanIssue(path, "media failed"),))
+        assert core.videos() == ()
+    media.failing = False
+    assert core.scan() == ScanResult(1, ())
+    assert media.reads == [path, path, path]
+    assert core.videos()[0].locations[0].path == path
+    assert path.stat().st_mtime_ns == signature.st_mtime_ns
+    assert core.scan() == ScanResult(0, ())
+    assert len(media.reads) == 3
+
+
+@pytest.mark.parametrize("stage", ["read", "capture"])
+def test_scan_rejects_file_changed_during_registration_and_retries(tmp_path, stage):
+    class ChangingMedia(Media):
+        changing = True
+
+        def read(self, path):
+            info = super().read(path)
+            if self.changing and stage == "read":
+                path.write_bytes(b"changed during read")
+            return info
+
+        def capture(self, path, destination, seconds):
+            super().capture(path, destination, seconds)
+            if self.changing and stage == "capture":
+                path.write_bytes(b"changed during capture")
+
+    media = ChangingMedia()
+    core = open_core(tmp_path / "data/library.sqlite3", media)
+    path = video_file(tmp_path / "watched")
+    core.add_watched_folder(path.parent)
+    result = core.scan()
+    assert result.added == 0 and not result.reconnected
+    assert len(result.issues) == 1
+    assert result.issues[0].path == path and result.issues[0].failed
+    assert core.videos() == ()
+    media.changing = False
+    assert core.scan() == ScanResult(1, ())
+    assert core.videos()[0].locations[0].path == path
+
+
+def test_cached_short_copy_attaches_to_video_registered_during_same_scan(core, tmp_path):
+    media = Media()
+    core = open_core(core.database, media)
+    direct = video_file(tmp_path / "outside", content=b"different")
+    core.add_file(direct)
+    old, = core.videos()
+    short = video_file(tmp_path / "watched", content=b"short")
+    core.add_watched_folder(short.parent)
+    media.duration = 20
+    assert core.scan() == ScanResult(0, ())
+    direct.write_bytes(b"short")
+    media.duration = 100
+    media.reads.clear()
+    assert core.scan() == ScanResult(1, ())
+    assert core.video(old.id).missing
+    new, = (video for video in core.videos() if video.id != old.id)
+    assert {location.path for location in new.locations} == {short, direct}
+    assert media.reads == [direct]
+
+
+def test_unchanged_scan_database_work_does_not_grow_per_file(core, tmp_path, monkeypatch):
+    media = Media()
+    core = open_core(core.database, media)
+    folder = tmp_path / "watched"
+    video_file(folder)
+    core.add_watched_folder(folder)
+    core.scan()
+    connect = sqlite3.connect
+    connections, statements = [], []
+
+    def counted_connect(*args, **kwargs):
+        db = connect(*args, **kwargs)
+        connections.append(1)
+        db.set_trace_callback(statements.append)
+        return db
+
+    monkeypatch.setattr(sqlite3, "connect", counted_connect)
+    assert core.scan() == ScanResult(0, ())
+    one_file_connections = len(connections)
+    one_file_settings = sum("FROM settings" in sql for sql in statements)
+    for i in range(40):
+        video_file(folder, f"video-{i}.mkv", str(i).encode())
+        video_file(folder, f"document-{i}.txt")
+    core.scan()
+    media.duration = 20
+    for i in range(40):
+        video_file(folder, f"short-{i}.mkv", f"short-{i}".encode())
+    core.scan()
+    core.exclude_video(core.videos()[0].id)
+    connections.clear()
+    statements.clear()
+    media.reads.clear()
+    assert core.scan() == ScanResult(0, ())
+    assert media.reads == []
+    assert len(core.excluded_videos()) == 1
+    # 공개 scan의 SQLite 경계 비용을 비교한다. 캐시 구조나 private 호출에는 의존하지 않는다.
+    assert len(connections) <= one_file_connections + 1  # excluded_videos 조회 1회 포함
+    assert sum("FROM settings" in sql for sql in statements) == one_file_settings
+
+
+def test_inaccessible_folder_preserves_cached_checks_until_successful_scan(core, tmp_path, monkeypatch):
+    media = Media()
+    core = open_core(core.database, media)
+    path = video_file(tmp_path / "watched/nested", "document.txt")
+    core.add_watched_folder(path.parent.parent)
+    core.scan()
+    scandir = os.scandir
+
+    def denied(directory):
+        if Path(directory) == path.parent:
+            raise PermissionError("folder denied")
+        return scandir(directory)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "scandir", denied)
+        assert core.scan() == ScanResult(0, (ScanIssue(path.parent, "folder denied"),))
+    assert core.scan() == ScanResult(0, ())
+    assert media.reads == [path]
+
+
+def test_registered_location_permission_failure_is_not_missing(core, tmp_path, monkeypatch):
+    path = video_file(tmp_path / "outside")
+    core.add_file(path)
+    video, = core.videos()
+    original_stat = Path.stat
+
+    def denied(file, *args, **kwargs):
+        if file == path:
+            raise PermissionError("file denied")
+        return original_stat(file, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "stat", denied)
+        result = core.scan()
+        assert ScanIssue(path, "file denied") in result.issues
+        assert not core.video(video.id).missing
+    assert core.scan() == ScanResult(0, ())
+    assert core.video(video.id) == video
 
 
 @pytest.mark.parametrize("change", ["size", "mtime"])

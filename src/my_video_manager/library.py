@@ -218,9 +218,10 @@ class Library:
                               reconnected=True)
         return self._not_added(path, "이미 등록된 영상입니다.")
 
-    def _register(self, path: Path, *, on_registered=None, missing_at_start=None) -> ScanResult:
-        signature = _signature(path)
-        minimum = self.minimum_duration
+    def _register(self, path: Path, *, on_registered=None, missing_at_start=None,
+                  signature=None, minimum=None) -> ScanResult:
+        signature = _signature(path) if signature is None else signature
+        minimum = self.minimum_duration if minimum is None else minimum
         with self._connect() as db:
             old = db.execute("""SELECT l.video_id, l.size, l.mtime_ns, v.excluded FROM locations l
                 JOIN videos v ON v.id=l.video_id WHERE l.path=?""", (str(path),)).fetchone()
@@ -372,29 +373,47 @@ class Library:
         with self._connect() as db:
             # 실패한 해상도는 유지한다. 파일 변경은 _register에서 다시 읽고,
             # 명시적 위치 연결은 reconnect_video에서 미확인으로 되돌린다.
-            paths = [Path(row[0]) for row in db.execute("SELECT path FROM locations")]
+            locations = {Path(row["path"]): (row["size"], row["mtime_ns"])
+                         for row in db.execute("SELECT path, size, mtime_ns FROM locations")}
+            checks = {Path(row["path"]): row for row in db.execute("SELECT * FROM library_file_checks")}
+            known_fingerprints = {row[0] for row in db.execute("SELECT fingerprint FROM videos")}
             missing_at_start = {row[0] for row in db.execute(
                 "SELECT id FROM videos WHERE NOT EXISTS (SELECT 1 FROM locations WHERE video_id = videos.id)")}
+        minimum = self.minimum_duration
+        check_paths = set(checks)
 
-        def register(path):
+        def registered(video_id):
+            # 같은 검사에서 새로 등록된 영상의 짧은 복사본도 기존 영상에 연결한다.
+            with self._connect() as db:
+                known_fingerprints.add(db.execute("SELECT fingerprint FROM videos WHERE id=?", (video_id,)).fetchone()[0])
+            (on_registered or self._on_registered)(video_id)
+
+        def register(path, signature):
             nonlocal reconnected
-            result = self._register(path, on_registered=on_registered, missing_at_start=missing_at_start)
+            # scan은 이미 등록됨/제외됨/비영상/최소 길이 미만 안내를 결과에 싣지 않는다.
+            if locations.get(path) == signature:
+                return 0
+            check = checks.get(path)
+            if check and (check["size"], check["mtime_ns"]) == signature:
+                if check["duration"] is None:
+                    return 0
+                if check["duration"] < minimum and check["fingerprint"] not in known_fingerprints:
+                    return 0
+            result = self._register(path, on_registered=registered, missing_at_start=missing_at_start,
+                                    signature=signature, minimum=minimum)
+            check_paths.add(path)
             if result.reconnected:
                 reconnected = True
                 issues.extend(result.issues)
             return result.added
 
-        for path in paths:
-            processed.add(path)
-            try:
-                added += register(path)
-            except (FileNotFoundError, NotADirectoryError):
-                self._forget_location(path)
-            except (OSError, ValueError, RuntimeError) as error:
-                issues.append(ScanIssue(path, str(error)))
         roots = [folder.path for folder in self.watched_folders()]
         pending = list(reversed(roots))
         visited: set[Path] = set()
+        signatures: dict[Path, tuple[int, int]] = {}
+        entries_in_order: list[Path | ScanIssue] = []
+        # 먼저 순회 결과를 모아 기존 위치 확인에도 DirEntry의 stat을 재사용한다.
+        # 등록/오류 보고는 기존처럼 저장된 위치 먼저, 이어서 순회 순서로 처리한다.
         while pending:
             directory = pending.pop()
             try:
@@ -404,33 +423,50 @@ class Library:
                 visited.add(real_path)
                 with os.scandir(directory) as entries:
                     for entry in entries:
-                        path = Path(entry.path)
+                        path = real_path / entry.name
                         try:
                             info = entry.stat(follow_symlinks=False)
                             if (stat.S_ISLNK(info.st_mode)
                                     or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
-                                issues.append(ScanIssue(path, "건너뜀: 다른 폴더나 파일을 가리키는 연결(정션·심볼릭 링크)",
-                                                        failed=False))
+                                entries_in_order.append(ScanIssue(
+                                    path, "건너뜀: 다른 폴더나 파일을 가리키는 연결(정션·심볼릭 링크)", failed=False))
                                 continue
                             if stat.S_ISDIR(info.st_mode):
                                 pending.append(path)
                             elif stat.S_ISREG(info.st_mode):
-                                path = path.resolve()
                                 seen.add(path)
-                                if path not in processed:
-                                    processed.add(path)
-                                    added += register(path)
+                                signatures[path] = (info.st_size, info.st_mtime_ns)
+                                entries_in_order.append(path)
                         except (OSError, ValueError, RuntimeError) as error:
                             inaccessible.add(path)
-                            issues.append(ScanIssue(path, str(error)))
+                            entries_in_order.append(ScanIssue(path, str(error)))
             except (OSError, RuntimeError) as error:
                 if not isinstance(error, (FileNotFoundError, NotADirectoryError)):
                     inaccessible.add(directory)
-                issues.append(ScanIssue(directory, str(error)))
+                entries_in_order.append(ScanIssue(directory, str(error)))
+
+        for path in locations:
+            processed.add(path)
+            try:
+                signature = signatures.get(path)
+                added += register(path, _signature(path) if signature is None else signature)
+            except (FileNotFoundError, NotADirectoryError):
+                self._forget_location(path)
+            except (OSError, ValueError, RuntimeError) as error:
+                issues.append(ScanIssue(path, str(error)))
+        for entry in entries_in_order:
+            if isinstance(entry, ScanIssue):
+                issues.append(entry)
+            elif entry not in processed:
+                processed.add(entry)
+                try:
+                    added += register(entry, signatures[entry])
+                except (OSError, ValueError, RuntimeError) as error:
+                    inaccessible.add(entry)
+                    issues.append(ScanIssue(entry, str(error)))
         with self._connect() as db:
-            stale = [row[0] for row in db.execute("SELECT path FROM library_file_checks")
-                     if Path(row[0]) not in seen
-                     and any(Path(row[0]).is_relative_to(root) for root in roots)
-                     and not any(Path(row[0]).is_relative_to(path) for path in inaccessible)]
-            db.executemany("DELETE FROM library_file_checks WHERE path=?", ((path,) for path in stale))
+            stale = [path for path in check_paths if path not in seen
+                     and any(path.is_relative_to(root) for root in roots)
+                     and not any(path.is_relative_to(blocked) for blocked in inaccessible)]
+            db.executemany("DELETE FROM library_file_checks WHERE path=?", ((str(path),) for path in stale))
         return ScanResult(added, tuple(issues), reconnected=reconnected)
