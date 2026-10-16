@@ -249,7 +249,7 @@ def test_interactive_password_confirmation_and_env_priority(scripts, monkeypatch
 @pytest.mark.parametrize('encrypted', [False, True])
 def test_command_line_key_and_manifest_roundtrip(artifacts, tmp_path, encrypted):
     full, _, runtime = artifacts
-    key_path = tmp_path / 'release.pem'
+    key_path = tmp_path / 'keys' / 'release.pem'
     output = tmp_path / 'release' / 'update-manifest.json'
     env = dict(os.environ)
     env['MVM_UPDATE_SIGNING_PASSWORD'] = 'disposable-cli-password'
@@ -334,7 +334,8 @@ def test_acl_restriction_uses_argument_lists_and_removes_explicit_other_sids(scr
 
     tool.restrict_key_directory(tmp_path, run=run, inspect=lambda path: acl_snapshot(foreign=True))
     assert calls == [
-        ['icacls.exe', str(tmp_path), '/grant:r', '*S-1-5-21-123:(OI)(CI)F', '/inheritance:r'],
+        ['icacls.exe', str(tmp_path), '/grant:r', '*S-1-5-21-123:(OI)(CI)F',
+         '*S-1-5-18:(OI)(CI)F', '/inheritance:r'],
         ['icacls.exe', str(tmp_path), '/remove', '*S-1-5-32-545']]
 
 
@@ -391,4 +392,60 @@ def test_real_windows_key_acl_is_private(scripts, tmp_path):
     tool.check_key_acl(target)
     for path in (target.parent, target):
         acl = tool.windows_acl(path)
-        assert {rule['sid'] for rule in acl['rules']} == {acl['user']}
+        assert {rule['sid'] for rule in acl['rules']} == {acl['user'], 'S-1-5-18'}
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Real Windows ACL in temporary folder only')
+@pytest.mark.parametrize('name', ['curly\u2019q dir', 'curly\u2018q dir',
+                                 'q\u2019; New-Item -ItemType File -Name pwned.txt; \u2019'])
+def test_windows_acl_treats_path_as_data(scripts, tmp_path, monkeypatch, name):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'q').mkdir()
+    target = tmp_path / name
+    target.mkdir()
+    assert scripts[0].windows_acl(target)['rules']
+    assert not (tmp_path / 'pwned.txt').exists()
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Real Windows ACL in temporary folder only')
+@pytest.mark.parametrize('encrypted', [False, True])
+def test_existing_key_directory_and_children_keep_acl(scripts, tmp_path, capsys, encrypted):
+    tool = scripts[0]
+    folder = tmp_path / 'existing'
+    child = folder / 'sub' / 'doc.txt'
+    child.parent.mkdir(parents=True)
+    child.write_text('unrelated document')
+    # Ensure the pre-existing directory is unsafe regardless of the temp root ACL.
+    result = subprocess.run(['icacls.exe', str(folder), '/grant', '*S-1-1-0:(OI)(CI)R'],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    targets = (folder, child.parent, child)
+    before = {path: tool.windows_acl(path) for path in targets}
+    target = folder / 'key.pem'
+    if encrypted:
+        assert len(tool.generate_key(target, b'disposable-password')) == 32
+    else:
+        with pytest.raises(ValueError, match='ACL verification failed'):
+            tool.generate_key(target, None)
+    assert target.exists()
+    assert {path: tool.windows_acl(path) for path in targets} == before
+    assert child.read_text() == 'unrelated document'
+    error = capsys.readouterr().err
+    assert 'WARNING' in error and 'icacls $keyFolder' in error and 'icacls $keyFile' in error
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Real Windows ACL in temporary folder only')
+def test_existing_private_directory_is_reused_without_restriction(scripts, tmp_path, monkeypatch):
+    tool = scripts[0]
+    target = tmp_path / 'keys' / 'first.pem'
+    tool.generate_key(target, None)
+    before = tool.windows_acl(target.parent)
+
+    def no_restriction(path):
+        pytest.fail('Existing directory must not be restricted again')
+
+    monkeypatch.setattr(tool, 'restrict_key_directory', no_restriction)
+    second = target.with_name('second.pem')
+    tool.generate_key(second, None)
+    tool.check_key_acl(second)
+    assert tool.windows_acl(target.parent) == before

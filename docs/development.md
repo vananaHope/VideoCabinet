@@ -219,9 +219,12 @@ Ctrl+C로 빌드를 중단하면 PowerShell이 실패 복구 catch를 건너뛸 
 `--private-key <경로>`로 바꿀 수 있지만 저장소·worktree 안 경로와 UNC·매핑된 네트워크 드라이브는 거부합니다.
 심볼릭 링크·정션을 해석한 실제 경로와 입력 경로를 모두 검사하며 기존 키는 덮어쓰지 않습니다.
 사용자만 접근할 수 있는 로컬 폴더를 선택하고 별도의 안전한 백업을 유지하세요.
-Windows에서는 키 생성 전에 키 전용 폴더의 ACL 상속을 끊고 현재 사용자만 모든 권한을
-갖도록 설정합니다. 기존 폴더를 지정해도 ACL을 변경하므로 다른 용도로 쓰는 폴더는 선택하지 마세요.
-생성 뒤 폴더·파일 ACL 확인에 실패하면 오류로 끝나며 완성된 키는 표시된 경로에 보존합니다.
+Windows에서는 이번 실행이 새로 만든 키 전용 폴더에만 ACL 상속을 끊고 현재 사용자와
+SYSTEM이 모든 권한을 갖도록 설정합니다. 재귀 옵션은 사용하지 않으며 Administrators는 허용하지 않습니다.
+기존 폴더와 하위 항목의 ACL은 변경하지 않고 폴더·키 파일의 ACL을 검사합니다.
+검사에 실패하면 암호 없는 키는 오류로 끝나고 암호화 키는 경고 후 진행하며,
+완성된 키는 표시된 경로에 보존합니다. 수동 설정 명령을 안내하므로 기존 내용에 미치는
+상속 영향을 검토한 뒤 적용하세요. 기본 경로는 키 전용 폴더로 유지합니다.
 `os.open(..., 0o600)`은 Windows에서 읽기 전용 비트만 반영하므로 접근 제어를 대신하지 않습니다.
 
 PowerShell에서 직접 확인·설정하려면 다음 명령을 사용합니다(실제 키 전용 경로로 바꾸세요).
@@ -232,16 +235,16 @@ $keyFile = Join-Path $keyFolder 'update-ed25519.pem'
 $keyUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 icacls $keyFolder
 icacls $keyFile
-icacls $keyFolder /grant:r "*${keyUserSid}:(OI)(CI)F" /inheritance:r
-icacls $keyFile /grant:r "*${keyUserSid}:F" /inheritance:r
-# 출력에 다른 주체의 명시적 권한이 남으면 해당 SID마다 실행합니다.
+icacls $keyFolder /grant:r "*${keyUserSid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' /inheritance:r
+icacls $keyFile /grant:r "*${keyUserSid}:F" '*S-1-5-18:F' /inheritance:r
+# 현재 사용자와 SYSTEM 외 주체의 명시적 권한이 남으면 해당 SID마다 실행합니다.
 # icacls $keyFolder /remove '*S-1-5-21-실제SID'
 # icacls $keyFile /remove '*S-1-5-21-실제SID'
 icacls $keyFolder
 icacls $keyFile
 ```
 
-현재 사용자(필요하면 SYSTEM) 외 주체가 남지 않았는지 최종 출력을 확인하세요.
+현재 사용자와 SYSTEM 외 주체가 남지 않았는지 최종 출력을 확인하세요.
 서명 도구도 폴더·파일을 검사하며, 다른 주체가 남거나 확인할 수 없으면 경고합니다.
 암호 없는 키는 오류로 중단하고 암호화된 키는 경고 후 진행합니다.
 `--no-password` 키는 같은 PC의 다른 계정(작업자 샌드박스 포함)이 읽을 수 있으면 키가 노출됩니다.

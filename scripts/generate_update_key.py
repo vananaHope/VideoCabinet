@@ -19,22 +19,22 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 def windows_acl(path: Path, *, run=subprocess.run) -> dict:
     """Read SID-based ACL entries without localized icacls output parsing."""
-    literal = str(path).replace("'", "''")
     script = """
 $ErrorActionPreference = 'Stop'
-$acl = Get-Acl -LiteralPath '%s'
+$acl = Get-Acl -LiteralPath $env:MVM_ACL_PATH
 @{user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   rules = @($acl.Access | ForEach-Object {
     @{sid = $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
       allow = ($_.AccessControlType -eq 'Allow'); rights = [int]$_.FileSystemRights}
   })} | ConvertTo-Json -Depth 4 -Compress
-""" % literal
+"""
     result = run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand',
                   base64.b64encode(script.encode('utf-16-le')).decode('ascii')],
                  capture_output=True, text=True, timeout=30,
                  # PowerShell 7's inherited module path can load incompatible
                  # modules in Windows PowerShell 5.1 started by Python.
-                 env={k: v for k, v in os.environ.items() if k.casefold() != 'psmodulepath'})
+                 env={**{k: v for k, v in os.environ.items() if k.casefold() != 'psmodulepath'},
+                      'MVM_ACL_PATH': str(path)})
     if result.returncode:
         raise ValueError(f'Cannot inspect private key ACL: {path}')
     return json.loads(result.stdout)
@@ -50,10 +50,10 @@ def restrict_key_directory(path: Path, *, run=subprocess.run, inspect=windows_ac
         if result.returncode:
             raise ValueError(f'Cannot restrict private key directory ACL: {path}')
 
-    apply([str(path), '/grant:r', f'*{user}:(OI)(CI)F', '/inheritance:r'])
+    apply([str(path), '/grant:r', f'*{user}:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F', '/inheritance:r'])
     # Re-read after removing inheritance: stale/unresolvable inherited SIDs
     # need no /remove call (icacls may fail resolving even a now-absent SID).
-    for sid in sorted({rule['sid'] for rule in inspect(path)['rules']} - {user}):
+    for sid in sorted({rule['sid'] for rule in inspect(path)['rules']} - {user, 'S-1-5-18'}):
         apply([str(path), '/remove', f'*{sid}'])
 
 
@@ -69,6 +69,17 @@ def check_key_acl(path: Path, *, inspect=windows_acl) -> None:
                            and r['rights'] & 0x1F01FF == 0x1F01FF for r in rules)
                 or any(not r['allow'] for r in rules)):
             raise ValueError(f'Unsafe private key ACL: {target}; key preserved at {path}')
+
+
+def print_acl_guidance() -> None:
+    print('Set $keyFolder and $keyFile to the private key directory and file in PowerShell; '
+          'review existing contents before changing inherited permissions:\n'
+          '$keyUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value\n'
+          'icacls $keyFolder /grant:r "*${keyUserSid}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" /inheritance:r\n'
+          'icacls $keyFile /grant:r "*${keyUserSid}:F" "*S-1-5-18:F" /inheritance:r\n'
+          'Inspect with icacls $keyFolder and icacls $keyFile; remove explicit SIDs other than '
+          'the current user and SYSTEM with icacls $keyFolder /remove "*<SID>" and '
+          'icacls $keyFile /remove "*<SID>" (see docs/development.md).', file=sys.stderr)
 
 
 def default_key_path() -> Path:
@@ -110,10 +121,15 @@ def generate_key(path: Path, password: bytes | None) -> bytes:
     encryption = serialization.NoEncryption() if password is None else serialization.BestAvailableEncryption(password)
     key = Ed25519PrivateKey.generate()
     encoded = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, encryption)
-    path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         raise FileExistsError(path)
-    restrict_key_directory(path.parent)
+    try:
+        path.parent.mkdir(parents=True)
+    except FileExistsError:
+        if not path.parent.is_dir():
+            raise
+    else:
+        restrict_key_directory(path.parent)
     # Exclusive creation preserves existing keys, including resolved link targets.
     # Windows only reflects the read-only bit here; access control uses ACLs.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0), 0o600)
@@ -128,7 +144,9 @@ def generate_key(path: Path, password: bytes | None) -> bytes:
         check_key_acl(path)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print(f'WARNING: {exc}; key preserved at {path}', file=sys.stderr)
-        raise ValueError(f'Private key ACL verification failed; key preserved at {path}') from None
+        print_acl_guidance()
+        if password is None:
+            raise ValueError(f'Private key ACL verification failed; key preserved at {path}') from None
     return key.public_key().public_bytes_raw()
 
 
@@ -154,6 +172,7 @@ def load_signing_key(path: Path) -> Ed25519PrivateKey:
         check_key_acl(path)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print(f'WARNING: {exc}', file=sys.stderr)
+        print_acl_guidance()
         if not encrypted:
             raise ValueError(f'Unencrypted signing key requires private ACL: {path}') from None
     password = signing_password() if encrypted else None
