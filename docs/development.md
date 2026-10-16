@@ -176,7 +176,7 @@ schema·입력·해시를 빌드 시 검증한 지문과 대조합니다. 공백
 0이 아닌 종료 코드와 `/LOG=<파일>`에 안내를 남깁니다. 설치 경로를 직접 지정하려면 `/DIR=<기존 설치 폴더>`를 사용합니다.
 이 검사는 호환성 검사이며, 실제 런타임 파일 내용의 무결성 검사나 서명 검증은 아닙니다.
 
-비GUI 실행 확인은 `my-video-manager.exe --version`으로 합니다(부모 프로세스가 stdout을 연결해야 출력이 보입니다).
+비GUI 실행 확인은 `my-video-manager.exe --version`으로 합니다. 배포 exe는 `console=False`라 콘솔이 없으므로(`--help`도 같음) stdout을 연결하지 않고 실행하면 argparse가 출력을 쓰지 못해 오류 창이 뜹니다. 파이프나 리다이렉션으로 출력을 받아야 합니다.
 설치 테스트 전용 `/DIsolatedTest` ISCC define은 제거 프로그램·등록·바로가기 생성을 끄고
 이전 설치 경로 재사용도 끕니다. `build.ps1`은 이 define을 전달하지 않습니다.
 `tests/test_patch_installer.py`는 이 구성과 임시 `/DIR=`로 실제 조용한 설치·거부 경로를 검사합니다.
