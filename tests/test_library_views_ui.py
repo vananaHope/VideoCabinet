@@ -28,7 +28,7 @@ def test_card_resize_rebuilds_virtual_offsets_and_keyboard_scroll(window_factory
     for size in ('medium', 'large', 'medium', 'small'):
         page.bridge.view(json.dumps({**default_options(), 'mode': 'folders', 'card_size': size}))
         page.selection_changed()
-        wait_for(lambda: js("document.querySelector('select[aria-label=\"카드 크기\"]').value") == size)
+        wait_for(lambda: js("document.querySelector('[aria-label=\"카드 크기\"]').dataset.value") == size)
         QTest.qWait(80)
         target = page.visible_ids[120]
         js("(()=>{const g=document.getElementById('library-grid');const row=parseFloat(getComputedStyle(g).getPropertyValue('--grid-row-height'))*parseFloat(getComputedStyle(document.documentElement).fontSize);g.scrollTop=Math.floor(120/Number(g.getAttribute('aria-colcount')))*row})()")

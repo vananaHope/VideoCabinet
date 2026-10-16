@@ -458,7 +458,7 @@ if args.verify:
     page.refresh()
     wait_until(lambda: not js("[...document.querySelectorAll('button')].some(b => b.textContent === '검증용 임시 태그')"))
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Escape)
-    assert page.tag_id is None and len(page.visible_video_ids()) == args.count
+    wait_until(lambda: page.tag_id is None and len(page.visible_video_ids()) == args.count)
     metrics['checks'].append('선택 태그 삭제 뒤 필터 해제·다음 검색 전체 태그 적용')
     # 실제 DOM의 composition 이벤트를 사용한다. Windows IME 자체 검증과 구분한다.
     original_ids = page.visible_video_ids()
@@ -497,19 +497,51 @@ if args.verify:
     QTest.mouseClick(host.view.focusProxy(), Qt.MouseButton.LeftButton, pos=QPoint(*map(int, point)))
     wait_until(lambda: js('document.activeElement.tagName') == 'INPUT')
     QTest.qWait(100)
+    # 검색 다음에는 보기·카드 크기·정렬 Select 트리거와 정렬 방향 버튼이 Tab 순서대로 온다.
+    for label in ('보기', '카드 크기', '정렬', '정렬 방향'):
+        QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
+        wait_until(lambda: js('document.activeElement.getAttribute("aria-label")') == label)
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.textContent') == '필터')
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
     wait_until(lambda: js("!!document.querySelector('[aria-label=\"라이브러리 필터 패널\"]')"))
-    js("document.querySelector('select[aria-label=\"시청 상태\"]').focus()")
-    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Down)
-    wait_until(lambda: page.options['viewing'] != '')
+    js("document.querySelector('[aria-label=\"시청 상태\"]').focus()")
+    select_open = "!!document.querySelector('[data-slot=select-content]')"
+    panel_open = "!!document.querySelector('[aria-label=\"라이브러리 필터 패널\"]')"
+    focused_item = "document.querySelector('[data-slot=select-item]:focus')?.dataset.value ?? null"
+    def select_key(key, expected_item=None):
+        QTest.keyClick(host.view.focusProxy(), key)
+        if expected_item is not None:
+            wait_until(lambda: js(focused_item) == expected_item)
+    # Radix Select: ↓로 목록을 열면 현재 값에 커서가 놓인다. 목록이 열린 채 Esc는 목록만 닫고 필터 패널은 남긴다.
+    # 목록은 창 blur·resize에도 닫히므로 필터를 바꿔 다시 그리기 전에 확인한다.
+    select_key(Qt.Key.Key_Down, '')
+    assert js("document.querySelectorAll('[data-slot=select-item]:focus').length") == 1
+    select_key(Qt.Key.Key_Escape)
+    wait_until(lambda: not js(select_open))
+    assert js(panel_open)
+    assert js('document.activeElement.getAttribute("aria-label")') == '시청 상태'
+    assert page.options['viewing'] == ''
+    # 방향키·글자 입력으로 옮겨 Enter로 고른다. 닫힌 뒤 포커스는 트리거로 돌아온다.
+    select_key(Qt.Key.Key_Down, '')
+    select_key(Qt.Key.Key_Down, 'unwatched')
+    select_key(Qt.Key.Key_Return)
+    wait_until(lambda: page.options['viewing'] == 'unwatched')
     assert len(page.visible_video_ids()) < len(original_ids)
-    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Home)
+    wait_until(lambda: not js(select_open) and js('document.activeElement.getAttribute("aria-label")') == '시청 상태')
+    select_key(Qt.Key.Key_Down, 'unwatched')
+    # QTest로 한글 문자 키를 보내면 offscreen Chromium이 멈춘다. 글자 입력 이동은 keydown 이벤트로 확인한다.
+    js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: '다', bubbles: true}))")
+    wait_until(lambda: js(focused_item) == 'finished')
+    select_key(Qt.Key.Key_Home, '')
+    select_key(Qt.Key.Key_Return)
     wait_until(lambda: page.options['viewing'] == '')
     assert page.visible_video_ids() == original_ids
+    wait_until(lambda: not js(select_open) and js('document.activeElement.getAttribute("aria-label")') == '시청 상태')
+    # 목록이 닫힌 트리거의 Esc는 이전처럼 필터 패널을 닫는다.
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Escape)
-    metrics['checks'].append('필터 패널 NativeSelect 방향키 변경·Home 복원·Esc 포커스')
+    wait_until(lambda: not js(panel_open) and js('document.activeElement.textContent') == '필터')
+    metrics['checks'].append('필터 패널 Select Esc는 목록만 닫음·방향키·글자 입력 이동·Enter 변경·Home 복원·닫힌 트리거 Esc로 패널 닫음')
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.id') == 'hidden-gems')
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)

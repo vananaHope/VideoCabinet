@@ -1,16 +1,14 @@
 import { Popover } from "radix-ui"
 import { SlidersHorizontal, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { NativeSelect } from "@/components/ui/native-select"
+import { SelectField } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { libraryChoices, libraryFilterDefaults, type LibraryViewOptions, type TagData, type LibraryChip } from "@/bridge-types"
 
 type Change = (value: Partial<LibraryViewOptions>) => void
 export function LibraryChoice({ name, label, options, onChange }: { name: keyof typeof libraryChoices; label: string; options: LibraryViewOptions; onChange: Change }) {
   return <label className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"><span className="shrink-0">{label}</span>
-    <NativeSelect aria-label={label} value={options[name]} onChange={e => onChange({ [name]: e.target.value })}>
-      {libraryChoices[name].map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-    </NativeSelect>
+    <SelectField aria-label={label} value={options[name]} options={libraryChoices[name]} onValueChange={value => onChange({ [name]: value })} className="max-w-48" />
   </label>
 }
 

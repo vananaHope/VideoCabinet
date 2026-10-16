@@ -4,6 +4,7 @@ import { request } from "@/bridge"
 import type { QueueBridge, QueueRuleData, QueueRulesData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { SelectField } from "@/components/ui/select"
 import { ConfirmDialog, EmptyState } from "@/components/page-parts"
 
 const ruleClass = cva("w-full border-b px-4 py-3 text-left text-sm", { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
@@ -83,7 +84,8 @@ export function QueueRules({ bridge, data, showError }: { bridge: QueueBridge | 
       {!data.rules.length && <EmptyState title="자동 자막 규칙이 없습니다" description="아래에서 감시 폴더나 태그를 고르고 '규칙 저장'을 누르세요." />}
     </div>
     <label htmlFor="queue-target" className="text-sm">감시 폴더 또는 영상 태그</label>
-    <select id="queue-target" aria-label="자동 자막 대상" value={activeTarget} onChange={event => setTarget(event.target.value)} disabled={busy} className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring">{!data.targets.length && <option value="">감시 폴더나 태그를 먼저 추가하세요.</option>}{data.targets.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}</select>
+    <SelectField id="queue-target" aria-label="자동 자막 대상" value={activeTarget} onValueChange={setTarget} disabled={busy} className="w-full"
+      options={data.targets.length ? data.targets.map(item => [item.key, item.label] as const) : [["", "감시 폴더나 태그를 먼저 추가하세요."]]} />
     <label htmlFor="queue-language" className="text-sm">원어 (선택하지 않으면 자동 감지)</label>
     <Input id="queue-language" aria-label="원어" list="queue-languages" value={language} disabled={busy} onChange={event => setLanguage(event.target.value)} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }} />
     <datalist id="queue-languages">{["자동 감지", "ko", "en", "ja", "zh", "de", "fr", "es"].map(value => <option key={value} value={value} />)}</datalist>

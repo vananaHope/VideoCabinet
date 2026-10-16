@@ -273,6 +273,17 @@ def verify():
         wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"하이라이트 모아보기\"] [role=\"status\"]').textContent.includes('모아보기를 마쳤습니다')"))
         assert window.pages.count() == 2
         checks.append('모아보기 키보드 버튼 접근·실제 mpv 반복·자동 전환·복습 기록·시청 비간섭·웹 복귀')
+        # 태그 필터 목록의 Esc는 목록만 닫고 페이지 Esc(라이브러리 복귀)로 새지 않는다.
+        js(window, "document.querySelector('[aria-label=\"하이라이트 모아보기 태그 필터\"]').focus()")
+        key(window, Qt.Key.Key_Down)
+        wait_until(lambda: read(window, "!!document.querySelector('[data-slot=select-content]')"))
+        key(window, Qt.Key.Key_Escape)
+        wait_until(lambda: read(window, "!document.querySelector('[data-slot=select-content]')"))
+        settle(200)
+        assert window.web_host.active_tab == 'reel'
+        assert read(window, 'document.activeElement.getAttribute("aria-label")') == '하이라이트 모아보기 태그 필터'
+        checks.append('태그 필터 목록 Esc는 목록만 닫고 탭 유지')
+        js(window, "document.getElementById('reel-list').focus()")
         key(window, Qt.Key.Key_Escape)
         wait_until(lambda: window.web_host.active_tab == 'library')
         checks.append('모아보기 Esc 라이브러리 복귀')

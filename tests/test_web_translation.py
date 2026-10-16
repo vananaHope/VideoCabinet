@@ -70,10 +70,26 @@ def input_text(window, label, value):
     rendered(window)
 
 
-def choose(window, label, value):
+def open_choice(window, label):
     js(window, f"""(() => {{ const e = document.querySelector('[aria-label={json.dumps(label)}]');
-        e.value = {json.dumps(value)}; e.dispatchEvent(new Event('change', {{bubbles:true}})); }})()""")
+        e.focus(); e.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Enter', bubbles: true}})); }})()""")
+    wait_for(lambda: js(window, '!!document.querySelector("[data-slot=select-content]")'))
+
+
+def choose(window, label, value):
+    # Radix Select는 목록을 연 뒤 바깥 값(data-value)이 같은 항목을 눌러 고른다.
+    open_choice(window, label)
+    js(window, f"document.querySelector('[data-slot=select-item][data-value={json.dumps(value)}]').click()")
+    wait_for(lambda: js(window, '!document.querySelector("[data-slot=select-content]")'))
     rendered(window)
+
+
+def choice_options(window, label):
+    open_choice(window, label)
+    text = js(window, 'document.querySelector("[data-slot=select-content]").textContent')
+    js(window, "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))")
+    wait_for(lambda: js(window, '!document.querySelector("[data-slot=select-content]")'))
+    return text
 
 
 def capture(window, name):
@@ -162,7 +178,7 @@ def test_real_editor_preserves_each_provider_and_discards_key_on_cancel(window_f
         input_text(window, '모델 직접 입력', 'my-claude')
         choose(window, '번역 방식', 'codex')
         assert js(window, 'document.querySelector("[aria-label=\'모델 직접 입력\']").value') == 'my-codex'
-        assert js(window, 'document.querySelector("[aria-label=\'추론 강도\']").value') == 'max'
+        assert js(window, 'document.querySelector("[aria-label=\'추론 강도\']").dataset.value') == 'max'
         input_text(window, 'OpenCode Go 키 입력', 'replacement-key-5678')
         click(window, '키 지우기')
         assert js(window, 'document.querySelector("input[type=checkbox]").disabled')
@@ -221,7 +237,8 @@ def test_explicit_key_check_models_and_settings_status(window_factory, connected
         click(window, '모델 목록 조회')
         wait_for(lambda: dialogs.translation_worker is None)
         choose(window, '번역 방식', 'opencode_go')
-        assert 'custom-model' in js(window, 'document.querySelector("[aria-label=\'모델 목록\']").textContent')
+        assert 'custom-model' in choice_options(window, '모델 목록')
+        assert dialogs.active
         click(window, '확인')
     within(window.translations.settings, dialogs, check)
     assert store.read().reveal() == 'draft-secret-1234'
