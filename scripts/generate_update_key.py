@@ -21,6 +21,7 @@ def windows_acl(path: Path, *, run=subprocess.run) -> dict:
     """Read SID-based ACL entries without localized icacls output parsing."""
     script = """
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 $acl = Get-Acl -LiteralPath $env:MVM_ACL_PATH
 @{user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   rules = @($acl.Access | ForEach-Object {
@@ -30,14 +31,14 @@ $acl = Get-Acl -LiteralPath $env:MVM_ACL_PATH
 """
     result = run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand',
                   base64.b64encode(script.encode('utf-16-le')).decode('ascii')],
-                 capture_output=True, text=True, timeout=30,
+                 capture_output=True, timeout=30,
                  # PowerShell 7's inherited module path can load incompatible
                  # modules in Windows PowerShell 5.1 started by Python.
                  env={**{k: v for k, v in os.environ.items() if k.casefold() != 'psmodulepath'},
                       'MVM_ACL_PATH': str(path)})
     if result.returncode:
         raise ValueError(f'Cannot inspect private key ACL: {path}')
-    return json.loads(result.stdout)
+    return json.loads(result.stdout.decode('utf-8-sig'))
 
 
 def restrict_key_directory(path: Path, *, run=subprocess.run, inspect=windows_acl) -> None:
@@ -46,7 +47,8 @@ def restrict_key_directory(path: Path, *, run=subprocess.run, inspect=windows_ac
     acl = inspect(path)
     user = acl['user']
     def apply(args):
-        result = run(['icacls.exe', *args], capture_output=True, text=True, timeout=30)
+        # Localized diagnostic streams are not parsed; only the exit code matters.
+        result = run(['icacls.exe', *args], capture_output=True, timeout=30)
         if result.returncode:
             raise ValueError(f'Cannot restrict private key directory ACL: {path}')
 
@@ -83,7 +85,7 @@ def check_key_directory_acl(path: Path, *, inspect=windows_acl) -> None:
     if sys.platform != 'win32':
         return
     if not acl_is_private(inspect(path.parent)):
-        raise ValueError(f'Unsafe private key ACL: {path.parent}; key preserved at {path}')
+        raise ValueError(f'Unsafe private key ACL: {path.parent}; key not written: {path}')
 
 
 def print_acl_guidance() -> None:
@@ -151,7 +153,7 @@ def generate_key(path: Path, password: bytes | None) -> bytes:
             except (OSError, ValueError, subprocess.SubprocessError) as exc:
                 print(f'WARNING: {exc}', file=sys.stderr)
                 print_acl_guidance()
-                raise ValueError(f'Private key ACL verification failed; key preserved at {path}') from None
+                raise ValueError(f'Private key ACL verification failed; key not written: {path}') from None
     else:
         restrict_key_directory(path.parent)
     # Exclusive creation preserves existing keys, including resolved link targets.

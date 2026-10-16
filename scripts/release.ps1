@@ -1,13 +1,19 @@
 ﻿param(
     [Parameter(Mandatory = $true)][string]$Version,
     [switch]$DryRun,
-    [switch]$Build
+    [switch]$Build,
+    [string]$PrivateKey = ''
 )
 # Windows PowerShell 5.1은 이 인코딩으로 git의 UTF-8 출력을 해독한다.
 $OriginalOutputEncoding = [Console]::OutputEncoding
+$SigningPassword = $null
 try {
     [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
     $ErrorActionPreference = 'Stop'
+    if (-not $DryRun -and $env:MVM_UPDATE_SIGNING_PASSWORD) {
+        $SigningPassword = ConvertTo-SecureString $env:MVM_UPDATE_SIGNING_PASSWORD -AsPlainText -Force
+        Remove-Item Env:MVM_UPDATE_SIGNING_PASSWORD
+    }
     Set-Location (Join-Path $PSScriptRoot '..')
 
     function Get-Git([string[]]$Arguments) {
@@ -18,10 +24,47 @@ try {
         return ($Result -join "`n").Trim()
     }
 
+    $Python = Join-Path (Get-Location) '.venv/Scripts/python.exe'
+    function Get-Metadata([string[]]$Arguments) {
+        $ErrorActionPreference = 'Continue'
+        $PasswordPointer = [IntPtr]::Zero
+        try {
+            if ($SigningPassword -and $Arguments[0] -in @('preflight', 'sign')) {
+                $PasswordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SigningPassword)
+                $env:MVM_UPDATE_SIGNING_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($PasswordPointer)
+            }
+            $Result = & $Python -X utf8 "$PSScriptRoot/release_metadata.py" @Arguments
+            if ($LASTEXITCODE -ne 0) { throw '릴리스 메타데이터 검사에 실패했습니다. 위 원인을 확인하세요.' }
+            return ($Result -join "`n" | ConvertFrom-Json)
+        } finally {
+            if (-not $DryRun) { Remove-Item Env:MVM_UPDATE_SIGNING_PASSWORD -ErrorAction SilentlyContinue }
+            if ($PasswordPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($PasswordPointer) }
+        }
+    }
+    function Get-PatchPlan {
+        $Arguments = @('plan', '--directory', $AppDirectory)
+        if ($Previous.runtime_fingerprint) { $Arguments += @('--previous-fingerprint', $Previous.runtime_fingerprint) }
+        if ($DryRun -and -not $Build) { $Arguments += '--allow-missing' }
+        return Get-Metadata $Arguments
+    }
+    function Show-AssetPlan($Plan) {
+        Write-Host "이전 Release: $($Previous.tag), $($Previous.reason)"
+        Write-Host "이전 지문: $(if ($Previous.runtime_fingerprint) { $Previous.runtime_fingerprint } else { '없음/신뢰할 수 없음' })"
+        Write-Host "새 지문: $(if ($Plan.runtime_fingerprint) { $Plan.runtime_fingerprint } else { '미정' })"
+        if ($Previous.authentication -eq 'none') { Write-Host '첫 릴리스: 패치 없음, 전체 설치만' }
+        Write-Host "패치 가능: $(if ($null -eq $Plan.patch_available) { '미정' } else { $Plan.patch_available }) — $($Plan.reason)"
+        Write-Host '생성·업로드 자산:'
+        foreach ($Asset in @($Installer, $Checksum, $Manifest, $Signature)) { Write-Host "  $Asset" }
+        if ($Plan.patch_available) { Write-Host "  $PatchInstaller" }
+        elseif ($null -eq $Plan.patch_available) { Write-Host "  조건부: $PatchInstaller (빌드 후 지문 일치 때만)" }
+        else { Write-Host "패치 생성·업로드 제외: $PatchInstaller" }
+    }
+
     if ($Version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
         throw '버전은 x.y.z 형식이어야 합니다.'
     }
     if ($Build -and -not $DryRun) { throw '-Build는 -DryRun과 함께만 사용합니다.' }
+    if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { throw 'scripts/setup.ps1로 Python 환경을 먼저 준비하세요.' }
     foreach ($Tool in @('git', 'gh')) {
         if (-not (Get-Command $Tool -ErrorAction SilentlyContinue)) {
             throw "$Tool 도구가 필요합니다. Git for Windows와 GitHub CLI를 설치하고 gh auth login을 실행하세요."
@@ -76,10 +119,32 @@ try {
     $CommitMessage = "버전 $Version 릴리스 준비"
     $Installer = Join-Path (Get-Location) "dist/installer/MyVideoManager-Setup-$Version.exe"
     $Checksum = "$Installer.sha256"
+    $PatchInstaller = Join-Path (Split-Path $Installer) "MyVideoManager-Patch-$Version.exe"
+    $Manifest = Join-Path (Split-Path $Installer) "$Version/update-manifest.json"
+    $Signature = "$Manifest.sig"
+    $AppDirectory = Join-Path (Get-Location) 'dist/my-video-manager'
+    $KeyArguments = @()
+    if ($PrivateKey) { $KeyArguments = @('--private-key', $PrivateKey) }
+    # 암호는 한 번만 받고 preflight/sign 자식 프로세스 환경에만 잠시 제공한다.
+    if (-not $DryRun) {
+        $KeyInfo = Get-Metadata (@('key-info') + $KeyArguments)
+        if ($KeyInfo.encrypted -and -not $SigningPassword) {
+            if ([Console]::IsInputRedirected) { throw '비대화형 실행에는 MVM_UPDATE_SIGNING_PASSWORD가 필요합니다.' }
+            $SigningPassword = Read-Host 'Signing key password' -AsSecureString
+            if ($SigningPassword.Length -eq 0) { throw '서명 키 암호는 비어 있을 수 없습니다.' }
+        }
+        Get-Metadata (@('preflight') + $KeyArguments) | Out-Null
+        foreach ($Output in @($Manifest, $Signature)) {
+            if (Test-Path -LiteralPath $Output) { throw "기존 메타데이터를 덮어쓰지 않습니다: $Output" }
+        }
+    }
+    $Previous = Get-Metadata @('previous', '--repository', $Repository, '--version', $Version)
+    $FullInstallNote = '이번 버전은 전체 설치 파일로 한 번 설치해야 합니다. 이후 런타임 지문이 같은 버전부터 패치를 사용할 수 있습니다.'
 
     if ($DryRun) {
         Write-Host "계획: pyproject.toml 버전 $CurrentVersion -> $Version, 커밋: $CommitMessage"
-        Write-Host "계획: 태그 $Tag 생성, main과 태그 push, 설치 파일과 SHA-256을 GitHub Release에 게시"
+        Write-Host "계획: 태그 $Tag 생성, main과 태그 push, 설치 파일·SHA-256·매니페스트·서명을 GitHub Release에 게시"
+        Write-Host '실제 발행 시 서명 키 필요: 앱 내장 공개 키 일치 검사 필수 (DryRun은 개인 키를 읽거나 암호를 묻지 않음).'
         Write-Host "릴리스 노트 (기준: $Range):"
         Get-Git @('-c', 'i18n.logOutputEncoding=utf-8', 'log', '--reverse', '--format=%s', $Range) | Write-Host
         Write-Host $CommitMessage
@@ -87,6 +152,15 @@ try {
             & "$PSScriptRoot/build.ps1" -Version $Version
             if ($LASTEXITCODE -ne 0) { throw 'dry-run 빌드에 실패했습니다.' }
         }
+        $Plan = Get-PatchPlan
+        Show-AssetPlan $Plan
+        if ($null -eq $Plan.patch_available) { Write-Host "패치 불가 판정 시 릴리스 노트 안내: $FullInstallNote" }
+        elseif (-not $Plan.patch_available) { Write-Host "릴리스 노트 안내: $FullInstallNote" }
+        if ($Build -and $Plan.patch_available) {
+            & "$PSScriptRoot/build.ps1" -Version $Version -SkipPyInstaller -PatchOnly
+            if ($LASTEXITCODE -ne 0) { throw 'dry-run 패치 빌드에 실패했습니다.' }
+        }
+        Write-Host '매니페스트·서명·체크섬은 실제 발행 단계에서 생성합니다.'
         Write-Host 'DryRun 완료: 버전·커밋·태그·원격은 변경하지 않았습니다.'
         return
     }
@@ -108,13 +182,27 @@ try {
         & "$PSScriptRoot/build.ps1"
         if ($LASTEXITCODE -ne 0) { throw '빌드에 실패했습니다.' }
         if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) { throw "설치 파일이 없습니다: $Installer" }
+        $Plan = Get-PatchPlan
+        Show-AssetPlan $Plan
+        $Assets = @($Installer, $Checksum, $Manifest, $Signature)
+        $ManifestArguments = @('sign', '--version', $Version, '--runtime-fingerprint', (Join-Path $AppDirectory 'runtime-fingerprint.json'), '--full', $Installer, '--output', $Manifest) + $KeyArguments
+        if ($Previous.runtime_fingerprint) { $ManifestArguments += @('--previous-fingerprint', $Previous.runtime_fingerprint) }
+        if ($Plan.patch_available) {
+            & "$PSScriptRoot/build.ps1" -Version $Version -SkipPyInstaller -PatchOnly
+            if ($LASTEXITCODE -ne 0) { throw '패치 빌드에 실패했습니다.' }
+            $Assets += $PatchInstaller
+            $ManifestArguments += @('--patch', $PatchInstaller)
+        }
+        Get-Metadata $ManifestArguments | Out-Null
         if (Get-Git @('status', '--porcelain', '--untracked-files=all')) { throw '빌드가 추적 대상 파일을 변경했습니다. 발행을 중단합니다.' }
         $Digest = (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
         [IO.File]::WriteAllText($Checksum, "$Digest  $([IO.Path]::GetFileName($Installer))`n", (New-Object Text.UTF8Encoding($false)))
         # 6. 이전 태그 이후 커밋 제목으로 노트를 만든 뒤 4~5단계에 사용한다.
         $NotesPath = Join-Path (Split-Path $Installer) "release-notes-$Version.md"
         $Subjects = Get-Git @('-c', 'i18n.logOutputEncoding=utf-8', 'log', '--reverse', '--format=%s', $Range)
-        [IO.File]::WriteAllText($NotesPath, (($Subjects -split "`n" | ForEach-Object { "- $_" }) -join "`n"), (New-Object Text.UTF8Encoding($false)))
+        $Notes = (($Subjects -split "`n" | ForEach-Object { "- $_" }) -join "`n")
+        if (-not $Plan.patch_available) { $Notes = "$FullInstallNote`n`n$Notes" }
+        [IO.File]::WriteAllText($NotesPath, $Notes, (New-Object Text.UTF8Encoding($false)))
         # 4. 원격 main이 바뀌면 non-fast-forward/atomic push가 전체를 거부한다. 강제 push하지 않는다.
         Get-Git @('tag', '-a', $Tag, '-m', "버전 $Version 릴리스") | Write-Host
         $CreatedTag = Get-Git @('rev-parse', "refs/tags/$Tag")
@@ -122,7 +210,7 @@ try {
         Get-Git @('push', '--atomic', 'origin', 'HEAD:refs/heads/main', "refs/tags/$Tag") | Write-Host
         $PushConfirmed = $true
         # 5. 기존 태그를 검증하고 설치 파일과 체크섬을 함께 게시한다.
-        & gh release create $Tag $Installer $Checksum --repo "github.com/$Repository" --verify-tag --title "$Tag 릴리스" --notes-file $NotesPath
+        & gh release create $Tag @Assets --repo "github.com/$Repository" --verify-tag --title "$Tag 릴리스" --notes-file $NotesPath
         if ($LASTEXITCODE -ne 0) { throw 'Release 생성에 실패했습니다. 원격 태그와 자산 상태를 확인하세요. 자동 덮어쓰기는 하지 않습니다.' }
         Write-Host "릴리스 완료: $Tag"
 
@@ -141,8 +229,9 @@ try {
             Write-Warning "먼저 확인: git ls-remote origin refs/heads/main refs/tags/$Tag"
             Write-Warning "Release 확인: gh release view $Tag --repo github.com/$Repository"
             Write-Warning "원격 main/태그가 이번 커밋($VersionCommit)을 가리키고 Release가 없으면 실행:"
-            Write-Warning "gh release create $Tag '$Installer' '$Checksum' --repo github.com/$Repository --verify-tag --title '$Tag 릴리스' --notes-file '$NotesPath'"
-            Write-Warning "Release가 이미 있으면 누락 자산만 추가: gh release upload $Tag '$Installer' '$Checksum' --repo github.com/$Repository"
+            $AssetArguments = ($Assets | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ' '
+            Write-Warning "gh release create $Tag $AssetArguments --repo github.com/$Repository --verify-tag --title '$Tag 릴리스' --notes-file '$NotesPath'"
+            Write-Warning "Release가 이미 있으면 다음 목록 중 누락 자산만 골라 추가: gh release upload $Tag $AssetArguments --repo github.com/$Repository"
         } else {
             try {
                 if ((Get-Git @('rev-parse', 'HEAD')) -ne $VersionCommit) {
@@ -173,5 +262,7 @@ try {
         throw $Failure
     }
 } finally {
+    if (-not $DryRun) { Remove-Item Env:MVM_UPDATE_SIGNING_PASSWORD -ErrorAction SilentlyContinue }
+    if ($SigningPassword) { $SigningPassword.Dispose() }
     [Console]::OutputEncoding = $OriginalOutputEncoding
 }
