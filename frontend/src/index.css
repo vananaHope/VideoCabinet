@@ -39,6 +39,8 @@
   --radius-md: calc(var(--radius) - 0.125rem);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 0.25rem);
+  /* 대기열 고정 머리글 높이. 머리글 높이와 목록 scroll-padding이 같은 값을 쓴다. */
+  --spacing-queue-header: calc(var(--spacing) * 7.25);
 
 }
 

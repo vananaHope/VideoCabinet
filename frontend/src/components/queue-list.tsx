@@ -9,7 +9,8 @@ const columns = "grid grid-cols-6 gap-3 px-3"
 const wide = "col-span-2 min-w-0"
 const rowClass = cva(`${columns} items-center border-b py-1 text-sm`, { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
 // 안내가 많아도 머리글과 행 세 개 이상이 보이는 높이를 지킨다.
-const listClass = cva("min-h-32 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border" } } })
+// 고정 머리글 높이 토큰을 scroll-padding에도 써서, 키보드로 위쪽 행을 골라도 머리글에 가리지 않게 한다.
+const listClass = cva("min-h-32 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border scroll-pt-queue-header" } } })
 const trackClass = cva("h-2 w-full rounded-full", { variants: { selected: { true: "bg-muted-foreground", false: "bg-muted" } } })
 const badges = { completed: "success", failed: "destructive", transcribing: "info", translating: "info", held: "highlight", queued: "muted" } as const
 // 행 안내의 위계: 실패 사유는 오류, 보류 사유는 경고, 그 밖의 안내(말소리 없음·이어받기 등)는 정보다.
@@ -45,7 +46,7 @@ export function QueueList({ store, ids, selected, onSelect, emptyState }: { stor
     document.getElementById(`queue-row-${ids[next]}`)?.scrollIntoView({ block: "nearest" })
   }
   return <div id="queue-list" role={ids.length ? "grid" : "region"} aria-label="자막 대기열" aria-activedescendant={selected === null ? undefined : `queue-row-${selected}`} tabIndex={0} onKeyDown={keyDown} className={listClass({ empty: !ids.length })}>
-    {!ids.length ? emptyState : <div role="row" className={`${columns} sticky top-0 z-10 border-b bg-muted py-1.5 text-xs text-muted-foreground`}>{["영상", "상태", "진행률", "안내"].map(label => <div key={label} role="columnheader" className={label === "영상" || label === "안내" ? wide : undefined}>{label}</div>)}</div>}
+    {!ids.length ? emptyState : <div role="row" className={`${columns} sticky top-0 z-10 h-queue-header items-center border-b bg-muted text-xs text-muted-foreground`}>{["영상", "상태", "진행률", "안내"].map(label => <div key={label} role="columnheader" className={label === "영상" || label === "안내" ? wide : undefined}>{label}</div>)}</div>}
     {ids.map(id => <QueueRow key={id} store={store} id={id} selected={id === selected} onSelect={onSelect} />)}
   </div>
 }

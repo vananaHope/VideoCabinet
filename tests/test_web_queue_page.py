@@ -334,7 +334,7 @@ LONG_NOTICE = ('OpenCode Go 서버가 요청을 거절했습니다. 네트워크
 
 
 def open_queue(window_factory, core, width, height, *, long_notices):
-    """대기열 행 3개가 있는 실제 창을 열고, 필요하면 긴 안내 3개(셸·오류·결과)를 모두 펼친다."""
+    """core의 영상마다 대기열 행이 있는 실제 창을 열고, 필요하면 긴 안내 3개(셸·오류·결과)를 모두 펼친다."""
     from test_web_statistics import wait_for
     for video in core.videos():
         core.request_subtitles(video.id)
@@ -354,7 +354,7 @@ def open_queue(window_factory, core, width, height, *, long_notices):
         js('window.queueNoticeRendered = false; requestAnimationFrame(() => requestAnimationFrame(() => { window.queueNoticeRendered = true }))')
         wait_for(lambda: js('window.queueNoticeRendered'))
 
-    wait_for(lambda: js("document.querySelectorAll('#queue-list [data-queue-row]').length") == 3)
+    wait_for(lambda: js("document.querySelectorAll('#queue-list [data-queue-row]').length") == len(core.videos()))
     wait_for(lambda: js('innerWidth') == width and js('innerHeight') == height)
     if long_notices:
         window.show_status('번역 처리 실패: ' + LONG_NOTICE)
@@ -447,3 +447,70 @@ def test_small_window_reaches_bottom_of_other_list_pages(window_factory, core):
             return {{ top: page.getBoundingClientRect().top, lastTop: last.top, last: last.bottom, viewport: innerHeight }}
         }})())"""))
         assert layout['top'] <= layout['lastTop'] and layout['last'] <= layout['viewport'], (tab, layout)
+
+
+QUEUE_SELECTION = """JSON.stringify((() => {
+    const list = document.getElementById('queue-list')
+    const view = list.getBoundingClientRect()
+    const header = list.querySelector(':scope > [role=row]:not([data-queue-row])').getBoundingClientRect()
+    const row = document.getElementById(list.getAttribute('aria-activedescendant')).getBoundingClientRect()
+    return { id: Number(list.getAttribute('aria-activedescendant').slice(10)), top: row.top, bottom: row.bottom,
+             header: header.bottom, viewBottom: view.top + list.clientTop + list.clientHeight, scrollTop: list.scrollTop }
+})())"""
+
+
+@pytest.mark.parametrize('count,width,height,long_notices,down,up', [(300, 800, 500, True, 80, 50), (12, 1100, 400, False, None, 8)])
+def test_keyboard_selection_stays_below_sticky_queue_header(window_factory, core, tmp_path, count, width, height, long_notices, down, up):
+    # 키보드로 위쪽 행을 고르면 선택 행 전체가 고정 머리글 아래에 보여야 한다.
+    # ↓·End 방향은 지금처럼 목록 아래 끝에 맞추고, 마우스 선택은 목록을 스크롤하지 않는다(#157).
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from test_web_statistics import wait_for
+    for index in range(len(core.videos()), count):
+        path = tmp_path / f'영상 {index:03}.mkv'
+        path.write_bytes(str(index).encode())
+        core.add_file(path)
+    window, js, rendered = open_queue(window_factory, core, width, height, long_notices=long_notices)
+    ids = json.loads(js("JSON.stringify([...document.querySelectorAll('#queue-list [data-queue-row]')].map(row => Number(row.dataset.queueRow)))"))
+    assert len(ids) == count
+    view = window.web_host.view.focusProxy() or window.web_host.view
+    js("document.getElementById('queue-list').scrollIntoView({ block: 'nearest' })")
+    rendered()
+    # offscreen 문서는 실제 마우스 입력이 있어야 포커스를 얻는다. 첫 행을 눌러 선택한다.
+    point = json.loads(js(f"JSON.stringify((r => [r.x + r.width / 2, r.y + r.height / 2])(document.getElementById('queue-row-{ids[0]}').getBoundingClientRect()))"))
+    QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=QPoint(int(point[0]), int(point[1])))
+    wait_for(lambda: js("document.activeElement.id") == 'queue-list' and js("document.getElementById('queue-list').getAttribute('aria-activedescendant')") == f'queue-row-{ids[0]}')
+    assert json.loads(js(QUEUE_SELECTION))['scrollTop'] == 0
+    position = 0
+
+    def press(key, target):
+        nonlocal position
+        QTest.keyClick(view, key)
+        position = target
+        wait_for(lambda: js("document.getElementById('queue-list').getAttribute('aria-activedescendant')") == f'queue-row-{ids[target]}')
+
+    def selection():
+        rendered()
+        state = json.loads(js(QUEUE_SELECTION))
+        assert state['id'] == ids[position], state
+        return state
+
+    for _ in range(down or 0):
+        press(Qt.Key.Key_Down, position + 1)
+    if down is None:
+        press(Qt.Key.Key_End, count - 1)
+    state = selection()
+    assert abs(state['bottom'] - state['viewBottom']) <= 1 and state['scrollTop'] > 0, state
+    for _ in range(up):
+        press(Qt.Key.Key_Up, position - 1)
+    state = selection()
+    assert state['header'] <= state['top'] and state['bottom'] <= state['viewBottom'], state
+    capture(window, f'queue-{width}x{height}-{count}-rows-up')
+    press(Qt.Key.Key_Home, 0)
+    state = selection()
+    assert state['header'] <= state['top'] and state['scrollTop'] == 0, state
+    # 마우스로 일부만 보이는 아래 행을 눌러도 목록 스크롤은 그대로다.
+    point = json.loads(js("JSON.stringify((l => [l.x + l.width / 2, l.bottom - 4])(document.getElementById('queue-list').getBoundingClientRect()))"))
+    QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=QPoint(int(point[0]), int(point[1])))
+    wait_for(lambda: js("document.getElementById('queue-list').getAttribute('aria-activedescendant')") != f'queue-row-{ids[0]}')
+    assert json.loads(js(QUEUE_SELECTION))['scrollTop'] == 0
