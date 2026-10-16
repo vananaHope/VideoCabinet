@@ -172,6 +172,32 @@ class AppCore:
     def fill_next_thumbnail(self, *, cancellation):
         return self._thumbnail_backfill.step(cancellation)
 
+    def check_for_update(self, *, http=None, installation=None):
+        """Blocking update check for a worker; optional adapters support offline tests."""
+        from .update_check import UpdateChecker
+        return UpdateChecker(self.settings, clock=self._clock, http=http, installation=installation).check()
+
+    def should_check_for_update(self) -> bool:
+        """Startup decision only; does not start a thread or access the network."""
+        from .update_check import UpdateChecker
+        return UpdateChecker(self.settings, clock=self._clock).should_check_on_startup()
+
+    def last_update_check(self):
+        from .update_check import UpdateChecker
+        return UpdateChecker(self.settings, clock=self._clock).last_result()
+
+    def automatic_update_check_enabled(self) -> bool:
+        from .update_check import UpdateChecker
+        return UpdateChecker(self.settings, clock=self._clock).automatic_enabled()
+
+    def set_automatic_update_check_enabled(self, enabled: bool) -> None:
+        from .update_check import UpdateChecker
+        UpdateChecker(self.settings, clock=self._clock).set_automatic_enabled(enabled)
+
+    def installed_update_info(self):
+        from .update_check import installed_update_info
+        return installed_update_info()
+
     def fill_next_resolution(self, *, cancellation) -> ResolutionResult:
         """작업자용 API. 한 영상 처리 후 반환하며 취소 시 다음 호출에서 이어진다."""
         return self._resolution.step(cancellation)
