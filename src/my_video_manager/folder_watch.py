@@ -19,6 +19,10 @@ from .external_subtitles import EXTENSIONS as SUBTITLE_SUFFIXES
 
 AUTOMATIC_DETECTION_KEY = "library.automatic_detection_enabled"
 MAX_BATCH_WAIT_SECONDS = 60.0
+# 끊긴 감시 루트의 생존 확인·재연결 간격. 건강한 루트는 스레드 생존만 메모리에서 보고,
+# 끊긴 루트만 존재를 stat 한 번으로 확인한다. 외장 드라이브를 다시 꽂은 뒤 10초 안에
+# 감지를 이어 가며, 느린 네트워크 확인은 끝난 뒤에야 다음 확인을 예약해 쌓이지 않는다.
+RECONNECT_SECONDS = 10.0
 FolderBatch = tuple[Path, ...]
 # None은 접근할 수 없는 요청 폴더 또는 하위 항목이다. ScanIssue로 보고한다.
 Snapshot = dict[Path, tuple[int, int] | None]
@@ -37,6 +41,9 @@ class FolderWatcher(Protocol):
 
     이동의 원본·대상은 같은 콜백에 넣는다. stop은 이후 이벤트 전달을 끝낸다.
     이벤트 콜백에서 수명 메서드를 호출하지 않는다.
+    선택적으로 failed_folders(감시하지 못하는 루트)와 reconnect()를 제공한다.
+    reconnect는 타이머 스레드에서 수명 메서드와 동시에 불릴 수 있으며, 멈춘 감시를
+    failed_folders로 옮기고 다시 설치한 루트를 FolderBatch로 반환한다.
     """
 
     def start(self, folders: FolderBatch, on_change: Callable[[FolderBatch], None]) -> None: ...
@@ -188,8 +195,8 @@ class FolderWatch:
                  snapshot: Callable[[FolderBatch], Snapshot] = folder_snapshot,
                  ready: Callable[[Path], bool] = file_ready,
                  debounce_seconds: float = 0.5, stable_seconds: float = 5.0,
-                 poll_seconds: float = 1.0):
-        if debounce_seconds <= 0 or stable_seconds <= 0 or poll_seconds <= 0:
+                 poll_seconds: float = 1.0, reconnect_seconds: float = RECONNECT_SECONDS):
+        if min(debounce_seconds, stable_seconds, poll_seconds, reconnect_seconds) <= 0:
             raise ValueError("감지 대기 시간은 양수여야 합니다.")
         self._settings = settings
         self._folders = minimal_folders(folders)
@@ -207,6 +214,8 @@ class FolderWatch:
         self._debounce = debounce_seconds
         self._stable = stable_seconds
         self._poll = poll_seconds
+        self._reconnect = reconnect_seconds
+        self._reconnect_error_reported = False
         self._lock = RLock()
         self._started = False
         self._active = False
@@ -214,6 +223,7 @@ class FolderWatch:
         self._revision = 0
         self._timer: ScheduledCall | None = None
         self._timer_id = 0
+        self._health: ScheduledCall | None = None
         # 이벤트 경로별 (첫 이벤트, 마지막 이벤트) 시각.
         self._pending: dict[Path, tuple[float, float]] = {}
         self._last_event = 0.0
@@ -226,7 +236,7 @@ class FolderWatch:
 
     @property
     def failed_folders(self) -> FolderBatch:
-        """감시 설치 실패 경로. 자동 재접속은 하지 않는다."""
+        """감시하지 못하는 루트. 어댑터가 reconnect를 제공하면 주기적으로 다시 연결한다."""
         return tuple(sorted(set(self._update_failed) | set(getattr(self._watcher, "failed_folders", ()))))
 
     def start(self) -> None:
@@ -243,6 +253,10 @@ class FolderWatch:
         except Exception:
             self.stop()
             raise
+        if hasattr(self._watcher, "reconnect"):
+            with self._lock:
+                if epoch == self._epoch:
+                    self._schedule_health(epoch)
 
     def stop(self) -> None:
         self._started = False
@@ -251,6 +265,9 @@ class FolderWatch:
             self._epoch += 1
             self._clear()
             self._confirmed = {}
+            if self._health is not None:
+                self._health.cancel()
+                self._health = None
         # 콜백의 state lock을 해제한 뒤 observer를 join한다.
         self._watcher.stop()
 
@@ -308,6 +325,31 @@ class FolderWatch:
         self._timer_id += 1
         timer_id = self._timer_id
         self._timer = self._scheduler.call_later(seconds, lambda: self._tick(epoch, timer_id))
+
+    def _schedule_health(self, epoch):
+        self._health = self._scheduler.call_later(self._reconnect, lambda: self._check_watches(epoch))
+
+    def _check_watches(self, epoch):
+        """타이머 스레드에서 끊긴 감시를 확인한다. 소유 스레드 호출을 기다리게 하지 않도록
+        어댑터 확인은 상태 잠금 밖에서 한다. 다시 연결한 루트는 끊긴 동안의 변경을
+        반영하도록 일반 변경과 같은 디바운스·안정화를 거쳐 한 번 지정 검사로 넘긴다.
+        """
+        with self._lock:
+            if not self._active or epoch != self._epoch:
+                return
+        try:
+            recovered = self._watcher.reconnect()
+            self._reconnect_error_reported = False
+        except Exception as error:
+            recovered = ()
+            if not self._reconnect_error_reported:
+                logger.warning("감시 폴더 재연결 확인 실패; 계속 다시 시도합니다: %s", error)
+                self._reconnect_error_reported = True
+        if recovered:
+            self._changed(epoch, recovered)
+        with self._lock:
+            if self._active and epoch == self._epoch:
+                self._schedule_health(epoch)
 
     def _stale(self, epoch, revision):
         """잠금 안에서 호출한다. 잠금 밖 계산 중 종료·폴더 변경·새 이벤트가 있었으면 버린다."""

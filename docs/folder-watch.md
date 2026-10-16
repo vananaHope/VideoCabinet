@@ -37,9 +37,10 @@ watch.stop()
   뒤 접근 불가 표식으로 넘긴다. 묶음당 첫 실패만 traceback 없이 로그에 남긴다.
 - 어댑터는 dispatcher를 먼저 시작한 뒤 루트별로 감시를 설치한다. 실패한 루트는
   건너뛰며 정상 루트는 계속 감시한다. `watch.failed_folders`와
-  `WatchdogFolderWatcher.failed_folders`는 실패 루트의 `tuple[Path, ...]`를 제공한다.
-  명시적인 `set_folders()` / 폴더 추가 또는 껐다 켜기로 다시 설치할 수 있다.
-  자동 재접속은 하지 않으며, 런타임에 사라진 루트 감시는 #133에서 다룬다.
+  `WatchdogFolderWatcher.failed_folders`는 감시하지 못하는 루트의 `tuple[Path, ...]`를 제공한다.
+  시작 때 없던 루트와 실행 중 사라진 루트 모두 아래 "루트 소실과 재연결"대로 자동으로 다시 연결한다.
+  껐다 켜기로도 바로 다시 설치할 수 있다. `set_folders()` / 폴더 추가·해제는 새 루트만 소유 스레드에서
+  설치하고, 이미 실패한 루트는 느린 드라이브에서 기다리지 않도록 재연결 타이머에 맡긴다.
   `start()`가 예외를 던지는 것은 observer 자체를 시작할 수 없는 경우다.
 - `AppCore`는 영속 폴더 변경 뒤 감시 갱신 실패를 로그로 남기고 폴더 관리를 성공으로
   끝낸다. 폴더 해제의 시리즈 재구성도 계속한다. 일반 어댑터의 `update()` 예외는
@@ -50,7 +51,7 @@ watch.stop()
 `watchdog==6.0.0`을 고정했다. Windows의 `ReadDirectoryChangesW` 기반 재귀 감시를
 사용하므로 Qt 이벤트 루프나 하위 폴더별 Qt 감시 등록 없이 코어를 검증할 수 있다.
 유휴 중 전체 폴더를 반복 순회하는 방식도 피한다.
-Windows에서는 `WindowsApiObserver`를 직접 가져오며 import 실패를 조용히 polling으로 대체하지 않는다.
+Windows에서는 `WindowsApiEmitter`를 직접 가져와 상속하며 import 실패를 조용히 polling으로 대체하지 않는다.
 [공식 Windows 구현 설명](https://python-watchdog.readthedocs.io/en/latest/installation.html)과
 [고정 패키지 배포본](https://pypi.org/project/watchdog/6.0.0/)을 확인했다.
 기존 `scripts/bundle_licenses.py`가 wheel의 Apache-2.0 `LICENSE`와 `COPYING`을 수집한다.
@@ -72,7 +73,7 @@ Windows 기본 `file_ready()`는 `CreateFileW(GENERIC_READ, FILE_SHARE_READ, OPE
 배정은 경로마다 상위 폴더를 따라 올라가므로 비용이 경로 수 × 깊이에 비례한다.
 그 사이 종료·폴더 변경·새 이벤트가 있으면 계산 결과를 버리고 다시 확인한다.
 
-변경이 없으면 타이머도 없다. 디렉터리 이동은 자식 이벤트가 없어도 해당 하위 트리를
+변경이 없으면 묶음 타이머도 없다(루트 생존 확인 타이머만 돈다). 디렉터리 이동은 자식 이벤트가 없어도 해당 하위 트리를
 확인한다. 중복·상하위 폴더는 한 번만 확인한다.
 일반 폴더 수정 이벤트(`DirModifiedEvent`)는 자식 파일 이벤트와 중복되므로 무시한다.
 영상·외부 자막 이외 파일의 `modified`도 디바운스를 연장하지 않는다.
@@ -81,11 +82,14 @@ Windows 기본 `file_ready()`는 `CreateFileW(GENERIC_READ, FILE_SHARE_READ, OPE
 Windows에서 이름 변경은 이동 이벤트, 폴더 간 이동은 삭제·추가로 전달될 수도 있다.
 두 형태 모두 같은 디바운스·안정화 묶음에 원본과 대상을 넣는다. 여러 감시 루트 사이의
 변경도 같은 컨트롤러에서 모은다. 삭제한 하위 폴더는 지정 검사에서 정보성 결과로,
-감시 루트 자체의 소실과 접근 오류는 기존 실패 결과로 남는다.
+감시 루트 자체의 소실과 접근 오류는 기존 실패 결과로 남는다. 감시 루트가 없을 때의 기록은
+아래 "루트 소실과 재연결"을 따른다.
 
 `FolderWatcher`는 `start(folders, on_change)`, `update(folders)`, `stop()` 계약이다.
+선택적으로 `failed_folders`와 `reconnect() -> tuple[Path, ...]`를 제공한다.
 이동 이벤트의 원본·대상은 한 콜백에 넣으며 OS가 나눈 이벤트도 컨트롤러가 모은다.
 `clock`(단조 초), `scheduler.call_later(seconds, callback)`(취소 가능한 핸들 반환),
+`reconnect_seconds`(기본 `RECONNECT_SECONDS`),
 `snapshot(folders)`(경로별 크기·수정 시각 또는 접근 불가 표식 `None`),
 `ready(path)`(쓰는 중이면 `False`, 열 수 있으면 `True`)와 대기 시간을 주입할 수 있다.
 테스트의 `FakeWatcher`와 `FakeTime`은 실제 대기 없이 공개 동작을 검증한다.
@@ -105,4 +109,40 @@ Windows에서 이름 변경은 이동 이벤트, 폴더 간 이동은 삭제·�
 이후 이벤트 범위와 지정 검사 계약을 함께 바꿀 때 다룰 수 있다.
 
 쓰기 핸들을 닫은 뒤 5초 이상 멈췄다가 다시 여는 복사는 완료로 오인할 수 있는 휴리스틱이다.
-감시 중 루트/드라이브 소실·재접속, OS 이벤트 버퍼 넘침 복구는 #133에서 다룬다.
+
+## 루트 소실과 재연결 (#133)
+
+감시 루트를 지우면 watchdog emitter는 `DirDeletedEvent`를 보낸 뒤 스스로 멈추고,
+드라이브·네트워크 연결이 끊기면 `ReadDirectoryChangesW` 오류로 이벤트 없이 멈춘다.
+어느 경우도 watchdog이 알려 주지 않으므로 어댑터가 `reconnect()`에서 루트별 emitter
+스레드의 생존을 확인한다. 멈춘 루트는 감시를 해제해 `failed_folders`로 옮기고 경고를
+루트당 한 번 남긴다. 다른 루트의 감시와 앱 동작은 그대로 이어진다.
+
+`FolderWatch`는 `reconnect()`를 제공하는 어댑터에 대해 시작된 동안
+`RECONNECT_SECONDS`(10초)마다 타이머 스레드에서 이를 부른다. 건강한 루트는 메모리의
+스레드 생존만 보고, 실패한 루트만 `os.path.isdir` 한 번으로 존재를 확인한다. 외장 드라이브를
+다시 꽂으면 10초 안에 감지를 이어 가며, 확인이 끝난 뒤에야 다음 확인을 예약하므로 느린
+네트워크 확인이 쌓이지 않는다. 존재 확인은 어댑터 잠금 밖에서 하고, 재설치(`schedule`)만
+잠금 안에서 해 소유 스레드의 `stop()`/`update()`가 느린 드라이브를 기다리지 않게 한다
+(존재 확인 직후 다시 끊겨 `CreateFileW`가 늦어지는 경우만 남는다). `reconnect()` 예외는
+성공할 때까지 한 번만 로그를 남기고 다음 주기에 다시 시도한다.
+
+다시 설치한 루트는 일반 변경처럼 대기 묶음에 넣어 디바운스·안정화·폴더별 대기 규칙을
+거친 뒤 `on_batch_ready`로 한 번 지정 검사에 넘긴다. 감시를 먼저 설치한 뒤 검사하므로
+끊긴 동안과 재설치 직전의 변경이 모두 반영된다. 안정화 동안 루트 전체의 서명을 확인한다.
+
+Windows emitter는 `WindowsApiEmitter`를 상속해(`BaseObserver(_Emitter)`) 세 가지를 더한다.
+스스로 멈춘 emitter를 해제할 때 디렉터리 핸들을 두 번 닫지 않는다. 연결 끊김 읽기 오류를
+스레드 밖 traceback 대신 `error`에 남겨 끊김 경고에 싣는다. 중지 중이 아닌 0바이트 읽기는
+OS 이벤트 버퍼 넘침이므로 루트 전체 변경으로 넘긴다. 넘침이 이어져도 같은 대기 묶음에서
+루트 검사 하나로 합쳐지며, 로그는 처음 한 번과 `stop()` 때의 횟수 집계만 남긴다.
+
+### 끊긴 루트 아래 기록
+
+지정·전체 검사에서 폴더가 없을 때(`FileNotFoundError`), 그 폴더를 담는 감시 폴더가 모두
+없으면 드라이브 분리와 삭제를 구분할 수 없으므로 "접근 불가 폴더 아래 기록 보존" 규칙을
+따른다. 그 아래 위치와 외부 자막 기록을 바꾸지 않고 "파일 없음"으로 만들지 않으며, 실패
+`ScanIssue`로 보고한다. 루트 없이 하위 폴더만 지정한 검사도 같다. 감시 폴더가 남아 있는데
+하위 폴더(겹친 안쪽 감시 폴더 포함)만 없으면 기존대로 삭제로 보고 위치를 정리한다.
+비영상 판정 캐시는 기존처럼 정리하므로 다시 연결된 뒤 같은 서명도 새로 판정한다.
+사용자가 감시 폴더째 지운 경우에도 위치가 남으며, 재생 때 위치 확인이나 감시 폴더 해제로 정리된다.
