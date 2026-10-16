@@ -7,6 +7,7 @@ import DialogsLayer from "@/dialogs/DialogsLayer"
 import ShellModals from "@/dialogs/ShellModals"
 import SubtitlePreparation from "@/components/subtitle-preparation"
 import { NoticeStack } from "@/components/ui/notice"
+import { shellStatusTone } from "@/lib/shell-status"
 
 export default function App() {
   const [bridge, setBridge] = useState<ShellBridge | null>(null)
@@ -48,10 +49,12 @@ export default function App() {
       <SubtitlePreparation />
       {(error || status) && <div className="border-b px-4 py-2"><NoticeStack items={[
         error && { tone: "error", message: error, onDismiss: () => setError("") },
-        status && { tone: "info", message: status, label: "작업 알림", onDismiss: () => setStatus("") },
+        status && { tone: shellStatusTone(status), message: status, label: "작업 알림", onDismiss: () => setStatus("") },
       ]} /></div>}
     </div>
-    {Object.entries(pages).map(([name, Page]) => Page && <div key={name} hidden={tab !== name} className="min-h-0 flex-1"><Page /></div>)}
+    {/* 페이지 영역. 목록 최소 높이와 안내를 합친 높이가 창보다 크면(작은 창) 여기서 세로로 스크롤해 아래 작업 버튼에 닿는다.
+        기본 창에서는 각 페이지가 높이에 맞춰 내부 목록만 스크롤하므로 바깥 스크롤이 생기지 않는다. */}
+    {Object.entries(pages).map(([name, Page]) => Page && <div key={name} data-page={name} hidden={tab !== name} className="min-h-0 flex-1 overflow-y-auto"><Page /></div>)}
     <DialogsLayer />
     <ShellModals />
   </div>

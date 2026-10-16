@@ -329,18 +329,17 @@ def test_no_speech_completion_status_and_tray_notice(setup, qapp, monkeypatch):
         qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def test_expanding_every_long_notice_keeps_queue_rows_visible(window_factory, core):
-    # 셸 작업 알림과 대기열 오류·결과가 모두 긴 문구이고 '전체 보기'를 전부 펼쳐도,
-    # 1100×720에서 대기열 머리글과 행 세 개, 아래 버튼이 보여야 한다(#134 R1).
-    import os
-    from pathlib import Path
+LONG_NOTICE = ('OpenCode Go 서버가 요청을 거절했습니다. 네트워크 연결과 키 상태를 확인한 뒤 다시 시도하세요. '
+               '같은 문제가 이어지면 다른 번역 방식을 고르거나 잠시 뒤 실패 항목을 다시 시도하세요. ') * 3
+
+
+def open_queue(window_factory, core, width, height, *, long_notices):
+    """대기열 행 3개가 있는 실제 창을 열고, 필요하면 긴 안내 3개(셸·오류·결과)를 모두 펼친다."""
     from test_web_statistics import wait_for
-    long = ('OpenCode Go 서버가 요청을 거절했습니다. 네트워크 연결과 키 상태를 확인한 뒤 다시 시도하세요. '
-            '같은 문제가 이어지면 다른 번역 방식을 고르거나 잠시 뒤 실패 항목을 다시 시도하세요. ') * 3
     for video in core.videos():
         core.request_subtitles(video.id)
     window = window_factory()
-    window.resize(1100, 720)
+    window.resize(width, height)
     window.subtitles.timer.stop()
     window.navigate_web_tab('queue')
     host = window.web_host
@@ -351,26 +350,100 @@ def test_expanding_every_long_notice_keeps_queue_rows_visible(window_factory, co
         wait_for(lambda: bool(result))
         return result[0]
 
+    def rendered():
+        js('window.queueNoticeRendered = false; requestAnimationFrame(() => requestAnimationFrame(() => { window.queueNoticeRendered = true }))')
+        wait_for(lambda: js('window.queueNoticeRendered'))
+
     wait_for(lambda: js("document.querySelectorAll('#queue-list [data-queue-row]').length") == 3)
-    window.show_status('번역 처리 실패: ' + long)
-    host.controllers['queue'].bridge.bulkFinished.emit(json.dumps({'error': long, 'message': '재시도 결과 · ' + long}))
-    expand = "[...document.querySelectorAll('button')].filter(b => b.textContent === '전체 보기' && b.getClientRects().length)"
-    wait_for(lambda: js(f"{expand}.length") == 3)
-    js(f"{expand}.forEach(b => b.click())")
-    wait_for(lambda: js("[...document.querySelectorAll('button')].filter(b => b.textContent === '접기').length") == 3)
-    js('window.queueNoticeRendered = false; requestAnimationFrame(() => requestAnimationFrame(() => { window.queueNoticeRendered = true }))')
-    wait_for(lambda: js('window.queueNoticeRendered'))
-    layout = json.loads(js("""JSON.stringify((() => {
-        const grid = document.querySelector('#queue-list[role=grid]').getBoundingClientRect()
-        const rows = [...document.querySelectorAll('#queue-list [data-queue-row]')].map(row => row.getBoundingClientRect().bottom)
-        const button = [...document.querySelectorAll('button')].find(b => b.textContent === '실패 항목 모두 재시도').getBoundingClientRect()
-        return { top: grid.top, height: grid.height, bottom: grid.bottom, rows, button: button.bottom, viewport: innerHeight }
-    })())"""))
+    wait_for(lambda: js('innerWidth') == width and js('innerHeight') == height)
+    if long_notices:
+        window.show_status('번역 처리 실패: ' + LONG_NOTICE)
+        host.controllers['queue'].bridge.bulkFinished.emit(json.dumps({'error': LONG_NOTICE, 'message': '재시도 결과 · ' + LONG_NOTICE}))
+        expand = "[...document.querySelectorAll('button')].filter(b => b.textContent === '전체 보기' && b.getClientRects().length)"
+        wait_for(lambda: js(f"{expand}.length") == 3)
+        js(f"{expand}.forEach(b => b.click())")
+        wait_for(lambda: js("[...document.querySelectorAll('button')].filter(b => b.textContent === '접기').length") == 3)
+    rendered()
+    return window, js, rendered
+
+
+QUEUE_LAYOUT = """JSON.stringify((() => {
+    const page = document.querySelector('[data-page=queue]')
+    const grid = document.querySelector('#queue-list[role=grid]').getBoundingClientRect()
+    const rows = [...document.querySelectorAll('#queue-list [data-queue-row]')].map(row => row.getBoundingClientRect().bottom)
+    const button = [...document.querySelectorAll('button')].find(b => b.textContent === '실패 항목 모두 재시도').getBoundingClientRect()
+    return { top: grid.top, height: grid.height, bottom: grid.bottom, rows, buttonTop: button.top, button: button.bottom,
+             viewport: innerHeight, pageTop: page.getBoundingClientRect().top, scrollHeight: page.scrollHeight, clientHeight: page.clientHeight }
+})())"""
+
+
+def capture(window, name):
+    import os
+    from pathlib import Path
+    if output := os.environ.get('MVM_NOTICE_SCREEN_DIR'):
+        Path(output).mkdir(parents=True, exist_ok=True)
+        assert window.grab().save(str(Path(output) / f'{name}.png'))
+
+
+def test_expanding_every_long_notice_keeps_queue_rows_visible(window_factory, core):
+    # 셸 작업 알림과 대기열 오류·결과가 모두 긴 문구이고 '전체 보기'를 전부 펼쳐도,
+    # 1100×720에서 대기열 머리글과 행 세 개, 아래 버튼이 바깥 스크롤 없이 보여야 한다(#134 R1).
+    window, js, _ = open_queue(window_factory, core, 1100, 720, long_notices=True)
+    layout = json.loads(js(QUEUE_LAYOUT))
     assert layout['height'] >= 120, layout
     assert all(bottom <= layout['bottom'] for bottom in layout['rows']), layout
     assert layout['bottom'] <= layout['button'] <= layout['viewport'], layout
-    if output := os.environ.get('MVM_NOTICE_SCREEN_DIR'):
-        Path(output).mkdir(parents=True, exist_ok=True)
-        pixmap = window.grab()
-        assert (pixmap.width(), pixmap.height()) == (1100, 720)
-        assert pixmap.save(str(Path(output) / 'queue-long-notices-all-expanded.png'))
+    assert (window.grab().width(), window.grab().height()) == (1100, 720)
+    capture(window, 'queue-long-notices-all-expanded')
+
+
+@pytest.mark.parametrize('width,height,long_notices', [(900, 600, True), (1100, 400, False)])
+def test_small_window_scrolls_page_area_to_queue_actions(window_factory, core, width, height, long_notices):
+    # 목록 최소 높이와 안내의 합이 창보다 크면 페이지 영역(탭 아래)이 세로로 스크롤해
+    # 아래 작업 버튼에 닿을 수 있어야 한다. 목록 최소 높이는 그대로 지킨다(#134 재검토).
+    window, js, rendered = open_queue(window_factory, core, width, height, long_notices=long_notices)
+    before = json.loads(js(QUEUE_LAYOUT))
+    assert before['scrollHeight'] > before['clientHeight'], before
+    assert before['button'] > before['viewport'], before
+    assert before['height'] >= 120, before
+    js("document.querySelector('[data-page=queue]').scrollTop = 1e6")
+    rendered()
+    after = json.loads(js(QUEUE_LAYOUT))
+    assert after['pageTop'] <= after['buttonTop'] and after['button'] <= after['viewport'], after
+    capture(window, f'queue-{width}x{height}-{"long-notices" if long_notices else "no-notice"}-scrolled')
+
+
+def test_default_window_pages_have_no_outer_scroll(window_factory, core):
+    # 기본 1100×720에 안내가 없으면 어느 페이지도 바깥(페이지 영역) 스크롤이 생기지 않는다.
+    window, js, rendered = open_queue(window_factory, core, 1100, 720, long_notices=False)
+    capture(window, 'queue-1100x720-no-notice')
+    from test_web_statistics import wait_for
+    for tab in ('library', 'queue', 'reel', 'search', 'settings'):
+        window.navigate_web_tab(tab)
+        wait_for(lambda: not js(f"document.querySelector('[data-page={tab}]').hidden"))
+        if tab == 'settings':
+            js("document.querySelector('[data-category=keys]').click()")
+        rendered()
+        sizes = json.loads(js(f"JSON.stringify((e => [e.scrollHeight, e.clientHeight])(document.querySelector('[data-page={tab}]')))"))
+        assert sizes[0] == sizes[1], (tab, sizes)
+
+
+def test_small_window_reaches_bottom_of_other_list_pages(window_factory, core):
+    # 목록 최소 높이를 둔 다른 페이지(라이브러리 격자, 모아보기·검색 목록, 키 배치 표)도
+    # 1100×400에서 페이지 영역을 스크롤하면 페이지 맨 아래 요소가 화면 안에 들어온다.
+    from test_web_statistics import wait_for
+    window, js, rendered = open_queue(window_factory, core, 1100, 400, long_notices=False)
+    for tab in ('library', 'reel', 'search', 'settings'):
+        window.navigate_web_tab(tab)
+        wait_for(lambda: not js(f"document.querySelector('[data-page={tab}]').hidden"))
+        if tab == 'settings':
+            js("document.querySelector('[data-category=keys]').click()")
+        rendered()
+        js(f"document.querySelector('[data-page={tab}]').scrollTop = 1e6")
+        rendered()
+        layout = json.loads(js(f"""JSON.stringify((() => {{
+            const page = document.querySelector('[data-page={tab}]')
+            const last = page.querySelector('main').lastElementChild.getBoundingClientRect()
+            return {{ top: page.getBoundingClientRect().top, lastTop: last.top, last: last.bottom, viewport: innerHeight }}
+        }})())"""))
+        assert layout['top'] <= layout['lastTop'] and layout['last'] <= layout['viewport'], (tab, layout)

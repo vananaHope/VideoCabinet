@@ -343,3 +343,47 @@ def test_hidden_status_bar_delivers_notices_to_web(window_factory):
     window.statusBar().clearMessage()
     assert changes == ['등록 작업 완료', '']
     assert json.loads(window.web_host.bridge.shellSnapshot())['status'] == ''
+
+
+def test_shell_status_tone_uses_only_known_failure_prefixes(window_factory):
+    # 셸 작업 알림은 위계 없는 문자열이다. 앱이 직접 만드는 고정 접두사만 오류·경고로 보이고,
+    # 문장 속 "실패"(실패 0개, 영상 제목 등)는 정보로 남는다(frontend/src/lib/shell-status.ts).
+    from my_video_manager.library_operations import SCAN_RUNNING_MESSAGE
+    from my_video_manager.subtitle_queue import NO_SPEECH_NOTICE
+    from my_video_manager.translation_kind import REFINEMENT, TRANSLATION
+    cases = [
+        ('검사 실패: 폴더에 접근할 수 없습니다.', 'error'),
+        ('자막 처리 실패: 작업자 오류', 'error'),
+        ('자막 실패 — 다시 시도하세요: 모델 오류', 'error'),
+        ('번역 처리 실패: 작업자 오류', 'error'),
+        *((f'{task.label} 실패 · 서버 오류 번역 방식 / 재시도에서 다시 요청하세요.', 'error') for task in (TRANSLATION, REFINEMENT)),
+        ('썸네일 채우기 실패: 디스크 오류 · 다시 검사하면 재시도합니다.', 'error'),
+        ('해상도 채우기 실패: 디스크 오류 · 다시 검사하면 재시도합니다.', 'error'),
+        *((f'{task.label} 보류 · 12:30 자동 재시도 · 사용량 한도', 'warning') for task in (TRANSLATION, REFINEMENT)),
+        ('자막은 저장됐지만 표시에 실패했습니다: mpv 오류', 'warning'),
+        *((f'{task.subtitle_label}은 저장됐지만 표시에 실패했습니다: mpv 오류', 'warning') for task in (TRANSLATION, REFINEMENT)),
+        ('썸네일을 만들지 못했습니다: 손상된 파일 · 다시 검사하면 재시도합니다.', 'warning'),
+        ('해상도를 읽지 못했습니다: 손상된 파일 · 다시 검사하면 재시도합니다.', 'warning'),
+        ('영상 3개 등록 · 전체 10개 · 안내 0개', 'info'),
+        (SCAN_RUNNING_MESSAGE, 'info'),
+        (f'받아쓰기 완료 · {NO_SPEECH_NOTICE}', 'info'),
+        ('원어 자막 완료 · 원어 en · 12줄', 'info'),
+        ('이번 처리: 완료 3개 · 말소리 없음 0개 · 실패 0개', 'info'),
+        ('‘번역 처리 실패 모음’ 영상을 대기열에 추가했습니다.', 'info'),
+        ('번역 처리 실패 모음 영상 등록 완료', 'info'),
+    ]
+    window = window_factory()
+    host = window.web_host
+
+    def js(source):
+        result = []
+        host.engine_page.runJavaScript(source, result.append)
+        wait_for(lambda: bool(result))
+        return result[0]
+
+    notice = "document.querySelector('[role][aria-label=\"작업 알림\"]')"
+    for text, tone in cases:
+        window.show_status(text)
+        wait_for(lambda: js(f"{notice}?.textContent ?? ''") == text)
+        assert js(f"{notice}.dataset.tone") == tone, text
+        assert js(f"{notice}.getAttribute('role')") == ('alert' if tone == 'error' else 'status'), text
