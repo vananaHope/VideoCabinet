@@ -334,13 +334,21 @@ class ExternalSubtitles:
                          paths[row["id"]].name, row["warning"], tuple(tracks), tails[row["id"]])
                          for row, tracks in files.values())
 
-    def refresh(self, video_ids=None, *, folders=None, skipped_folders=()):
-        """한 검사에서 디렉터리별 목록을 한 번만 읽고 크기·mtime이 바뀐 파일만 파싱한다."""
+    def refresh(self, video_ids=None, *, folders=None, skipped_folders=(), preserved_folders=()):
+        """한 검사에서 디렉터리별 목록을 한 번만 읽고 크기·mtime이 바뀐 파일만 파싱한다.
+
+        preserved_folders(끊긴 감시 폴더) 아래의 자막 기록은 확인하지 않고 그대로 둔다.
+        """
         with self._connect() as db:
             locations = db.execute("""SELECT l.video_id, l.path, v.duration FROM locations l
                 JOIN videos v ON v.id=l.video_id""").fetchall()
             old = db.execute("""SELECT f.*, EXISTS(SELECT 1 FROM external_subtitles s WHERE s.file_id=f.id)
                 AS has_tracks FROM external_subtitle_files f""").fetchall()
+            if preserved_folders:
+                def available(row):
+                    return not any(Path(row["path"]).is_relative_to(folder) for folder in preserved_folders)
+                locations = [row for row in locations if available(row)]
+                old = [row for row in old if available(row)]
             if folders is not None:
                 def in_scope(row):
                     path = Path(row["path"])

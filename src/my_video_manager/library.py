@@ -82,6 +82,12 @@ def _fingerprint(path: Path) -> str:
     return f"v1:{size}:{digest.hexdigest()}"
 
 
+def _disconnected(directory: Path, watched_roots) -> bool:
+    """directory를 담는 감시 폴더가 모두 없으면 끊긴 것으로 본다. 남은 감시 폴더가 있으면 삭제다."""
+    roots = [root for root in watched_roots if directory.is_relative_to(root)]
+    return bool(roots) and not any(root.is_dir() for root in roots)
+
+
 def _signature(path: Path) -> tuple[int, int]:
     info = path.stat()
     if not stat.S_ISREG(info.st_mode):
@@ -407,16 +413,16 @@ class Library:
             roots = self._scan_roots(folders)
             if folders is not None and not roots:
                 return ScanResult(0, ())
-            skipped = set()
+            skipped, disconnected = set(), set()
             result = self._scan(roots, include_direct=folders is None, skipped=skipped,
-                                on_registered=on_registered)
+                                disconnected=disconnected, on_registered=on_registered)
             warnings = self.external_subtitles.refresh(
                 folders=None if folders is None else roots,
-                skipped_folders=() if folders is None else skipped)
+                skipped_folders=() if folders is None else skipped, preserved_folders=disconnected)
             return ScanResult(result.added, result.issues + tuple(ScanIssue(*warning) for warning in warnings),
                               reconnected=result.reconnected)
 
-    def _scan(self, roots, *, include_direct, skipped, on_registered=None) -> ScanResult:
+    def _scan(self, roots, *, include_direct, skipped, disconnected, on_registered=None) -> ScanResult:
         added, issues = 0, []
         reconnected = False
         processed: set[Path] = set()
@@ -501,12 +507,19 @@ class Library:
                 missing = isinstance(error, (FileNotFoundError, NotADirectoryError))
                 if not missing:
                     inaccessible.add(directory)
+                elif _disconnected(directory, watched_roots):
+                    # 감시 폴더째 없으면 드라이브 분리와 삭제를 구분할 수 없다.
+                    # 접근 불가 폴더처럼 그 아래 위치를 "파일 없음"으로 바꾸지 않는다.
+                    disconnected.add(directory)
                 # 지정 검사 중 사용자가 지운 하위 폴더는 정상 변경이다.
-                failed = not (missing and not include_direct and directory not in watched_roots)
+                failed = directory in disconnected or not (
+                    missing and not include_direct and directory not in watched_roots)
                 entries_in_order.append(ScanIssue(directory, str(error), failed=failed))
 
         for path in locations:
             if not include_direct and any(path.is_relative_to(blocked) for blocked in skipped):
+                continue
+            if any(path.is_relative_to(gone) for gone in disconnected):
                 continue
             processed.add(path)
             try:
