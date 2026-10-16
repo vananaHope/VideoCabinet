@@ -124,6 +124,7 @@ class AppCore:
         self._clock = clock
         self._lock = RLock()
         self.settings = Settings(self._connect)
+        self._folder_watch = None
         self._keys = KeyBindings(self.settings, DEFAULT_KEY_BINDINGS, tuple(Command(kind) for kind in CommandType))
         if key_bindings is not None:
             self._keys.replace(key_bindings, persist=False)
@@ -689,14 +690,52 @@ class AppCore:
         return None if isinstance(result, Highlight) else result
 
     def add_watched_folder(self, path: Path) -> WatchedFolder:
-        return self._library.add_watched_folder(path)
+        folder = self._library.add_watched_folder(path)
+        self._update_folder_watch()
+        return folder
 
     def watched_folders(self) -> tuple[WatchedFolder, ...]:
         return self._library.watched_folders()
 
     def remove_watched_folder(self, path: Path) -> None:
         self._library.remove_watched_folder(path)
+        self._update_folder_watch()
         self._series.regroup(self.videos() + self.excluded_videos())
+
+    def create_folder_watch(self, on_batch_ready, *, watcher=None, **options):
+        """감시 컨트롤러를 한 번 만든다. start/stop과 콜백 스레드 연결은 호출자 소유.
+
+        콜백은 tuple[Path, ...]를 기존 검사 실행기에 enqueue해야 한다.
+        실행기는 AppCore.scan(folders=folders)를 한 번 호출한다.
+        clock/scheduler/snapshot 등은 FolderWatch에 주입할 수 있다.
+        """
+        from .folder_watch import FolderWatch
+        if self._folder_watch is not None:
+            raise RuntimeError("폴더 감시 컨트롤러가 이미 있습니다.")
+        if watcher is None:
+            from .folder_watch_adapter import WatchdogFolderWatcher
+            watcher = WatchdogFolderWatcher()
+        self._folder_watch = FolderWatch(
+            self.settings, (folder.path for folder in self.watched_folders()),
+            on_batch_ready, watcher=watcher, **options)
+        return self._folder_watch
+
+    def _update_folder_watch(self):
+        if self._folder_watch is not None:
+            self._folder_watch.set_folders(folder.path for folder in self.watched_folders())
+
+    def automatic_detection_enabled(self) -> bool:
+        from .folder_watch import automatic_detection_enabled
+        return automatic_detection_enabled(self.settings)
+
+    def set_automatic_detection_enabled(self, enabled: bool) -> None:
+        from .folder_watch import AUTOMATIC_DETECTION_KEY
+        if not isinstance(enabled, bool):
+            raise TypeError("자동 감지 설정은 bool이어야 합니다.")
+        if self._folder_watch is None:
+            self.settings.set(AUTOMATIC_DETECTION_KEY, enabled)
+        else:
+            self._folder_watch.set_enabled(enabled)
 
     def add_file(self, path: Path) -> ScanResult:
         result = self._library.add_file(path)
