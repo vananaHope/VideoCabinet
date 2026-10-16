@@ -151,6 +151,37 @@ libmpv·FFmpeg·ffprobe를 포함합니다. CUDA·Whisper 모델은 넣지 않�
 `-Version 0.2.0`은 소스를 바꾸지 않고 설치 파일과 앱 표시 버전을 함께 지정합니다(Release DryRun용).
 이미 만든 실행 폴더로 설치 파일만 다시 만들 때는 `-SkipPyInstaller -AppDirectory <실행 폴더>`를 사용합니다.
 
+앱 부분만 담은 패치도 만들려면 `scripts/build.ps1 -Patch`를 사용합니다.
+전체 설치 파일과 함께 `dist/installer/MyVideoManager-Patch-<version>.exe`를 만듭니다.
+기본 빌드는 패치를 추가 압축하지 않습니다. 기존 번들에서는 `-SkipPyInstaller -Patch`를 함께 쓰며,
+`-Version`은 번들의 `my_video_manager/build-version.txt`와 같아야 합니다.
+릴리스 자동화 연결·업데이트 매니페스트·서명·업로드는 별도 작업입니다.
+
+패치는 PYZ를 포함한 exe 전체와 앱 데이터·웹 자산·앱 `.dist-info`·라이선스·지문 문서를 교체합니다.
+파일 경계는 `runtime_fingerprint.py`의 `APP_OWNED_PATHS` 한 곳에서 정의하고
+`scripts/patch_payload.py`가 Inno 파일 목록과 오래된 앱 디렉터리 정리 목록을 생성합니다.
+앱 패키지를 PYZ 밖으로 옮기지 않으므로 기존 PyInstaller 부트로더/PYZ 구성을 유지하며,
+Python·PyInstaller·의존성 호환성은 런타임 지문으로 제한합니다.
+동봉 런타임 DLL·ffmpeg·mpv와 사용자 데이터는 패치에 포함하지 않습니다.
+삭제된 웹 청크·모듈·옛 `.dist-info`가 남지 않도록 앱 소유 디렉터리를 비운 뒤 새 파일을 설치합니다.
+이 디렉터리에 개인 파일을 저장하지 마세요. 설치 중 디스크 오류·강제 종료까지 원자적으로 복구하는
+업데이트 트랜잭션은 제공하지 않으며, 중단 후에는 전체 설치 파일로 복구합니다.
+
+패치와 전체 설치는 같은 `AppId`, 사용자 단위 설치, Inno Restart Manager의 실행 중 앱 닫기,
+라이선스 파일 동봉 규칙을 사용합니다. 패치는 설치 전 `PrepareToInstall`에서 exe 존재와 지문 JSON의
+schema·입력·해시를 빌드 시 검증한 지문과 대조합니다. 공백·키 순서·설명 문구 변경은 허용하지만
+지문 불일치·누락·손상·지원하지 않는 schema·중복 키는 거부합니다. 외부 경로를 덮어쓰거나 지우지 않도록
+설치 트리의 junction/symlink도 거부합니다. 검증 실패 시 앱 종료나 설치 파일·등록 정보 변경 전에
+“전체 설치 파일을 사용하세요”를 안내하며 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`에서는
+0이 아닌 종료 코드와 `/LOG=<파일>`에 안내를 남깁니다. 설치 경로를 직접 지정하려면 `/DIR=<기존 설치 폴더>`를 사용합니다.
+이 검사는 호환성 검사이며, 실제 런타임 파일 내용의 무결성 검사나 서명 검증은 아닙니다.
+
+비GUI 실행 확인은 `my-video-manager.exe --version`으로 합니다(부모 프로세스가 stdout을 연결해야 출력이 보입니다).
+설치 테스트 전용 `/DIsolatedTest` ISCC define은 제거 프로그램·등록·바로가기 생성을 끄고
+이전 설치 경로 재사용도 끕니다. `build.ps1`은 이 define을 전달하지 않습니다.
+`tests/test_patch_installer.py`는 이 구성과 임시 `/DIR=`로 실제 조용한 설치·거부 경로를 검사합니다.
+사람이 확인할 때는 별도 시험 PC에서 실제 마법사·앱 닫기·설치 등록·제거 프로그램 동작을 확인하세요.
+
 실행 폴더 루트의 `runtime-fingerprint.json`은 실제 동봉 Python 배포판의 고정 버전 목록(앱 자체 제외), Python·PyInstaller·hooks 버전, ffmpeg·ffprobe·mpv와 커스텀 hook의 SHA-256, 필터링 후 동봉 바이너리·데이터의 대상 경로 목록(`bundle_files`)을 기록합니다. 대상 경로는 Windows 기준 소문자·`/` 구분자로 정규화하고 정렬·중복 제거하며 앱 소유 경로는 제외합니다. hook은 CRLF를 LF로 바꾼 뒤 해시합니다. schema 2는 파일 집합을 기록하지 않던 schema 1을 허용하지 않으므로 기존 번들은 다시 빌드해야 합니다. 입력 정책과 이유는 `runtime_fingerprint.py` 한 곳에 있으며 앱 코드·앱 버전·웹 자산·`.spec` 전체는 입력에서 제외합니다.
 `installed_runtime_fingerprint()`는 설치본 지문을 읽고 개발 환경·누락·손상 파일에는 `None`을 돌려줍니다. `-SkipPyInstaller`는 기존 지문과 동봉 바이너리를 검증하며 지문이 없는 예전 번들은 다시 빌드해야 합니다.
 

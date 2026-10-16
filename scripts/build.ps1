@@ -1,5 +1,6 @@
 ﻿param(
     [switch]$SkipPyInstaller,
+    [switch]$Patch,
     [string]$AppDirectory = 'dist/my-video-manager',
     [string]$OutputDirectory = 'dist/installer',
     [string]$InnoCompiler = '',
@@ -94,3 +95,11 @@ Confirm-Exit 'Runtime fingerprint'
 & $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" installer/my-video-manager.iss
 Confirm-Exit 'Inno Setup'
 Write-Host "Created: $OutputDirectory/MyVideoManager-Setup-$Version.exe"
+if ($Patch) {
+    $PatchInclude = Join-Path (Get-Location) 'build/patch-payload.iss'
+    & $Python scripts/patch_payload.py $AppDirectory --output $PatchInclude --version $Version
+    Confirm-Exit 'Patch payload'
+    & $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" "/DPatchInclude=$PatchInclude" installer/my-video-manager.iss
+    Confirm-Exit 'Inno Setup patch'
+    Write-Host "Created: $OutputDirectory/MyVideoManager-Patch-$Version.exe"
+}

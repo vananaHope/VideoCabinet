@@ -207,6 +207,14 @@ def test_bundle_paths_normalize_order_separators_case_and_duplicates(inputs):
     assert make_runtime_fingerprint(**inputs) == original
 
 
+def test_explicit_exe_ownership_preserves_pre_patch_fingerprint(inputs, monkeypatch):
+    from my_video_manager import runtime_fingerprint as module
+    current = make_runtime_fingerprint(**inputs)['fingerprint']
+    monkeypatch.setattr(module, 'APP_OWNED_PATHS', tuple(
+        pattern for pattern in module.APP_OWNED_PATHS if pattern != 'my-video-manager.exe'))
+    assert make_runtime_fingerprint(**inputs)['fingerprint'] == current
+
+
 def test_hook_line_endings_do_not_change_identity(bundle):
     module, stage, hooks = bundle
     hook = hooks / 'hook-example.py'

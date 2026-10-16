@@ -10,6 +10,8 @@ def main():
         from .transcription import main as transcription_main
         return transcription_main(sys.argv[2:])
     parser = argparse.ArgumentParser(description="개인 영상 라이브러리")
+    from .app_version import current_version
+    parser.add_argument('--version', action='version', version=current_version())
     parser.add_argument("--data-dir", type=Path, help="데이터를 저장할 폴더 (기본: 사용자 프로필/.my-video-manager)")
     args = parser.parse_args()
     from PySide6.QtWidgets import QApplication, QMessageBox
