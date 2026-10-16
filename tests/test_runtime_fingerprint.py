@@ -207,6 +207,23 @@ def test_bundle_paths_normalize_order_separators_case_and_duplicates(inputs):
     assert make_runtime_fingerprint(**inputs) == original
 
 
+def test_explicit_exe_ownership_preserves_pre_patch_fingerprint(inputs):
+    """The entry exe must be app-owned: adding it to bundle_files leaves the identity unchanged.
+
+    Dropping 'my-video-manager.exe' from APP_OWNED_PATHS makes this test fail.
+    """
+    without_exe = make_runtime_fingerprint(**inputs)['fingerprint']
+    inputs['bundle_files'] = [*inputs['bundle_files'], 'my-video-manager.exe']
+    assert make_runtime_fingerprint(**inputs)['fingerprint'] == without_exe
+
+
+def test_fixture_inputs_match_pre_patch_golden_fingerprint(inputs):
+    # Golden obtained by running git show f447c83:src/my_video_manager/runtime_fingerprint.py
+    # on this exact fixture input; guards the #136 input policy against unrelated edits.
+    assert make_runtime_fingerprint(**inputs)['fingerprint'] == \
+        'c1423283827ea5cb61205437e1d2bb2a7328fba58e6ab83a06040429d1176b7c'
+
+
 def test_hook_line_endings_do_not_change_identity(bundle):
     module, stage, hooks = bundle
     hook = hooks / 'hook-example.py'

@@ -16,7 +16,7 @@ FILENAME = 'runtime-fingerprint.json'
 SCHEMA_VERSION = 2
 NATIVE_FILES = ('ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe', 'mpv/libmpv-2.dll')
 # The complete input policy lives here. Descriptions are explanatory, not hashed.
-APP_OWNED_PATHS = ('my_video_manager/**', 'my_video_manager-*.dist-info/**',
+APP_OWNED_PATHS = ('my-video-manager.exe', 'my_video_manager/**', 'my_video_manager-*.dist-info/**',
                    'licenses/**', 'third-party-notices.txt', FILENAME)
 INPUT_REASONS = {
     'dependencies': 'Actual bundled Python distributions, pinned name==version; excludes the app itself.',
@@ -26,7 +26,7 @@ INPUT_REASONS = {
     'hooks': 'SHA-256 of installer/hooks/*.py with CRLF normalized to LF detects custom collection policy changes.',
     'bundle_files': 'Sorted unique binary/data destinations, with Windows case and separators normalized; '
                     'detects runtime file selection changes without hashing sizes or contents. '
-                    'Excludes PYZ pure Python and app-owned paths replaced by app updates: '
+                    'Excludes PYZ pure Python (replaced with the exe) and app-owned paths replaced by app updates: '
                     + ', '.join(APP_OWNED_PATHS),
 }
 
