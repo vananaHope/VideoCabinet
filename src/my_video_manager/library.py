@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 import hashlib
+import logging
 import math
 import os
 from pathlib import Path
@@ -356,14 +357,66 @@ class Library:
             self._forget_location(path)
         raise ValueError("파일 없음: 영상의 위치가 없습니다. 다시 검사하거나 파일을 다시 연결해 주세요.")
 
-    def scan(self, *, on_registered=None) -> ScanResult:
+    def _scan_roots(self, folders):
+        watched = [folder.path for folder in self.watched_folders()]
+        if folders is None:
+            return watched
+        if isinstance(folders, (str, os.PathLike)):
+            raise TypeError("folders에는 경로 목록을 넘겨야 합니다.")
+        roots = []
+        logger = logging.getLogger(__name__)
+        for folder in folders:
+            # resolve 전에 연결의 각 경로 구성 요소를 확인한다. 감시 폴더 내부로
+            # 향하는 정션도 직접 지정해서 순회 규칙을 우회할 수 없다.
+            path = Path(os.path.abspath(folder))
+            parents = [root for root in watched if path.is_relative_to(root)]
+            if not parents:
+                # 감시 폴더는 해석된 형태로 저장되므로 subst 드라이브나 8.3 이름처럼
+                # 다른 표기로 들어온 같은 폴더는 실제 경로로 해석한 뒤 다시 확인한다.
+                path = path.resolve(strict=False)
+                parents = [root for root in watched if path.is_relative_to(root)]
+            if not parents:
+                logger.info("감시 폴더 밖 검사 경로를 건너뜁니다: %s", path)
+                continue
+            root = min(parents, key=lambda item: len(item.parts))
+            linked = False
+            try:
+                ancestors = [path, *path.parents[:len(path.parts) - len(root.parts)]]
+                for current in reversed(ancestors):
+                    try:
+                        info = current.lstat()
+                    except (FileNotFoundError, NotADirectoryError):
+                        break  # 사라진 폴더도 범위 안의 위치/캐시를 정리해야 한다.
+                    if (stat.S_ISLNK(info.st_mode)
+                            or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                        linked = True
+                        break
+                if linked:
+                    logger.info("연결된 검사 경로를 건너뜁니다: %s", path)
+                    continue
+            except OSError:
+                # 접근 실패는 순회에서 ScanIssue로 보고하고 캐시를 보존한다.
+                pass
+            if not any(path.is_relative_to(existing) for existing in roots):
+                roots = [existing for existing in roots if not existing.is_relative_to(path)]
+                roots.append(path)
+        return roots
+
+    def scan(self, *, folders=None, on_registered=None) -> ScanResult:
         with self._lock:
-            result = self._scan(on_registered=on_registered)
-            warnings = self.external_subtitles.refresh()
+            roots = self._scan_roots(folders)
+            if folders is not None and not roots:
+                return ScanResult(0, ())
+            skipped = set()
+            result = self._scan(roots, include_direct=folders is None, skipped=skipped,
+                                on_registered=on_registered)
+            warnings = self.external_subtitles.refresh(
+                folders=None if folders is None else roots,
+                skipped_folders=() if folders is None else skipped)
             return ScanResult(result.added, result.issues + tuple(ScanIssue(*warning) for warning in warnings),
                               reconnected=result.reconnected)
 
-    def _scan(self, *, on_registered=None) -> ScanResult:
+    def _scan(self, roots, *, include_direct, skipped, on_registered=None) -> ScanResult:
         added, issues = 0, []
         reconnected = False
         processed: set[Path] = set()
@@ -374,8 +427,10 @@ class Library:
             # 실패한 해상도는 유지한다. 파일 변경은 _register에서 다시 읽고,
             # 명시적 위치 연결은 reconnect_video에서 미확인으로 되돌린다.
             locations = {Path(row["path"]): (row["size"], row["mtime_ns"])
-                         for row in db.execute("SELECT path, size, mtime_ns FROM locations")}
-            checks = {Path(row["path"]): row for row in db.execute("SELECT * FROM library_file_checks")}
+                         for row in db.execute("SELECT path, size, mtime_ns FROM locations")
+                         if include_direct or any(Path(row["path"]).is_relative_to(root) for root in roots)}
+            checks = {Path(row["path"]): row for row in db.execute("SELECT * FROM library_file_checks")
+                      if include_direct or any(Path(row["path"]).is_relative_to(root) for root in roots)}
             known_fingerprints = {row[0] for row in db.execute("SELECT fingerprint FROM videos")}
             missing_at_start = {row[0] for row in db.execute(
                 "SELECT id FROM videos WHERE NOT EXISTS (SELECT 1 FROM locations WHERE video_id = videos.id)")}
@@ -408,7 +463,6 @@ class Library:
                 issues.extend(result.issues)
             return result.added
 
-        roots = [folder.path for folder in self.watched_folders()]
         pending = list(reversed(roots))
         visited: set[Path] = set()
         signatures: dict[Path, tuple[int, int]] = {}
@@ -429,6 +483,7 @@ class Library:
                             info = entry.stat(follow_symlinks=False)
                             if (stat.S_ISLNK(info.st_mode)
                                     or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                                skipped.add(path)
                                 entries_in_order.append(ScanIssue(
                                     path, "건너뜀: 다른 폴더나 파일을 가리키는 연결(정션·심볼릭 링크)", failed=False))
                                 continue
@@ -447,6 +502,8 @@ class Library:
                 entries_in_order.append(ScanIssue(directory, str(error)))
 
         for path in locations:
+            if not include_direct and any(path.is_relative_to(blocked) for blocked in skipped):
+                continue
             processed.add(path)
             try:
                 signature = signatures.get(path)
@@ -468,6 +525,7 @@ class Library:
         with self._connect() as db:
             stale = [path for path in check_paths if path not in seen
                      and any(path.is_relative_to(root) for root in roots)
+                     and (include_direct or not any(path.is_relative_to(blocked) for blocked in skipped))
                      and not any(path.is_relative_to(blocked) for blocked in inaccessible)]
             db.executemany("DELETE FROM library_file_checks WHERE path=?", ((str(path),) for path in stale))
         return ScanResult(added, tuple(issues), reconnected=reconnected)

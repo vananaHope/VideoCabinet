@@ -334,13 +334,20 @@ class ExternalSubtitles:
                          paths[row["id"]].name, row["warning"], tuple(tracks), tails[row["id"]])
                          for row, tracks in files.values())
 
-    def refresh(self, video_ids=None):
+    def refresh(self, video_ids=None, *, folders=None, skipped_folders=()):
         """한 검사에서 디렉터리별 목록을 한 번만 읽고 크기·mtime이 바뀐 파일만 파싱한다."""
         with self._connect() as db:
             locations = db.execute("""SELECT l.video_id, l.path, v.duration FROM locations l
                 JOIN videos v ON v.id=l.video_id""").fetchall()
             old = db.execute("""SELECT f.*, EXISTS(SELECT 1 FROM external_subtitles s WHERE s.file_id=f.id)
                 AS has_tracks FROM external_subtitle_files f""").fetchall()
+            if folders is not None:
+                def in_scope(row):
+                    path = Path(row["path"])
+                    return (any(path.is_relative_to(folder) for folder in folders)
+                            and not any(path.is_relative_to(folder) for folder in skipped_folders))
+                locations = [row for row in locations if in_scope(row)]
+                old = [row for row in old if in_scope(row)]
             if video_ids is not None:
                 # Registering a longer name can take a sidecar away from another
                 # video in this directory. Reconcile all its registered siblings.
