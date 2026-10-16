@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { connectBridge, request } from "@/bridge"
 import type { FolderAction, FoldersBridge, FoldersData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
+import { Notice, NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, EmptyState, PageHeader, StatusBadge, Tabs } from "@/components/page-parts"
 import { MinimumDuration } from "@/components/minimum-duration"
 
@@ -36,12 +37,12 @@ export default function FoldersPage() {
     setError("")
     if (bridge) request(reply => bridge.action(name, target, reply)).catch(error => setError(String(error)))
   }
-  if (!data || !bridge) return <p role="status" className="p-6">{error || "폴더 정보를 불러오는 중…"}</p>
+  if (!data || !bridge) return error ? <Notice tone="error" className="m-4">{error}</Notice> : <p role="status" className="p-6">폴더 정보를 불러오는 중…</p>
   const videos = section === 'excluded' ? data.excluded : data.dismissed
   // 목록만 스크롤한다. 바깥 스크롤은 목록이 최소 높이까지 줄어든 아주 작은 창에서만 생긴다.
   return <main className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4" aria-label="폴더 관리">
     <PageHeader title="폴더 관리" description="감시 폴더의 하위 폴더까지 검사합니다. 실제 파일과 영상 기록은 유지합니다." actions={<Button variant="outline" onClick={() => act('manageTags')}>모든 태그 관리</Button>} />
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    <NoticeStack items={[error && { tone: "error", message: error, onDismiss: () => setError("") }]} />
     <div className="flex flex-wrap gap-2">
       <Button id="folders-add" disabled={data.scanning} onClick={() => act('addFolder')}>감시 폴더 추가</Button>
       <Button variant="outline" disabled={data.scanning} onClick={() => act('scan')}>다시 검사</Button>

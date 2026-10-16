@@ -292,3 +292,47 @@ def test_shared_match_spans_are_original_slices_and_web_parts_stay_equivalent(te
     parts = matched_parts(text, query)
     assert ''.join(part['text'] for part in parts) == text
     assert [part['text'] for part in parts if part['matched']] == [text[start:end] for start, end in expected]
+
+
+def test_dismissed_reel_completion_reappears_after_next_web_play(window_factory, core):
+    # 완료 안내를 닫은 뒤 같은 하이라이트를 다시 끝까지 보면, 같은 완료 문구라도 새 완료로 다시 보인다(#134 R2).
+    from test_web_statistics import wait_for
+
+    class OptionsPlayer(ReelPlayer):
+        def playback_options(self):
+            return (1, True)
+
+    mark(core, core.videos()[0], 10, 15)
+    window = window_factory()
+    window.player_factory = OptionsPlayer
+    window.navigate_web_tab('reel')
+    host = window.web_host
+
+    def js(source):
+        result = []
+        host.engine_page.runJavaScript(source, result.append)
+        wait_for(lambda: bool(result))
+        return result[0]
+
+    success = "document.querySelectorAll('main[aria-label=\"하이라이트 모아보기\"] [data-slot=notice][data-tone=success]').length"
+
+    def complete_from_web():
+        wait_for(lambda: js("[...document.querySelectorAll('button')].some(b => b.textContent === '처음부터 차례 재생' && !b.disabled)"))
+        js("[...document.querySelectorAll('button')].find(b => b.textContent === '처음부터 차례 재생').click()")
+        wait_for(lambda: core.reel_playback is not None and window.pages.currentWidget() is window.playback_page)
+        core.playback.report(15)
+        core.advance_reel_if_due()
+        window.reel.sync()
+        assert window.pages.currentWidget() is host
+
+    complete_from_web()
+    wait_for(lambda: js(success) == 1)
+    js("document.querySelector('main[aria-label=\"하이라이트 모아보기\"] [data-tone=success] [aria-label=\"안내 닫기\"]').click()")
+    wait_for(lambda: js(success) == 0)
+    # 완료 복귀는 빈 상태와 완료 상태를 연달아 보낸다. 두 메시지가 한 번에 도착하면 화면은 빈 상태를 보지 못한다.
+    # 그 경합을 고정하려고 두 번째 완료에서는 빈 상태 전송을 막고, 같은 완료 문구만 다시 보낸다.
+    page = host.controllers['reel']
+    original = page.refresh_guidance
+    page.refresh_guidance = lambda: original() if page.status else None
+    complete_from_web()
+    wait_for(lambda: js(success) == 1)

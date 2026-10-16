@@ -27,6 +27,8 @@
     "status-success-foreground": "#052e16",
     "status-info": "#93c5fd",
     "status-info-foreground": "#172554",
+    "status-warning": "#fcd34d",
+    "status-warning-foreground": "#451a03",
     "primary-text": "#a5b4fc"
   },
   "layout": {

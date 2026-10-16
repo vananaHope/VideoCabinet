@@ -1,5 +1,6 @@
 import type { ExternalSubtitleFileData } from "@/bridge-types"
 import { StatusBadge } from "@/components/page-parts"
+import { Notice } from "@/components/ui/notice"
 
 export function ExternalSubtitleList({ files }: { files: ExternalSubtitleFileData[] }) {
   return <section aria-label="외부 자막" className="space-y-2 border-t pt-2">
@@ -13,7 +14,8 @@ export function ExternalSubtitleList({ files }: { files: ExternalSubtitleFileDat
           <span>{track.lineCount}줄</span>
           {track.languageClass && <span title={track.languageClass} className="max-w-full truncate">{track.languageClass}</span>}
         </div>) : <div className="flex items-center gap-2"><StatusBadge variant="destructive">읽기 실패</StatusBadge><span>0줄</span></div>}
-        {file.warning && <p className="wrap-anywhere text-destructive">{file.warning}</p>}
+        {/* 한 트랙도 읽지 못했으면 실패 사유(오류), 일부만 읽었으면 확인할 점(경고)이다. */}
+        {file.warning && <Notice tone={file.subtitles.length ? "warning" : "error"} size="compact" role="note">{file.warning}</Notice>}
       </li>)}
     </ul>}
   </section>

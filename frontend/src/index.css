@@ -10,6 +10,8 @@
   --color-status-info: var(--status-info);
   --color-status-success-foreground: var(--status-success-foreground);
   --color-status-success: var(--status-success);
+  --color-status-warning-foreground: var(--status-warning-foreground);
+  --color-status-warning: var(--status-warning);
   --color-highlight-foreground: var(--highlight-foreground);
   --color-highlight: var(--highlight);
   --color-highlight-range: var(--highlight-range);

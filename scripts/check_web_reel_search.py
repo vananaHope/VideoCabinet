@@ -136,7 +136,7 @@ def capture_page(core, label, tab, text='', preparing=False, failed=False, compl
         page.bridge.find(text)
         query(window, text)
         if failed:
-            wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent === '검색 실패: 검증용 색인 오류'"))
+            wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"alert\"]')?.textContent === '검색 실패: 검증용 색인 오류'"))
         elif preparing:
             wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('색인 준비 중')"))
         else:

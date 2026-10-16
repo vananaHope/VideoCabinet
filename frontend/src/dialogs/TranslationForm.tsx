@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { DialogValues, TranslationSettingsData } from '@/bridge-types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Notice } from '@/components/ui/notice'
 import { Choice } from './dialog-parts'
 
 const rows = (items: { id: string; label: string }[]) => items.map(item => ({ id: item.id, title: item.label, detail: '', status: '', start: 0, end: null }))
@@ -39,14 +40,15 @@ export function TranslationForm({ data, form, update, act, busy }: {
       </div>
       {efforts.length > 0 && <Choice label="추론 강도" rows={rows([{ id: '', label: '기본(모델 기본값)' }, ...efforts.map(id => ({ id, label: id }))])}
         value={current.effort} onChange={effort => update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, effort } : s) })} />}
-      {selected.expensive_efforts.includes(current.effort) && <p className="text-sm text-muted-foreground">{selected.effort_notice}</p>}
-      {notice && <p role="status" className="text-sm text-destructive">{notice}</p>}
-      <p className="text-sm text-muted-foreground">{selected.notice}</p>
-      {model.policy && <div role="note" className={`space-y-2 whitespace-pre-wrap break-words rounded-md border p-2 text-sm ${model.warning ? 'border-destructive' : ''}`}>
-        {model.training_warning && <p className="rounded bg-destructive px-2 py-1 text-destructive-foreground">학습 사용 주의</p>}
-        {model.expired_warning && <p className="rounded bg-highlight px-2 py-1 text-highlight-foreground">무보존 계약 만료 · 갱신 확인 필요</p>}
-        <p>{model.policy}</p>
-      </div>}
+      {/* 정책·경고 문구는 공용 안내로 보인다. 배치(#135)는 그대로 두고, 대화상자가 스크롤되므로 접지 않는다. */}
+      {selected.expensive_efforts.includes(current.effort) && <Notice tone="warning" role="note" clamp={false}>{selected.effort_notice}</Notice>}
+      {notice && <Notice tone="warning" clamp={false}>{notice}</Notice>}
+      {selected.notice && <Notice tone="info" role="note" clamp={false}>{selected.notice}</Notice>}
+      {model.policy && <Notice tone={model.warning ? 'warning' : 'info'} role="note" aria-label="모델 정책" clamp={false}
+        title={(model.training_warning || model.expired_warning) && <>
+          {model.training_warning && <p>학습 사용 주의</p>}
+          {model.expired_warning && <p>무보존 계약 만료 · 갱신 확인 필요</p>}
+        </>}>{model.policy}</Notice>}
       <section className="space-y-2 rounded-md border p-3" aria-label="OpenCode Go 키">
         <p className="text-sm font-medium">OpenCode Go 키 · {form.key_action === 'delete' ? '삭제 예정' : form.key_action === 'replace' ? '교체 예정' : registered ? `등록됨 (${data.key_masked})` : '없음'}</p>
         <Input type="password" autoComplete="off" aria-label="OpenCode Go 키 입력" placeholder="새 키 입력 (확인할 때 저장)" value={form.key} onChange={event => update({ key: event.target.value, key_action: event.target.value ? 'replace' : 'keep', fallback: !data.key_masked && !form.key && !!event.target.value ? true : form.fallback })} />
@@ -56,12 +58,12 @@ export function TranslationForm({ data, form, update, act, busy }: {
           <Button variant="outline" onClick={() => update({ key: '', key_action: 'delete', fallback: false })}>키 지우기</Button>
           <Button variant="ghost" onClick={() => update({ key: '', key_action: 'keep' })}>키 편집 취소</Button>
         </div>
-        {data.key_error && <p className="text-sm text-destructive">{data.key_error}</p>}
+        {data.key_error && <Notice tone="error" clamp={false}>{data.key_error}</Notice>}
       </section>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={!hasKey} checked={hasKey && form.fallback} onChange={event => update({ fallback: event.target.checked })} />실패하면 OpenCode Go로 이어서</label>
-      <p className="text-xs text-muted-foreground">{data.fallback_notice}</p>
+      {data.fallback_notice && <Notice tone="info" size="compact" role="note">{data.fallback_notice}</Notice>}
       <Button variant="ghost" onClick={() => { setNotice(''); update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, model: selected.default_model, effort: '' } : s) }) }}>이 방식의 모델·강도 기본값</Button>
     </fieldset>
-    {busy && <p role="status" className="text-sm">요청 처리 중… 취소하면 요청도 중단합니다.</p>}
+    {busy && <Notice tone="info" className="mt-3" clamp={false}>요청 처리 중… 취소하면 요청도 중단합니다.</Notice>}
   </div>
 }

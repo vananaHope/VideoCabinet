@@ -3,6 +3,7 @@ import { Film } from "lucide-react"
 import { connectBridge, request } from "@/bridge"
 import type { ReelBridge, ReelData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
+import { NoticeStack } from "@/components/ui/notice"
 import { SelectField } from "@/components/ui/select"
 import { EmptyState, PageHeader } from "@/components/page-parts"
 import { ResultRow, listKey, restoreListFocus, timestamp } from "@/components/reel-search-parts"
@@ -11,6 +12,7 @@ export default function ReelPage() {
   const [bridge, setBridge] = useState<ReelBridge | null>(null)
   const [data, setData] = useState<ReelData | null>(null)
   const [error, setError] = useState("")
+  const [hiddenStatus, setHiddenStatus] = useState("")
   const scroll = useRef(0)
   const goHome = useRef(() => {})
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
@@ -30,6 +32,9 @@ export default function ReelPage() {
     return () => { disposed = true; disconnect() }
   }, [showError])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
+  // 완료 안내가 사라지면(새로고침·필터·탭 이동) 닫은 기록도 지워 다음 완료 때 다시 보인다.
+  // 재생에서 돌아올 때는 빈 상태 없이 같은 문구가 다시 올 수 있어 play()에서도 지운다.
+  useEffect(() => { if (!data?.status) setHiddenStatus("") }, [data?.status])
   const entries = data?.entries ?? []
   const selected = entries.find(entry => entry.id === data?.selectedId)
   function select(index: number) {
@@ -39,7 +44,11 @@ export default function ReelPage() {
     document.getElementById(`reel-${id}`)?.scrollIntoView({ block: "nearest" })
   }
   function play(id: number) {
-    if (bridge) { setError(""); request(reply => bridge.play(id, reply)).catch(showError) }
+    if (!bridge) return
+    // 재생 요청이 새 모아보기의 시작이다. 코어도 이때 완료 안내를 비우므로 화면도 비우고 닫은 기록을 지워,
+    // 같은 완료 문구가 다시 와도 새 완료로 보인다.
+    setError(""); setHiddenStatus(""); setData(current => current?.status ? { ...current, status: "" } : current)
+    request(reply => bridge.play(id, reply)).catch(showError)
   }
   return <main aria-label="하이라이트 모아보기" onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) { event.preventDefault(); goHome.current() } }} className="flex h-full flex-col gap-3 p-4">
     <PageHeader title="하이라이트 모아보기" description="모든 영상의 하이라이트를 이어서 봅니다. 시청 기록과 별도로 복습을 기록합니다." />
@@ -51,11 +60,15 @@ export default function ReelPage() {
       </label>
       <Button variant="outline" onClick={() => { if (bridge) request(reply => bridge.refresh(reply)).catch(showError) }}>목록 갱신</Button>
     </div>
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {/* 재생 요청 실패와 모아보기 완료 안내를 목록 위 한곳에 쌓는다. 아래 줄은 늘 목록 설명을 보인다. */}
+    <NoticeStack layout="yield" items={[
+      error && { tone: "error", message: error, onDismiss: () => setError("") },
+      data?.status && data.status !== hiddenStatus && { tone: "success", message: data.status, onDismiss: () => setHiddenStatus(data.status) },
+    ]} />
     <div id="reel-list" role="listbox" aria-label="모든 영상의 하이라이트" aria-activedescendant={selected ? `reel-${selected.id}` : undefined} tabIndex={0}
       onScroll={event => { if (event.currentTarget.offsetParent) scroll.current = event.currentTarget.scrollTop }}
       onKeyDown={event => listKey(event, entries.length, entries.findIndex(e => e.id === selected?.id), select, () => { if (selected?.playable) play(selected.id) })}
-      className="min-h-0 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
+      className="min-h-32 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
       {!entries.length ? <EmptyState title={data?.emptyTitle ?? "불러오는 중…"} description={data?.emptyDescription ?? ""} /> : entries.map((entry, index) => <ResultRow key={entry.id} id={`reel-${entry.id}`} selected={entry.id === selected?.id}
         onClick={() => { select(index); document.getElementById("reel-list")?.focus({ preventScroll: true }) }} onDoubleClick={() => { if (entry.playable) play(entry.id) }}>
         <div className="relative flex aspect-video w-32 shrink-0 items-center justify-center self-start overflow-hidden rounded-md bg-muted"><Film aria-hidden="true" className="absolute size-8 text-muted-foreground" />{entry.thumbnail && <img src={entry.thumbnail} alt="" loading="lazy" onError={event => { event.currentTarget.hidden = true }} className="relative h-full w-full object-cover" />}</div>
@@ -69,6 +82,6 @@ export default function ReelPage() {
       </ResultRow>)}
     </div>
     <div className="flex flex-wrap items-center gap-3"><Button disabled={!entries.some(e => e.playable)} onClick={() => play(0)}>처음부터 차례 재생</Button><Button variant="outline" disabled={!selected?.playable} onClick={() => selected && play(selected.id)}>선택한 하이라이트부터 재생</Button><span className="text-xs text-muted-foreground">↑/↓ 선택 · Enter 재생</span></div>
-    <p role="status" className="text-xs text-muted-foreground">{data?.status || `하이라이트 ${entries.length}개 · 영상 제목 → 영상 안 시각 순 · 파일 없음·길이 0인 지점은 건너뜁니다. 새 항목은 ‘목록 갱신’으로 불러옵니다.`}</p>
+    <p role="status" className="text-xs text-muted-foreground">{`하이라이트 ${entries.length}개 · 영상 제목 → 영상 안 시각 순 · 파일 없음·길이 0인 지점은 건너뜁니다. 새 항목은 ‘목록 갱신’으로 불러옵니다.`}</p>
   </main>
 }
