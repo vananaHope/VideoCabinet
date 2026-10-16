@@ -65,10 +65,20 @@ def clock():
     return FakeClock()
 
 
+def installed(version='1.0.0', fingerprint=FINGERPRINT):
+    return lambda: InstalledUpdateInfo(version, fingerprint)
+
+
 @pytest.fixture
-def core(tmp_path, clock, monkeypatch):
-    monkeypatch.setattr(update_check, 'current_version', lambda: '1.0.0')
-    return AppCore(media=object(), clock=clock, database=tmp_path / 'library.sqlite3')
+def core(tmp_path, clock):
+    return AppCore(media=object(), clock=clock, database=tmp_path / 'library.sqlite3',
+                   update_installation=installed())
+
+
+def reopen(core, clock, installation=None):
+    """Same database, as after an app restart with the same (or a newly installed) app."""
+    return AppCore(media=object(), clock=clock, database=core.database,
+                   update_installation=installation or core.update_installation)
 
 
 @pytest.fixture
@@ -84,7 +94,8 @@ def http(key):
 
 
 def check(core, http, *, version='1.0.0', fingerprint=FINGERPRINT):
-    return core.check_for_update(http=http, installation=lambda: InstalledUpdateInfo(version, fingerprint))
+    core.update_installation = installed(version, fingerprint)
+    return core.check_for_update(http=http)
 
 
 @pytest.mark.parametrize('version,fingerprint,patch,expected', [
@@ -181,7 +192,7 @@ def test_failed_fetch_is_recorded_and_app_remains_usable(core, clock, http, fail
     assert 'secret' not in json.dumps(core.settings.get(LAST_CHECK_KEY))
     assert core.videos() == ()
     assert core.create_tag('after failure').name == 'after failure'
-    reopened = AppCore(media=object(), clock=clock, database=core.database)
+    reopened = reopen(core, clock)
     assert reopened.last_update_check() == result
     assert not reopened.should_check_for_update()
 
@@ -191,7 +202,7 @@ def test_auto_default_off_persistence_and_manual_override(core, clock, http):
     assert core.automatic_update_check_enabled()
     assert core.should_check_for_update()
     core.set_automatic_update_check_enabled(False)
-    reopened = AppCore(media=object(), clock=clock, database=core.database)
+    reopened = reopen(core, clock)
     assert not reopened.automatic_update_check_enabled()
     assert not reopened.should_check_for_update()
     assert check(reopened, http).kind == 'patch'
@@ -211,12 +222,11 @@ def test_startup_interval_boundaries(core, clock, http, elapsed, expected):
     assert core.should_check_for_update() is expected
 
 
-def test_installed_version_change_marks_history_stale_and_allows_startup(core, clock, http, monkeypatch):
+def test_installed_version_change_marks_history_stale_and_allows_startup(core, clock, http):
     assert check(core, http).kind == 'patch'
     assert not core.last_update_check().stale
     clock.now += timedelta(hours=1)
-    monkeypatch.setattr(update_check, 'current_version', lambda: '1.2.3')
-    reopened = AppCore(media=object(), clock=clock, database=core.database)
+    reopened = reopen(core, clock, installed('1.2.3'))
     history = reopened.last_update_check()
     assert history.stale
     assert history.current_version == '1.0.0'
@@ -231,7 +241,8 @@ def test_installed_version_change_marks_history_stale_and_allows_startup(core, c
 
 
 @pytest.mark.parametrize('reason,hours', [
-    ('network', 3), ('timeout', 3), ('http_403', 24), ('http_429', 24),
+    ('network', 3), ('timeout', 3), ('http_500', 3), ('http_502', 3), ('http_503', 3),
+    ('http_403', 24), ('http_404', 24), ('http_429', 24),
     ('invalid_signature', 24), ('invalid_format', 24),
 ])
 def test_failure_retry_interval_boundaries(core, clock, http, reason, hours):
@@ -277,11 +288,11 @@ def test_invalid_boolean_uses_default_and_rejects_new_bad_value(core):
         core.set_automatic_update_check_enabled('false')
 
 
-def test_real_installation_adapter_uses_package_version_without_subprocess(core, monkeypatch):
-    monkeypatch.setattr(update_check, 'current_version', current_version)
-    installed = core.installed_update_info()
-    assert installed.version == current_version()
-    assert installed.runtime_fingerprint is None  # source checkout
+def test_real_installation_adapter_uses_package_version_without_subprocess(core):
+    core.update_installation = None
+    info = core.installed_update_info()
+    assert info.version == current_version()
+    assert info.runtime_fingerprint is None  # source checkout
 
 
 def test_bad_installed_version_is_failure_without_http(core, http):
@@ -292,10 +303,35 @@ def test_bad_installed_version_is_failure_without_http(core, http):
 def test_installation_read_failure_is_recorded(core, http):
     def unavailable():
         raise OSError('private installation path')
-    result = core.check_for_update(http=http, installation=unavailable)
+    core.update_installation = unavailable
+    result = core.check_for_update(http=http)
     assert result.failure_reason == 'installation_unavailable'
+    assert result.stale  # no installed version to compare; startup checks again
     assert core.last_update_check() == result
+    assert core.should_check_for_update()
     assert not http.calls
+
+
+def test_stale_uses_injected_installation_not_running_app(core, http):
+    # The fixture's installed version differs from the source checkout's version.
+    assert core.installed_update_info().version != current_version()
+    result = check(core, http)
+    assert not result.stale and not core.last_update_check().stale
+    assert not core.should_check_for_update()
+    core.update_installation = installed('1.2.3')
+    assert core.last_update_check().stale
+    assert core.should_check_for_update()
+
+
+def test_stale_is_not_persisted_and_saved_value_is_ignored(core, http):
+    check(core, http)
+    saved = core.settings.get(LAST_CHECK_KEY)
+    assert 'stale' not in saved
+    core.settings.set(LAST_CHECK_KEY, {**saved, 'stale': True})
+    assert not core.last_update_check().stale
+    core.update_installation = installed('1.2.3')
+    core.settings.set(LAST_CHECK_KEY, {**saved, 'stale': False})
+    assert core.last_update_check().stale
 
 
 @pytest.mark.parametrize('version,fingerprint,expected', [
@@ -303,7 +339,7 @@ def test_installation_read_failure_is_recorded(core, http):
 ])
 def test_successful_history_survives_reopen(core, clock, http, version, fingerprint, expected):
     result = check(core, http, version=version, fingerprint=fingerprint)
-    reopened = AppCore(media=object(), clock=clock, database=core.database)
+    reopened = reopen(core, clock)
     assert reopened.last_update_check() == result
     assert result.kind == expected
 
