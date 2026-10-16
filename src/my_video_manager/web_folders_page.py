@@ -95,8 +95,13 @@ class WebFoldersPage(WebPageController):
     def __init__(self, host):
         super().__init__(host)
         self.library = host.controllers['library']
-        self.report = '폴더를 추가하면 자동으로 검사합니다. 파일을 옮긴 뒤에는 다시 검사를 누르세요.'
+        self.report = '폴더를 추가하면 자동으로 검사합니다.'
         self.bridge = FoldersBridge(self)
+        self.unwatched = ()
+        # 감시 실패는 신호 없이 바뀌므로 보이는 동안만 가볍게 확인한다.
+        self.timer = QTimer(self)
+        self.timer.setInterval(1000)
+        self.timer.timeout.connect(self.poll_unwatched)
         self.focus_requested = self.bridge.foldersFocusRequested
         self.library.scan_state_changed.connect(lambda _: self.refresh())
         self.library.scan_message.connect(self.report_scan)
@@ -105,6 +110,14 @@ class WebFoldersPage(WebPageController):
 
     def activated(self):
         self.refresh()
+        self.timer.start()
+
+    def deactivated(self):
+        self.timer.stop()
+
+    def poll_unwatched(self):
+        if tuple(map(str, self.window.folder_watch.unwatched_folders())) != self.unwatched:
+            self.refresh()
 
     def open_section(self, section):
         if section not in ('folders', 'excluded', 'dismissed'):
@@ -120,10 +133,12 @@ class WebFoldersPage(WebPageController):
         def rows(videos):
             return [dict(id=video.id, title=video.title, missing=video.missing,
                          excluded=video.excluded) for video in videos]
+        watch = self.window.folder_watch
+        self.unwatched = tuple(map(str, watch.unwatched_folders()))
         return dict(folders=[str(folder.path) for folder in self.core.watched_folders()],
                     excluded=rows(self.core.excluded_videos()), dismissed=rows(self.core.dismissed_videos()),
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,
-                    report=self.report)
+                    report=self.report, automaticDetection=watch.enabled, unwatched=list(self.unwatched))
 
     def refresh(self):
         if self.is_active():

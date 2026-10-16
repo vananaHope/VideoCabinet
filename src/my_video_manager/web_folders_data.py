@@ -16,3 +16,5 @@ class FoldersData(TypedDict):
     minimum: float
     scanning: bool
     report: str
+    automaticDetection: bool
+    unwatched: list[str]

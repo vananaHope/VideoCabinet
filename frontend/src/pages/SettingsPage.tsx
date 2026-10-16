@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Notice, NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, PageHeader, StatusBadge } from "@/components/page-parts"
 import { MinimumDuration } from "@/components/minimum-duration"
+import { AutomaticDetection } from "@/components/automatic-detection"
 import { KeyBindingsEditor } from "@/components/key-bindings-editor"
 import { BackupSettings } from "@/components/backup-settings"
 
@@ -55,6 +56,7 @@ export default function SettingsPage() {
           <h2 className="text-lg font-semibold">일반</h2>
           <section className="space-y-3 rounded-xl border bg-card p-4"><h3 className="font-semibold">My Video Manager · {data.version}</h3><Button variant="link" title={data.releasesUrl} onClick={() => action('releases')}>GitHub Release에서 버전 보기 ↗</Button></section>
           <MinimumDuration id="settings-minimum" value={data.minimum} scanning={data.scanning} onSave={async value => { await request(reply => bridge.setMinimum(value, reply)) }} />
+          <AutomaticDetection enabled={data.automaticDetection} scanning={data.scanning} onChange={async enabled => { await request(reply => bridge.setAutomaticDetection(enabled, reply)) }} />
           <section className="space-y-3 rounded-xl border bg-card p-4"><div className="flex items-center gap-3"><h3 className="font-semibold">완전 종료</h3><StatusBadge variant="destructive">위험 작업</StatusBadge></div><p className="text-sm text-muted-foreground">창을 닫으면 트레이로 숨습니다. 완전 종료하면 진행 중인 자막 처리를 멈추고 앱을 끝냅니다.</p><Button variant="destructive" onClick={() => setQuit(true)}>완전 종료</Button></section>
         </section>
         <div hidden={category !== 'keys'} className="min-h-0 flex-1"><div className="flex h-full min-h-0 flex-col"><KeyBindingsEditor rows={data.bindings} bridge={bridge} /></div></div>

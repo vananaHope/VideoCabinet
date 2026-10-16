@@ -48,7 +48,11 @@ class LibraryOperations:
             try:
                 self.core.add_watched_folder(folder)
                 self.refreshed.emit()
-                self.scan()
+                if self.worker is None:
+                    self.scan()
+                else:
+                    # 폴더 선택 중 시작된 검사는 새 폴더를 모르므로 끝난 뒤 다시 검사한다.
+                    self.window.folder_watch.request_full_scan()
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "감시 폴더", str(error))
 
