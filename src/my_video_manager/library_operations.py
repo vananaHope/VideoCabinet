@@ -50,8 +50,12 @@ class LibraryOperations:
 
     def scan(self, checked=False, *, operation=None, quiet_if_unchanged=False):
         if self.worker is not None:
+            if operation is not None:
+                self.report_scan("진행 중인 검사가 끝난 뒤 다시 시도하세요.")
             return
         self._quiet_scan = quiet_if_unchanged
+        if quiet_if_unchanged:
+            self._previous_scan_report = self.window.web_host.controllers['folders'].report
         self.worker = ScanWorker(self.core, self, operation)
         self.worker.completed.connect(self.scan_completed)
         self.worker.failed.connect(lambda error: self.report_scan(f"검사 실패: {error}"))
@@ -68,7 +72,8 @@ class LibraryOperations:
     def scan_completed(self, result):
         self.refresh()
         if self._quiet_scan and result.added == 0 and not result.issues:
-            self.report_scan("")
+            self.scan_message.emit(self._previous_scan_report)
+            self.window.show_status("")
             return
         summary = f"영상 {result.added}개 등록 · 전체 {len(self.cards)}개 · 안내 {len(result.issues)}개"
         self.scan_message.emit(summary + "\n" + "\n".join(f"{i.path}: {i.message}" for i in result.issues))

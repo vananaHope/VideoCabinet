@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QSystemTrayIcon
 
 from my_video_manager.core import AppCore
 from my_video_manager.library import MediaInfo
@@ -204,15 +204,51 @@ def test_startup_does_not_overlap_a_manual_scan_already_running(startup):
     assert window.web_host.controllers['folders'].report
 
 
-def test_unchanged_startup_is_quiet_but_manual_completion_is_reported(startup):
+@pytest.mark.parametrize('previous_report', [None, 'previous scan report'])
+def test_unchanged_startup_is_quiet_but_manual_completion_is_reported(startup, previous_report):
     _, _, _, calls, create = startup
     window = create()
+    folders = window.web_host.controllers['folders']
+    if previous_report is not None:
+        folders.report_scan(previous_report)
+    previous_report = folders.report
     wait_for(lambda: len(calls) == 1 and window.worker is None)
-    assert window.web_host.controllers['folders'].report == ''
+    assert folders.report == previous_report
     assert window.statusBar().currentMessage() == ''
     window.scan()
     wait_for(lambda: len(calls) == 2 and window.worker is None)
     assert window.web_host.controllers['folders'].report
+
+
+def test_file_dialog_racing_startup_scan_reports_retry(startup, monkeypatch):
+    core, folder, media, calls, create = startup
+    media.slow_path = folder / 'new.mkv'
+    media.slow_path.write_bytes(b'new')
+    direct = folder.parent / 'direct.mkv'
+    direct.write_bytes(b'direct')
+    window = create(show=False)
+    folders = window.web_host.controllers['folders']
+    errors = []
+    folders.bridge.foldersError.connect(errors.append)
+
+    def choose_file(*args):
+        # 파일 선택의 중첩 이벤트 루프 중 시작 타이머가 발동한다.
+        window.show()
+        wait_for(media.started.is_set)
+        return str(direct), ''
+
+    monkeypatch.setattr(QFileDialog, 'getOpenFileName', choose_file)
+    assert json.loads(folders.bridge.action('addFile', '')) == {'ok': True}
+    wait_for(lambda: media.started.is_set() and not folders.bridge.busy)
+    assert folders.report == '진행 중인 검사가 끝난 뒤 다시 시도하세요.'
+    assert not errors and window.worker.isRunning() and len(calls) == 1
+    media.release.set()
+    wait_for(lambda: window.worker is None)
+    assert {video.title for video in core.videos()} == {'existing', 'new'}
+    # 안내에 따라 재시도하면 선택한 파일을 정상 등록한다.
+    assert json.loads(folders.bridge.action('addFile', '')) == {'ok': True}
+    wait_for(lambda: not folders.bridge.busy and window.worker is None)
+    assert {video.title for video in core.videos()} == {'existing', 'new', 'direct'}
 
 
 def test_startup_warning_is_not_silenced(startup):

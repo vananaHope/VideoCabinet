@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--offscreen', action='store_true')
 parser.add_argument('--count', type=int, default=0)
-parser.add_argument('--output', type=Path, default=ROOT / '.local/issue-131')
+parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-131')
 args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu'
@@ -151,6 +151,7 @@ def main():
         core.scan = measured_scan
         started = time.perf_counter()
         window = MainWindow(core, **({'player_factory': Player} if args.offscreen else {}))
+        previous_report = window.web_host.controllers['folders'].report
         window.resize(1100, 720)
         window.web_host.frontend_loaded.connect(
             lambda: metrics.update(frontend_ready_seconds=time.perf_counter() - started))
@@ -163,7 +164,7 @@ def main():
                 wait(lambda: bool(scan_calls) and window.worker is None)
                 assert metrics['added'] == metrics['issues'] == media.reads == media.captures == 0
                 assert len(window.library_page.cards) == args.count
-                assert window.web_host.controllers['folders'].report == ''
+                assert window.web_host.controllers['folders'].report == previous_report
                 capture(window, f'unchanged-{args.count}')
             else:
                 wait(media.started.is_set)
