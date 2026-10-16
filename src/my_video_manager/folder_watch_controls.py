@@ -25,6 +25,8 @@ class FolderWatchControls(QObject):
         # 순서를 유지한 폴더 집합. 전체 검사가 예약되면 폴더 묶음은 그 안에 포함된다.
         self._pending = {}
         self._full_scan = False
+        # 자동 검사가 이미 알린 안내. 원인이 그대로인 동안(드라이브 분리 등) 같은 실패를 반복해 알리지 않는다.
+        self._reported = frozenset()
         self.batch_ready.connect(self.enqueue, Qt.ConnectionType.QueuedConnection)
         for tab in ('folders', 'settings'):
             self.changed.connect(window.web_host.controllers[tab].refresh)
@@ -115,11 +117,20 @@ class FolderWatchControls(QObject):
         if self._user_busy():
             self._retry.start()
             return
-        if self._full_scan:
-            self._full_scan = False
-            self._pending.clear()
-            self.library.scan(quiet_if_unchanged=True)
-            return
-        folders = tuple(self._pending)
+        folders = None if self._full_scan else tuple(self._pending)
+        self._full_scan = False
         self._pending.clear()
-        self.library.scan(operation=lambda: self.core.scan(folders=folders), quiet_if_unchanged=True)
+        known = self._reported
+
+        def scan():
+            result = self.core.scan() if folders is None else self.core.scan(folders=folders)
+            # 검사한 범위의 안내만 이번 결과로 바꾼다. 작업자는 한 번에 하나라 경합하지 않는다.
+            kept = () if folders is None else (issue for issue in known if not within(issue.path, folders))
+            self._reported = frozenset((*kept, *result.issues))
+            return result
+
+        self.library.scan(operation=scan, quiet_if_unchanged=True, known_issues=known)
+
+
+def within(path, folders):
+    return any(path == folder or path.is_relative_to(folder) for folder in folders)

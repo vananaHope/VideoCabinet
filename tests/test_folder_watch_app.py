@@ -7,7 +7,8 @@ import pytest
 from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QSystemTrayIcon
 
-from my_video_manager.core import AppCore
+from my_video_manager.core import AppCore, ScanResult
+from my_video_manager.library import ScanIssue
 from my_video_manager.ui import MainWindow
 from qt_wait import wait_for
 from test_folder_watch import FakeWatcher
@@ -250,8 +251,10 @@ def test_folder_added_while_scan_runs_is_scanned_afterwards(app, monkeypatch, tm
     monkeypatch.setattr(QFileDialog, 'getExistingDirectory', lambda *args: str(other))
     window.library_page.add_folder()
     gate.set()
-    wait_for(lambda: 'late' in titles(core) and window.worker is None)
-    assert scans == [None, None]
+    # 앞 검사가 끝나는 순간과 미룬 검사 시작 사이에도 조건이 참이 되지 않게 두 번째 검사를 기다린다.
+    wait_for(lambda: len(scans) == 2 and window.worker is None)
+    settle(300)
+    assert scans == [None, None] and 'late' in titles(core)
 
 
 def test_failed_batch_scan_reports_and_next_batch_runs(app, monkeypatch):
@@ -284,3 +287,34 @@ def test_enabling_without_watched_folders_does_not_scan(app):
     window.folder_watch.set_enabled(True)
     settle(300)
     assert scans == [] and core.automatic_detection_enabled()
+
+
+def test_repeated_automatic_failure_is_reported_once(app, monkeypatch):
+    core, folder, scans, order, _, create = app
+    window = create(RecordingWatcher(order))
+    wait_for(lambda: scans == [None] and window.worker is None)
+    folders = window.web_host.controllers['folders']
+    root = core.watched_folders()[0].path
+    issue = ScanIssue(root, '감시 폴더를 찾을 수 없습니다.')
+    results = []
+
+    def scan(*, folders=None):
+        scans.append(folders)
+        return results.pop(0)
+
+    monkeypatch.setattr(core, 'scan', scan)
+
+    def run(*result):
+        results.append(ScanResult(0, result))
+        count = len(scans)
+        window.folder_watch.batch_ready.emit((root,))
+        wait_for(lambda: len(scans) == count + 1 and window.worker is None)
+
+    run(issue)
+    assert '감시 폴더를 찾을 수 없습니다' in folders.report
+    folders.report_scan('사용자가 본 다른 안내')
+    run(issue)  # 드라이브가 분리된 동안 같은 실패가 다시 나와도 조용하다.
+    assert folders.report == '사용자가 본 다른 안내'
+    run()  # 다시 연결되어 실패가 사라지면 기억도 지운다.
+    run(issue)
+    assert '감시 폴더를 찾을 수 없습니다' in folders.report
