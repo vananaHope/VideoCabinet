@@ -1,3 +1,4 @@
+import { RotateCcw } from 'lucide-react'
 import { useState } from 'react'
 import type { DialogValues, TranslationSettingsData } from '@/bridge-types'
 import { Button } from '@/components/ui/button'
@@ -6,6 +7,8 @@ import { Notice, NoticeStack } from '@/components/ui/notice'
 import { Choice } from './dialog-parts'
 
 const rows = (items: { id: string; label: string }[]) => items.map(item => ({ id: item.id, title: item.label, detail: '', status: '', start: 0, end: null }))
+// OpenCode Go는 키로 직접 번역하므로 목록 조회만 쓰고, 이어받기는 구독 CLI 방식에만 있다.
+const DIRECT_PROVIDER = 'opencode_go'
 const keyDraft = (form: Pick<DialogValues, 'key' | 'key_action'>) => `${form.key_action}:${form.key}`
 
 export function TranslationForm({ data, form, update, act, busy, request }: {
@@ -21,8 +24,7 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
   const current = form.selections.find(s => s.provider === form.choice)!
   const model = selected.models.find(m => m.id === current.model) ?? selected.unknown_model
   const efforts = model.efforts
-  // OpenCode Go는 키로 직접 번역하므로 목록 조회만 쓰고, 이어받기는 구독 CLI 방식에만 있다.
-  const direct = form.choice === 'opencode_go'
+  const direct = form.choice === DIRECT_PROVIDER
   function selectModel(value: string) {
     const next = selected.models.find(m => m.id === value) ?? selected.unknown_model
     const effort = next.efforts.includes(current.effort) ? current.effort : ''
@@ -48,6 +50,7 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
       </div>
       <div className="space-y-2 border-t pt-3">
         <div className="grid grid-cols-2 gap-3">
+          <p className="col-start-1 row-start-1 self-center text-sm font-medium">모델</p>
           <Choice label="모델 목록" rows={rows([
             ...(selected.cli_default ? [{ id: '', label: '기본(CLI 기본값)' }] : []),
             ...selected.models,
@@ -56,7 +59,9 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
           <label className="flex flex-col gap-2 text-sm">모델 직접 입력<Input aria-label="모델 직접 입력" value={current.model} title={current.model} onChange={event => selectModel(event.target.value)} /></label>
           {efforts.length > 0 && <Choice label="추론 강도" rows={rows([{ id: '', label: '기본(모델 기본값)' }, ...efforts.map(id => ({ id, label: id }))])}
             value={current.effort} onChange={effort => update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, effort } : s) })} />}
-          <Button variant="ghost" className="col-start-2 self-end justify-self-start" onClick={() => { setNotice(''); update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, model: selected.default_model, effort: '' } : s) }) }}>이 방식의 모델·강도 기본값</Button>
+          {/* 기본값 버튼은 제공자와 관계없이 묶음 머리 행 오른쪽 끝에 보인다. Tab은 입력 칸 다음에 오도록 DOM에서는 맨 뒤에 둔다. */}
+          <Button variant="outline" size="xs" className="col-start-2 row-start-1 self-center justify-self-end" onClick={() => { setNotice(''); update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, model: selected.default_model, effort: '' } : s) }) }}>
+            <RotateCcw aria-hidden="true" />이 방식의 모델·강도 기본값</Button>
         </div>
         {model.policy && <Notice tone={model.warning ? 'warning' : 'info'} role="note" aria-label="모델 정책" clamp={false}
           title={(model.training_warning || model.expired_warning) && <>

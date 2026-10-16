@@ -148,6 +148,15 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
             return {bottom: footer.bottom, top: footer.top, fields: last.bottom, height: innerHeight};
         })())"""))
         assert geometry['bottom'] <= geometry['height'] and geometry['fields'] <= geometry['top'], geometry
+        # 기본값 버튼은 모든 방식에서 모델 묶음 머리 행에 있어 따로 한 줄을 차지하지 않는다(#135).
+        reset = json.loads(js(window, f"""JSON.stringify((() => {{
+            const button = [...document.querySelectorAll('[role=dialog] button')].find(e => e.textContent === {json.dumps(RESET)}).getBoundingClientRect();
+            const select = document.querySelector('[aria-label="모델 목록"]').getBoundingClientRect();
+            const last = document.querySelector('[aria-label="{'모델 직접 입력' if provider == 'opencode_go' else '추론 강도'}"]').getBoundingClientRect();
+            const grid = document.querySelector('[aria-label="모델 목록"]').closest('.grid').getBoundingClientRect();
+            return {{button: button.bottom, select: select.top, last: last.bottom, grid: grid.bottom}};
+        }})())"""))
+        assert reset['button'] <= reset['select'] and reset['grid'] - reset['last'] < 1, reset
         capture(window, f'{provider}-key-{key}-expired-{expired}-long-{long_model}')
         view = window.web_host.view.focusProxy() or window.web_host.view
         QTest.keyClick(view, Qt.Key.Key_Tab)
@@ -170,6 +179,29 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
         rendered(window)
         QTest.keyClick(view, Qt.Key.Key_Escape)
         wait_for(lambda: not dialogs.active)
+    within(window.translations.settings, dialogs, check)
+
+
+RESET = '이 방식의 모델·강도 기본값'
+
+
+@pytest.mark.parametrize('provider,changed,default', [('codex', 'my-codex', 'gpt-5.6-terra'), ('opencode_go', 'custom-model', 'deepseek-v4.1-flash')])
+def test_reset_button_restores_provider_default_model_and_effort(window_factory, connected, provider, changed, default):
+    window = window_factory()
+    dialogs = window.web_host.dialogs
+    def check():
+        loaded(window)
+        choose(window, '번역 방식', provider)
+        input_text(window, '모델 직접 입력', changed)
+        if provider == 'codex':
+            choose(window, '추론 강도', 'max')
+        assert js(window, 'document.querySelector("[aria-label=\'모델 직접 입력\']").value') == changed
+        click(window, RESET)
+        assert js(window, 'document.querySelector("[aria-label=\'모델 직접 입력\']").value') == default
+        assert js(window, 'document.querySelector("[aria-label=\'모델 목록\']").dataset.value') == default
+        if provider == 'codex':
+            assert js(window, 'document.querySelector("[aria-label=\'추론 강도\']").dataset.value') == ''
+        click(window, '취소')
     within(window.translations.settings, dialogs, check)
 
 
