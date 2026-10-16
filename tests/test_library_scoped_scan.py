@@ -295,3 +295,46 @@ def test_scoped_scan_serializes_full_scan_before_rule_snapshot(tmp_path, monkeyp
         assert full.result(10) == ScanResult(1, ())
     assert second_rules.is_set()
     assert len(core.videos()) == 2
+
+
+@pytest.mark.parametrize("folders", ["문자열", Path("경로")])
+def test_scoped_scan_rejects_single_path_instead_of_list(core, folders):
+    with pytest.raises(TypeError):
+        core.scan(folders=folders)
+
+
+@pytest.mark.parametrize("notation", ["trailing", "case", "dotdot"])
+def test_scoped_scan_accepts_equivalent_path_notations(tmp_path, notation):
+    if notation == "case" and os.name != "nt":
+        pytest.skip("대소문자 구분 없는 경로 비교는 Windows에서만 확인한다")
+    media = Media()
+    core = open_core(tmp_path / "data/library.sqlite3", media)
+    path = video_file(tmp_path / "watched/nested")
+    core.add_watched_folder(path.parent.parent)
+    nested = path.parent
+    folder = {
+        "trailing": Path(str(nested) + os.sep),
+        "case": Path(str(nested).upper()),
+        "dotdot": nested / ".." / "nested",
+    }[notation]
+    assert core.scan(folders=[folder]) == ScanResult(1, ())
+    assert [os.path.normcase(str(read)) for read in media.reads] == [os.path.normcase(str(path))]
+
+
+def test_scoped_scan_resets_thumbnail_backfill_only_on_reconnection(core, tmp_path):
+    source = video_file(tmp_path / "watched/a")
+    target = tmp_path / "watched/b/moved.mkv"
+    target.parent.mkdir()
+    core.add_watched_folder(source.parent.parent)
+    core.scan()
+    core.settings.set("thumbnail.cursor", 1)
+    # 다시 연결이 없는 지정 검사는 백필 커서를 되돌리지 않는다.
+    assert core.scan(folders=[source.parent]) == ScanResult(0, ())
+    assert core.settings.get("thumbnail.cursor") == 1
+    source.rename(target)
+    assert core.scan(folders=[source.parent]) == ScanResult(0, ())
+    assert core.settings.get("thumbnail.cursor") == 1
+    # 다시 연결이 일어난 지정 검사는 백필 커서를 되돌려 다시 시도하게 한다.
+    result = core.scan(folders=[target.parent])
+    assert result.reconnected
+    assert core.settings.get("thumbnail.cursor") is None

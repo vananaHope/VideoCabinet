@@ -361,14 +361,22 @@ class Library:
         watched = [folder.path for folder in self.watched_folders()]
         if folders is None:
             return watched
+        if isinstance(folders, (str, os.PathLike)):
+            raise TypeError("folders에는 경로 목록을 넘겨야 합니다.")
         roots = []
+        logger = logging.getLogger(__name__)
         for folder in folders:
             # resolve 전에 연결의 각 경로 구성 요소를 확인한다. 감시 폴더 내부로
             # 향하는 정션도 직접 지정해서 순회 규칙을 우회할 수 없다.
             path = Path(os.path.abspath(folder))
             parents = [root for root in watched if path.is_relative_to(root)]
             if not parents:
-                logging.getLogger(__name__).info("감시 폴더 밖 검사 경로를 건너뜁니다: %s", path)
+                # 감시 폴더는 해석된 형태로 저장되므로 subst 드라이브나 8.3 이름처럼
+                # 다른 표기로 들어온 같은 폴더는 실제 경로로 해석한 뒤 다시 확인한다.
+                path = path.resolve(strict=False)
+                parents = [root for root in watched if path.is_relative_to(root)]
+            if not parents:
+                logger.info("감시 폴더 밖 검사 경로를 건너뜁니다: %s", path)
                 continue
             root = min(parents, key=lambda item: len(item.parts))
             linked = False
@@ -384,7 +392,7 @@ class Library:
                         linked = True
                         break
                 if linked:
-                    logging.getLogger(__name__).info("연결된 검사 경로를 건너뜁니다: %s", path)
+                    logger.info("연결된 검사 경로를 건너뜁니다: %s", path)
                     continue
             except OSError:
                 # 접근 실패는 순회에서 ScanIssue로 보고하고 캐시를 보존한다.

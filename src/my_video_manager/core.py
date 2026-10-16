@@ -754,6 +754,9 @@ class AppCore:
     def scan(self, *, folders: Iterable[Path] | None = None) -> ScanResult:
         """감시 폴더 전체 또는 지정한 하위 폴더를 검사한다. 범위 밖 입력은 건너뛴다.
 
+        `folders`에는 `watched_folders()`가 돌려준 경로 아래 폴더의 `Path` 목록을
+        넘긴다. 밖이거나 감시 해제된 경로는 건너뛰고 로그만 남긴다. 단일 `str`이나
+        `PathLike`를 그대로 넘기면 `TypeError`다.
         인자가 없으면 직접 추가한 위치도 확인한다. 빈 목록은 아무것도 검사하지 않는다.
         전체/지정 폴더 검사는 자동 자막 규칙 적용과 후처리까지 순서대로 실행한다.
         """
@@ -761,7 +764,7 @@ class AppCore:
             rules = self._auto_subtitle_rules.list()
             result = self._library.scan(
                 folders=folders, on_registered=lambda video_id: self._auto_subtitle_rules.apply(video_id, rules=rules))
-            if folders is None:
+            if folders is None or result.reconnected:
                 self._thumbnail_backfill.retry_unavailable()
             self._series.regroup(self.videos() + self.excluded_videos())
             return result
