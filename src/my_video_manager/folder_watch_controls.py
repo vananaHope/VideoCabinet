@@ -121,15 +121,20 @@ class FolderWatchControls(QObject):
         self._full_scan = False
         self._pending.clear()
         known = self._reported
+        # 조용한 완료 판단의 근거. 완료 신호보다 먼저 작업자에서 채워진다.
+        anchors = KnownIssues()
 
         def scan():
             result = self.core.scan() if folders is None else self.core.scan(folders=folders)
             # 검사한 범위의 안내만 이번 결과로 바꾼다. 작업자는 한 번에 하나라 경합하지 않는다.
-            kept = () if folders is None else (issue for issue in known.issues if not within(issue.path, folders))
+            kept = () if folders is None else tuple(
+                issue for issue in known.issues if not within(issue.path, folders))
+            # 범위 밖 기억과 이번에 그대로 다시 나온 기억만 근거로 삼아, 재연결 직후 새 원인의 실패는 알린다.
+            anchors.issues = frozenset((*kept, *(issue for issue in known.issues if issue in result.issues)))
             self._reported = KnownIssues((*kept, *result.issues))
             return result
 
-        self.library.scan(operation=scan, quiet_if_unchanged=True, known_issues=known)
+        self.library.scan(operation=scan, quiet_if_unchanged=True, known_issues=anchors)
 
 
 class KnownIssues:

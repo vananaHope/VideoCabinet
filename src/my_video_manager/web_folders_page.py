@@ -138,7 +138,8 @@ class WebFoldersPage(WebPageController):
         return dict(folders=[str(folder.path) for folder in self.core.watched_folders()],
                     excluded=rows(self.core.excluded_videos()), dismissed=rows(self.core.dismissed_videos()),
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,
-                    report=self.report, automaticDetection=watch.enabled, unwatched=list(self.unwatched))
+                    report=self.report, automaticDetection=watch.enabled, unwatched=list(self.unwatched),
+                    watchStartFailed=watch.enabled and watch.start_failed)
 
     def refresh(self):
         if self.is_active():

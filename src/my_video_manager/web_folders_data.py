@@ -18,3 +18,4 @@ class FoldersData(TypedDict):
     report: str
     automaticDetection: bool
     unwatched: list[str]
+    watchStartFailed: bool

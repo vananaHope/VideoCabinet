@@ -183,10 +183,12 @@ def test_full_exit_stops_watch_before_pending_batches_run(app, monkeypatch):
     gate.set()
     stops = []
     stop = window.folder_watch.watch.stop
-    monkeypatch.setattr(window.folder_watch.watch, 'stop', lambda: (stops.append(window.worker), stop()))
+    # 끊긴 드라이브에서 정지가 기다려도 보이지 않게 창과 트레이 아이콘을 먼저 숨긴다.
+    monkeypatch.setattr(window.folder_watch.watch, 'stop', lambda: (
+        stops.append((window.worker, window.isVisible(), window.tray.icon.isVisible())), stop()))
     wait_for(lambda: window.worker is None and len(scans) == 2)
     window.tray.quit()
-    assert window.tray.quitting and stops == [None] and watcher.stops >= 1
+    assert window.tray.quitting and stops == [(None, False, False)] and watcher.stops >= 1
     window.folder_watch.batch_ready.emit((folder / 'b',))
     settle(300)
     assert len(scans) == 2
@@ -347,3 +349,113 @@ def test_disconnected_root_failure_is_reported_once_and_again_after_reconnect(ap
     batch(folder)
     assert str(folder) in folders.report
     detached.rename(folder)
+
+
+def test_new_failure_after_reconnect_is_reported(app, monkeypatch):
+    # 끊긴 루트를 알린 뒤 재연결 검사에서 다른 원인의 실패가 나오면 조용히 넘기지 않는다.
+    core, folder, scans, order, _, create = app
+    window = create(RecordingWatcher(order))
+    wait_for(lambda: scans == [None] and window.worker is None)
+    folders = window.web_host.controllers['folders']
+    detached = folder.with_name('detached')
+
+    def batch(*paths):
+        count = len(scans)
+        window.folder_watch.batch_ready.emit(paths)
+        wait_for(lambda: len(scans) == count + 1 and window.worker is None)
+
+    folder.rename(detached)
+    batch(folder)
+    assert str(folder) in folders.report
+    folders.report_scan('사용자가 본 다른 안내')
+    detached.rename(folder)
+    broken = folder / 'a' / 'broken.mkv'
+    broken.write_bytes(b'locked by another program')
+    read = core._media.read
+
+    def locked(path):
+        if path.name == broken.name:
+            raise OSError('다른 프로세스가 파일을 사용 중입니다')
+        return read(path)
+
+    monkeypatch.setattr(core._media, 'read', locked)
+    batch(folder)
+    assert '다른 프로세스가 파일을 사용 중입니다' in folders.report
+
+
+def test_same_path_with_new_cause_is_reported(app, monkeypatch):
+    core, folder, scans, order, _, create = app
+    window = create(RecordingWatcher(order))
+    wait_for(lambda: scans == [None] and window.worker is None)
+    folders = window.web_host.controllers['folders']
+    root = core.watched_folders()[0].path
+    results = [ScanResult(0, (ScanIssue(root, '폴더를 찾을 수 없습니다.'),)),
+               ScanResult(0, (ScanIssue(root, '액세스가 거부되었습니다.'),))]
+
+    def scan(*, folders=None):
+        scans.append(folders)
+        return results.pop(0)
+
+    monkeypatch.setattr(core, 'scan', scan)
+    for expected in ('폴더를 찾을 수 없습니다', '액세스가 거부되었습니다'):
+        count = len(scans)
+        window.folder_watch.batch_ready.emit((root,))
+        wait_for(lambda: len(scans) == count + 1 and window.worker is None)
+        assert expected in folders.report
+        folders.report_scan('사용자가 본 다른 안내')
+
+
+def test_batches_wait_while_folder_action_is_busy(app):
+    core, folder, scans, order, _, create = app
+    window = create(RecordingWatcher(order))
+    wait_for(lambda: scans == [None] and window.worker is None)
+    bridge = window.web_host.controllers['folders'].bridge
+    bridge.busy = True
+    window.folder_watch.batch_ready.emit((folder / 'a',))
+    settle(1200)  # 0.5초 재시도가 두 번 지나도 사용자 작업 중에는 시작하지 않는다.
+    assert scans == [None] and window.worker is None
+    bridge.busy = False
+    wait_for(lambda: len(scans) == 2 and window.worker is None)
+    settle(700)
+    assert scans == [None, (folder / 'a',)]
+
+
+def test_batches_held_during_quit_confirmation_run_after_cancel(app):
+    core, folder, scans, order, _, create = app
+    window = create(RecordingWatcher(order))
+    wait_for(lambda: scans == [None] and window.worker is None)
+    window.tray.quitting = True
+    window.folder_watch.batch_ready.emit((folder / 'b',))
+    settle(700)
+    assert scans == [None]
+    # 종료 확인에서 취소하면 tray가 quitting을 되돌리고 resume()한다.
+    window.tray.quitting = False
+    window.tray.resume()
+    wait_for(lambda: len(scans) == 2 and window.worker is None)
+    assert scans == [None, (folder / 'b',)]
+
+
+@pytest.mark.parametrize('control', ['automatic', 'minimum'])
+def test_settings_button_keeps_focus_after_keyboard_save(app, control):
+    core, folder, scans, order, _, create = app
+    window = create(RecordingWatcher(order))
+    wait_for(lambda: scans == [None] and window.worker is None)
+    window.navigate_web_tab('settings')
+    host = window.web_host
+
+    def js(source):
+        values = []
+        host.engine_page.runJavaScript(source, values.append)
+        wait_for(lambda: bool(values))
+        return values[0]
+
+    button = ('document.getElementById("settings-automatic-detection-toggle")' if control == 'automatic'
+              else 'document.querySelector("#settings-minimum").parentElement.querySelector("button")')
+    # 탭 진입의 기본 포커스(분류 버튼)가 먼저 자리 잡은 뒤 누른다.
+    wait_for(lambda: js('!!document.activeElement?.closest("#settings-category")') and js(f'!!{button}'))
+    for _ in range(2):
+        js(f'{button}.focus(); {button}.click(); true')
+        settle(300)
+        wait_for(lambda: window.worker is None)
+        settle(300)
+        assert js(f'document.activeElement === {button}')

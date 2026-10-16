@@ -605,6 +605,7 @@ export interface FoldersData {
   report: string
   automaticDetection: boolean
   unwatched: Array<string>
+  watchStartFailed: boolean
 }
 
 export type FolderAction = "addFolder" | "removeFolder" | "scan" | "addFile" | "restoreExcluded" | "restoreDismissed" | "manageTags"

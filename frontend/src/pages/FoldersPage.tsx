@@ -44,7 +44,7 @@ export default function FoldersPage() {
     <PageHeader title="폴더 관리" description="감시 폴더의 하위 폴더까지 검사합니다. 실제 파일과 영상 기록은 유지합니다." actions={<Button variant="outline" onClick={() => act('manageTags')}>모든 태그 관리</Button>} />
     <NoticeStack items={[
       error && { tone: "error", message: error, onDismiss: () => setError("") },
-      data.unwatched.length > 0 && { key: "unwatched", tone: "warning", title: `감시하지 못하는 폴더 ${data.unwatched.length}개`, message: `연결과 권한을 확인한 뒤 설정에서 자동 감지를 껐다 켜면 다시 시도합니다. 그동안 바뀐 파일은 다시 검사로 반영하세요.\n${data.unwatched.join("\n")}` },
+      data.unwatched.length > 0 && { key: "unwatched", tone: "warning", title: `감시하지 못하는 폴더 ${data.unwatched.length}개`, message: data.watchStartFailed ? "자동 감지를 시작하지 못했습니다. 설정에서 자동 감지를 껐다 켜면 다시 시도합니다." : "연결되면 자동으로 다시 감시하고 바뀐 파일을 검사합니다." },
       !data.automaticDetection && { tone: "info", message: "자동 감지가 꺼져 있습니다. 파일을 옮긴 뒤에는 다시 검사를 누르세요." },
     ]} />
     <div className="flex flex-wrap gap-2">
