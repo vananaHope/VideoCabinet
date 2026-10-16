@@ -200,6 +200,94 @@ Ctrl+C로 빌드를 중단하면 PowerShell이 실패 복구 catch를 건너뛸 
 `-DryRun -Build`의 빌드 산출물은 Git에서 제외된 폴더에 남으며 tracked 파일과 커밋은 그대로입니다.
 
 
+## 업데이트 매니페스트와 서명 키 (#138)
+
+`scripts/generate_update_key.py`와 `scripts/generate_update_manifest.py`는 로컬에서
+키·매니페스트·서명을 만드는 독립 도구입니다. 빌드·릴리스 연결과 GitHub 업로드는
+후속 #139의 범위이며, 앱 안 업데이트 확인·다운로드도 아직 연결하지 않습니다.
+런타임 검증 의존성은 `cryptography==50.0.2`로 고정합니다.
+
+### 사람이 한 번 준비할 키
+
+**실제 릴리스 키는 사람이 생성·보관하고 공개 키만 코드에 반영합니다.** 현재
+`src/my_video_manager/update_manifest.py`의 `UPDATE_PUBLIC_KEY = b''`는 의도적으로
+검증을 항상 실패시키는 자리 표시 값입니다. 키 생성 도구는 교체할 상수 선언을 출력하며
+소스는 직접 수정하지 않습니다. 개인 키나 암호를 코드·Git·로그·이슈에 붙여 넣지 마세요.
+
+기본 개인 키 경로는 `%APPDATA%\my-video-manager\release-keys\update-ed25519.pem`이며,
+`APPDATA`가 없으면 `~/.config/my-video-manager/release-keys/update-ed25519.pem`입니다.
+`--private-key <경로>`로 바꿀 수 있지만 저장소·worktree 안 경로와 UNC·매핑된 네트워크 드라이브는 거부합니다.
+심볼릭 링크·정션을 해석한 실제 경로와 입력 경로를 모두 검사하며 기존 키는 덮어쓰지 않습니다.
+사용자만 접근할 수 있는 로컬 폴더를 선택하고 별도의 안전한 백업을 유지하세요.
+
+```powershell
+# 기본: 암호화 PKCS8 PEM. 터미널에서 암호와 확인 암호를 숨겨 입력합니다.
+.venv/Scripts/python.exe scripts/generate_update_key.py
+
+# 선택: 암호 없는 PKCS8 PEM. 파일 접근 권한·백업 보호에 전적으로 의존합니다.
+.venv/Scripts/python.exe scripts/generate_update_key.py --no-password
+```
+
+두 명령 중 하나만 실행합니다. 출력의 `UPDATE_PUBLIC_KEY = bytes.fromhex('...')` 선언을
+앱 코드의 자리 표시 값과 교체하고, 공개 키 변경을 검토·커밋한 뒤 앱을 빌드합니다.
+기존 키를 잃거나 바꾸면 기존 공개 키로 새 서명을 검증할 수 없으므로 임의로 재생성하지 마세요.
+공개 키를 반영한 앱으로 테스트용 매니페스트를 검증한 뒤 실제 발행에 사용합니다.
+
+암호화 키는 파일만 유출돼도 암호가 추가로 필요하지만 자동화에서 암호를 공급해야 합니다.
+생성·서명 도구는 `MVM_UPDATE_SIGNING_PASSWORD` 환경 변수를 먼저 읽고, 값이 없으면
+대화형 터미널에서만 암호를 묻습니다. 비대화형에서는 환경 변수가 없다는 오류로 멈춥니다.
+관리자 에이전트가 비대화형 PowerShell로 릴리스할 때는 비밀 저장소에서 이 프로세스의 환경에
+암호를 주입하거나, 사람이 선택한 `--no-password` 키를 사용하세요. 암호를 명령행 인수나
+저장소의 `.env` 파일에 넣지 않습니다. 도구는 암호나 개인 키 내용을 출력하지 않습니다.
+
+### 매니페스트 만들기
+
+전체·패치 설치 파일과 빌드가 만든 `runtime-fingerprint.json`을 입력합니다.
+이전 릴리스의 지문은 그 릴리스의 보관된 빌드 산출물을 사용하며 현재 환경에서 재계산하지 않습니다.
+
+```powershell
+# 최초 릴리스: 이전 지문·패치 인수를 생략합니다.
+.venv/Scripts/python.exe scripts/generate_update_manifest.py --version 0.5.0 --runtime-fingerprint dist/my-video-manager/runtime-fingerprint.json --full dist/installer/MyVideoManager-Setup-0.5.0.exe
+
+# 이전 릴리스와 지문이 같은 경우: 패치 파일이 필수입니다.
+.venv/Scripts/python.exe scripts/generate_update_manifest.py --version 0.5.1 --runtime-fingerprint dist/my-video-manager/runtime-fingerprint.json --previous-runtime-fingerprint C:/release-archive/0.5.0/runtime-fingerprint.json --full dist/installer/MyVideoManager-Setup-0.5.1.exe --patch dist/installer/MyVideoManager-Patch-0.5.1.exe
+```
+
+런타임이 바뀐 경우에는 이전 지문 인수를 주되 `--patch`는 생략합니다.
+버전은 릴리스 도구와 같은 `X.Y.Z` 형식이며, 파일은 한 번씩 스트리밍하여 바이트 크기와 SHA-256을 계산합니다.
+기본 출력은 `dist/installer/update-manifest.json`과 `update-manifest.json.sig`입니다.
+`--output <매니페스트 경로>`를 바꾸면 서명은 그 경로에 `.sig`를 붙입니다.
+기존 출력은 덮어쓰지 않으며 쓰기 실패 시 이번 실행이 새로 만든 파일만 정리합니다.
+강제 종료로 파일 하나만 남았으면 그 실행의 산출물을 확인·제거한 뒤 재실행합니다.
+
+schema 1의 필드는 다음과 같습니다. 모르는 필드와 일관되지 않은 조합도 거부합니다.
+
+| 필드 | 의미 |
+|---|---|
+| `schema_version` | 정수 `1`; 모르는 버전은 거부 |
+| `version` | 릴리스 버전 `X.Y.Z` |
+| `runtime_fingerprint` | 이번 빌드의 검증된 SHA-256 런타임 지문 |
+| `previous_runtime_fingerprint` | 이전 릴리스 지문; 최초 릴리스는 `null` |
+| `full` | `filename`, 양의 정수 `size`(바이트), 소문자 64자리 `sha256` |
+| `patch` | 같은 구조의 패치 자산; 지문 변경·최초 릴리스는 `null` |
+| `patch_available` | 이전 릴리스와 지문이 같으면 `true`이며 이때 `patch` 필수 |
+
+`patch_available`은 이전 릴리스와 비교한 **패치 발행 여부**입니다. 실제 설치 가능 여부는
+사용자의 **설치본 지문과 이번 지문이 같은지**로 판단해야 합니다. 두 버전 이상 앞선 설치본도
+지문이 같으면 패치를 적용할 수 있으며, 바로 이전 버전이라는 이유만으로 허용하면 안 됩니다.
+
+서명 파일은 base64가 아닌 **64바이트 raw Ed25519 서명**입니다. 서명 대상은 출력 JSON의
+정확한 바이트 전체이므로 공백·줄바꿈을 바꾸거나 JSON을 다시 저장하면 검증에 실패합니다.
+`verify_manifest(data: bytes, signature: bytes)`는 앱의 공개 키로 **서명 확인 → UTF-8 디코딩 →
+JSON 파싱 → schema 검증** 순서로 처리하고 불변 `UpdateManifest`를 반환합니다.
+명시적 `public_key=`는 테스트·오프라인 검증 도구용이며 다운로드한 매니페스트의 키를 전달하지 않습니다.
+
+거부 시 `ManifestError.kind`는 `invalid_public_key`, `invalid_signature_format`,
+`invalid_signature`, `invalid_json`, `unsupported_schema`, `invalid_format`을 구별합니다.
+다른 키의 서명·변조·길이는 맞지만 깨진 서명은 암호학적으로 구별할 수 없으므로 모두
+`invalid_signature`입니다. 잘못된 서명 길이는 `invalid_signature_format`입니다.
+실패하면 업데이트 확인 호출부는 매니페스트 필드를 사용하지 않아야 합니다.
+
 ## 자막 기능 준비 API
 
 작업자 스레드에서
