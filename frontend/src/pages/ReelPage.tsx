@@ -33,6 +33,7 @@ export default function ReelPage() {
   }, [showError])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
   // 완료 안내가 사라지면(새로고침·필터·탭 이동) 닫은 기록도 지워 다음 완료 때 다시 보인다.
+  // 재생에서 돌아올 때는 빈 상태 없이 같은 문구가 다시 올 수 있어 play()에서도 지운다.
   useEffect(() => { if (!data?.status) setHiddenStatus("") }, [data?.status])
   const entries = data?.entries ?? []
   const selected = entries.find(entry => entry.id === data?.selectedId)
@@ -43,7 +44,11 @@ export default function ReelPage() {
     document.getElementById(`reel-${id}`)?.scrollIntoView({ block: "nearest" })
   }
   function play(id: number) {
-    if (bridge) { setError(""); request(reply => bridge.play(id, reply)).catch(showError) }
+    if (!bridge) return
+    // 재생 요청이 새 모아보기의 시작이다. 코어도 이때 완료 안내를 비우므로 화면도 비우고 닫은 기록을 지워,
+    // 같은 완료 문구가 다시 와도 새 완료로 보인다.
+    setError(""); setHiddenStatus(""); setData(current => current?.status ? { ...current, status: "" } : current)
+    request(reply => bridge.play(id, reply)).catch(showError)
   }
   return <main aria-label="하이라이트 모아보기" onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) { event.preventDefault(); goHome.current() } }} className="flex h-full flex-col gap-3 p-4">
     <PageHeader title="하이라이트 모아보기" description="모든 영상의 하이라이트를 이어서 봅니다. 시청 기록과 별도로 복습을 기록합니다." />
@@ -56,14 +61,14 @@ export default function ReelPage() {
       <Button variant="outline" onClick={() => { if (bridge) request(reply => bridge.refresh(reply)).catch(showError) }}>목록 갱신</Button>
     </div>
     {/* 재생 요청 실패와 모아보기 완료 안내를 목록 위 한곳에 쌓는다. 아래 줄은 늘 목록 설명을 보인다. */}
-    <NoticeStack items={[
+    <NoticeStack layout="yield" items={[
       error && { tone: "error", message: error, onDismiss: () => setError("") },
       data?.status && data.status !== hiddenStatus && { tone: "success", message: data.status, onDismiss: () => setHiddenStatus(data.status) },
     ]} />
     <div id="reel-list" role="listbox" aria-label="모든 영상의 하이라이트" aria-activedescendant={selected ? `reel-${selected.id}` : undefined} tabIndex={0}
       onScroll={event => { if (event.currentTarget.offsetParent) scroll.current = event.currentTarget.scrollTop }}
       onKeyDown={event => listKey(event, entries.length, entries.findIndex(e => e.id === selected?.id), select, () => { if (selected?.playable) play(selected.id) })}
-      className="min-h-0 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
+      className="min-h-32 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
       {!entries.length ? <EmptyState title={data?.emptyTitle ?? "불러오는 중…"} description={data?.emptyDescription ?? ""} /> : entries.map((entry, index) => <ResultRow key={entry.id} id={`reel-${entry.id}`} selected={entry.id === selected?.id}
         onClick={() => { select(index); document.getElementById("reel-list")?.focus({ preventScroll: true }) }} onDoubleClick={() => { if (entry.playable) play(entry.id) }}>
         <div className="relative flex aspect-video w-32 shrink-0 items-center justify-center self-start overflow-hidden rounded-md bg-muted"><Film aria-hidden="true" className="absolute size-8 text-muted-foreground" />{entry.thumbnail && <img src={entry.thumbnail} alt="" loading="lazy" onError={event => { event.currentTarget.hidden = true }} className="relative h-full w-full object-cover" />}</div>

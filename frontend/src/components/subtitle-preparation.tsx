@@ -27,11 +27,11 @@ export default function SubtitlePreparation() {
     setError('')
     if (bridge) request(reply => bridge.preparationAction(name, reply)).catch(error => setError(String(error)))
   }
-  // 사용자가 취소한 준비는 실패가 아니라 다시 시도를 기다리는 상태다.
+  // 사용자가 취소한 준비는 실패가 아니라 다시 시도를 기다리는 상태다. 낭독 강도(role)는 위계를 따른다(오류만 alert).
   const failed = data.state === 'failed'
   const tone = failed ? data.kind === 'cancelled' ? 'warning' : 'error' : 'info'
-  return <section aria-label="자막 기능 준비" className="flex shrink-0 flex-col gap-2 border-b px-4 py-2">
-    <Notice tone={tone} title="자막 기능 준비" role={failed ? 'alert' : 'status'} clamp={false}
+  return <section aria-label="자막 기능 준비" className="flex flex-col gap-2 border-b px-4 py-2">
+    <Notice tone={tone} title="자막 기능 준비" clamp={false}
       action={failed ? <Button size="sm" onClick={() => action('retry')}>다시 시도</Button> : <Button size="sm" variant="outline" disabled={data.state === 'cancelling'} onClick={() => action('cancel')}>취소</Button>}>
       <div className="flex min-w-0 items-start gap-3"><p className="line-clamp-2 min-w-0 flex-1" title={data.message}>{data.message}</p>{data.percent !== null && <span className="shrink-0 tabular-nums">{data.percentLabel}</span>}</div>
       {data.state === 'preparing' && <><p className="text-xs text-muted-foreground">{data.summary}</p><Progress value={data.percent} aria-label="자막 기능 준비 진행률" /></>}

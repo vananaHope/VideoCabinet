@@ -163,3 +163,26 @@ def test_request_notice_uses_manifest_and_disappears_when_ready(window_factory, 
     assert preparation_download_label() in model.snapshot()['information']
     monkeypatch.setattr(core, 'subtitle_support_status', lambda: dict(kind='ready'))
     assert model.snapshot()['information'] == ''
+
+
+@pytest.mark.parametrize('kind,tone,role', [('cancelled', 'warning', 'status'), ('server', 'error', 'alert')])
+def test_preparation_notice_role_follows_tone(window_factory, kind, tone, role):
+    # 사용자가 취소한 준비는 경고(status)이고, 실제 실패만 오류(alert)로 낭독한다(#134 R3).
+    from my_video_manager.subtitle_preparation_ui import preparation_state
+    from test_web_statistics import wait_for
+    window = window_factory()
+    window.subtitles.timer.stop()
+    host = window.web_host
+
+    def js(source):
+        result = []
+        host.engine_page.runJavaScript(source, result.append)
+        wait_for(lambda: bool(result))
+        return result[0]
+
+    wait_for(lambda: js("!!document.querySelector('nav [data-tab]')"))
+    window.subtitles.set_preparation(preparation_state('failed', kind=kind, message='자막 기능 준비 안내'))
+    notice = "document.querySelector('section[aria-label=\"자막 기능 준비\"] [data-slot=notice]')"
+    wait_for(lambda: js(f"!!{notice}"))
+    assert js(f"{notice}.dataset.tone") == tone
+    assert js(f"{notice}.getAttribute('role')") == role

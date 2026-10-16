@@ -8,7 +8,8 @@ import { QueueStore } from "./queue-store"
 const columns = "grid grid-cols-6 gap-3 px-3"
 const wide = "col-span-2 min-w-0"
 const rowClass = cva(`${columns} items-center border-b py-1 text-sm`, { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
-const listClass = cva("min-h-0 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border" } } })
+// 안내가 많아도 머리글과 행 세 개 이상이 보이는 높이를 지킨다.
+const listClass = cva("min-h-32 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border" } } })
 const trackClass = cva("h-2 w-full rounded-full", { variants: { selected: { true: "bg-muted-foreground", false: "bg-muted" } } })
 const badges = { completed: "success", failed: "destructive", transcribing: "info", translating: "info", held: "highlight", queued: "muted" } as const
 // 행 안내의 위계: 실패 사유는 오류, 보류 사유는 경고, 그 밖의 안내(말소리 없음·이어받기 등)는 정보다.

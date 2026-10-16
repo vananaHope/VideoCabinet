@@ -327,3 +327,50 @@ def test_no_speech_completion_status_and_tray_notice(setup, qapp, monkeypatch):
         window.tray.quit()
         window.deleteLater()
         qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_expanding_every_long_notice_keeps_queue_rows_visible(window_factory, core):
+    # 셸 작업 알림과 대기열 오류·결과가 모두 긴 문구이고 '전체 보기'를 전부 펼쳐도,
+    # 1100×720에서 대기열 머리글과 행 세 개, 아래 버튼이 보여야 한다(#134 R1).
+    import os
+    from pathlib import Path
+    from test_web_statistics import wait_for
+    long = ('OpenCode Go 서버가 요청을 거절했습니다. 네트워크 연결과 키 상태를 확인한 뒤 다시 시도하세요. '
+            '같은 문제가 이어지면 다른 번역 방식을 고르거나 잠시 뒤 실패 항목을 다시 시도하세요. ') * 3
+    for video in core.videos():
+        core.request_subtitles(video.id)
+    window = window_factory()
+    window.resize(1100, 720)
+    window.subtitles.timer.stop()
+    window.navigate_web_tab('queue')
+    host = window.web_host
+
+    def js(source):
+        result = []
+        host.engine_page.runJavaScript(source, result.append)
+        wait_for(lambda: bool(result))
+        return result[0]
+
+    wait_for(lambda: js("document.querySelectorAll('#queue-list [data-queue-row]').length") == 3)
+    window.show_status('번역 처리 실패: ' + long)
+    host.controllers['queue'].bridge.bulkFinished.emit(json.dumps({'error': long, 'message': '재시도 결과 · ' + long}))
+    expand = "[...document.querySelectorAll('button')].filter(b => b.textContent === '전체 보기' && b.getClientRects().length)"
+    wait_for(lambda: js(f"{expand}.length") == 3)
+    js(f"{expand}.forEach(b => b.click())")
+    wait_for(lambda: js("[...document.querySelectorAll('button')].filter(b => b.textContent === '접기').length") == 3)
+    js('window.queueNoticeRendered = false; requestAnimationFrame(() => requestAnimationFrame(() => { window.queueNoticeRendered = true }))')
+    wait_for(lambda: js('window.queueNoticeRendered'))
+    layout = json.loads(js("""JSON.stringify((() => {
+        const grid = document.querySelector('#queue-list[role=grid]').getBoundingClientRect()
+        const rows = [...document.querySelectorAll('#queue-list [data-queue-row]')].map(row => row.getBoundingClientRect().bottom)
+        const button = [...document.querySelectorAll('button')].find(b => b.textContent === '실패 항목 모두 재시도').getBoundingClientRect()
+        return { top: grid.top, height: grid.height, bottom: grid.bottom, rows, button: button.bottom, viewport: innerHeight }
+    })())"""))
+    assert layout['height'] >= 120, layout
+    assert all(bottom <= layout['bottom'] for bottom in layout['rows']), layout
+    assert layout['bottom'] <= layout['button'] <= layout['viewport'], layout
+    if output := os.environ.get('MVM_NOTICE_SCREEN_DIR'):
+        Path(output).mkdir(parents=True, exist_ok=True)
+        pixmap = window.grab()
+        assert (pixmap.width(), pixmap.height()) == (1100, 720)
+        assert pixmap.save(str(Path(output) / 'queue-long-notices-all-expanded.png'))

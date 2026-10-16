@@ -112,8 +112,17 @@ export type NoticeItem = {
   label?: string
 }
 
+/**
+ * 높이 정책. 목록이 있는 페이지는 yield를 쓴다. 안내 묶음은 목록이 최소 높이를 지키고 남은 자리까지만 차지하고,
+ * 넘치면 묶음 안에서 스크롤한다. 그래도 안내 한 줄 높이는 남겨 오류가 통째로 가려지지 않게 한다.
+ */
+const stackVariants = cva("flex min-w-0 flex-col gap-2", {
+  variants: { layout: { auto: "", yield: "min-h-10 shrink overflow-y-auto" } },
+  defaultVariants: { layout: "auto" },
+})
+
 /** 쌓는 순서는 오류 → 경고 → 성공 → 정보다. 기본 세 개까지 보이고 나머지는 “더 보기”로 펼친다. */
-function NoticeStack({ items, max = 3, size, clamp, className, ...props }: Omit<React.ComponentProps<"div">, "children"> & {
+function NoticeStack({ items, max = 3, size, clamp, layout, className, ...props }: Omit<React.ComponentProps<"div">, "children"> & VariantProps<typeof stackVariants> & {
   items: readonly (NoticeItem | false | null | undefined | "")[]
   max?: number
   size?: VariantProps<typeof noticeVariants>["size"]
@@ -136,7 +145,7 @@ function NoticeStack({ items, max = 3, size, clamp, className, ...props }: Omit<
   const hidden = Math.max(0, visible.length - max)
   const shown = expanded ? visible : visible.slice(0, max)
   return (
-    <div data-slot="notice-stack" className={cn("flex min-w-0 flex-col gap-2", className)} {...props}>
+    <div data-slot="notice-stack" className={cn(stackVariants({ layout }), className)} {...props}>
       {shown.map(({ item, index }) => (
         <Notice key={item.key ?? (typeof item.message === "string" ? item.message : index)} tone={item.tone} size={size} clamp={clamp} title={item.title}
           action={item.action} onDismiss={item.onDismiss} role={item.role} aria-label={item.label}>
