@@ -9,7 +9,7 @@ import pytest
 
 from my_video_manager.app_version import current_version
 from my_video_manager.core import AppCore
-from my_video_manager import update_manifest
+from my_video_manager import update_check, update_manifest
 from my_video_manager.update_check import (
     AUTO_CHECK_KEY, LAST_CHECK_KEY, LATEST_RELEASE_URL, InstalledUpdateInfo,
 )
@@ -66,7 +66,8 @@ def clock():
 
 
 @pytest.fixture
-def core(tmp_path, clock):
+def core(tmp_path, clock, monkeypatch):
+    monkeypatch.setattr(update_check, 'current_version', lambda: '1.0.0')
     return AppCore(media=object(), clock=clock, database=tmp_path / 'library.sqlite3')
 
 
@@ -210,6 +211,47 @@ def test_startup_interval_boundaries(core, clock, http, elapsed, expected):
     assert core.should_check_for_update() is expected
 
 
+def test_installed_version_change_marks_history_stale_and_allows_startup(core, clock, http, monkeypatch):
+    assert check(core, http).kind == 'patch'
+    assert not core.last_update_check().stale
+    clock.now += timedelta(hours=1)
+    monkeypatch.setattr(update_check, 'current_version', lambda: '1.2.3')
+    reopened = AppCore(media=object(), clock=clock, database=core.database)
+    history = reopened.last_update_check()
+    assert history.stale
+    assert history.current_version == '1.0.0'
+    assert history.latest_version == '1.2.3'
+    assert reopened.should_check_for_update()
+    reopened.set_automatic_update_check_enabled(False)
+    assert not reopened.should_check_for_update()
+    assert check(reopened, http, version='1.2.3').kind == 'none'
+    assert not reopened.last_update_check().stale
+    reopened.set_automatic_update_check_enabled(True)
+    assert not reopened.should_check_for_update()
+
+
+@pytest.mark.parametrize('reason,hours', [
+    ('network', 3), ('timeout', 3), ('http_403', 24), ('http_429', 24),
+    ('invalid_signature', 24), ('invalid_format', 24),
+])
+def test_failure_retry_interval_boundaries(core, clock, http, reason, hours):
+    http.failure = UpdateCheckError(reason)
+    assert check(core, http).failure_reason == reason
+    clock.now = NOW + timedelta(hours=hours) - timedelta(seconds=1)
+    assert not core.should_check_for_update()
+    clock.now += timedelta(seconds=1)
+    assert core.should_check_for_update()
+
+
+def test_empty_public_key_records_failure_without_http(core, http, monkeypatch):
+    monkeypatch.setattr(update_manifest, 'UPDATE_PUBLIC_KEY', b'')
+    result = check(core, http)
+    assert result.kind == 'failed'
+    assert result.failure_reason == 'invalid_public_key'
+    assert core.last_update_check() == result
+    assert not http.calls
+
+
 def test_timezone_and_naive_clock(core, clock, http):
     clock.now = NOW.astimezone(timezone(timedelta(hours=9)))
     assert check(core, http).checked_at == NOW
@@ -235,7 +277,8 @@ def test_invalid_boolean_uses_default_and_rejects_new_bad_value(core):
         core.set_automatic_update_check_enabled('false')
 
 
-def test_real_installation_adapter_uses_package_version_without_subprocess(core):
+def test_real_installation_adapter_uses_package_version_without_subprocess(core, monkeypatch):
+    monkeypatch.setattr(update_check, 'current_version', current_version)
     installed = core.installed_update_info()
     assert installed.version == current_version()
     assert installed.runtime_fingerprint is None  # source checkout

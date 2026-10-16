@@ -5,6 +5,7 @@ import json
 import re
 from typing import Callable, Literal, Protocol
 
+from . import update_manifest
 from .app_version import RELEASES_URL, current_version
 from .runtime_fingerprint import installed_runtime_fingerprint
 from .settings import Settings
@@ -14,6 +15,7 @@ from .update_manifest import FILENAME, ManifestError, verify_manifest
 
 LATEST_RELEASE_URL = 'https://api.github.com/repos/vananaHope/my-video-manager/releases/latest'
 AUTO_CHECK_INTERVAL = timedelta(days=1)
+TRANSIENT_FAILURE_CHECK_INTERVAL = timedelta(hours=3)
 AUTO_CHECK_KEY = 'updates.check_on_startup'
 LAST_CHECK_KEY = 'updates.last_check'
 METADATA_LIMIT = 1024 * 1024
@@ -51,6 +53,15 @@ class UpdateCheckResult:
     latest_version: str | None = None
     download_size: int | None = None
     failure_reason: str | None = None
+
+    @property
+    def stale(self) -> bool:
+        """Whether this history belongs to a different installed app version.
+
+        Computed on access, never persisted. UI consumers must distinguish stale
+        history from an update currently available for the installed app.
+        """
+        return self.current_version != current_version()
 
     @property
     def release_url(self) -> str | None:
@@ -120,17 +131,20 @@ class UpdateChecker:
         if not self.automatic_enabled():
             return False
         last = self.last_result()
-        if last is None:
+        if last is None or last.stale:
             return True
         elapsed = _utc(self._clock()) - last.checked_at
+        interval = (TRANSIENT_FAILURE_CHECK_INTERVAL
+                    if last.kind == 'failed' and last.failure_reason in ('network', 'timeout')
+                    else AUTO_CHECK_INTERVAL)
         # A clock correction must not suppress checks indefinitely.
-        return elapsed < timedelta(0) or elapsed >= AUTO_CHECK_INTERVAL
+        return elapsed < timedelta(0) or elapsed >= interval
 
     def check(self) -> UpdateCheckResult:
         """Synchronous I/O; the UI owns worker scheduling and duplicate exclusion.
 
-        Manual checks always run. Only should_check_on_startup applies the daily
-        interval, including failed attempts, to avoid restart/retry storms.
+        Manual checks always run. Only should_check_on_startup applies retry
+        intervals, including failed attempts, to avoid restart/retry storms.
         """
         checked_at = _utc(self._clock())
         current = None
@@ -144,6 +158,9 @@ class UpdateChecker:
             except (ValueError, AttributeError):
                 raise UpdateCheckError('invalid_installed_version') from None
             current = installed.version
+            key = update_manifest.UPDATE_PUBLIC_KEY
+            if not isinstance(key, bytes) or len(key) != 32:
+                raise ManifestError('invalid_public_key')
             http = self._http if self._http is not None else UrllibUpdateHttp()
             release_data = http.get(LATEST_RELEASE_URL, max_bytes=METADATA_LIMIT)
             try:
