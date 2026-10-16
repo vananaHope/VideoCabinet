@@ -603,6 +603,9 @@ export interface FoldersData {
   minimum: number
   scanning: boolean
   report: string
+  automaticDetection: boolean
+  unwatched: Array<string>
+  watchStartFailed: boolean
 }
 
 export type FolderAction = "addFolder" | "removeFolder" | "scan" | "addFile" | "restoreExcluded" | "restoreDismissed" | "manageTags"
@@ -642,6 +645,7 @@ export interface SettingsData {
   bindings: Array<SettingKeyData>
   minimum: number
   scanning: boolean
+  automaticDetection: boolean
   translationCli: string
   translation: TranslationSettingsData
   heldTranslations: number
@@ -710,6 +714,7 @@ export interface SettingsBridge {
   captureKey: (key: string, reply: Reply) => void
   cancelCapture: (reply: Reply) => void
   setMinimum: (seconds: number, reply: Reply) => void
+  setAutomaticDetection: (enabled: boolean, reply: Reply) => void
   action: (name: SettingsAction, reply: Reply) => void
   backupSnapshot: (reply: Reply) => void
   backupAction: (name: BackupAction, target: string, includeThumbnails: boolean, reply: Reply) => void
@@ -728,6 +733,7 @@ export function publicSettingsBridge(raw: SettingsBridge): SettingsBridge {
     captureKey: raw.captureKey.bind(raw),
     cancelCapture: raw.cancelCapture.bind(raw),
     setMinimum: raw.setMinimum.bind(raw),
+    setAutomaticDetection: raw.setAutomaticDetection.bind(raw),
     action: raw.action.bind(raw),
     backupSnapshot: raw.backupSnapshot.bind(raw),
     backupAction: raw.backupAction.bind(raw),

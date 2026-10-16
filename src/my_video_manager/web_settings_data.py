@@ -18,6 +18,7 @@ class SettingsData(TypedDict):
     bindings: list[SettingKeyData]
     minimum: float
     scanning: bool
+    automaticDetection: bool
     translationCli: str
     translation: TranslationSettingsData
     heldTranslations: int

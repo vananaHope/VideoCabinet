@@ -95,6 +95,17 @@ class SettingsBridge(QObject):
         except (ValueError, OSError, sqlite3.Error) as error:
             return encode({'error': str(error)})
 
+    @SETTINGS.slot('setAutomaticDetection')
+    def setAutomaticDetection(self, enabled):
+        try:
+            if self.page.library.worker is not None:
+                raise ValueError('검사가 끝난 뒤 자동 감지를 바꿔 주세요.')
+            self.page.window.folder_watch.set_enabled(enabled)
+            self.page.refresh()
+            return self.snapshot()
+        except (ValueError, TypeError, OSError, sqlite3.Error) as error:
+            return encode({'error': str(error)})
+
     @SETTINGS.slot('action')
     def action(self, name):
         if name not in ('translation', 'quit', 'releases') or self.busy:
@@ -149,6 +160,7 @@ class WebSettingsPage(WebPageController):
                     keys=list(row.keys), defaults=list(row.default_keys), display=display_keys(row.keys),
                     defaultDisplay=display_keys(row.default_keys)) for row in self.core.key_bindings()],
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,
+                    automaticDetection=self.core.automatic_detection_enabled(),
                     translationCli=self.core.translation_cli, translation=self.core.translation_settings(),
                     heldTranslations=sum(entry.state == 'held' for entry in queue),
                     failedTranslations=sum(entry.state == 'failed' for entry in queue))

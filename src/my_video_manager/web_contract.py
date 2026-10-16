@@ -143,6 +143,7 @@ SETTINGS = BridgeContract(name='settings', interface='SettingsBridge', slots={
     'beginCapture': (Argument('command', str, 'string'),),
     'captureKey': (Argument('key', str, 'string'),), 'cancelCapture': (),
     'setMinimum': (Argument('seconds', float, 'number'),),
+    'setAutomaticDetection': (Argument('enabled', bool, 'boolean'),),
     'action': (Argument('name', str, 'SettingsAction'),),
     'backupSnapshot': (),
     'backupAction': (Argument('name', str, 'BackupAction'), Argument('target', str, 'string'),

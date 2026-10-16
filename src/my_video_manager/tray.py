@@ -55,6 +55,8 @@ class TrayControls(QObject):
         self.core.resume_subtitle_processing()
         self.window.subtitles.timer.start(500)
         self.window.translations.timer.start(500)
+        # 종료를 취소하면 종료 확인 중 미뤄 둔 감시 묶음을 이어서 검사한다.
+        self.window.folder_watch.flush()
 
     def quit(self):
         self.quitting = True
@@ -89,10 +91,14 @@ class TrayControls(QObject):
             event.ignore()
             return
         if self.quitting:
+            # 끊긴 드라이브에서 감시 정지가 잠시 기다려도 보이지 않게 창과 아이콘을 먼저 숨긴다.
+            window.hide()
+            self.icon.hide()
+            # 감시를 먼저 멈춘 뒤 미룬 검사 요청을 정리한다. 검사 작업자는 위에서 끝난 것을 확인했다.
+            window.folder_watch.stop()
             window.resolutions.shutdown()
             window.thumbnails.shutdown()
             self.timer.stop()
-            self.icon.hide()
             QApplication.instance().removeEventFilter(window)
             event.accept()
             QApplication.instance().quit()

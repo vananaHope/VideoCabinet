@@ -17,7 +17,7 @@ from .theme import apply_theme
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, core: AppCore, *, player_factory=MpvPlayer):
+    def __init__(self, core: AppCore, *, player_factory=MpvPlayer, folder_watch_options=None):
         apply_theme(QApplication.instance())
         super().__init__()
         self.core = core
@@ -46,6 +46,8 @@ class MainWindow(QMainWindow):
         from .web_page_registry import create_web_shell
         self.web_host = create_web_shell(self)
         self.library_page = self.web_host.controllers['library']
+        from .folder_watch_controls import FolderWatchControls
+        self.folder_watch = FolderWatchControls(self, **(folder_watch_options or {}))
         self._startup_frontend_ready = False
         self._startup_scan_scheduled = False
         self._startup_scan_timer = QTimer(self)
@@ -92,8 +94,14 @@ class MainWindow(QMainWindow):
         self._startup_scan_timer.start()
 
     def scan_on_startup(self):
-        """향후 자동 감지 설정도 이 진입점에서 함께 확인한다."""
-        if not self.tray.quitting and self.core.watched_folders():
+        """감시를 먼저 시작한 뒤 시작 검사를 돌려 감시 시작 직후의 틈을 덮는다.
+
+        자동 감지를 끄면 시작 검사도 함께 끈다.
+        """
+        if self.tray.quitting:
+            return
+        self.folder_watch.start()
+        if self.folder_watch.enabled and self.core.watched_folders():
             self.library_page.scan(quiet_if_unchanged=True)
 
     def page_changed(self, _index):
