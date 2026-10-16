@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { connectBridge, request } from "@/bridge"
 import type { SearchBridge, SearchData } from "@/bridge-types"
 import { EmptyState, PageHeader, StatusBadge } from "@/components/page-parts"
+import { NoticeStack } from "@/components/ui/notice"
 import { MatchedText, ResultRow, SearchInput, listKey, restoreListFocus, timestamp } from "@/components/reel-search-parts"
 
 export default function SearchPage() {
@@ -78,7 +79,11 @@ export default function SearchPage() {
         }
       }} />
     <p className="text-xs text-muted-foreground">띄어쓰기와 대소문자를 구분하지 않습니다. ↓ 결과 선택 · Enter 또는 클릭으로 재생</p>
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {/* 재생 요청 실패와 검색 실패를 같은 자리에 쌓는다. 아래 상태 줄에는 실패 문구를 되풀이하지 않는다. */}
+    <NoticeStack items={[
+      error && { tone: "error", message: error, onDismiss: () => setError("") },
+      state === "error" && { tone: "error", message: `검색 실패: ${data?.error}` },
+    ]} />
     <div id="search-results" role="listbox" aria-label="검색 결과" aria-busy={pending || state === "preparing"} aria-activedescendant={results.length ? `search-result-${data?.selectedIndex}` : undefined} tabIndex={0}
       onScroll={event => { if (event.currentTarget.offsetParent) scroll.current = event.currentTarget.scrollTop }}
       onKeyDown={event => listKey(event, results.length, data?.selectedIndex ?? 0, select, () => play(data?.selectedIndex ?? -1))}
@@ -89,6 +94,6 @@ export default function SearchPage() {
           <p className="whitespace-pre-wrap wrap-anywhere text-sm"><MatchedText parts={result.text} /></p></div>
       </ResultRow>) : state !== "pending" && <EmptyState title={empty[0]} description={empty[1]} />}
     </div>
-    <p role="status" className="text-sm text-muted-foreground">{state === "pending" ? "검색 중…" : state === "preparing" ? "검색 색인 준비 중…" : state === "error" ? `검색 실패: ${data?.error}` : !query.trim() ? "검색어를 입력하세요." : `검색 결과 ${results.length}개`}{!pending && data?.truncated && ` · 최대 ${data.limit}개까지 표시합니다. 결과가 많습니다. 더 길게 입력하세요.`}</p>
+    {state !== "error" && <p role="status" className="text-sm text-muted-foreground">{state === "pending" ? "검색 중…" : state === "preparing" ? "검색 색인 준비 중…" : !query.trim() ? "검색어를 입력하세요." : `검색 결과 ${results.length}개`}{!pending && data?.truncated && ` · 최대 ${data.limit}개까지 표시합니다. 결과가 많습니다. 더 길게 입력하세요.`}</p>}
   </main>
 }

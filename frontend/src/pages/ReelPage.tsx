@@ -3,6 +3,7 @@ import { Film } from "lucide-react"
 import { connectBridge, request } from "@/bridge"
 import type { ReelBridge, ReelData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
+import { NoticeStack } from "@/components/ui/notice"
 import { SelectField } from "@/components/ui/select"
 import { EmptyState, PageHeader } from "@/components/page-parts"
 import { ResultRow, listKey, restoreListFocus, timestamp } from "@/components/reel-search-parts"
@@ -11,6 +12,7 @@ export default function ReelPage() {
   const [bridge, setBridge] = useState<ReelBridge | null>(null)
   const [data, setData] = useState<ReelData | null>(null)
   const [error, setError] = useState("")
+  const [hiddenStatus, setHiddenStatus] = useState("")
   const scroll = useRef(0)
   const goHome = useRef(() => {})
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
@@ -30,6 +32,8 @@ export default function ReelPage() {
     return () => { disposed = true; disconnect() }
   }, [showError])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
+  // 완료 안내가 사라지면(새로고침·필터·탭 이동) 닫은 기록도 지워 다음 완료 때 다시 보인다.
+  useEffect(() => { if (!data?.status) setHiddenStatus("") }, [data?.status])
   const entries = data?.entries ?? []
   const selected = entries.find(entry => entry.id === data?.selectedId)
   function select(index: number) {
@@ -51,7 +55,11 @@ export default function ReelPage() {
       </label>
       <Button variant="outline" onClick={() => { if (bridge) request(reply => bridge.refresh(reply)).catch(showError) }}>목록 갱신</Button>
     </div>
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {/* 재생 요청 실패와 모아보기 완료 안내를 목록 위 한곳에 쌓는다. 아래 줄은 늘 목록 설명을 보인다. */}
+    <NoticeStack items={[
+      error && { tone: "error", message: error, onDismiss: () => setError("") },
+      data?.status && data.status !== hiddenStatus && { tone: "success", message: data.status, onDismiss: () => setHiddenStatus(data.status) },
+    ]} />
     <div id="reel-list" role="listbox" aria-label="모든 영상의 하이라이트" aria-activedescendant={selected ? `reel-${selected.id}` : undefined} tabIndex={0}
       onScroll={event => { if (event.currentTarget.offsetParent) scroll.current = event.currentTarget.scrollTop }}
       onKeyDown={event => listKey(event, entries.length, entries.findIndex(e => e.id === selected?.id), select, () => { if (selected?.playable) play(selected.id) })}
@@ -69,6 +77,6 @@ export default function ReelPage() {
       </ResultRow>)}
     </div>
     <div className="flex flex-wrap items-center gap-3"><Button disabled={!entries.some(e => e.playable)} onClick={() => play(0)}>처음부터 차례 재생</Button><Button variant="outline" disabled={!selected?.playable} onClick={() => selected && play(selected.id)}>선택한 하이라이트부터 재생</Button><span className="text-xs text-muted-foreground">↑/↓ 선택 · Enter 재생</span></div>
-    <p role="status" className="text-xs text-muted-foreground">{data?.status || `하이라이트 ${entries.length}개 · 영상 제목 → 영상 안 시각 순 · 파일 없음·길이 0인 지점은 건너뜁니다. 새 항목은 ‘목록 갱신’으로 불러옵니다.`}</p>
+    <p role="status" className="text-xs text-muted-foreground">{`하이라이트 ${entries.length}개 · 영상 제목 → 영상 안 시각 순 · 파일 없음·길이 0인 지점은 건너뜁니다. 새 항목은 ‘목록 갱신’으로 불러옵니다.`}</p>
   </main>
 }

@@ -1,5 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority"
 import { Button } from "@/components/ui/button"
+import { Notice } from "@/components/ui/notice"
 import { EmptyState, Tabs } from "@/components/page-parts"
 import { HighlightPanel, type HighlightSnapshot } from "@/components/highlight-panel"
 import { ExternalSubtitleList } from "@/components/external-subtitle-list"
@@ -48,13 +49,14 @@ export function DetailPanel({ video, details, highlights, revision, tab, onTabCh
       <div id="detail-scroll" className="min-h-0 flex-1 space-y-2 overflow-y-auto border-t pt-2 text-xs leading-5 text-muted-foreground wrap-anywhere">
         <Thumbnail video={video} variant="detail" />
         <p>{duration(video.duration)} · {viewing(video)}</p>
-        {video.missing ? <p>파일 없음 · 다시 검사하거나 파일을 연결하세요.</p> : <p>위치 {video.locationCount}개</p>}
+        {video.missing ? <Notice tone="warning" size="compact" role="note">파일 없음 · 다시 검사하거나 파일을 연결하세요.</Notice> : <p>위치 {video.locationCount}개</p>}
         {video.resumePoint !== null && <p>이어볼 위치 {duration(video.resumePoint)} ({Math.round(video.stoppedPercent ?? 0)}%)</p>}
         <p>태그: {video.tags.map(t => t.name).join(", ") || "없음"}</p>
         <p>시리즈: {video.series || "없음"}</p>
         {details && <>
-          <p>{originalSummary(details)}</p>
-          <p>{translationSummary(details)}</p>
+          {/* 말소리 없음과 번역 미등록 사유는 정보 안내다. 줄 수 요약은 일반 정보 줄로 둔다. */}
+          {details.has_transcript && details.no_speech ? <Notice tone="info" size="compact" role="note">{originalSummary(details)}</Notice> : <p>{originalSummary(details)}</p>}
+          {!details.translated_lines && details.translation_skip_reason && skipReasons[details.translation_skip_reason] ? <Notice tone="info" size="compact" role="note">{translationSummary(details)}</Notice> : <p>{translationSummary(details)}</p>}
           <p>대기열: {[details.subtitle_state && `원어 ${queueLabels[details.subtitle_state] || details.subtitle_state}`, details.translation_state && `${details.taskLabel} ${queueLabels[details.translation_state] || details.translation_state}`].filter(Boolean).join(" · ") || "없음"}</p>
           <p>하이라이트 {details.highlight_count}개</p>
           <ExternalSubtitleList files={details.externalSubtitles} />

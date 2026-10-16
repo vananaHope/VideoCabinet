@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { connectBridge, request } from "@/bridge"
 import type { SettingsBridge, SettingsData, ShellBridge } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
+import { Notice, NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, PageHeader, StatusBadge } from "@/components/page-parts"
 import { MinimumDuration } from "@/components/minimum-duration"
 import { KeyBindingsEditor } from "@/components/key-bindings-editor"
@@ -40,12 +41,12 @@ export default function SettingsPage() {
     setError('')
     if (bridge) request(reply => bridge.action(name, reply)).catch(error => setError(String(error)))
   }
-  if (!data || !bridge || !shell) return <p role="status" className="p-6">{error || '설정을 불러오는 중…'}</p>
+  if (!data || !bridge || !shell) return error ? <Notice tone="error" className="m-4">{error}</Notice> : <p role="status" className="p-6">설정을 불러오는 중…</p>
   const translationProvider = data.translation.providers.find(p => p.id === data.translation.provider)!
   const translationSelection = data.translation.selections.find(s => s.provider === data.translation.provider)!
   return <main className="flex h-full min-h-0 flex-col gap-3 p-4" aria-label="설정">
     <PageHeader title="설정" description="키 배치와 라이브러리 설정을 한곳에서 관리합니다. Alt+S 또는 Ctrl+7로 엽니다." />
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    <NoticeStack items={[error && { tone: 'error', message: error, onDismiss: () => setError('') }]} />
     <div className="flex min-h-0 flex-1 gap-6">
       <nav id="settings-category" aria-label="설정 분류" className="flex w-40 shrink-0 flex-col gap-2">{categories.map(([id, label]) => <Button key={id} variant={category === id ? 'secondary' : 'ghost'} aria-current={category === id ? 'true' : undefined} data-category={id} onClick={() => setCategory(id)}>{label}</Button>)}</nav>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">

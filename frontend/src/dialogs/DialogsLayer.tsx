@@ -3,6 +3,7 @@ import { connectBridge, request } from '@/bridge'
 import type { DialogData, DialogSnapshot, DialogsBridge, DialogValues } from '@/bridge-types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NoticeStack } from '@/components/ui/notice'
 import { ConfirmDialog } from '@/components/page-parts'
 import { Choice, DialogFrame, DialogList, TextArea } from './dialog-parts'
 import { TagEntry } from './TagEntry'
@@ -117,9 +118,12 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {kind === 'subtitles' && <label className="block space-y-2 text-sm">원어<Input aria-label="원어" list="spoken-languages" value={form.choice} onChange={event => update({ choice: event.target.value })} /><datalist id="spoken-languages">{data.choices.map(row => <option key={row.id} value={row.title} />)}</datalist></label>}
       {kind === 'translation' && data.translation && <TranslationForm data={data.translation} form={form} update={update} act={act} busy={busy || data.network_busy} />}
       {kind === 'video-rename' && <Input aria-label="영상 제목" value={form.name} onChange={event => update({ name: event.target.value })} />}
-      {data.information && <p role="status" className="whitespace-pre-wrap text-sm text-muted-foreground">{data.information}</p>}
-      {data.warning && <p role="status" className="whitespace-pre-wrap text-sm text-destructive">{data.warning}</p>}
-      {error && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-destructive">{error}</p>}
+      {/* 대화상자 안내는 입력 아래 한곳에 쌓는다: 요청 실패(오류) → 확인할 점(경고) → 결과·설명(정보). 대화상자가 스크롤되므로 접지 않는다. */}
+      <NoticeStack className="shrink-0" clamp={false} items={[
+        error && { tone: 'error', message: error, onDismiss: () => setError('') },
+        data.warning && { tone: 'warning', message: data.warning },
+        data.information && { tone: 'info', message: data.information },
+      ]} />
     </div>
     {/* 선택한 행에 대한 작업은 왼쪽, 대화상자를 끝내는 닫기·취소 → 주 작업은 오른쪽 끝에 둔다. 순서는 그대로다. */}
     <footer className="flex flex-wrap justify-end gap-2">

@@ -1,6 +1,7 @@
 import { memo, useCallback, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { cva } from "class-variance-authority"
 import { StatusBadge } from "@/components/page-parts"
+import { InlineNotice } from "@/components/ui/notice"
 import { QueueStore } from "./queue-store"
 
 // 열 비율은 영상 2 : 상태 1 : 진행률 1 : 안내 2로 두어 긴 안내가 일찍 잘리지 않게 한다.
@@ -10,6 +11,8 @@ const rowClass = cva(`${columns} items-center border-b py-1 text-sm`, { variants
 const listClass = cva("min-h-0 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border" } } })
 const trackClass = cva("h-2 w-full rounded-full", { variants: { selected: { true: "bg-muted-foreground", false: "bg-muted" } } })
 const badges = { completed: "success", failed: "destructive", transcribing: "info", translating: "info", held: "highlight", queued: "muted" } as const
+// 행 안내의 위계: 실패 사유는 오류, 보류 사유는 경고, 그 밖의 안내(말소리 없음·이어받기 등)는 정보다.
+const tones = { failed: "error", held: "warning" } as const
 
 const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { store: QueueStore; id: number; selected: boolean; onSelect: (id: number) => void }) {
   const subscribe = useCallback((listener: () => void) => store.subscribeRow(id, listener), [store, id])
@@ -19,7 +22,7 @@ const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { sto
     <div role="gridcell" title={row.title} className={`${wide} truncate font-medium`}>{row.title}</div>
     <div role="gridcell"><StatusBadge variant={selected && row.state === "queued" ? "selectedMuted" : badges[row.state as keyof typeof badges]}>{row.stateLabel}</StatusBadge></div>
     <div role="gridcell" className="flex min-w-0 items-center gap-2"><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="progressbar" aria-label={`${row.title} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(row.progress * 100)} className={trackClass({ selected })}><rect width={Math.max(0, Math.min(100, row.progress * 100))} height={8} className="fill-primary" /></svg><span className="text-xs tabular-nums">{Math.round(row.progress * 100)}%</span></div>
-    <div role="gridcell" title={row.message} className={`${wide} truncate text-muted-foreground`}>{row.message}</div>
+    <div role="gridcell" className={`${wide} text-muted-foreground`}>{row.message && <InlineNotice tone={tones[row.state as keyof typeof tones] ?? "info"} text={row.message} />}</div>
   </div>
 })
 

@@ -37,6 +37,10 @@ def core(connected):
     return connected[0]
 
 
+# 모델 정책은 공용 안내(role=note)다. 위계는 data-tone으로 확인한다.
+POLICY = 'document.querySelector(\'[role=note][aria-label="모델 정책"]\')'
+
+
 def js(window, source):
     result = []
     window.web_host.engine_page.runJavaScript(source, result.append)
@@ -131,7 +135,8 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
             assert ('주의:' in text) == expired
         assert ('등록됨 (****1234)' in text) == key
         if expired:
-            assert js(window, 'document.querySelector("[role=note] .bg-highlight") !== null')
+            assert js(window, f'{POLICY}.dataset.tone') == 'warning'
+            assert '무보존 계약 만료' in js(window, f'{POLICY}.textContent')
         if long_model:
             assert js(window, 'document.querySelector("[aria-label=\'모델 직접 입력\']").value') == model
         geometry = json.loads(js(window, """JSON.stringify((() => {
@@ -267,9 +272,10 @@ def test_training_policy_warning_comes_from_bridge_data(window_factory, connecte
     dialogs = window.web_host.dialogs
     def check():
         loaded(window)
-        text = js(window, 'document.querySelector("[role=note]").textContent')
+        text = js(window, f'{POLICY}.textContent')
         assert '학습 사용 ·' in text and '주의:' in text
-        assert js(window, 'document.querySelector("[role=note] .bg-destructive") !== null')
+        assert '학습 사용 주의' in text
+        assert js(window, f'{POLICY}.dataset.tone') == 'warning'
         capture(window, 'opencode-policy-training-fixture')
     within(window.translations.settings, dialogs, check)
 

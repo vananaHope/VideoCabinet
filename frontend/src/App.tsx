@@ -6,6 +6,7 @@ import { Tabs } from "@/components/page-parts"
 import DialogsLayer from "@/dialogs/DialogsLayer"
 import ShellModals from "@/dialogs/ShellModals"
 import SubtitlePreparation from "@/components/subtitle-preparation"
+import { NoticeStack } from "@/components/ui/notice"
 
 export default function App() {
   const [bridge, setBridge] = useState<ShellBridge | null>(null)
@@ -41,9 +42,12 @@ export default function App() {
       <span className="shrink-0 text-sm font-semibold">영상 라이브러리</span>
       <Tabs label="페이지 이동" value={tab} items={tabs.map(([value, label], index) => ({ value, label, shortcut: `Ctrl+${index + 1}` }))} onChange={navigate} variant="navigation" />
     </header>
+    {/* 셸 안내는 탭 아래 한곳에 쌓는다. 자막 기능 준비가 먼저, 그 아래 연결 오류와 작업 알림이 온다. */}
     <SubtitlePreparation />
-    {status && <p role="status" aria-label="작업 알림" className="shrink-0 border-b px-4 py-2 text-sm text-muted-foreground">{status}</p>}
-    {error && <p role="alert" className="p-3 text-destructive">{error}</p>}
+    {(error || status) && <div className="shrink-0 border-b px-4 py-2"><NoticeStack items={[
+      error && { tone: "error", message: error, onDismiss: () => setError("") },
+      status && { tone: "info", message: status, label: "작업 알림", onDismiss: () => setStatus("") },
+    ]} /></div>}
     {Object.entries(pages).map(([name, Page]) => Page && <div key={name} hidden={tab !== name} className="min-h-0 flex-1"><Page /></div>)}
     <DialogsLayer />
     <ShellModals />

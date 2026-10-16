@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input"
 import { LibraryChoice, LibraryFilters, LibraryFilterChips } from "@/components/library-filters"
 import { LibraryFolders } from "@/components/library-folders"
 import { Button } from "@/components/ui/button"
+import { InlineNotice, NoticeStack } from "@/components/ui/notice"
 import { GemCard } from "@/components/gem-card"
 import { VideoMenu } from "@/components/video-menu"
 import { LibraryGrid, openKeyboardMenu } from "@/components/library-grid"
@@ -224,9 +225,9 @@ export default function LibraryPage() {
       </div>
       <LibraryFilterChips options={data.options} chips={data.chips} onChange={filter} />
     </>}
-    {error && <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-destructive p-3 text-destructive"><span>{error}</span><Button variant="outline" size="sm" onClick={() => setError("")}>닫기</Button></div>}
+    <NoticeStack className="shrink-0" items={[error && { tone: "error", message: error, onDismiss: () => setError("") }]} />
     <section aria-label="숨겨진 보석" className="flex shrink-0 flex-col gap-1">
-      <div className="flex items-center gap-2"><Sparkles className="size-4 text-primary-text" aria-hidden="true" /><h2 className="text-sm font-semibold">숨겨진 보석 · {gems.length}개</h2>{data?.options.mode === "folders" && <Button size="xs" variant="ghost" aria-expanded={data?.options.mode !== "folders" || gemsExpanded} onClick={() => setGemsExpanded(value => !value)}>{gemsExpanded ? "접기" : "펼치기"}</Button>}<span className="text-xs text-muted-foreground">{data?.gemError ? `불러오지 못했어요: ${data.gemError}` : gems.length ? "←/→ 선택 · Enter 재생 · Backspace 관심 없음" : "지금은 추천할 영상이 없어요"}</span></div>
+      <div className="flex items-center gap-2"><Sparkles className="size-4 text-primary-text" aria-hidden="true" /><h2 className="text-sm font-semibold">숨겨진 보석 · {gems.length}개</h2>{data?.options.mode === "folders" && <Button size="xs" variant="ghost" aria-expanded={data?.options.mode !== "folders" || gemsExpanded} onClick={() => setGemsExpanded(value => !value)}>{gemsExpanded ? "접기" : "펼치기"}</Button>}{data?.gemError ? <span className="min-w-0 text-xs"><InlineNotice tone="error" role="alert" text={`불러오지 못했어요: ${data.gemError}`} /></span> : <span className="text-xs text-muted-foreground">{gems.length ? "←/→ 선택 · Enter 재생 · Backspace 관심 없음" : "지금은 추천할 영상이 없어요"}</span>}</div>
       {gems.length > 0 && (data?.options.mode !== "folders" || gemsExpanded) && <div ref={gemRow} id="hidden-gems" role="listbox" aria-label="숨겨진 보석 추천 카드" aria-activedescendant={`gem-${activeGem}`} tabIndex={0} onKeyDown={gemKey} className="gem-row rounded-lg p-1">
         {gems.map(gem => { const video = byId.get(gem.videoId); return video && <VideoMenu key={gem.videoId} id={gem.videoId} gem scanning={false} onAction={action}>
           <GemCard id={`gem-${gem.videoId}`} video={video} reason={gem.reason} variant={activeGem === gem.videoId ? "selected" : "default"} role="option" aria-selected={activeGem === gem.videoId} tabIndex={-1}
