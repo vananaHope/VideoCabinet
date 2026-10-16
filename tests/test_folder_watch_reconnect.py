@@ -4,7 +4,8 @@ import logging
 from queue import Empty, Queue
 import shutil
 import sys
-from time import monotonic
+from threading import Event, Thread
+from time import monotonic, sleep
 
 import pytest
 
@@ -135,8 +136,13 @@ def test_reconnect_errors_are_logged_once_and_retried_without_blocking(core, tmp
     watcher.error = OSError("device not ready")
     with caplog.at_level(logging.WARNING):
         time.advance(RECONNECT_SECONDS * 5)
-    assert watcher.reconnects == 5
-    assert sum("재연결 확인 실패" in record.message for record in caplog.records) == 1
+        assert watcher.reconnects == 5
+        assert sum("재연결 확인 실패" in record.message for record in caplog.records) == 1
+        # 껐다 켠 뒤 새 확인 체인의 첫 실패도 다시 남긴다.
+        service.stop()
+        service.start()
+        time.advance(RECONNECT_SECONDS * 2)
+    assert sum("재연결 확인 실패" in record.message for record in caplog.records) == 2
     watcher.error = None
     watcher.emit(root)
     time.advance(6)
@@ -181,6 +187,29 @@ def test_deleted_inner_root_under_existing_outer_root_is_still_missing(core, tmp
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows ReadDirectoryChangesW 버퍼 넘침")
+def test_reconnect_check_keeps_running_after_delivery_error(core, tmp_path):
+    root = video_file(tmp_path / "watched").parent
+    core.add_watched_folder(root)
+
+    class Unresolvable:
+        def __fspath__(self):
+            raise TypeError("경로로 바꿀 수 없음")
+
+    class Watcher(ReconnectingWatcher):
+        def reconnect(self):
+            super().reconnect()
+            return (Unresolvable(),) if self.reconnects == 1 else ()
+
+    watcher, time, batches = Watcher(), FakeTime(), []
+    service = core.create_folder_watch(batches.append, watcher=watcher, clock=time, scheduler=time)
+    service.start()
+    with pytest.raises(TypeError):
+        time.advance(RECONNECT_SECONDS)
+    time.advance(RECONNECT_SECONDS * 2)
+    assert watcher.reconnects == 3
+    service.stop()
+
+
 def test_buffer_overflow_rescans_whole_root_once_and_logs_once(core, tmp_path, monkeypatch, caplog):
     from watchdog.observers.api import EventQueue, ObservedWatch
     from my_video_manager import folder_watch_adapter
@@ -190,23 +219,27 @@ def test_buffer_overflow_rescans_whole_root_once_and_logs_once(core, tmp_path, m
     queue = EventQueue()
     emitter = folder_watch_adapter._Emitter(queue, ObservedWatch(str(root), recursive=True))
     emitter._whandle = object()
-    monkeypatch.setattr(folder_watch_adapter, "read_events", lambda *args, **kwargs: [])
-    watcher, time, batches = FakeWatcher(), FakeTime(), []
-    service = core.create_folder_watch(batches.append, watcher=watcher, clock=time, scheduler=time)
+    adapter, time, batches = WatchdogFolderWatcher(), FakeTime(), []
+    service = core.create_folder_watch(batches.append, watcher=adapter, clock=time, scheduler=time)
     service.start()
-    handler = folder_watch_adapter._Handler(watcher.callback)
+    handler = adapter._handler
     with caplog.at_level(logging.WARNING):
         for _ in range(3):
-            emitter.queue_events(0)
+            # 실제 어댑터의 emitter는 진짜 읽기에서 기다리므로 이 emitter의 읽기만 바꾼다.
+            with monkeypatch.context() as patch:
+                patch.setattr(folder_watch_adapter, "read_events", lambda *args, **kwargs: [])
+                emitter.queue_events(0)
             while not queue.empty():
                 handler.dispatch(queue.get()[0])
             time.advance(0.2)
-    emitter._whandle = None
-    assert handler.overflows >= 1
-    assert sum("버퍼가 넘쳐" in record.message for record in caplog.records) == 1
-    time.advance(6)
-    assert batches == [(root,)]
-    service.stop()
+        emitter._whandle = None
+        assert handler.overflows == 3
+        assert sum("버퍼가 넘쳐" in record.message for record in caplog.records) == 1
+        time.advance(6)
+        assert batches == [(root,)]
+        service.stop()
+    summary, = [record.message for record in caplog.records if "버퍼 넘침이" in record.message]
+    assert "3번" in summary
 
 
 def test_real_root_deleted_and_recreated_resumes_detection(core, tmp_path):
@@ -334,3 +367,73 @@ def test_folder_update_leaves_failed_roots_to_reconnect_timer(tmp_path):
         assert adapter.reconnect() == (missing,) and not adapter.failed_folders
     finally:
         adapter.stop()
+
+
+def test_reading_failed_folders_under_controller_lock_does_not_deadlock_with_reconnect(core, tmp_path):
+    """소유 스레드(컨트롤러 잠금) · 타이머(reconnect) · dispatcher(observer 잠금)가 겹쳐도 모두 끝난다."""
+    healthy = tmp_path / "healthy"
+    lost = tmp_path / "lost"
+    for root in (healthy, lost):
+        root.mkdir()
+        core.add_watched_folder(root)
+    events = Queue()
+    adapter = WatchdogFolderWatcher()
+    service = core.create_folder_watch(events.put, watcher=adapter, debounce_seconds=0.05,
+                                       stable_seconds=0.2, poll_seconds=0.05, reconnect_seconds=3600)
+    threads = []
+    try:
+        service.start()
+        wait_until_watching(events, healthy)
+        shutil.rmtree(lost)
+        deadline = monotonic() + 10
+        # reconnect가 unschedule할 대상(스스로 멈춘 emitter)을 만든다.
+        while any(emitter.is_alive() for emitter in tuple(adapter._observer.emitters)
+                  if emitter.watch.path == str(lost)):
+            assert monotonic() < deadline
+            sleep(0.05)
+        holding, results = Event(), {}
+
+        def owner():
+            with service._lock:
+                holding.set()
+                sleep(1.0)  # 그 사이 dispatcher가 observer 잠금을 쥔 채 이 잠금을 기다린다.
+                results["failed"] = service.failed_folders
+
+        def timer():
+            results["recovered"] = adapter.reconnect()
+
+        threads += [Thread(target=owner, daemon=True), Thread(target=timer, daemon=True)]
+        threads[0].start()
+        holding.wait()
+        video_file(healthy, "during-lock.mkv")
+        sleep(0.3)
+        threads[1].start()
+        for thread in threads:
+            thread.join(10)
+        assert not any(thread.is_alive() for thread in threads), "잠금 순환으로 멈췄습니다."
+        assert results["recovered"] == () and adapter.failed_folders == (lost,)
+        deadline = monotonic() + 10
+        while healthy not in events.get(timeout=max(0.01, deadline - monotonic())):
+            pass  # dispatcher도 끝나 묶음이 전달된다.
+    finally:
+        if not any(thread.is_alive() for thread in threads):
+            service.stop()  # 멈춘 스레드가 있으면 stop도 멈추므로 실패만 보고한다.
+
+
+def test_same_folders_with_failed_root_keeps_stabilization_in_progress(core, tmp_path):
+    healthy = video_file(tmp_path / "healthy").parent
+    missing = tmp_path / "missing"
+    missing.mkdir()
+    for root in (healthy, missing):
+        core.add_watched_folder(root)
+    missing.rmdir()
+    watcher, time, batches = ReconnectingWatcher(), FakeTime(), []
+    service = core.create_folder_watch(batches.append, watcher=watcher, clock=time, scheduler=time)
+    service.start()
+    assert service.failed_folders == (missing,)
+    watcher.emit(healthy)
+    time.advance(4)
+    service.set_folders(folder.path for folder in core.watched_folders())
+    time.advance(2)
+    assert batches == [(healthy,)]
+    service.stop()

@@ -4,7 +4,7 @@ from pathlib import Path
 import logging
 import os
 import sys
-from threading import Lock, RLock
+from threading import Lock
 
 from watchdog.events import DirCreatedEvent, FileSystemEventHandler
 
@@ -97,104 +97,146 @@ class WatchdogFolderWatcher:
 
     start/update/stop은 소유 스레드에서 호출한다. reconnect는 타이머 스레드에서
     호출할 수 있다. 생성만으로는 스레드나 OS 감시 핸들을 만들지 않는다.
+
+    잠금 규칙: watchdog dispatcher는 observer 잠금을 쥔 채 이벤트 콜백(컨트롤러 잠금)을
+    부른다. 그래서 이 클래스의 잠금은 상태 교체에만 쓰고, observer 호출(schedule,
+    unschedule, stop, join)은 어떤 우리 잠금도 쥐지 않고 한다. 진행 중인 루트는 _busy로
+    표시해 소유 스레드와 타이머 스레드가 같은 루트를 동시에 설치·해제하지 않게 한다.
     """
 
     def __init__(self):
-        # 소유 스레드의 수명 메서드와 타이머 스레드의 reconnect를 직렬화한다.
-        # 이벤트 전달(dispatcher) 스레드는 이 잠금을 쓰지 않는다.
-        self._lock = RLock()
+        self._lock = Lock()
         self._observer = None
         self._handler = None
+        self._folders = ()
         self._watches = {}
         self._failed = set()
+        self._busy = set()
+        # 잠금 없이 읽는 불변 스냅숏. _failed를 바꿀 때 잠금 안에서 새 tuple로 교체한다.
+        self._failed_snapshot = ()
 
     @property
     def failed_folders(self):
-        with self._lock:
-            return tuple(sorted(self._failed))
+        """감시하지 못하는 루트. 어떤 잠금도 기다리지 않는다."""
+        return self._failed_snapshot
 
     def start(self, folders, on_change):
         self.stop()
+        observer = Observer()
         with self._lock:
-            self._observer = Observer()
+            self._observer = observer
             self._handler = _Handler(on_change)
-            try:
-                # dispatcher를 먼저 시작하면 schedule마다 emitter 시작 실패를 격리할 수 있다.
-                self._observer.start()
-                self.update(folders)
-            except Exception:
-                self.stop()
-                raise
+        try:
+            # dispatcher를 먼저 시작하면 schedule마다 emitter 시작 실패를 격리할 수 있다.
+            observer.start()
+            self.update(folders)
+        except Exception:
+            self.stop()
+            raise
 
     def update(self, folders):
+        folders = minimal_folders(folders)
         with self._lock:
-            if self._observer is None:
+            observer, handler = self._observer, self._handler
+            if observer is None:
                 return
-            folders = minimal_folders(folders)
-            # 새 구독을 먼저 설치해 상하위 루트 교체 중 감시 공백을 줄인다.
+            self._folders = folders
             # 이미 실패한 루트는 느린 드라이브에서 소유 스레드를 막지 않도록 reconnect에 맡긴다.
             self._failed.intersection_update(folders)
-            for folder in folders:
-                if folder not in self._watches and folder not in self._failed:
-                    self._install(folder)
-            for folder in tuple(self._watches):
-                if folder not in folders:
-                    self._observer.unschedule(self._watches.pop(folder))
+            install = [folder for folder in folders
+                       if folder not in self._watches and folder not in self._failed and folder not in self._busy]
+            remove = [self._watches.pop(folder) for folder in tuple(self._watches) if folder not in folders]
+            self._busy.update(install)
+            self._publish()
+        # 새 구독을 먼저 설치해 상하위 루트 교체 중 감시 공백을 줄인다.
+        installed = {folder: self._schedule(observer, handler, folder) for folder in install}
+        for watch in remove:
+            self._unschedule(observer, watch)
+        self._commit(observer, installed)
 
     def reconnect(self):
         """멈춘 감시를 실패로 옮기고, 다시 나타난 실패 루트를 재설치해 반환한다.
 
         emitter 스레드는 루트 삭제(DirDeletedEvent) 뒤 스스로 끝나거나 드라이브 분리 같은
         읽기 오류로 끝난다. 어느 경우든 스레드 생존 여부만 메모리에서 확인한다.
-        존재 확인은 느린 드라이브에서 오래 걸릴 수 있어 잠금 밖에서 한다.
+        존재 확인과 observer 호출은 느린 드라이브에서 오래 걸릴 수 있어 잠금 밖에서 한다.
         """
         with self._lock:
-            observer = self._observer
+            observer, handler = self._observer, self._handler
             if observer is None:
                 return ()
-            emitters = {emitter.watch: emitter for emitter in list(observer.emitters)}
+            # set을 tuple로 복사하는 동안 Python 코드가 끼어들지 않으므로 동시 schedule과 안전하다.
+            emitters = {emitter.watch: emitter for emitter in tuple(observer.emitters)}
+            lost = {}
             for folder, watch in tuple(self._watches.items()):
                 emitter = emitters.get(watch)
-                if emitter is not None and emitter.is_alive():
-                    continue
-                del self._watches[folder]
-                try:
-                    observer.unschedule(watch)
-                except Exception:
-                    pass  # 이미 멈춘 emitter의 정리 실패가 재연결을 막지 않는다.
-                self._failed.add(folder)
-                logger.warning("감시 폴더 연결이 끊겼습니다; 다른 폴더는 계속 감시하며 다시 연결을 시도합니다: %s (%s)",
-                               folder, getattr(emitter, "error", None) or "폴더 없음")
-            candidates = tuple(self._failed)
-        present = [folder for folder in candidates if os.path.isdir(folder)]
-        recovered = []
+                if emitter is None or not emitter.is_alive():
+                    lost[folder] = (self._watches.pop(folder), emitter)
+            candidates = (set(self._failed) | set(lost)) - self._busy
+            self._busy.update(candidates)
+            self._failed.update(lost)
+            self._publish()
+        for folder, (watch, emitter) in lost.items():
+            logger.warning("감시 폴더 연결이 끊겼습니다; 다른 폴더는 계속 감시하며 다시 연결을 시도합니다: %s (%s)",
+                           folder, getattr(emitter, "error", None) or "폴더 없음")
+            self._unschedule(observer, watch)
+        installed = {folder: self._schedule(observer, handler, folder, quiet=True)
+                     for folder in candidates if os.path.isdir(folder)}
+        recovered = self._commit(observer, installed, released=candidates)
+        for folder in recovered:
+            logger.info("감시 폴더를 다시 연결했습니다: %s", folder)
+        return recovered
+
+    def _schedule(self, observer, handler, folder, quiet=False):
+        try:
+            return observer.schedule(handler, str(folder), recursive=True)
+        except Exception as error:
+            if not quiet:
+                logger.warning("감시 폴더 설치 실패; 다른 폴더는 계속 감시합니다: %s (%s)", folder, error)
+            return None
+
+    def _unschedule(self, observer, watch):
+        try:
+            observer.unschedule(watch)
+        except Exception:
+            pass  # 이미 멈춘 emitter나 정지한 observer의 정리 실패가 감시를 막지 않는다.
+
+    def _commit(self, observer, installed, released=()):
+        """잠금 밖에서 설치한 결과를 반영한다. 그 사이 해제·정지된 루트의 새 감시는 되돌린다."""
+        recovered, discard = [], []
         with self._lock:
-            if self._observer is not observer:
-                return ()
-            for folder in present:
-                if folder in self._failed and self._install(folder):
-                    logger.info("감시 폴더를 다시 연결했습니다: %s", folder)
-                    recovered.append(folder)
+            current = self._observer is observer
+            for folder in (*installed, *released):
+                self._busy.discard(folder)
+            for folder, watch in installed.items():
+                if not current or folder not in self._folders:
+                    if watch is not None:
+                        discard.append(watch)
+                elif watch is None:
+                    self._failed.add(folder)
+                else:
+                    self._watches[folder] = watch
+                    if folder in self._failed:
+                        recovered.append(folder)
+                    self._failed.discard(folder)
+            self._publish()
+        for watch in discard:
+            self._unschedule(observer, watch)
         return tuple(recovered)
 
-    def _install(self, folder):
-        try:
-            self._watches[folder] = self._observer.schedule(self._handler, str(folder), recursive=True)
-        except Exception as error:
-            if folder not in self._failed:
-                logger.warning("감시 폴더 설치 실패; 다른 폴더는 계속 감시합니다: %s (%s)", folder, error)
-            self._failed.add(folder)
-            return False
-        self._failed.discard(folder)
-        return True
+    def _publish(self):
+        self._failed_snapshot = tuple(sorted(self._failed))
 
     def stop(self):
         with self._lock:
             observer, self._observer = self._observer, None
             handler, self._handler = self._handler, None
+            self._folders = ()
             self._watches.clear()
             self._failed.clear()
-        # 이벤트 콜백이 컨트롤러 잠금을 쓰므로 join은 이 잠금 밖에서 한다.
+            self._busy.clear()
+            self._publish()
+        # 이벤트 콜백이 컨트롤러 잠금을 쓰므로 observer 정지·join은 잠금 밖에서 한다.
         if observer is not None:
             observer.stop()
             if observer.ident is not None:

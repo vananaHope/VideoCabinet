@@ -236,7 +236,10 @@ class FolderWatch:
 
     @property
     def failed_folders(self) -> FolderBatch:
-        """감시하지 못하는 루트. 어댑터가 reconnect를 제공하면 주기적으로 다시 연결한다."""
+        """감시하지 못하는 루트. 어댑터가 reconnect를 제공하면 주기적으로 다시 연결한다.
+
+        불변 스냅숏을 읽으므로 어떤 스레드에서든 잠금을 기다리지 않는다.
+        """
         return tuple(sorted(set(self._update_failed) | set(getattr(self._watcher, "failed_folders", ()))))
 
     def start(self) -> None:
@@ -268,6 +271,7 @@ class FolderWatch:
             if self._health is not None:
                 self._health.cancel()
                 self._health = None
+            self._reconnect_error_reported = False
         # 콜백의 state lock을 해제한 뒤 observer를 join한다.
         self._watcher.stop()
 
@@ -284,19 +288,24 @@ class FolderWatch:
 
     def set_folders(self, folders: Iterable[Path]) -> None:
         folders = minimal_folders(folders)
+        # 어댑터 상태(failed_folders)는 이 잠금 안에서 읽지 않는다. dispatcher가 observer 잠금을
+        # 쥔 채 이 잠금을 기다리므로 잠금 순환이 생길 수 있다. 어댑터의 실패 루트는 재연결
+        # 타이머가 다시 설치하므로, 같은 폴더로는 이 컨트롤러의 갱신 실패만 다시 시도한다.
         with self._lock:
-            if folders == self._folders and not self.failed_folders:
+            changed = folders != self._folders
+            if not changed and not self._update_failed:
                 return
             previous = self._folders
-            self._folders = folders
-            self._pending = {path: times for path, times in self._pending.items() if self._contains(path)}
-            self._revision += 1
-            self._folder_states = {}
-            self._confirmed = {path: sig for path, sig in self._confirmed.items() if self._contains(path)}
-            if self._pending:
-                self._batch_started = min(first for first, _ in self._pending.values())
-            else:
-                self._clear()
+            if changed:
+                self._folders = folders
+                self._pending = {path: times for path, times in self._pending.items() if self._contains(path)}
+                self._revision += 1
+                self._folder_states = {}
+                self._confirmed = {path: sig for path, sig in self._confirmed.items() if self._contains(path)}
+                if self._pending:
+                    self._batch_started = min(first for first, _ in self._pending.values())
+                else:
+                    self._clear()
         if self._active:
             try:
                 self._watcher.update(folders)
@@ -338,18 +347,21 @@ class FolderWatch:
             if not self._active or epoch != self._epoch:
                 return
         try:
-            recovered = self._watcher.reconnect()
-            self._reconnect_error_reported = False
-        except Exception as error:
-            recovered = ()
-            if not self._reconnect_error_reported:
-                logger.warning("감시 폴더 재연결 확인 실패; 계속 다시 시도합니다: %s", error)
-                self._reconnect_error_reported = True
-        if recovered:
-            self._changed(epoch, recovered)
-        with self._lock:
-            if self._active and epoch == self._epoch:
-                self._schedule_health(epoch)
+            try:
+                recovered = self._watcher.reconnect()
+                self._reconnect_error_reported = False
+            except Exception as error:
+                recovered = ()
+                if not self._reconnect_error_reported:
+                    logger.warning("감시 폴더 재연결 확인 실패; 계속 다시 시도합니다: %s", error)
+                    self._reconnect_error_reported = True
+            if recovered:
+                self._changed(epoch, recovered)
+        finally:
+            # 예외가 나도 주기 확인은 계속한다.
+            with self._lock:
+                if self._active and epoch == self._epoch:
+                    self._schedule_health(epoch)
 
     def _stale(self, epoch, revision):
         """잠금 안에서 호출한다. 잠금 밖 계산 중 종료·폴더 변경·새 이벤트가 있었으면 버린다."""
