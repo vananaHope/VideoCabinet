@@ -1,6 +1,7 @@
 """감시 루트·드라이브가 사라지거나 다시 연결될 때의 감지와 기록 보존(#133)."""
 
 import logging
+from pathlib import Path
 from queue import Empty, Queue
 import shutil
 import sys
@@ -186,7 +187,6 @@ def test_deleted_inner_root_under_existing_outer_root_is_still_missing(core, tmp
     assert core.video(video.id).missing
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows ReadDirectoryChangesW 버퍼 넘침")
 def test_reconnect_check_keeps_running_after_delivery_error(core, tmp_path):
     root = video_file(tmp_path / "watched").parent
     core.add_watched_folder(root)
@@ -210,6 +210,7 @@ def test_reconnect_check_keeps_running_after_delivery_error(core, tmp_path):
     service.stop()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ReadDirectoryChangesW 버퍼 넘침")
 def test_buffer_overflow_rescans_whole_root_once_and_logs_once(core, tmp_path, monkeypatch, caplog):
     from watchdog.observers.api import EventQueue, ObservedWatch
     from my_video_manager import folder_watch_adapter
@@ -437,3 +438,63 @@ def test_same_folders_with_failed_root_keeps_stabilization_in_progress(core, tmp
     time.advance(2)
     assert batches == [(healthy,)]
     service.stop()
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_root_removed_and_readded_during_reconnect_check_is_still_retried(tmp_path, monkeypatch, present):
+    """reconnect가 끊긴 루트의 존재를 확인하는 동안 해제·재추가되어도 그 루트를 잃지 않는다."""
+    from my_video_manager import folder_watch_adapter
+
+    lost = tmp_path / "lost"
+    other = tmp_path / "other"
+    other.mkdir()
+    changes = Queue()
+    adapter = WatchdogFolderWatcher()
+    isdir = folder_watch_adapter.os.path.isdir
+    checking, release = Event(), Event()
+
+    def slow_isdir(path):
+        if Path(path) == lost and not release.is_set():
+            checking.set()
+            release.wait(10)
+            return present
+        return isdir(path)
+
+    adapter.start((lost, other), changes.put)
+    try:
+        assert adapter.failed_folders == (lost,)
+        monkeypatch.setattr(folder_watch_adapter.os.path, "isdir", slow_isdir)
+        results = {}
+        thread = Thread(target=lambda: results.setdefault("recovered", adapter.reconnect()), daemon=True)
+        thread.start()
+        assert checking.wait(10)
+        adapter.update((other,))
+        adapter.update((lost, other))
+        if present:
+            lost.mkdir()
+        release.set()
+        thread.join(10)
+        assert not thread.is_alive()
+        monkeypatch.undo()
+        if present:
+            assert not adapter.failed_folders
+        else:
+            # 다음 재연결 주기에 다시 시도하고, 나타나면 감시한다.
+            assert adapter.failed_folders == (lost,)
+            assert adapter.reconnect() == ()
+            lost.mkdir()
+            assert adapter.reconnect() == (lost,)
+            assert not adapter.failed_folders
+        deadline = monotonic() + 10
+        attempt = 0
+        while True:
+            assert monotonic() < deadline, "다시 추가한 루트가 감시되지 않습니다."
+            attempt += 1
+            (lost / f"probe-{attempt}.txt").write_bytes(b"")
+            try:
+                if lost in changes.get(timeout=0.5):
+                    break
+            except Empty:
+                pass
+    finally:
+        adapter.stop()

@@ -219,6 +219,12 @@ class WatchdogFolderWatcher:
                     if folder in self._failed:
                         recovered.append(folder)
                     self._failed.discard(folder)
+            # 확인 중에 해제·재추가된 루트는 update가 _busy라 건너뛰었다. 설치되지 않았으면
+            # 다음 재연결 주기에 다시 시도하도록 실패로 남긴다.
+            for folder in released:
+                if (current and folder in self._folders
+                        and folder not in self._watches and folder not in installed):
+                    self._failed.add(folder)
             self._publish()
         for watch in discard:
             self._unschedule(observer, watch)
