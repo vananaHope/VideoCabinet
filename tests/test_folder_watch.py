@@ -1,7 +1,11 @@
 """가짜 이벤트·시계와 공개 AppCore 동작으로 자동 감지 계약을 검증한다."""
 
-from queue import Queue
+from pathlib import Path
+from queue import Empty, Queue
+import os
 import shutil
+import sys
+from threading import Event, Thread
 from time import monotonic
 
 import pytest
@@ -457,14 +461,268 @@ def test_watcher_failure_cleans_up_and_allows_explicit_restart(core, tmp_path, o
 
     watcher, time, batches = FailingWatcher(), FakeTime(), []
     service = core.create_folder_watch(batches.append, watcher=watcher, clock=time, scheduler=time)
-    with pytest.raises(OSError):
+    if operation == "start":
+        with pytest.raises(OSError):
+            service.start()
+        assert watcher.callback is None and watcher.stops >= 1
+    else:
         service.start()
         other = video_file(tmp_path / "other")
         core.add_watched_folder(other.parent)
-    assert watcher.callback is None and watcher.stops >= 1
+        assert {folder.path for folder in core.watched_folders()} == {path.parent, other.parent}
+        assert service.failed_folders
+        assert watcher.callback is not None
     watcher.fail = False
-    service.start()
+    if operation == "start":
+        service.start()
+    else:
+        core.add_watched_folder(other.parent)
+        assert not service.failed_folders
     watcher.emit(path.parent)
     time.advance(6)
     assert batches == [(path.parent,)]
     service.stop()
+
+
+def test_locked_file_waits_and_restarts_stabilization_before_delivery(core, tmp_path):
+    path = video_file(tmp_path / "watched")
+    core.add_watched_folder(path.parent)
+    locked, checked = True, []
+
+    def ready(candidate):
+        checked.append(candidate)
+        return not locked
+
+    service, watcher, time, batches = watch(core, ready=ready)
+    watcher.emit(path.parent)
+    time.advance(11)
+    assert checked == [path, path]
+    assert batches == []
+    locked = False
+    time.advance(4)
+    assert batches == []
+    time.advance(1)
+    assert batches == [(path.parent,)]
+    # 직전 전달 때와 서명이 같은 파일은 다시 열지 않는다.
+    checked.clear()
+    watcher.emit(path.parent)
+    time.advance(6)
+    assert checked == []
+    service.stop()
+
+
+def test_remove_folder_still_regroups_when_watcher_update_fails(core, tmp_path, caplog):
+    first = video_file(tmp_path / "a", "Class 1.mkv", b"a")
+    video_file(first.parent, "Class 2.mkv", b"b")
+    other = video_file(tmp_path / "b", "Other 1.mkv", b"a")
+    video_file(other.parent, "Other 2.mkv", b"c")
+    for folder in (first.parent, other.parent):
+        core.add_watched_folder(folder)
+    core.scan()
+    video = next(video for video in core.videos() if len(video.locations) == 2)
+    assert core.series_for_video(video.id).name == "Class"
+
+    class Watcher(FakeWatcher):
+        def update(self, folders):
+            if len(folders) < 2:
+                raise OSError("cannot update")
+            super().update(folders)
+
+    service = core.create_folder_watch(lambda _: None, watcher=Watcher())
+    try:
+        service.start()
+        core.remove_watched_folder(first.parent)
+        assert core.series_for_video(video.id).name == "Other"
+        assert [folder.path for folder in core.watched_folders()] == [other.parent]
+        assert first.parent in service.failed_folders
+        assert len(caplog.records) == 1 and caplog.records[0].exc_info is None
+    finally:
+        service.stop()
+
+
+def test_final_stat_recheck_detects_changes_even_with_stale_directory_signature(core, tmp_path):
+    path = video_file(tmp_path / "watched")
+    core.add_watched_folder(path.parent)
+    stale = folder_snapshot((path.parent,))
+    use_stale = True
+    service, watcher, time, batches = watch(
+        core, snapshot=lambda folders: stale if use_stale else folder_snapshot(folders), ready=lambda _: True)
+    watcher.emit(path.parent)
+    time.advance(4)
+    path.write_bytes(b"changed while the directory cache stayed stale")
+    time.advance(3)
+    assert batches == []
+    use_stale = False
+    time.advance(6)
+    assert batches == [(path.parent,)]
+    service.stop()
+
+
+def test_inaccessible_descendant_is_stable_and_does_not_block_batch(core, tmp_path, monkeypatch):
+    path = video_file(tmp_path / "watched")
+    locked = path.parent / "locked"
+    locked.mkdir()
+    core.add_watched_folder(path.parent)
+    scandir = os.scandir
+
+    def denied(directory):
+        if Path(directory) == locked:
+            raise PermissionError("denied child")
+        return scandir(directory)
+
+    monkeypatch.setattr(os, "scandir", denied)
+    assert folder_snapshot((path.parent,))[locked] is None
+    service, watcher, time, batches = watch(core)
+    watcher.emit(path.parent)
+    time.advance(6)
+    assert batches == [(path.parent,)]
+    result = core.scan(folders=batches[0])
+    assert result.added == 1
+    assert any(issue.path == locked and issue.failed for issue in result.issues)
+    service.stop()
+
+
+def test_inaccessible_requested_folder_retries_with_one_plain_warning(core, tmp_path, monkeypatch, caplog):
+    path = video_file(tmp_path / "watched")
+    core.add_watched_folder(path.parent)
+    scandir = os.scandir
+    locked = True
+
+    def denied(directory):
+        if locked and Path(directory) == path.parent:
+            raise PermissionError("denied root")
+        return scandir(directory)
+
+    monkeypatch.setattr(os, "scandir", denied)
+    service, watcher, time, batches = watch(core)
+    watcher.emit(path.parent)
+    time.advance(20)
+    assert batches == [] and len(caplog.records) == 1
+    assert caplog.records[0].exc_info is None
+    locked = False
+    time.advance(6)
+    assert batches == [(path.parent,)]
+    service.stop()
+
+
+def test_growing_nonvideo_file_does_not_starve_other_folder(core, tmp_path):
+    movie = video_file(tmp_path / "movies")
+    download = video_file(tmp_path / "downloads", "big.part", b"")
+    for folder in (movie.parent, download.parent):
+        core.add_watched_folder(folder)
+    service, watcher, time, batches = watch(core)
+    watcher.emit(movie.parent)
+    time.advance(0.2)
+    watcher.emit(download.parent)
+    for second in range(120):
+        download.write_bytes(b"x" * second)
+        time.advance(1)
+    assert len(batches) == 1 and set(batches[0]) == {movie.parent, download.parent}
+    assert download not in folder_snapshot((download.parent,))
+    service.stop()
+
+
+@pytest.mark.parametrize("suffix", [".srt", ".vtt", ".smi"])
+def test_external_subtitles_are_included_in_stability(core, tmp_path, suffix):
+    path = video_file(tmp_path / "watched", "video" + suffix)
+    core.add_watched_folder(path.parent)
+    service, watcher, time, batches = watch(core)
+    watcher.emit(path.parent)
+    time.advance(4)
+    path.write_bytes(b"subtitle copying is not complete yet")
+    time.advance(4)
+    assert batches == []
+    time.advance(2)
+    assert batches == [(path.parent,)]
+    service.stop()
+
+
+def test_real_missing_root_does_not_disable_healthy_roots(core, tmp_path):
+    healthy = tmp_path / "healthy"
+    missing = tmp_path / "missing"
+    for root in (healthy, missing):
+        root.mkdir()
+        core.add_watched_folder(root)
+    missing.rmdir()
+    events = Queue()
+    adapter = WatchdogFolderWatcher()
+    service = core.create_folder_watch(events.put, watcher=adapter, debounce_seconds=0.05,
+                                       stable_seconds=0.2, poll_seconds=0.05)
+    try:
+        service.start()
+        assert adapter.failed_folders == (missing,) == service.failed_folders
+        video_file(healthy)
+        assert events.get(timeout=10) == (healthy,)
+        added = tmp_path / "added"
+        added.mkdir()
+        core.add_watched_folder(added)
+        video_file(added)
+        assert events.get(timeout=10) == (added,)
+        core.set_automatic_detection_enabled(False)
+        core.set_automatic_detection_enabled(True)
+        video_file(healthy, "again.mkv")
+        assert events.get(timeout=10) == (healthy,)
+        core.remove_watched_folder(missing)
+        assert not service.failed_folders
+    finally:
+        service.stop()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows CopyFileExW 공유 모드 검증")
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_real_copyfileex_waits_for_copy_completion(core, tmp_path, overwrite):
+    import ctypes
+    from ctypes import wintypes
+
+    source = tmp_path / "source.mkv"
+    source.write_bytes(b"x" * (4 * 1024 * 1024))
+    watched = tmp_path / "watched"
+    watched.mkdir()
+    core.add_watched_folder(watched)
+    copying, release, finished = Event(), Event(), Event()
+    events, results = Queue(), []
+    progress_type = ctypes.WINFUNCTYPE(
+        wintypes.DWORD, ctypes.c_longlong, ctypes.c_longlong, ctypes.c_longlong,
+        ctypes.c_longlong, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        wintypes.HANDLE, wintypes.LPVOID)
+
+    @progress_type
+    def progress(total, transferred, *args):
+        if transferred < total:
+            copying.set()
+            release.wait(10)
+        return 0
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    copy_file = kernel.CopyFileExW
+    copy_file.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, progress_type,
+                         wintypes.LPVOID, ctypes.POINTER(wintypes.BOOL), wintypes.DWORD]
+    copy_file.restype = wintypes.BOOL
+
+    def copy():
+        results.append(bool(copy_file(str(source), str(watched / "copy.mkv"), progress, None, None, 0)))
+        finished.set()
+
+    service = core.create_folder_watch(lambda batch: events.put((batch, finished.is_set())),
+                                       debounce_seconds=0.02, stable_seconds=0.1, poll_seconds=0.02)
+    worker = Thread(target=copy)
+    try:
+        service.start()
+        if overwrite:
+            (watched / "copy.mkv").write_bytes(b"y" * (4 * 1024 * 1024))
+            assert events.get(timeout=10)[0] == (watched,)
+        worker.start()
+        assert copying.wait(10)
+        # 서명 안정화보다 긴 시간 동안 실제 쓰기 핸들을 연 채 멈춘다.
+        with pytest.raises(Empty):
+            events.get(timeout=0.6)
+        release.set()
+        worker.join(10)
+        assert not worker.is_alive() and results == [True]
+        batch, completed = events.get(timeout=10)
+        assert completed and batch == (watched,)
+    finally:
+        release.set()
+        if worker.ident is not None:
+            worker.join(10)
+        service.stop()

@@ -12,11 +12,15 @@ from time import monotonic
 from typing import Protocol
 
 from .settings import Settings
+from .media import VIDEO_SUFFIXES
+from .external_subtitles import EXTENSIONS as SUBTITLE_SUFFIXES
 
 
 AUTOMATIC_DETECTION_KEY = "library.automatic_detection_enabled"
 FolderBatch = tuple[Path, ...]
-Snapshot = dict[Path, tuple[int, int]]
+# None은 접근할 수 없는 하위 항목이다. 검사 단계에서 ScanIssue로 보고한다.
+Snapshot = dict[Path, tuple[int, int] | None]
+STABLE_SUFFIXES = VIDEO_SUFFIXES | SUBTITLE_SUFFIXES
 logger = logging.getLogger(__name__)
 
 
@@ -61,12 +65,13 @@ def minimal_folders(folders: Iterable[Path]) -> FolderBatch:
 
 
 def folder_snapshot(folders: FolderBatch) -> Snapshot:
-    """검사할 범위의 서명만 읽는다. 삭제는 빈 결과, 접근 실패는 예외다.
+    """영상·외부 자막의 서명만 읽는다. 요청 폴더의 접근 실패만 예외다.
 
     디렉터리 이동 시 자식 이벤트가 누락되어도 복사 중인 자식을 기다린다.
     라이브러리 순회와 같이 정션·심볼릭 링크를 따라가지 않는다.
     """
     result = {}
+    roots = set(folders)
     pending = list(folders)
     while pending:
         directory = pending.pop()
@@ -77,21 +82,67 @@ def folder_snapshot(folders: FolderBatch) -> Snapshot:
                 continue
             with os.scandir(directory) as entries:
                 for entry in entries:
+                    path = directory / entry.name
                     try:
                         info = entry.stat(follow_symlinks=False)
                     except FileNotFoundError:
                         continue
+                    except OSError:
+                        result[path] = None
+                        continue
                     if (stat.S_ISLNK(info.st_mode)
                             or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
                         continue
-                    path = directory / entry.name
                     if stat.S_ISDIR(info.st_mode):
                         pending.append(path)
-                    elif stat.S_ISREG(info.st_mode):
-                        result[path] = (info.st_size, info.st_mtime_ns)
+                    elif stat.S_ISREG(info.st_mode) and path.suffix.casefold() in STABLE_SUFFIXES:
+                        try:
+                            # Windows의 디렉터리 항목 캐시는 복사 중에도 고정될 수 있다.
+                            info = os.stat(path, follow_symlinks=False)
+                            result[path] = (info.st_size, info.st_mtime_ns)
+                        except FileNotFoundError:
+                            continue
+                        except OSError:
+                            result[path] = None
         except (FileNotFoundError, NotADirectoryError):
             continue
+        except OSError:
+            if directory in roots:
+                raise
+            result[directory] = None
     return result
+
+
+def file_ready(path: Path) -> bool:
+    """내용을 읽지 않고 쓰기 핸들과 충돌하는 읽기 열기를 확인한다.
+
+    Windows 공유/잠금 위반은 False, 다른 접근 오류는 호출자에게 전달한다.
+    비Windows의 open은 Windows 공유 모드 보장을 제공하지 않는다.
+    """
+    if os.name != "nt":
+        with path.open("rb"):
+            return True
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+    # GENERIC_READ, FILE_SHARE_READ (쓰기/삭제 공유 없음), OPEN_EXISTING.
+    handle = create(str(path), 0x80000000, 1, None, 3, 0x80, None)
+    if handle == wintypes.HANDLE(-1).value:
+        error = ctypes.get_last_error()
+        if error in (32, 33):  # ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+            return False
+        raise ctypes.WinError(error)
+    try:
+        return True
+    finally:
+        close(handle)
 
 
 def automatic_detection_enabled(settings: Settings) -> bool:
@@ -112,6 +163,7 @@ class FolderWatch:
                  on_batch_ready: Callable[[FolderBatch], None], *, watcher: FolderWatcher,
                  clock: Callable[[], float] = monotonic, scheduler: Scheduler | None = None,
                  snapshot: Callable[[FolderBatch], Snapshot] = folder_snapshot,
+                 ready: Callable[[Path], bool] = file_ready,
                  debounce_seconds: float = 0.5, stable_seconds: float = 5.0,
                  poll_seconds: float = 1.0):
         if debounce_seconds <= 0 or stable_seconds <= 0 or poll_seconds <= 0:
@@ -123,6 +175,10 @@ class FolderWatch:
         self._clock = clock
         self._scheduler = scheduler or ThreadScheduler()
         self._snapshot = snapshot
+        self._ready = ready
+        self._confirmed: Snapshot = {}
+        self._snapshot_error_reported = False
+        self._update_failed: FolderBatch = ()
         self._debounce = debounce_seconds
         self._stable = stable_seconds
         self._poll = poll_seconds
@@ -142,6 +198,11 @@ class FolderWatch:
     def enabled(self) -> bool:
         return automatic_detection_enabled(self._settings)
 
+    @property
+    def failed_folders(self) -> FolderBatch:
+        """감시 설치 실패 경로. 자동 재접속은 하지 않는다."""
+        return tuple(sorted(set(self._update_failed) | set(getattr(self._watcher, "failed_folders", ()))))
+
     def start(self) -> None:
         self._started = True
         if not self.enabled or self._active:
@@ -152,6 +213,7 @@ class FolderWatch:
             epoch = self._epoch
         try:
             self._watcher.start(self._folders, lambda folders: self._changed(epoch, folders))
+            self._update_failed = ()
         except Exception:
             self.stop()
             raise
@@ -162,6 +224,7 @@ class FolderWatch:
             self._active = False
             self._epoch += 1
             self._clear()
+            self._confirmed.clear()
         # 콜백의 state lock을 해제한 뒤 observer를 join한다.
         self._watcher.stop()
 
@@ -179,19 +242,22 @@ class FolderWatch:
     def set_folders(self, folders: Iterable[Path]) -> None:
         folders = minimal_folders(folders)
         with self._lock:
-            if folders == self._folders:
+            if folders == self._folders and not self.failed_folders:
                 return
+            previous = self._folders
             self._folders = folders
             self._pending = {path for path in self._pending if self._contains(path)}
             self._revision += 1
             self._signature = None
+            self._confirmed = {path: sig for path, sig in self._confirmed.items() if self._contains(path)}
             if not self._pending:
                 self._clear()
         if self._active:
             try:
                 self._watcher.update(folders)
+                self._update_failed = ()
             except Exception:
-                self.stop()
+                self._update_failed = minimal_folders((*previous, *folders))
                 raise
 
     def _contains(self, path):
@@ -204,6 +270,7 @@ class FolderWatch:
         self._timer = None
         self._pending.clear()
         self._signature = None
+        self._snapshot_error_reported = False
         self._revision += 1
 
     def _schedule(self, seconds):
@@ -241,8 +308,10 @@ class FolderWatch:
             folders = minimal_folders(self._pending)
         try:
             signature = self._snapshot(folders)
-        except OSError:
-            logger.exception("감시 폴더 안정화 확인 실패")
+        except OSError as error:
+            if not self._snapshot_error_reported:
+                logger.warning("감시 폴더 안정화 확인 실패; 재시도합니다: %s", error)
+                self._snapshot_error_reported = True
             signature = None
         with self._lock:
             if not self._active or epoch != self._epoch:
@@ -259,10 +328,43 @@ class FolderWatch:
             if signature is None or now - self._stable_since < self._stable:
                 self._schedule(self._poll)
                 return
+            changed = {path: sig for path, sig in signature.items()
+                       if sig is not None and sig != self._confirmed.get(path)}
+        # OS 핸들 확인은 state lock 밖에서 수행한다. 종료/새 이벤트는 아래에서 재확인한다.
+        ready = True
+        for path, expected in changed.items():
+            try:
+                if not self._ready(path):
+                    ready = False
+                    break
+                info = os.stat(path, follow_symlinks=False)
+                if (info.st_size, info.st_mtime_ns) != expected:
+                    ready = False
+                    break
+            except (FileNotFoundError, NotADirectoryError):
+                ready = False
+                break
+            except OSError:
+                # 영구 접근 거부를 복사로 오인해 기다리지 않는다. scan이 오류를 보고한다.
+                continue
+        with self._lock:
+            if not self._active or epoch != self._epoch:
+                return
+            if revision != self._revision:
+                if self._pending and self._timer is None:
+                    self._schedule(self._poll)
+                return
+            if not ready:
+                self._stable_since = self._clock()
+                self._schedule(self._poll)
+                return
             try:
                 self._on_batch_ready(folders)
             except Exception:
                 logger.exception("감시 폴더 검사 요청 전달 실패; 다시 시도합니다")
                 self._schedule(self._poll)
             else:
+                self._confirmed = {path: sig for path, sig in self._confirmed.items()
+                                   if not any(path.is_relative_to(folder) for folder in folders)}
+                self._confirmed.update(signature)
                 self._clear()

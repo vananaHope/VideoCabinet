@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, tzinfo
 from enum import Enum
 import math
+import logging
 from pathlib import Path
 import sqlite3
 from threading import RLock
@@ -722,7 +723,11 @@ class AppCore:
 
     def _update_folder_watch(self):
         if self._folder_watch is not None:
-            self._folder_watch.set_folders(folder.path for folder in self.watched_folders())
+            try:
+                self._folder_watch.set_folders(folder.path for folder in self.watched_folders())
+            except Exception as error:
+                # 영속 폴더 변경은 이미 성공했다. 감시 실패가 regroup/UI 응답을 막지 않는다.
+                logging.getLogger(__name__).warning("감시 대상 갱신 실패: %s", error)
 
     def automatic_detection_enabled(self) -> bool:
         from .folder_watch import automatic_detection_enabled
