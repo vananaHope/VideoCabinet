@@ -32,6 +32,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.core import AppCore, MediaInfo
+from my_video_manager.library import LIBRARY_DB_VERSION
 from my_video_manager.ui import MainWindow
 from my_video_manager.backup import BackupBusyError, BackupRestoreResult, create_automatic_backup, create_backup
 from unittest.mock import patch
@@ -274,7 +275,8 @@ try:
             assert button('백업 파일 선택')
             finished()
         assert '1개' in content('[aria-label="백업 미리보기"]')
-        assert '현재 DB 버전 3과 같은 버전' in content('[aria-label="백업 미리보기"]')
+        # 현재 스키마 버전은 코드 상수를 읽어 비교한다(#72 이후 v4).
+        assert f'현재 DB 버전 {LIBRARY_DB_VERSION}과 같은 버전' in content('[aria-label="백업 미리보기"]')
         assert js('document.activeElement.hasAttribute("data-backup-preview")')
         capture('backup-preview')
         assert button('이 백업으로 복원 예약')
@@ -336,7 +338,7 @@ try:
             assert button('백업 파일 선택')
             finished()
         assert 'DB 버전 2입니다' in content('[aria-label="백업 미리보기"]')
-        assert '현재 버전 3에 맞춰 바꾼 뒤 복원' in content('[aria-label="백업 미리보기"]')
+        assert f'현재 버전 {LIBRARY_DB_VERSION}에 맞춰 바꾼 뒤 복원' in content('[aria-label="백업 미리보기"]')
         assert '복원 전 지금 라이브러리는 자동 백업으로 남습니다' in content('[aria-label="백업 미리보기"]')
         capture('backup-v2-preview')
         assert button('이 백업으로 복원 예약')
@@ -346,9 +348,9 @@ try:
         assert core.pending_backup_restore().db_version == 2
         assert button('예약 취소')
         finished()
-        checks.append('DB v2 백업의 v3 이전 안내·복원 예약·취소')
+        checks.append(f'DB v2 백업의 v{LIBRARY_DB_VERSION} 이전 안내·복원 예약·취소')
         with closing(sqlite3.connect(old_database)) as future:
-            future.execute('PRAGMA user_version=4')
+            future.execute(f'PRAGMA user_version={LIBRARY_DB_VERSION + 1}')
         future_archive = create_backup(old_database, workspace / 'future.zip').path
         with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(future_archive), '')):
             assert button('백업 파일 선택')

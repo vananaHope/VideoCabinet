@@ -29,6 +29,7 @@ from PySide6.QtWidgets import QApplication
 from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.core import AppCore, CommandType, MediaInfo, ScanResult
+from my_video_manager.translation_models import DEFAULT_PROVIDER, provider
 from my_video_manager.ui import MainWindow
 
 
@@ -247,7 +248,9 @@ try:
     assert js('document.getElementById("settings-minimum").value') == '25.5'
     capture('settings-general')
     category('translation')
-    assert 'codex' in content('[aria-label="번역 CLI 설정"]')
+    # #63 이후 '번역 CLI 설정' 문구는 번역 방식 선택으로 바뀌었다.
+    # 문구 대신 구역 aria-label과 코드의 기본 번역 방식 라벨을 비교해 다시 낡지 않게 한다.
+    assert provider(DEFAULT_PROVIDER).label in content('[aria-label="번역 설정"]')
     capture('settings-translation')
     category('transcription')
     capture('settings-transcription')

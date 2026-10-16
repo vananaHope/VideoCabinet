@@ -172,6 +172,8 @@ try:
         keys(Qt.Key.Key_Down)
         assert js("document.querySelector('#queue-list [aria-selected=true]').dataset.queueRow") == str(videos[1].id)
         keys(Qt.Key.Key_Tab)
+        assert js('document.activeElement.textContent') == '기존 한국어 자막 모두 다듬기'
+        keys(Qt.Key.Key_Tab)
         assert js('document.activeElement.textContent') == '앞당기기'
         keys(Qt.Key.Key_Space)
         assert core.subtitle_queue_items()[0].video_id == videos[1].id
@@ -180,12 +182,11 @@ try:
         keys(Qt.Key.Key_Space)
         assert videos[1].id not in {item.video_id for item in core.subtitle_queue_items()}
         keys(Qt.Key.Key_Tab)
+        # 실패 항목이 없으면 '실패 항목 모두 재시도'는 비활성이라 Tab 이동에서 빠진다.
+        assert js("[...document.querySelectorAll('button')].find(b => b.textContent === '실패 항목 모두 재시도').disabled")
+        assert js('document.activeElement.textContent') == '선택한 보류 재시도', js('document.activeElement.outerHTML')[:200]
         keys(Qt.Key.Key_Space)
-        assert js("document.body.innerText.includes('재시도 0개 · 건너뜀 0개')")
-        keys(Qt.Key.Key_Tab)
-        assert js('document.activeElement.textContent') == '선택한 번역 보류 재시도'
-        keys(Qt.Key.Key_Space)
-        metrics['checks'].append('↑↓ 선택, Tab 버튼 이동, Space 앞당기기·빼기·일괄 재시도·보류 재시도')
+        metrics['checks'].append('↑↓ 선택, Tab 버튼 이동(비활성 일괄 재시도 건너뜀), Space 앞당기기·빼기·보류 재시도')
         # 상태 필터 Select: Enter로 열고 End·Home으로 옮긴 뒤 Enter로 고른다.
         js("document.querySelector('[aria-label=\"대기열 상태 필터\"]').focus()")
         keys(Qt.Key.Key_Return)
