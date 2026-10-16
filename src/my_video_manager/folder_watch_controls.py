@@ -26,7 +26,7 @@ class FolderWatchControls(QObject):
         self._pending = {}
         self._full_scan = False
         # 자동 검사가 이미 알린 안내. 원인이 그대로인 동안(드라이브 분리 등) 같은 실패를 반복해 알리지 않는다.
-        self._reported = frozenset()
+        self._reported = KnownIssues()
         self.batch_ready.connect(self.enqueue, Qt.ConnectionType.QueuedConnection)
         for tab in ('folders', 'settings'):
             self.changed.connect(window.web_host.controllers[tab].refresh)
@@ -125,11 +125,22 @@ class FolderWatchControls(QObject):
         def scan():
             result = self.core.scan() if folders is None else self.core.scan(folders=folders)
             # 검사한 범위의 안내만 이번 결과로 바꾼다. 작업자는 한 번에 하나라 경합하지 않는다.
-            kept = () if folders is None else (issue for issue in known if not within(issue.path, folders))
-            self._reported = frozenset((*kept, *result.issues))
+            kept = () if folders is None else (issue for issue in known.issues if not within(issue.path, folders))
+            self._reported = KnownIssues((*kept, *result.issues))
             return result
 
         self.library.scan(operation=scan, quiet_if_unchanged=True, known_issues=known)
+
+
+class KnownIssues:
+    """자동 검사가 이미 알린 안내. 알린 실패 폴더 아래의 실패(끊긴 루트의 하위 폴더 등)도 같은 원인으로 본다."""
+
+    def __init__(self, issues=()):
+        self.issues = frozenset(issues)
+
+    def __contains__(self, issue):
+        return issue in self.issues or issue.failed and any(
+            known.failed and within(issue.path, (known.path,)) for known in self.issues)
 
 
 def within(path, folders):

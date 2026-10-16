@@ -56,7 +56,7 @@ class LibraryOperations:
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "감시 폴더", str(error))
 
-    def scan(self, checked=False, *, operation=None, quiet_if_unchanged=False, known_issues=frozenset()):
+    def scan(self, checked=False, *, operation=None, quiet_if_unchanged=False, known_issues=()):
         if self.worker is not None:
             if operation is not None:
                 # 대화상자에서 고른 작업은 안내 대신 예외로 올려 각 화면의 오류 자리에 보여 준다.
@@ -82,7 +82,7 @@ class LibraryOperations:
 
     def scan_completed(self, result):
         self.refresh()
-        if self._quiet_scan and result.added == 0 and set(result.issues) <= self._known_issues:
+        if self._quiet_scan and result.added == 0 and all(i in self._known_issues for i in result.issues):
             # 검사 중 다른 안내가 들어왔으면 그것을 덮어쓰지 않는다.
             if self.window.web_host.controllers['folders'].report == SCAN_RUNNING_MESSAGE:
                 self.scan_message.emit(self._previous_scan_report)

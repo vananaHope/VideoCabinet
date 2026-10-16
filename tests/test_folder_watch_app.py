@@ -318,3 +318,32 @@ def test_repeated_automatic_failure_is_reported_once(app, monkeypatch):
     run()  # 다시 연결되어 실패가 사라지면 기억도 지운다.
     run(issue)
     assert '감시 폴더를 찾을 수 없습니다' in folders.report
+
+
+def test_disconnected_root_failure_is_reported_once_and_again_after_reconnect(app):
+    # #133: 루트가 없으면 지정 검사는 위치를 보존하고 실패 ScanIssue를 돌려준다.
+    core, folder, scans, order, _, create = app
+    window = create(RecordingWatcher(order))
+    wait_for(lambda: scans == [None] and window.worker is None)
+    folders = window.web_host.controllers['folders']
+    existing = core.videos()[0].id
+    detached = folder.with_name('detached')
+
+    def batch(*paths):
+        count = len(scans)
+        window.folder_watch.batch_ready.emit(paths)
+        wait_for(lambda: len(scans) == count + 1 and window.worker is None)
+
+    folder.rename(detached)
+    batch(folder)
+    assert str(folder) in folders.report and not core.video(existing).missing
+    folders.report_scan('사용자가 본 다른 안내')
+    batch(folder)  # 재연결 전 같은 실패가 다시 나와도 조용하다.
+    batch(folder / 'a')  # 루트 없이 하위 폴더만 지정해도 새 안내가 없으면 조용하다.
+    assert folders.report == '사용자가 본 다른 안내' and not core.video(existing).missing
+    detached.rename(folder)
+    batch(folder)  # 재연결 묶음: 실패가 사라져 기억을 지운다.
+    folder.rename(detached)
+    batch(folder)
+    assert str(folder) in folders.report
+    detached.rename(folder)
