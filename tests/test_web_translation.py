@@ -129,6 +129,9 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
         assert js(window, 'document.activeElement.getAttribute("aria-label")') == '번역 방식'
         assert js(window, 'document.querySelector("[data-dialog-frame]").scrollWidth <= document.querySelector("[data-dialog-frame]").clientWidth')
         assert js(window, '!!document.querySelector("[aria-label=\'추론 강도\']")') == (provider != 'opencode_go')
+        # 이어받기는 구독 CLI 방식에만, 모델 목록 조회는 OpenCode Go에만 있다(#135).
+        assert js(window, '!!document.querySelector("[data-translation-form] input[type=checkbox]")') == (provider != 'opencode_go')
+        assert ('모델 목록 조회' in js(window, 'document.querySelector("[aria-label=\'OpenCode Go 키\']").textContent')) == (provider == 'opencode_go')
         text = js(window, 'document.querySelector("[role=dialog]").textContent')
         if provider == 'opencode_go':
             assert '2026-10-31' in text and 'OpenCode 서버' in text
@@ -145,6 +148,15 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
             return {bottom: footer.bottom, top: footer.top, fields: last.bottom, height: innerHeight};
         })())"""))
         assert geometry['bottom'] <= geometry['height'] and geometry['fields'] <= geometry['top'], geometry
+        # 기본값 버튼은 모든 방식에서 모델 묶음 머리 행에 있어 따로 한 줄을 차지하지 않는다(#135).
+        reset = json.loads(js(window, f"""JSON.stringify((() => {{
+            const button = [...document.querySelectorAll('[role=dialog] button')].find(e => e.textContent === {json.dumps(RESET)}).getBoundingClientRect();
+            const select = document.querySelector('[aria-label="모델 목록"]').getBoundingClientRect();
+            const last = document.querySelector('[aria-label="{'모델 직접 입력' if provider == 'opencode_go' else '추론 강도'}"]').getBoundingClientRect();
+            const grid = document.querySelector('[aria-label="모델 목록"]').closest('.grid').getBoundingClientRect();
+            return {{button: button.bottom, select: select.top, last: last.bottom, grid: grid.bottom}};
+        }})())"""))
+        assert reset['button'] <= reset['select'] and reset['grid'] - reset['last'] < 1, reset
         capture(window, f'{provider}-key-{key}-expired-{expired}-long-{long_model}')
         view = window.web_host.view.focusProxy() or window.web_host.view
         QTest.keyClick(view, Qt.Key.Key_Tab)
@@ -167,6 +179,29 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
         rendered(window)
         QTest.keyClick(view, Qt.Key.Key_Escape)
         wait_for(lambda: not dialogs.active)
+    within(window.translations.settings, dialogs, check)
+
+
+RESET = '이 방식의 모델·강도 기본값'
+
+
+@pytest.mark.parametrize('provider,changed,default', [('codex', 'my-codex', 'gpt-5.6-terra'), ('opencode_go', 'custom-model', 'deepseek-v4.1-flash')])
+def test_reset_button_restores_provider_default_model_and_effort(window_factory, connected, provider, changed, default):
+    window = window_factory()
+    dialogs = window.web_host.dialogs
+    def check():
+        loaded(window)
+        choose(window, '번역 방식', provider)
+        input_text(window, '모델 직접 입력', changed)
+        if provider == 'codex':
+            choose(window, '추론 강도', 'max')
+        assert js(window, 'document.querySelector("[aria-label=\'모델 직접 입력\']").value') == changed
+        click(window, RESET)
+        assert js(window, 'document.querySelector("[aria-label=\'모델 직접 입력\']").value') == default
+        assert js(window, 'document.querySelector("[aria-label=\'모델 목록\']").dataset.value') == default
+        if provider == 'codex':
+            assert js(window, 'document.querySelector("[aria-label=\'추론 강도\']").dataset.value') == ''
+        click(window, '취소')
     within(window.translations.settings, dialogs, check)
 
 
@@ -239,9 +274,10 @@ def test_explicit_key_check_models_and_settings_status(window_factory, connected
         assert '키 확인 성공' in state(dialogs)['information']
         assert not state(dialogs)['warning']
         assert store.read() is None
+        assert '키 확인 성공' in js(window, 'document.querySelector("[data-key-result]").textContent')
+        choose(window, '번역 방식', 'opencode_go')
         click(window, '모델 목록 조회')
         wait_for(lambda: dialogs.translation_worker is None)
-        choose(window, '번역 방식', 'opencode_go')
         assert 'custom-model' in choice_options(window, '모델 목록')
         assert dialogs.active
         click(window, '확인')
@@ -354,7 +390,7 @@ def test_key_failure_diagnostic_is_rendered(window_factory, connected, tmp_path,
         assert warning in js(window, 'document.querySelector("[role=dialog]").textContent')
         if output := os.environ.get('MVM_KEY_FAILURE_SCREEN_DIR'):
             monkeypatch.setenv('MVM_TRANSLATION_SCREEN_DIR', output)
-            js(window, "document.querySelector('[role=dialog] [role=status]').scrollIntoView({block:'center',behavior:'instant'})")
+            js(window, "document.querySelector('[data-key-result]').scrollIntoView({block:'center',behavior:'instant'})")
             QTest.qWait(500)
             capture(window, 'key-check-failure')
         click(window, '취소')
@@ -380,3 +416,64 @@ def test_model_choice_keeps_cli_default_apart_from_sentinel_like_model(window_fa
         assert js(window, 'document.querySelector("[aria-label=\'모델 목록\']").dataset.value') == ''
         click(window, '취소')
     within(window.translations.settings, dialogs, check)
+
+
+def key_result(window):
+    rendered(window)
+    return json.loads(js(window, """JSON.stringify((() => {
+        const slot = document.querySelector('[data-key-result]');
+        const outside = [...document.querySelectorAll('[role=dialog] [data-slot=notice]')].filter(e => !slot || !slot.contains(e));
+        return {tones: slot ? [...slot.querySelectorAll('[data-slot=notice]')].map(e => e.dataset.tone) : [], text: slot ? slot.textContent : '',
+                outside: outside.map(e => e.textContent).join('|')};
+    })())"""))
+
+
+def test_key_check_states_share_one_slot(window_factory, connected):
+    # 확인 중·성공·실패가 키 입력 아래 같은 자리에서 위계로 구분되고, 대화상자 아래쪽 안내로 새지 않는다(#135).
+    core, http, _, _, _, _ = connected
+    window = window_factory()
+    window.resize(1100, 720)
+    dialogs = window.web_host.dialogs
+    def scroll():
+        js(window, "document.querySelector('[data-key-result]').scrollIntoView({block:'center',behavior:'instant'})")
+        QTest.qWait(300)
+    def pending():
+        loaded(window)
+        assert key_result(window)['tones'] == []
+        http.delay = True
+        input_text(window, 'OpenCode Go 키 입력', 'draft-key-1234')
+        click(window, '키 확인')
+        wait_for(http.waiting.is_set)
+        wait_for(lambda: key_result(window)['tones'] == ['info'])
+        result = key_result(window)
+        assert '키 확인 중' in result['text'] and '취소하면 요청도 중단합니다.' in result['text']
+        assert '키 확인 중' not in result['outside'] and '요청 처리 중' not in result['outside']
+        scroll()
+        capture(window, 'key-check-pending')
+        click(window, '취소')
+        wait_for(lambda: dialogs.translation_worker is None)
+    within(window.translations.settings, dialogs, pending)
+    http.delay = False
+    def results():
+        loaded(window)
+        input_text(window, 'OpenCode Go 키 입력', 'draft-key-1234')
+        click(window, '키 확인')
+        wait_for(lambda: dialogs.translation_worker is None)
+        result = key_result(window)
+        assert result['tones'] == ['success'] and '키 확인 성공' in result['text'], result
+        assert '키 확인 성공' not in result['outside']
+        scroll()
+        capture(window, 'key-check-success')
+        http.status = 402
+        click(window, '키 확인')
+        wait_for(lambda: dialogs.translation_worker is None)
+        result = key_result(window)
+        assert result['tones'] == ['error'] and 'HTTP 402' in result['text'], result
+        assert 'HTTP 402' not in result['outside']
+        scroll()
+        capture(window, 'key-check-failure')
+        # 결과는 요청한 키 초안의 것이다. 키를 고치면 지난 결과를 숨긴다.
+        input_text(window, 'OpenCode Go 키 입력', 'other-key-5678')
+        assert key_result(window)['tones'] == []
+        click(window, '취소')
+    within(window.translations.settings, dialogs, results)
