@@ -370,6 +370,50 @@ def test_scan_retries_failed_files_with_unchanged_signature(tmp_path, stage, fai
     assert len(media.reads) == 3
 
 
+def test_scan_registers_final_content_changed_before_its_registration(tmp_path):
+    final_content = b"finished copying the second video"
+    paths = [video_file(tmp_path / "watched", name, name.encode())
+             for name in ("a.mkv", "b.mkv")]
+    changed = []
+
+    class ChangingMedia(Media):
+        def read(self, path):
+            if not changed:
+                other = next(candidate for candidate in paths if candidate != path)
+                other.write_bytes(final_content)
+                changed.append(other)
+            return super().read(path)
+
+    core = open_core(tmp_path / "data/library.sqlite3", ChangingMedia())
+    core.add_watched_folder(paths[0].parent)
+    assert core.scan() == ScanResult(2, ())
+    video, = (video for video in core.videos()
+              if video.locations[0].path == changed[0])
+    digest = hashlib.sha256(str(len(final_content)).encode("ascii") + final_content * 3)
+    assert video.fingerprint == f"v1:{len(final_content)}:{digest.hexdigest()}"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory entry metadata cache")
+def test_scan_registers_file_changed_through_hard_link_before_scan(tmp_path):
+    core = open_core(tmp_path / "data/library.sqlite3")
+    path = video_file(tmp_path / "watched", content=b"a" * 1000)
+    core.add_watched_folder(path.parent)
+    other = tmp_path / "other.mkv"
+    os.link(path, other)
+    with other.open("ab") as target:
+        target.write(b"b" * 5000)
+    with os.scandir(path.parent) as entries:
+        cached_size = next(entries).stat().st_size
+    if cached_size != 1000:
+        pytest.skip("Filesystem did not retain stale directory entry metadata")
+    assert core.scan() == ScanResult(1, ())
+    video, = core.videos()
+    final_content = b"a" * 1000 + b"b" * 5000
+    digest = hashlib.sha256(b"6000" + final_content * 3)
+    assert video.fingerprint == f"v1:6000:{digest.hexdigest()}"
+    assert video.locations[0].path == path
+
+
 @pytest.mark.parametrize("stage", ["read", "capture"])
 def test_scan_rejects_file_changed_during_registration_and_retries(tmp_path, stage):
     class ChangingMedia(Media):

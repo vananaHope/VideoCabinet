@@ -399,8 +399,9 @@ class Library:
                     return 0
                 if check["duration"] < minimum and check["fingerprint"] not in known_fingerprints:
                     return 0
+            # 순회 뒤 파일이 바뀌었거나 DirEntry 값이 늦을 수 있어 등록 시 서명을 새로 읽는다.
             result = self._register(path, on_registered=registered, missing_at_start=missing_at_start,
-                                    signature=signature, minimum=minimum)
+                                    minimum=minimum)
             check_paths.add(path)
             if result.reconnected:
                 reconnected = True
