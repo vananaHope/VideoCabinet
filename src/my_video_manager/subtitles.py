@@ -74,6 +74,11 @@ class Transcript:
     def translation_eligible(self) -> bool:
         return bool(self.lines) and self.spoken_language not in (None, "ko")
 
+    @property
+    def no_speech(self) -> bool:
+        """받아쓰기를 마쳤지만 말소리를 찾지 못해 줄이 없다. 원어 지정 여부와 무관하다."""
+        return not self.lines
+
 
 @dataclass(frozen=True)
 class TranscriptSummary:
@@ -81,6 +86,7 @@ class TranscriptSummary:
     spoken_language: str | None
     line_count: int
     queue_state: str | None
+    no_speech: bool = False
 
 
 def _transcript_language(row, line_count):
@@ -99,6 +105,7 @@ class SubtitleQueueEntry:
     error_detail: str | None = None
     progress: float = 0.0
     retry_guidance: str | None = None
+    no_speech: bool = False
 
 
 def normalize_spoken_language(language: str | None) -> str | None:
@@ -249,7 +256,7 @@ class Subtitles:
             count = db.execute("SELECT COUNT(*) FROM transcript_lines WHERE transcript_id = ?",
                                (row["id"],)).fetchone()[0] if row else 0
             return TranscriptSummary(row is not None, _transcript_language(row, count) if row else None,
-                                     count, queue[0] if queue else None)
+                                     count, queue[0] if queue else None, row is not None and not count)
 
     def subtitled_video_ids(self) -> frozenset[int]:
         """빈 자막도 포함해 transcripts가 있는 모든 영상 ID를 조회한다."""
@@ -333,7 +340,7 @@ class Subtitles:
                         self.review.translations.request(pending.video_id, automatic=True, connection=db)
                     db.execute("DELETE FROM subtitle_queue WHERE id = ?", (pending.id,))
                 return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
-                                          pending.requested_at, "completed", None)
+                                          pending.requested_at, "completed", None, no_speech=not result.segments)
             except TranscriberCancelled:
                 with self._connect() as db:
                     db.execute("UPDATE subtitle_queue SET state = 'queued' WHERE id = ?", (pending.id,))

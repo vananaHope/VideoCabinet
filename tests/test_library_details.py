@@ -89,23 +89,58 @@ def test_summary_includes_saved_partial_translation_while_held(tmp_path):
     assert summary.translated_lines == sum(line.translation is not None for line in core.review_lines(video.id))
 
 
-@pytest.mark.parametrize("language", [None, "ko"])
+@pytest.mark.parametrize("language", [None, "ko", "ja"])
 def test_empty_transcript_summary_matches_public_language_semantics(tmp_path, language):
     class SilentTranscriber:
         def transcribe(self, *args, **kwargs):
             return TranscriberResult("en", ())
     core = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
-                   database=tmp_path / "data/library.sqlite3", transcriber=SilentTranscriber())
+                   database=tmp_path / "data/library.sqlite3", transcriber=SilentTranscriber(),
+                   translator=Translator())
     path = tmp_path / "영상.mkv"
     path.write_bytes(b"video")
     core.add_file(path)
     video, = core.videos()
     core.request_subtitles(video.id, language)
-    core.process_next_subtitle()
+    assert core.process_next_subtitle().no_speech
     summary = core.library_details(video.id)
     assert summary.has_transcript
     assert summary.original_lines == 0
-    assert summary.spoken_language == core.transcript(video.id).spoken_language
+    assert summary.spoken_language == core.transcript(video.id).spoken_language == language
+    # 자동 감지와 원어 직접 지정 모두 말소리 없음이며, 번역·다듬기는 원어 줄이 없어 등록하지 않는다.
+    assert summary.no_speech and core.transcript(video.id).no_speech
+    assert summary.translation_skip_reason == "no_speech"
+    assert summary.translation_state is None and core.translation_queue() == ()
+    # 다시 받아쓰기(원어 직접 지정 포함)는 그대로 요청할 수 있다.
+    assert core.request_subtitles(video.id, "en").state == "queued"
+
+
+def test_spoken_transcripts_are_not_no_speech_and_unknown_language_reason(tmp_path):
+    class Uncertain(Transcriber):
+        probability = 1.0
+
+        def transcribe(self, *args, **kwargs):
+            result = super().transcribe(*args, **kwargs)
+            return TranscriberResult(result.spoken_language, result.segments, self.probability)
+    transcriber = Uncertain()
+    core = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+                   database=tmp_path / "data/library.sqlite3", transcriber=transcriber, translator=Translator())
+    path = tmp_path / "영상.mkv"
+    path.write_bytes(b"video")
+    core.add_file(path)
+    video, = core.videos()
+    core.request_subtitles(video.id)
+    assert not core.process_next_subtitle().no_speech
+    spoken = core.library_details(video.id)
+    assert not spoken.no_speech and spoken.translation_skip_reason is None
+    assert spoken.original_lines == 2 and spoken.translation_state == "queued"
+    core.remove_from_subtitle_queue(video.id)
+    transcriber.probability = 0.2
+    core.request_subtitles(video.id)
+    core.process_next_subtitle()
+    unknown = core.library_details(video.id)
+    assert not unknown.no_speech and unknown.spoken_language is None
+    assert unknown.translation_skip_reason == "unknown_language"
 
 
 def test_snapshot_and_gems_do_not_read_details_and_selected_summaries_are_isolated(tmp_path, monkeypatch):

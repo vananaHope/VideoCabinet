@@ -178,3 +178,63 @@ def test_collapsed_folders_survive_view_switch_and_settings_reload(window_factor
     assert core.library_view_options()['collapsed_folders'] == ['root|child']
     page.bridge.view(json.dumps({**core.library_view_options(), 'mode': 'folders'}))
     assert page.options['collapsed_folders'] == ['root|child']
+
+
+def test_detail_panel_shows_no_speech_and_translation_skip_reason(window_factory, core):
+    from datetime import datetime, timezone
+    from my_video_manager.core import AppCore
+    from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
+    from test_web_library_data import Media
+    from test_web_statistics import wait_for
+
+    class Transcriber:
+        result = TranscriberResult('nn', (), 0.61)
+
+        def transcribe(self, *args, **kwargs):
+            return self.result
+
+    transcriber = Transcriber()
+    writer = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+                     database=core.database, transcriber=transcriber)
+    auto, specified, spoken = (v.id for v in core.videos())
+    speech = TranscriberResult('en', (TranscriptSegment(0, 1, 'Hello'),))
+    for video_id, language, result in ((auto, None, transcriber.result), (specified, 'ja', transcriber.result),
+                                       (spoken, 'en', speech)):
+        transcriber.result = result
+        writer.request_subtitles(video_id, language)
+        writer.process_next_subtitle()
+    window = window_factory()
+    page, host = window.library_page, window.web_host
+
+    def js(code):
+        result = []
+        host.engine_page.runJavaScript(code, result.append)
+        wait_for(lambda: bool(result))
+        return result[0]
+
+    def details():
+        return js("document.getElementById('detail-scroll')?.innerText ?? ''")
+
+    def select(video_id, expected):
+        wait_for(lambda: js(f"!!document.getElementById('video-{video_id}')"))
+        js(f"document.getElementById('video-{video_id}').click()")
+        wait_for(lambda: page.selected_id == video_id)
+        wait_for(lambda: expected in details())
+        return details()
+
+    text = select(auto, '말소리를 찾지 못했습니다')
+    assert '원어 자막 · 말소리를 찾지 못했습니다.' in text and '0줄' not in text
+    assert '번역 자막 없음 · 원어 자막 줄이 없어 만들지 않았습니다.' in text
+    text = select(specified, '원어: ja · 말소리를 찾지 못했습니다.')
+    assert '번역 자막 없음 · 원어 자막 줄이 없어 만들지 않았습니다.' in text
+    text = select(spoken, '원어: en · 1줄')
+    assert '말소리' not in text and '만들지 않았습니다' not in text
+
+    # 다시 받아써서 말소리를 찾으면 선택 영상의 안내가 정상 요약으로 바뀐다.
+    select(auto, '말소리를 찾지 못했습니다')
+    transcriber.result = speech
+    writer.request_subtitles(auto, 'en')
+    writer.process_next_subtitle()
+    window.subtitles.video_changed.emit(auto)
+    wait_for(lambda: '원어: en · 1줄' in details())
+    assert '말소리' not in details() and '만들지 않았습니다' not in details()

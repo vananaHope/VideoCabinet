@@ -22,7 +22,8 @@ from .search import Search, SearchResponse
 from .tags import Tag, Tags
 from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
-from .translation import Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection
+from .translation import (Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection,
+                          translation_skip_reason)
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
@@ -428,7 +429,8 @@ class AppCore:
             translated = self._translations.summary(video_id, connection=db)
             return LibraryDetails(original.has_transcript, original.spoken_language, original.line_count,
                                   translated.translated_lines, original.queue_state, translated.queue_state,
-                                  self._highlights.count(video_id, connection=db))
+                                  self._highlights.count(video_id, connection=db), original.no_speech,
+                                  translation_skip_reason(original))
 
     def subtitled_video_ids(self) -> frozenset[int]:
         return self._subtitles.subtitled_video_ids()

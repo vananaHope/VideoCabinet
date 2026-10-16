@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from .subtitle_preparation_ui import PreparationWorker, preparation_state, failure_message
+from .subtitle_queue import NO_SPEECH_NOTICE
 
 
 class SubtitleWorker(QThread):
@@ -124,6 +125,7 @@ class SubtitleControls(QObject):
             transcript = self.core.transcript(result.video_id)
             self.window.statusBar().setToolTip("")
             self.window.statusBar().showMessage(
+                f"받아쓰기 완료 · {NO_SPEECH_NOTICE}" if transcript.no_speech else
                 f"원어 자막 완료 · 원어 {transcript.spoken_language or '알 수 없음'} · {len(transcript.lines)}줄")
             session = self.core.playback.session
             if self.window.player and session and session.video_id == result.video_id:

@@ -121,6 +121,8 @@ export interface DetailsData {
   subtitle_state: string | null
   translation_state: string | null
   highlight_count: number
+  no_speech: boolean
+  translation_skip_reason: string | null
   externalSubtitles: Array<ExternalSubtitleFileData>
 }
 

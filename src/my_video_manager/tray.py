@@ -46,8 +46,9 @@ class TrayControls(QObject):
     def notify_completion(self):
         counts = self.core.take_subtitle_queue_completion()
         if counts is not None:
-            completed, failed = counts
-            self.icon.showMessage("자막 대기열 처리 종료", f"이번 처리: 완료 {completed}개 · 실패 {failed}개")
+            no_speech = f" · 말소리 없음 {counts.no_speech}개" if counts.no_speech else ""
+            self.icon.showMessage("자막 대기열 처리 종료",
+                                  f"이번 처리: 완료 {counts.completed}개{no_speech} · 실패 {counts.failed}개")
 
     def resume(self):
         self.window.subtitles.stopping = False
