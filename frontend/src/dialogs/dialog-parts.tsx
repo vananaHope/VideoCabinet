@@ -2,6 +2,7 @@ import { cva } from 'class-variance-authority'
 import { Dialog } from 'radix-ui'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { DialogRow } from '@/bridge-types'
+import { SelectField } from '@/components/ui/select'
 import './dialogs.css'
 
 export function DialogFrame({ title, description, children, onClose, composing, onSize, wide }: { title: string; description: string; children: ReactNode; onClose: () => void; composing: { current: boolean }; onSize: (width: number, height: number) => void; wide: boolean }) {
@@ -76,8 +77,7 @@ export function TextArea({ value, onChange }: { value: string; onChange: (text: 
 }
 
 export function Choice({ label, value, rows, onChange }: { label: string; value: string; rows: DialogRow[]; onChange: (value: string) => void }) {
-  return <label className="flex flex-col gap-2 text-sm">{label}<select aria-label={label} value={value} onChange={event => onChange(event.target.value)}
-    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring">
-    {rows.map(row => <option key={row.id} value={row.id}>{row.title}</option>)}
-  </select></label>
+  return <label className="flex flex-col gap-2 text-sm">{label}
+    <SelectField aria-label={label} value={value} options={rows.map(row => [row.id, row.title] as const)} onValueChange={onChange} className="w-full" />
+  </label>
 }

@@ -186,13 +186,19 @@ try:
         assert js('document.activeElement.textContent') == '선택한 번역 보류 재시도'
         keys(Qt.Key.Key_Space)
         metrics['checks'].append('↑↓ 선택, Tab 버튼 이동, Space 앞당기기·빼기·일괄 재시도·보류 재시도')
-        # 상태 필터의 네이티브 키보드 흐름.
+        # 상태 필터 Select: Enter로 열고 End·Home으로 옮긴 뒤 Enter로 고른다.
         js("document.querySelector('[aria-label=\"대기열 상태 필터\"]').focus()")
+        keys(Qt.Key.Key_Return)
+        assert js("!!document.querySelector('[data-slot=select-content]')")
         keys(Qt.Key.Key_End)
         keys(Qt.Key.Key_Return)
         assert js("document.body.innerText.includes('이 상태의 항목이 없습니다')")
+        assert js('document.activeElement.getAttribute("aria-label")') == '대기열 상태 필터'
+        keys(Qt.Key.Key_Return)
         keys(Qt.Key.Key_Home)
         keys(Qt.Key.Key_Return)
+        assert not js("document.body.innerText.includes('이 상태의 항목이 없습니다')")
+        metrics['checks'].append('상태 필터 Select Enter 열기·End/Home 이동·Enter 선택·포커스 복귀')
         # Tab으로 자동 규칙 버튼에 도달해 키보드로 연다.
         js("document.querySelector('[data-tab=rules]').focus()")
         keys(Qt.Key.Key_Space)

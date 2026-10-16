@@ -3,7 +3,7 @@ import { Film } from "lucide-react"
 import { connectBridge, request } from "@/bridge"
 import type { ReelBridge, ReelData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
-import { NativeSelect } from "@/components/ui/native-select"
+import { SelectField } from "@/components/ui/select"
 import { EmptyState, PageHeader } from "@/components/page-parts"
 import { ResultRow, listKey, restoreListFocus, timestamp } from "@/components/reel-search-parts"
 
@@ -45,9 +45,9 @@ export default function ReelPage() {
     <PageHeader title="하이라이트 모아보기" description="모든 영상의 하이라이트를 이어서 봅니다. 시청 기록과 별도로 복습을 기록합니다." />
     <div className="flex items-center gap-3">
       <label className="flex min-w-0 flex-1 items-center gap-3 text-sm">하이라이트 태그
-        <NativeSelect aria-label="하이라이트 모아보기 태그 필터" value={data?.tagId ?? 0} onChange={event => { if (bridge) { scroll.current = 0; request(reply => bridge.filter(Number(event.target.value), reply)).catch(showError) } }}>
-          <option value={0}>모든 하이라이트</option>{data?.tags.map(tag => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
-        </NativeSelect>
+        <SelectField aria-label="하이라이트 모아보기 태그 필터" value={String(data?.tagId ?? 0)} className="max-w-48"
+          options={[["0", "모든 하이라이트"], ...(data?.tags ?? []).map(tag => [String(tag.id), tag.name] as const)]}
+          onValueChange={value => { if (bridge) { scroll.current = 0; request(reply => bridge.filter(Number(value), reply)).catch(showError) } }} />
       </label>
       <Button variant="outline" onClick={() => { if (bridge) request(reply => bridge.refresh(reply)).catch(showError) }}>목록 갱신</Button>
     </div>
