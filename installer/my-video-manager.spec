@@ -14,7 +14,8 @@ datas += [(str(stage / 'build-version.txt'), 'my_video_manager'),
 # 외부 프로그램은 공식 배포 폴더 그대로 동봉한다.
 datas += [(str(stage / 'ffmpeg'), 'ffmpeg'), (str(root / '.runtime' / 'mpv'), 'mpv')]
 a = Analysis([str(root / 'installer' / 'entry.py')], pathex=[str(root / 'src')],
-             binaries=[], datas=datas, hiddenimports=['faster_whisper', 'ctranslate2'],
+             binaries=[], datas=datas, hiddenimports=['faster_whisper', 'ctranslate2',
+                                                     'my_video_manager.runtime_fingerprint'],
              excludes=['nvidia', 'torch', 'pytest', 'tkinter', 'PyQt5', 'PyQt6'],
              hookspath=[str(root / 'installer' / 'hooks')], runtime_hooks=[], noarchive=False)
 # 네이티브 의존성 탐색이 빌드 PC의 CUDA를 발견해도 설치 파일에 섞지 않는다.
@@ -46,6 +47,10 @@ a.datas = [entry for entry in a.datas if keep_data(entry)]
 sys.path.insert(0, str(root / 'scripts'))
 from bundle_licenses import collect_bundle_licenses
 a.datas += collect_bundle_licenses(a, root, stage)
+from bundle_fingerprint import write_bundle_fingerprint
+fingerprint = write_bundle_fingerprint(stage, root / '.runtime' / 'mpv', root / 'installer' / 'hooks',
+                                       bundle_files=[entry[0] for entry in a.binaries + a.datas])
+a.datas.append((fingerprint.name, str(fingerprint), 'DATA'))
 pyz = PYZ(a.pure)
 # windowed도 부모가 연결한 stdout/stderr 파이프는 유지한다. 설치판 자식 JSON으로 검증한다.
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='my-video-manager',

@@ -151,6 +151,9 @@ libmpv·FFmpeg·ffprobe를 포함합니다. CUDA·Whisper 모델은 넣지 않�
 `-Version 0.2.0`은 소스를 바꾸지 않고 설치 파일과 앱 표시 버전을 함께 지정합니다(Release DryRun용).
 이미 만든 실행 폴더로 설치 파일만 다시 만들 때는 `-SkipPyInstaller -AppDirectory <실행 폴더>`를 사용합니다.
 
+실행 폴더 루트의 `runtime-fingerprint.json`은 실제 동봉 Python 배포판의 고정 버전 목록(앱 자체 제외), Python·PyInstaller·hooks 버전, ffmpeg·ffprobe·mpv와 커스텀 hook의 SHA-256, 필터링 후 동봉 바이너리·데이터의 대상 경로 목록(`bundle_files`)을 기록합니다. 대상 경로는 Windows 기준 소문자·`/` 구분자로 정규화하고 정렬·중복 제거하며 앱 소유 경로는 제외합니다. hook은 CRLF를 LF로 바꾼 뒤 해시합니다. schema 2는 파일 집합을 기록하지 않던 schema 1을 허용하지 않으므로 기존 번들은 다시 빌드해야 합니다. 입력 정책과 이유는 `runtime_fingerprint.py` 한 곳에 있으며 앱 코드·앱 버전·웹 자산·`.spec` 전체는 입력에서 제외합니다.
+`installed_runtime_fingerprint()`는 설치본 지문을 읽고 개발 환경·누락·손상 파일에는 `None`을 돌려줍니다. `-SkipPyInstaller`는 기존 지문과 동봉 바이너리를 검증하며 지문이 없는 예전 번들은 다시 빌드해야 합니다.
+
 설치판 FFmpeg는 PATH와 무관하게 Gyan `9.0.2 essentials` 배포본을 사용합니다.
 고정 URL·SHA-256은 `scripts/bundle_ffmpeg.py`에 있으며 `%LOCALAPPDATA%/my-video-manager/cache/ffmpeg/`의
 공용 아카이브를 빌드마다 재검증합니다. `ffmpeg.exe`·`ffprobe.exe`만 추출하고 `source.json`에 출처와
