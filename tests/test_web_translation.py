@@ -353,3 +353,24 @@ def test_key_failure_diagnostic_is_rendered(window_factory, connected, tmp_path,
             capture(window, 'key-check-failure')
         click(window, '취소')
     within(window.translations.settings, dialogs, check)
+
+
+def test_model_choice_keeps_cli_default_apart_from_sentinel_like_model(window_factory):
+    # Select 내부 값이 직접 입력한 모델 이름과 겹치면 선택 표시가 둘이 되고 기본값으로 돌아가지 못한다(#120).
+    window = window_factory()
+    dialogs = window.web_host.dialogs
+    def check():
+        loaded(window)
+        choose(window, '번역 방식', 'codex')
+        input_text(window, '모델 직접 입력', '__mvm-empty__')
+        open_choice(window, '모델 목록')
+        checked = json.loads(js(window, 'JSON.stringify([...document.querySelectorAll("[data-slot=select-item][data-state=checked]")].map(e => e.dataset.value))'))
+        assert checked == ['__mvm-empty__']
+        js(window, "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))")
+        wait_for(lambda: js(window, '!document.querySelector("[data-slot=select-content]")'))
+        assert dialogs.active
+        choose(window, '모델 목록', '')
+        assert js(window, 'document.querySelector("[aria-label=\'모델 직접 입력\']").value') == ''
+        assert js(window, 'document.querySelector("[aria-label=\'모델 목록\']").dataset.value') == ''
+        click(window, '취소')
+    within(window.translations.settings, dialogs, check)

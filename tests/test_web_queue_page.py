@@ -254,3 +254,53 @@ def test_retry_failed_availability_tracks_failure_retry_and_empty(queue_page, se
     assert changes[-1]['canRetryFailed'] is False
     reply(page.bridge.action('remove', video.id))
     assert reply(page.bridge.snapshot())['canRetryFailed'] is False
+
+
+def test_open_target_list_tab_commits_cursor_and_moves_like_native_select(window_factory, core):
+    # main의 native select: 열린 목록의 Tab·Shift+Tab은 커서 항목을 확정하고 목록만 닫으며,
+    # 포커스는 셀렉트에 남고 다음 Tab·Shift+Tab이 다음·이전 요소로 간다(#120).
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from test_web_dialogs import wait_for
+    videos = core.videos()
+    tags = [core.add_video_tag(videos[0].id, '가'), core.add_video_tag(videos[1].id, '나')]
+    window = window_factory()
+    window.activateWindow()
+    host = window.web_host
+    host.view.setFocus()
+    view = host.view.focusProxy() or host.view
+
+    def js(source):
+        result = []
+        host.engine_page.runJavaScript(source, result.append)
+        wait_for(lambda: bool(result))
+        return result[0]
+
+    def key(value, modifiers=Qt.KeyboardModifier.NoModifier):
+        QTest.keyClick(view, value, modifiers)
+        QTest.qWait(150)
+
+    target = "document.getElementById('queue-target')"
+    is_open = "!!document.querySelector('[data-slot=select-content]')"
+    wait_for(lambda: js("document.getElementById('library-grid') !== null"))
+    window.navigate_web_tab('queue')
+    wait_for(lambda: js("!!document.querySelector('[data-tab=rules]')"))
+    # offscreen 문서는 실제 마우스 입력이 있어야 포커스를 얻는다.
+    point = json.loads(js("JSON.stringify((() => { const r = document.querySelector('[data-tab=rules]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })())"))
+    QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=QPoint(int(point[0]), int(point[1])))
+    wait_for(lambda: js(f"!!{target} && document.hasFocus()"))
+    assert js(f"{target}.dataset.value") == f'tag:{tags[0].id}'
+
+    for modifiers, next_focus, expected in ((Qt.KeyboardModifier.NoModifier, 'queue-language', tags[1]),
+                                            (Qt.KeyboardModifier.ShiftModifier, 'queue-rules', tags[0])):
+        js(f"{target}.focus()")
+        key(Qt.Key.Key_Space)
+        wait_for(lambda: js(is_open))
+        key(Qt.Key.Key_Down if expected is tags[1] else Qt.Key.Key_Up)
+        tab = Qt.Key.Key_Tab if modifiers == Qt.KeyboardModifier.NoModifier else Qt.Key.Key_Backtab
+        key(tab, modifiers)
+        wait_for(lambda: not js(is_open) and js('document.activeElement.id') == 'queue-target')
+        assert js(f"{target}.dataset.value") == f'tag:{expected.id}'
+        key(tab, modifiers)
+        wait_for(lambda: js('document.activeElement.id') == next_focus)
+        assert not js(is_open)

@@ -132,10 +132,10 @@ function SelectScrollDownButton({
   )
 }
 
-// Radix Item은 빈 문자열 값을 쓸 수 없다. 안에서만 sentinel로 바꾸고 바깥에는 원래 값을 넘긴다.
-const EMPTY_VALUE = "__mvm-empty__"
-const itemValue = (value: string) => value === "" ? EMPTY_VALUE : value
-const outerValue = (value: string) => value === EMPTY_VALUE ? "" : value
+// Radix Item은 빈 문자열 값을 쓸 수 없다. 모든 값에 접두사를 붙여 안에서만 쓰고 바깥에는 원래 값을 넘긴다.
+// 접두사는 일대일이라 사용자가 입력한 어떤 문자열(모델 이름 등)과도 내부 값이 겹치지 않는다.
+const itemValue = (value: string) => `v:${value}`
+const outerValue = (value: string) => value.slice(2)
 
 type SelectOption = readonly [value: string, label: string]
 
@@ -158,13 +158,24 @@ function SelectField({
   id?: string
   "aria-label": string
 }) {
+  const [open, setOpen] = React.useState(false)
   const known = options.some(([option]) => option === value)
+  // 열린 목록의 Tab·Shift+Tab은 native select처럼 커서 항목을 확정하고 목록만 닫는다.
+  // 포커스는 트리거로 돌아오고, 다음 Tab·Shift+Tab이 다음·이전 요소로 이동한다.
+  function tabOut(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Tab") return
+    event.preventDefault()
+    const cursor = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>("[data-slot=select-item]") : null
+    const next = cursor?.dataset.value
+    if (next !== undefined && next !== value) onValueChange(next)
+    setOpen(false)
+  }
   return (
-    <Select value={known ? itemValue(value) : ""} onValueChange={next => onValueChange(outerValue(next))} disabled={disabled}>
+    <Select open={open} onOpenChange={setOpen} value={known ? itemValue(value) : ""} onValueChange={next => onValueChange(outerValue(next))} disabled={disabled}>
       <SelectTrigger id={id} aria-label={label} data-value={value} className={className}>
         <SelectValue placeholder={options[0]?.[1]} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent onKeyDown={tabOut}>
         {options.map(([option, text]) => <SelectItem key={option} value={itemValue(option)} data-value={option}>{text}</SelectItem>)}
       </SelectContent>
     </Select>
