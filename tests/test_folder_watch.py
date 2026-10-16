@@ -10,7 +10,7 @@ from time import monotonic
 
 import pytest
 
-from my_video_manager.folder_watch import AUTOMATIC_DETECTION_KEY, folder_snapshot
+from my_video_manager.folder_watch import AUTOMATIC_DETECTION_KEY, MAX_BATCH_WAIT_SECONDS, folder_snapshot
 from my_video_manager.folder_watch_adapter import WatchdogFolderWatcher
 from test_library import core, open_core, record, records, video_file
 
@@ -582,26 +582,170 @@ def test_inaccessible_descendant_is_stable_and_does_not_block_batch(core, tmp_pa
     service.stop()
 
 
-def test_inaccessible_requested_folder_retries_with_one_plain_warning(core, tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize("error_type", [PermissionError, OSError])
+def test_inaccessible_requested_folder_delivers_with_other_folder(core, tmp_path, monkeypatch, error_type):
     path = video_file(tmp_path / "watched")
+    other = video_file(tmp_path / "other", content=b"other")
     core.add_watched_folder(path.parent)
+    core.add_watched_folder(other.parent)
     scandir = os.scandir
     locked = True
 
     def denied(directory):
         if locked and Path(directory) == path.parent:
-            raise PermissionError("denied root")
+            raise error_type("denied root")
         return scandir(directory)
 
     monkeypatch.setattr(os, "scandir", denied)
     service, watcher, time, batches = watch(core)
-    watcher.emit(path.parent)
-    time.advance(20)
-    assert batches == [] and len(caplog.records) == 1
-    assert caplog.records[0].exc_info is None
-    locked = False
+    watcher.emit(path.parent, other.parent)
     time.advance(6)
+    assert len(batches) == 1 and set(batches[0]) == {path.parent, other.parent}
+    assert folder_snapshot((path.parent,))[path.parent] is None
+    result = core.scan(folders=batches[0])
+    assert result.added == 1
+    assert any(issue.path == path.parent and issue.failed for issue in result.issues)
+    locked = False
+    watcher.emit(path.parent)
+    time.advance(6)
+    assert batches[-1] == (path.parent,)
+    assert core.scan(folders=batches[-1]).added == 1
+    service.stop()
+
+
+def test_snapshot_adapter_errors_have_bounded_retry(core, tmp_path, caplog):
+    path = video_file(tmp_path / "watched")
+    core.add_watched_folder(path.parent)
+
+    def failed(_):
+        raise PermissionError("adapter cannot enumerate")
+
+    service, watcher, time, batches = watch(core, snapshot=failed)
+    watcher.emit(path.parent)
+    time.advance(12)
     assert batches == [(path.parent,)]
+    assert len(caplog.records) == 1 and caplog.records[0].exc_info is None
+    service.stop()
+
+
+def test_polling_uses_directory_metadata_and_fresh_stat_only_before_delivery(core, tmp_path, monkeypatch):
+    path = video_file(tmp_path / "watched")
+    core.add_watched_folder(path.parent)
+    original_stat, calls = os.stat, []
+
+    def counted(candidate, **kwargs):
+        if Path(candidate) == path:
+            calls.append(candidate)
+        return original_stat(candidate, **kwargs)
+
+    monkeypatch.setattr(os, "stat", counted)
+    service, watcher, time, batches = watch(core)
+    watcher.emit(path.parent)
+    time.advance(5)
+    assert calls == [] and batches == []
+    time.advance(1)
+    assert calls == [path] and batches == [(path.parent,)]
+    service.stop()
+
+
+@pytest.mark.parametrize("busy_kind", ["growing", "locked"])
+def test_batch_deadline_delivers_stable_folder_and_keeps_busy_folder(core, tmp_path, busy_kind):
+    movie = video_file(tmp_path / "movies")
+    growing = video_file(tmp_path / "recordings", "obs.mkv", b"recording")
+    for folder in (movie.parent, growing.parent):
+        core.add_watched_folder(folder)
+    busy = True
+    service, watcher, time, batches = watch(
+        core, ready=lambda path: not (busy and busy_kind == "locked" and path == growing))
+    watcher.emit(movie.parent, growing.parent)
+    for second in range(int(MAX_BATCH_WAIT_SECONDS) - 1):
+        if busy_kind == "growing":
+            growing.write_bytes(b"x" * (second + 1))
+        time.advance(1)
+    assert batches == []
+    for second in range(3):
+        if busy_kind == "growing":
+            growing.write_bytes(b"y" * (100 + second))
+        time.advance(1)
+    assert batches == [(movie.parent,)]
+    assert core.scan(folders=batches[0]).added == 1
+    busy = False
+    time.advance(6)
+    assert batches == [(movie.parent,), (growing.parent,)]
+    assert core.scan(folders=batches[1]).added == 1
+    service.stop()
+
+
+def test_partial_batch_delivery_failure_retries_without_losing_pending_folder(core, tmp_path):
+    movie = video_file(tmp_path / "movies")
+    locked = video_file(tmp_path / "recordings", "obs.mkv")
+    for folder in (movie.parent, locked.parent):
+        core.add_watched_folder(folder)
+    attempts, delivered = [], []
+    busy = True
+
+    def deliver(batch):
+        attempts.append(batch)
+        if len(attempts) == 1:
+            raise OSError("queue unavailable")
+        delivered.append(batch)
+
+    service, watcher, time, _ = watch(
+        core, deliver, ready=lambda path: not busy or path != locked)
+    watcher.emit(movie.parent, locked.parent)
+    time.advance(MAX_BATCH_WAIT_SECONDS + 3)
+    assert attempts == [(movie.parent,), (movie.parent,)]
+    assert delivered == [(movie.parent,)]
+    busy = False
+    time.advance(6)
+    assert delivered == [(movie.parent,), (locked.parent,)]
+    service.stop()
+    time.advance(MAX_BATCH_WAIT_SECONDS)
+    assert len(delivered) == 2
+
+
+def test_continuous_events_cannot_extend_batch_deadline_forever(core, tmp_path):
+    movie = video_file(tmp_path / "movies")
+    growing = video_file(tmp_path / "recordings", "obs.mkv")
+    for folder in (movie.parent, growing.parent):
+        core.add_watched_folder(folder)
+    service, watcher, time, batches = watch(core)
+    watcher.emit(movie.parent)
+    time.advance(1)  # 안정 폴더의 첫 스냅숏을 확보한다.
+    for step in range(280):
+        growing.write_bytes(b"x" * (step + 1))
+        watcher.emit(growing.parent)
+        time.advance(0.25)  # debounce보다 잦은 이벤트.
+        if time.now < MAX_BATCH_WAIT_SECONDS:
+            assert batches == []
+    assert batches == [(movie.parent,)]
+    time.advance(6)
+    assert batches[-1] == (growing.parent,)
+    service.stop()
+
+
+def test_move_pair_stays_together_until_destination_is_ready_before_deadline(core, tmp_path):
+    source = video_file(tmp_path / "source")
+    target = tmp_path / "target/moved.mkv"
+    target.parent.mkdir()
+    for folder in (source.parent, target.parent):
+        core.add_watched_folder(folder)
+    core.scan()
+    video, = core.videos()
+    copying = True
+    service, watcher, time, batches = watch(core, ready=lambda path: not copying or path != target)
+    source.rename(target)
+    watcher.emit(source.parent)
+    time.advance(0.2)
+    watcher.emit(target.parent)
+    time.advance(45)
+    assert batches == []
+    copying = False
+    time.advance(6)
+    assert len(batches) == 1 and set(batches[0]) == {source.parent, target.parent}
+    result = core.scan(folders=batches[0])
+    assert not result.reconnected and not result.issues
+    assert [location.path for location in core.video(video.id).locations] == [target]
     service.stop()
 
 

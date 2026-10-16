@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 import logging
 import os
 from pathlib import Path
@@ -17,11 +18,18 @@ from .external_subtitles import EXTENSIONS as SUBTITLE_SUFFIXES
 
 
 AUTOMATIC_DETECTION_KEY = "library.automatic_detection_enabled"
+MAX_BATCH_WAIT_SECONDS = 60.0
 FolderBatch = tuple[Path, ...]
-# None은 접근할 수 없는 하위 항목이다. 검사 단계에서 ScanIssue로 보고한다.
+# None은 접근할 수 없는 요청 폴더 또는 하위 항목이다. ScanIssue로 보고한다.
 Snapshot = dict[Path, tuple[int, int] | None]
 STABLE_SUFFIXES = VIDEO_SUFFIXES | SUBTITLE_SUFFIXES
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _FolderState:
+    signature: Snapshot
+    stable_since: float
 
 
 class FolderWatcher(Protocol):
@@ -65,13 +73,12 @@ def minimal_folders(folders: Iterable[Path]) -> FolderBatch:
 
 
 def folder_snapshot(folders: FolderBatch) -> Snapshot:
-    """영상·외부 자막의 서명만 읽는다. 요청 폴더의 접근 실패만 예외다.
+    """영상·외부 자막의 서명만 읽는다. 접근 실패는 범위와 관계없이 None이다.
 
     디렉터리 이동 시 자식 이벤트가 누락되어도 복사 중인 자식을 기다린다.
     라이브러리 순회와 같이 정션·심볼릭 링크를 따라가지 않는다.
     """
     result = {}
-    roots = set(folders)
     pending = list(folders)
     while pending:
         directory = pending.pop()
@@ -96,19 +103,11 @@ def folder_snapshot(folders: FolderBatch) -> Snapshot:
                     if stat.S_ISDIR(info.st_mode):
                         pending.append(path)
                     elif stat.S_ISREG(info.st_mode) and path.suffix.casefold() in STABLE_SUFFIXES:
-                        try:
-                            # Windows의 디렉터리 항목 캐시는 복사 중에도 고정될 수 있다.
-                            info = os.stat(path, follow_symlinks=False)
-                            result[path] = (info.st_size, info.st_mtime_ns)
-                        except FileNotFoundError:
-                            continue
-                        except OSError:
-                            result[path] = None
+                        # 비싼 핸들 기반 stat은 전달 직전의 변경 파일 확인에만 쓴다.
+                        result[path] = (info.st_size, info.st_mtime_ns)
         except (FileNotFoundError, NotADirectoryError):
             continue
         except OSError:
-            if directory in roots:
-                raise
             result[directory] = None
     return result
 
@@ -178,6 +177,7 @@ class FolderWatch:
         self._ready = ready
         self._confirmed: Snapshot = {}
         self._snapshot_error_reported = False
+        self._snapshot_error_since: float | None = None
         self._update_failed: FolderBatch = ()
         self._debounce = debounce_seconds
         self._stable = stable_seconds
@@ -191,8 +191,8 @@ class FolderWatch:
         self._timer_id = 0
         self._pending: set[Path] = set()
         self._last_event = 0.0
-        self._signature: Snapshot | None = None
-        self._stable_since = 0.0
+        self._folder_states: dict[Path, _FolderState] = {}
+        self._batch_started: float | None = None
 
     @property
     def enabled(self) -> bool:
@@ -248,7 +248,7 @@ class FolderWatch:
             self._folders = folders
             self._pending = {path for path in self._pending if self._contains(path)}
             self._revision += 1
-            self._signature = None
+            self._folder_states.clear()
             self._confirmed = {path: sig for path, sig in self._confirmed.items() if self._contains(path)}
             if not self._pending:
                 self._clear()
@@ -269,8 +269,10 @@ class FolderWatch:
             self._timer.cancel()
         self._timer = None
         self._pending.clear()
-        self._signature = None
+        self._folder_states.clear()
+        self._batch_started = None
         self._snapshot_error_reported = False
+        self._snapshot_error_since = None
         self._revision += 1
 
     def _schedule(self, seconds):
@@ -289,6 +291,8 @@ class FolderWatch:
                 return
             self._pending.update(accepted)
             self._last_event = self._clock()
+            if self._batch_started is None:
+                self._batch_started = self._last_event
             self._revision += 1
             if self._timer is None:
                 self._schedule(self._debounce)
@@ -299,19 +303,20 @@ class FolderWatch:
                     or timer_id != self._timer_id or not self._pending):
                 return
             self._timer = None
-            quiet = self._clock() - self._last_event
-            if quiet < self._debounce:
+            now = self._clock()
+            expired = now - self._batch_started >= MAX_BATCH_WAIT_SECONDS
+            quiet = now - self._last_event
+            if quiet < self._debounce and not expired:
                 # 단조 시계의 소수점 반올림 때문에 0에 가까운 재예약을 반복하지 않는다.
                 self._schedule(max(0.001, self._debounce - quiet))
                 return
             revision = self._revision
             folders = minimal_folders(self._pending)
+        snapshot_error = None
         try:
             signature = self._snapshot(folders)
         except OSError as error:
-            if not self._snapshot_error_reported:
-                logger.warning("감시 폴더 안정화 확인 실패; 재시도합니다: %s", error)
-                self._snapshot_error_reported = True
+            snapshot_error = error
             signature = None
         with self._lock:
             if not self._active or epoch != self._epoch:
@@ -322,31 +327,58 @@ class FolderWatch:
                     self._schedule(self._poll)
                 return
             now = self._clock()
-            if signature is None or signature != self._signature:
-                self._signature = signature
-                self._stable_since = now
-            if signature is None or now - self._stable_since < self._stable:
+            if signature is None:
+                if not self._snapshot_error_reported:
+                    logger.warning("감시 폴더 안정화 확인 실패; 제한적으로 재시도합니다: %s", snapshot_error)
+                    self._snapshot_error_reported = True
+                if self._snapshot_error_since is None:
+                    self._snapshot_error_since = now
+                if now - self._snapshot_error_since < self._stable:
+                    self._schedule(self._poll)
+                    return
+                # 주입 어댑터가 범위 전체의 오류를 던져도 무한 대기하지 않는다.
+                signature = {folder: None for folder in folders}
+            else:
+                self._snapshot_error_since = None
+            snapshots = {folder: {} for folder in folders}
+            for path, value in signature.items():
+                for folder in folders:
+                    if path.is_relative_to(folder):
+                        snapshots[folder][path] = value
+                        break
+            self._folder_states = {folder: self._folder_states[folder]
+                                   for folder in folders if folder in self._folder_states}
+            for folder, current in snapshots.items():
+                state = self._folder_states.get(folder)
+                if state is None or state.signature != current:
+                    self._folder_states[folder] = _FolderState(current, now)
+            stable = tuple(folder for folder in folders
+                           if now - self._folder_states[folder].stable_since >= self._stable)
+            expired = now - self._batch_started >= MAX_BATCH_WAIT_SECONDS
+            if not stable or (len(stable) != len(folders) and not expired):
                 self._schedule(self._poll)
                 return
-            changed = {path: sig for path, sig in signature.items()
-                       if sig is not None and sig != self._confirmed.get(path)}
+            changed = {folder: {path: sig for path, sig in snapshots[folder].items()
+                                if sig is not None and sig != self._confirmed.get(path)}
+                       for folder in stable}
         # OS 핸들 확인은 state lock 밖에서 수행한다. 종료/새 이벤트는 아래에서 재확인한다.
-        ready = True
-        for path, expected in changed.items():
-            try:
-                if not self._ready(path):
-                    ready = False
+        blocked = set()
+        for folder, files in changed.items():
+            for path, expected in files.items():
+                try:
+                    if not self._ready(path):
+                        blocked.add(folder)
+                        break
+                    info = os.stat(path, follow_symlinks=False)
+                    if (info.st_size, info.st_mtime_ns) != expected:
+                        blocked.add(folder)
+                        break
+                except (FileNotFoundError, NotADirectoryError):
+                    blocked.add(folder)
                     break
-                info = os.stat(path, follow_symlinks=False)
-                if (info.st_size, info.st_mtime_ns) != expected:
-                    ready = False
-                    break
-            except (FileNotFoundError, NotADirectoryError):
-                ready = False
-                break
-            except OSError:
-                # 영구 접근 거부를 복사로 오인해 기다리지 않는다. scan이 오류를 보고한다.
-                continue
+                except OSError:
+                    # 영구 접근 거부는 scan의 오류 보고에 맡긴다.
+                    continue
         with self._lock:
             if not self._active or epoch != self._epoch:
                 return
@@ -354,17 +386,28 @@ class FolderWatch:
                 if self._pending and self._timer is None:
                     self._schedule(self._poll)
                 return
-            if not ready:
-                self._stable_since = self._clock()
+            for folder in blocked:
+                self._folder_states[folder].stable_since = self._clock()
+            ready_folders = tuple(folder for folder in stable if folder not in blocked)
+            if not ready_folders or (blocked and not expired):
                 self._schedule(self._poll)
                 return
             try:
-                self._on_batch_ready(folders)
+                self._on_batch_ready(ready_folders)
             except Exception:
                 logger.exception("감시 폴더 검사 요청 전달 실패; 다시 시도합니다")
                 self._schedule(self._poll)
             else:
                 self._confirmed = {path: sig for path, sig in self._confirmed.items()
-                                   if not any(path.is_relative_to(folder) for folder in folders)}
-                self._confirmed.update(signature)
-                self._clear()
+                                   if not any(path.is_relative_to(folder) for folder in ready_folders)}
+                for folder in ready_folders:
+                    self._confirmed.update(snapshots[folder])
+                    del self._folder_states[folder]
+                self._pending = {path for path in self._pending
+                                 if not any(path.is_relative_to(folder) for folder in ready_folders)}
+                if self._pending:
+                    self._batch_started = self._clock()
+                    self._revision += 1
+                    self._schedule(self._poll)
+                else:
+                    self._clear()
