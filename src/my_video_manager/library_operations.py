@@ -4,6 +4,10 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from .web_dialogs_entries import TagEditor, TagManager
 
 
+# 조용한 시작 검사가 끝난 뒤 복원할지 판단하는 기준 문구.
+SCAN_RUNNING_MESSAGE = "영상을 검사하고 썸네일을 만드는 중입니다…"
+
+
 class ScanWorker(QThread):
     completed = Signal(object)
     failed = Signal(str)
@@ -51,7 +55,8 @@ class LibraryOperations:
     def scan(self, checked=False, *, operation=None, quiet_if_unchanged=False):
         if self.worker is not None:
             if operation is not None:
-                self.report_scan("진행 중인 검사가 끝난 뒤 다시 시도하세요.")
+                # 대화상자에서 고른 작업은 안내 대신 예외로 올려 각 화면의 오류 자리에 보여 준다.
+                raise ValueError("진행 중인 검사가 끝난 뒤 다시 시도하세요.")
             return
         self._quiet_scan = quiet_if_unchanged
         if quiet_if_unchanged:
@@ -62,7 +67,7 @@ class LibraryOperations:
         self.worker.finished.connect(self.scan_finished)
         self.scan_state_changed.emit(True)
         self.selection_changed()
-        self.report_scan("영상을 검사하고 썸네일을 만드는 중입니다…")
+        self.report_scan(SCAN_RUNNING_MESSAGE)
         self.worker.start()
 
     def report_scan(self, text):
@@ -72,8 +77,10 @@ class LibraryOperations:
     def scan_completed(self, result):
         self.refresh()
         if self._quiet_scan and result.added == 0 and not result.issues:
-            self.scan_message.emit(self._previous_scan_report)
-            self.window.show_status("")
+            # 검사 중 다른 안내가 들어왔으면 그것을 덮어쓰지 않는다.
+            if self.window.web_host.controllers['folders'].report == SCAN_RUNNING_MESSAGE:
+                self.scan_message.emit(self._previous_scan_report)
+                self.window.show_status("")
             return
         summary = f"영상 {result.added}개 등록 · 전체 {len(self.cards)}개 · 안내 {len(result.issues)}개"
         self.scan_message.emit(summary + "\n" + "\n".join(f"{i.path}: {i.message}" for i in result.issues))

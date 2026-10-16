@@ -10,7 +10,7 @@ from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QSystemTrayIcon
 
-from my_video_manager.core import AppCore
+from my_video_manager.core import AppCore, ScanResult
 from my_video_manager.library import MediaInfo
 from my_video_manager.ui import MainWindow
 from qt_wait import wait_for
@@ -240,15 +240,99 @@ def test_file_dialog_racing_startup_scan_reports_retry(startup, monkeypatch):
     monkeypatch.setattr(QFileDialog, 'getOpenFileName', choose_file)
     assert json.loads(folders.bridge.action('addFile', '')) == {'ok': True}
     wait_for(lambda: media.started.is_set() and not folders.bridge.busy)
-    assert folders.report == '진행 중인 검사가 끝난 뒤 다시 시도하세요.'
-    assert not errors and window.worker.isRunning() and len(calls) == 1
+    assert errors == ['진행 중인 검사가 끝난 뒤 다시 시도하세요.']
+    assert window.worker.isRunning() and len(calls) == 1
     media.release.set()
     wait_for(lambda: window.worker is None)
     assert {video.title for video in core.videos()} == {'existing', 'new'}
     # 안내에 따라 재시도하면 선택한 파일을 정상 등록한다.
+    errors.clear()
     assert json.loads(folders.bridge.action('addFile', '')) == {'ok': True}
     wait_for(lambda: not folders.bridge.busy and window.worker is None)
     assert {video.title for video in core.videos()} == {'existing', 'new', 'direct'}
+
+
+def stretch_quiet_startup_scan(core, calls, monkeypatch):
+    """무변경(조용한) 시작 검사가 끝나지 않도록 멈춰 두는 도우미."""
+    started, release = threading.Event(), threading.Event()
+
+    def quiet_scan():
+        calls.append(threading.get_ident())
+        started.set()
+        assert release.wait(20), '검사 중 조작이 끝나지 않았습니다.'
+        return ScanResult(0, ())
+
+    monkeypatch.setattr(core, 'scan', quiet_scan)
+    return started, release
+
+
+def test_add_file_racing_quiet_startup_scan_reports_error_and_keeps_it(startup, monkeypatch):
+    core, folder, _, calls, create = startup
+    direct = folder.parent / 'direct.mkv'
+    direct.write_bytes(b'direct')
+    window = create(show=False)
+    folders = window.web_host.controllers['folders']
+    errors = []
+    folders.bridge.foldersError.connect(errors.append)
+    started, release = stretch_quiet_startup_scan(core, calls, monkeypatch)
+
+    def choose_file(*args):
+        window.show()
+        wait_for(started.is_set)
+        return str(direct), ''
+
+    monkeypatch.setattr(QFileDialog, 'getOpenFileName', choose_file)
+    assert json.loads(folders.bridge.action('addFile', '')) == {'ok': True}
+    wait_for(lambda: started.is_set() and not folders.bridge.busy)
+    assert errors == ['진행 중인 검사가 끝난 뒤 다시 시도하세요.']
+    assert window.worker.isRunning() and len(calls) == 1
+    release.set()
+    wait_for(lambda: window.worker is None)
+    # 조용한 완료가 문구를 복원해도 거부된 파일이 등록되지 않았다는 사실은 오류에 남는다.
+    assert errors == ['진행 중인 검사가 끝난 뒤 다시 시도하세요.']
+    assert folders.report != '진행 중인 검사가 끝난 뒤 다시 시도하세요.'
+    assert {video.title for video in core.videos()} == {'existing'}
+
+
+def test_library_reconnect_racing_quiet_startup_scan_reports_error(startup, monkeypatch):
+    core, folder, _, calls, create = startup
+    replacement = folder.parent / 'replacement.mkv'
+    replacement.write_bytes(b'replacement')
+    window = create(show=False)
+    video_id = core.videos()[0].id
+    original = core.video(video_id).locations
+    window.library_page.refresh()
+    bridge = window.library_page.bridge
+    errors = []
+    bridge.libraryError.connect(errors.append)
+    started, release = stretch_quiet_startup_scan(core, calls, monkeypatch)
+
+    def choose_file(*args):
+        window.show()
+        wait_for(started.is_set)
+        return str(replacement), ''
+
+    monkeypatch.setattr(QFileDialog, 'getOpenFileName', choose_file)
+    assert json.loads(bridge.action('reconnect', video_id)) == {'ok': True}
+    wait_for(lambda: started.is_set() and not bridge.busy)
+    assert errors == ['진행 중인 검사가 끝난 뒤 다시 시도하세요.']
+    assert window.worker.isRunning() and len(calls) == 1
+    release.set()
+    wait_for(lambda: window.worker is None)
+    assert core.video(video_id).locations == original
+
+
+def test_quiet_completion_does_not_overwrite_a_newer_notice(startup, monkeypatch):
+    core, _, _, calls, create = startup
+    window = create(show=False)
+    folders = window.web_host.controllers['folders']
+    started, release = stretch_quiet_startup_scan(core, calls, monkeypatch)
+    window.show()
+    wait_for(started.is_set)
+    folders.report_scan('검사 중 들어온 안내')
+    release.set()
+    wait_for(lambda: window.worker is None)
+    assert folders.report == '검사 중 들어온 안내'
 
 
 def test_startup_warning_is_not_silenced(startup):
