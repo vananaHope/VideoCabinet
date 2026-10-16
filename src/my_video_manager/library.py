@@ -464,6 +464,7 @@ class Library:
             return result.added
 
         pending = list(reversed(roots))
+        watched_roots = {folder.path for folder in self.watched_folders()}
         visited: set[Path] = set()
         signatures: dict[Path, tuple[int, int]] = {}
         entries_in_order: list[Path | ScanIssue] = []
@@ -497,9 +498,12 @@ class Library:
                             inaccessible.add(path)
                             entries_in_order.append(ScanIssue(path, str(error)))
             except (OSError, RuntimeError) as error:
-                if not isinstance(error, (FileNotFoundError, NotADirectoryError)):
+                missing = isinstance(error, (FileNotFoundError, NotADirectoryError))
+                if not missing:
                     inaccessible.add(directory)
-                entries_in_order.append(ScanIssue(directory, str(error)))
+                # 지정 검사 중 사용자가 지운 하위 폴더는 정상 변경이다.
+                failed = not (missing and not include_direct and directory not in watched_roots)
+                entries_in_order.append(ScanIssue(directory, str(error), failed=failed))
 
         for path in locations:
             if not include_direct and any(path.is_relative_to(blocked) for blocked in skipped):
