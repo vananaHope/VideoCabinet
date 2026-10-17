@@ -14,6 +14,7 @@ from wait_helpers import CHILD_READY_TIMEOUT
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from my_video_manager.app_version import RELEASE_REPOSITORY
 from my_video_manager.runtime_fingerprint import NATIVE_FILES, make_runtime_fingerprint
 from my_video_manager.update_manifest import verify_manifest
 
@@ -83,6 +84,9 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from my_video_manager import update_manifest
 update_manifest.UPDATE_PUBLIC_KEY = bytes.fromhex(os.environ['RELEASE_TEST_PUBLIC'])
 original = tool.previous_release
+def previous_release(repository, version):
+    assert repository == os.environ['RELEASE_TEST_RELEASE_REPOSITORY'], repository
+    return original(repository, version, api=api)
 def api(endpoint, **kwargs):
     kind = os.environ.get('RELEASE_TEST_PREVIOUS', 'first')
     if endpoint.endswith('/latest'):
@@ -101,7 +105,7 @@ def api(endpoint, **kwargs):
         key = load_pem_private_key(Path(os.environ['RELEASE_TEST_PREVIOUS_KEY']).read_bytes(), password=None)
         return key.sign(data)
     return data
-tool.previous_release = lambda repository, version: original(repository, version, api=api)
+tool.previous_release = previous_release
 raise SystemExit(tool.main())
 ''', encoding='utf-8')
     (repo / "scripts/build.ps1").write_text(r'''param([string]$Version, [switch]$SkipPyInstaller, [switch]$PatchOnly)
@@ -150,7 +154,7 @@ def run_release(repository, *, build=False, status="404", build_fail=False, dry_
            "RELEASE_TEST_DIRTY_BUILD": str(int(dirty_build)),
            "RELEASE_TEST_HEAD_BUILD": str(int(head_build)), "RELEASE_TEST_REDIRECT": str(int(redirect)),
            'RELEASE_TEST_PREVIOUS': previous, 'RELEASE_TEST_PUBLISH': str(int(publish)),
-           'RELEASE_TEST_VERSION': version}
+           'RELEASE_TEST_VERSION': version, 'RELEASE_TEST_RELEASE_REPOSITORY': RELEASE_REPOSITORY}
     env['RELEASE_TEST_PREVIOUS_KEY'] = env['RELEASE_TEST_KEY']
     if key_state == 'missing':
         env['RELEASE_TEST_KEY'] += '.missing'
@@ -173,7 +177,8 @@ function global:gh {
         throw '가짜 Release 실패'
     }
     if ($args[0] -ne 'api') { throw '금지된 gh 명령' }
-    if ($args[1] -notlike 'repos/release-tests/my-video-manager*') { throw 'origin과 다른 저장소' }
+    # Release 조회는 -ReleaseRepository 기본값인 배포 저장소로만 가고 소스 origin은 쓰지 않는다.
+    if ($args[1] -notmatch "^repos/$([regex]::Escape($env:RELEASE_TEST_RELEASE_REPOSITORY))(/|$)") { throw '배포 저장소가 아닌 저장소' }
     if ($args[1] -notmatch '/releases/') {
         $global:LASTEXITCODE = 0
         return
@@ -207,6 +212,12 @@ def snapshot(repository):
     repo, remote = repository
     return (git(repo, "rev-parse", "HEAD"), git(repo, "show-ref"),
             (repo / "pyproject.toml").read_bytes(), git(remote, "show-ref"))
+
+
+def test_release_repository_default_matches_app_constant():
+    script = (ROOT / 'scripts/release.ps1').read_text(encoding='utf-8-sig')
+    assert f"[string]$ReleaseRepository = '{RELEASE_REPOSITORY}'" in script
+    assert RELEASE_REPOSITORY == 'vananaHope/my-video-manager-releases'
 
 
 @pytest.mark.parametrize("build", [False, True])
@@ -350,8 +361,11 @@ def test_release_failure_preserves_pushed_refs_and_prints_manual_completion(repo
     assert git(remote, "rev-parse", "v0.2.0^{}") == head
     assert git(repo, "rev-parse", "v0.2.0^{}") == head
     assert "git ls-remote origin refs/heads/main refs/tags/v0.2.0" in result.stdout
-    assert "gh release view v0.2.0 --repo github.com/release-tests/my-video-manager" in result.stdout
-    assert "gh release create v0.2.0" in result.stdout
+    assert f"gh release view v0.2.0 --repo github.com/{RELEASE_REPOSITORY}" in result.stdout
+    # 경고는 콘솔 폭에서 줄바꿈될 수 있어 공백을 합친 뒤 비교한다.
+    create = " ".join(result.stdout.split("gh release create v0.2.0", 1)[1].split("--notes-file", 1)[0].split())
+    assert f"--repo github.com/{RELEASE_REPOSITORY} --target main" in create
+    assert "--verify-tag" not in result.stdout
     assert "--notes-file" in result.stdout
     assert "gh release upload v0.2.0" in result.stdout
     assert git(repo, "status", "--porcelain") == ""
@@ -446,6 +460,14 @@ def test_publication_uploads_only_eligible_assets_with_verified_manifest(reposit
     else:
         assert patch.read_bytes() == b'stale patch'
     assert assets == expected
+    # 소스 origin에는 커밋과 태그만, Release는 소스 태그 없이 배포 저장소 main에 만든다.
+    _, remote = repository
+    head = git(repo, 'rev-parse', 'HEAD')
+    assert git(remote, 'rev-parse', 'main') == head
+    assert git(remote, 'rev-parse', 'v0.2.0^{}') == head
+    options = arguments[arguments.index('--repo'):]
+    assert options[:4] == ['--repo', f'github.com/{RELEASE_REPOSITORY}', '--target', 'main']
+    assert '--verify-tag' not in arguments
 
 
 def test_patch_assets_are_in_failure_recovery_instructions(repository):

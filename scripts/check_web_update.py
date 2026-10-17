@@ -61,6 +61,8 @@ class Player:
         pass
 
 
+# 실제 공개 키가 들어간 뒤에도 확인 단계는 키 미설정 빌드로 두어 네트워크에 닿지 않게 한다.
+update_manifest.UPDATE_PUBLIC_KEY = b''
 app = QApplication([])
 if args.offscreen:
     for name in ('malgun.ttf', 'malgunbd.ttf'):
@@ -77,7 +79,7 @@ failures = []
 
 def gated_check():
     started.append(threading.get_ident())
-    # 네트워크 대기를 흉내 낸다. 실제 서명 키가 없으므로 요청 없이 공개 키 미설정 실패로 끝난다.
+    # 네트워크 대기를 흉내 낸다. 공개 키를 비워 두었으므로 요청 없이 공개 키 미설정 실패로 끝난다.
     gate.wait(30)
     if failures:
         raise failures[0]
@@ -103,7 +105,7 @@ class ReleaseHttp:
         self.downloads = []
 
     def get(self, url, *, max_bytes):
-        assert url.startswith('https://github.com/vananaHope/my-video-manager/releases/download/v0.6.0/')
+        assert url.startswith('https://github.com/vananaHope/my-video-manager-releases/releases/download/v0.6.0/')
         assets = {name: {'filename': name, 'size': len(body), 'sha256': hashlib.sha256(body).hexdigest()}
                   for name, body in self.bodies.items()}
         data = json.dumps({'schema_version': 1, 'version': '0.6.0', 'runtime_fingerprint': FINGERPRINT,
