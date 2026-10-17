@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 import json
 import re
+import unicodedata
 from typing import Callable, Literal, Protocol
 
 from . import update_manifest
@@ -18,8 +19,13 @@ AUTO_CHECK_INTERVAL = timedelta(days=1)
 TRANSIENT_FAILURE_CHECK_INTERVAL = timedelta(hours=3)
 AUTO_CHECK_KEY = 'updates.check_on_startup'
 LAST_CHECK_KEY = 'updates.last_check'
+SKIPPED_VERSION_KEY = 'updates.skipped_version'
 METADATA_LIMIT = 1024 * 1024
 MANIFEST_LIMIT = 64 * 1024
+# Release notes come from the unsigned GitHub API body: display-only plain text.
+RELEASE_NOTES_LIMIT = 400
+RELEASE_NOTES_LINES = 8
+RELEASE_NOTES_SCAN = 20_000
 UpdateKind = Literal['none', 'patch', 'full', 'failed']
 
 
@@ -42,9 +48,11 @@ def installed_update_info() -> InstalledUpdateInfo:
 class UpdateCheckResult:
     """Historical display state, NOT authorization to download or install.
 
-    latest_version identifies the verified release for future skip-version UI.
+    latest_version identifies the verified release; a skipped version is compared to it.
     A future installer must fetch and verify metadata again, never trust this
     editable settings record. No unverified release fields survive a failure.
+    release_notes is a short plain-text summary of the unsigned release body,
+    kept only for display next to a patch/full result.
     """
 
     checked_at: datetime
@@ -53,6 +61,7 @@ class UpdateCheckResult:
     latest_version: str | None = None
     download_size: int | None = None
     failure_reason: str | None = None
+    release_notes: str | None = None
     # Whether this history belongs to a different installed app version.
     # UpdateChecker computes it from its installation adapter; never persisted.
     # UI consumers must distinguish stale history from an update currently
@@ -69,6 +78,43 @@ def _version(value: str) -> tuple:
         raise ValueError('invalid version')
     # Numeric ordering without integer conversion limits on untrusted strings.
     return tuple((len(part), part) for part in value.split('.'))
+
+
+def offers_update(result: UpdateCheckResult | None) -> bool:
+    """Whether a result describes an update for the installed app (not stale history)."""
+    return result is not None and not result.stale and result.kind in ('patch', 'full')
+
+
+def announces_update(result: UpdateCheckResult | None, skipped_version: str | None) -> bool:
+    """Whether to announce a result: a current update whose version is not the skipped one."""
+    return offers_update(result) and result.latest_version != skipped_version
+
+
+def release_notes_summary(body) -> str | None:
+    """Short display text from an unsigned release body; Markdown/HTML are never rendered.
+
+    Markup characters are dropped for readability, link targets are removed,
+    control and format characters (including bidi overrides) are stripped.
+    """
+    if not isinstance(body, str):
+        return None
+    lines = []
+    for raw in body[:RELEASE_NOTES_SCAN].splitlines():
+        line = ''.join(' ' if ch == '\t' else ch for ch in raw
+                       if ch == '\t' or unicodedata.category(ch)[0] != 'C')
+        nested = line[:1].isspace()
+        line = re.sub(r'<!--.*?(-->|$)|</?[A-Za-z][^>]*>', '', line).strip()
+        line = re.sub(r'^#{1,6}\s+', '', line)
+        line = re.sub(r'!?\[([^\]]*)\]\([^)]*\)', r'\1', line)
+        line = re.sub(r'\*\*|__|`', '', line).strip()
+        if item := re.match(r'[-*+](?:\s+|$)(.*)', line):
+            line = item[1] and ('  · ' if nested else '· ') + item[1]
+        if line:
+            lines.append(line)
+    text = '\n'.join(lines[:RELEASE_NOTES_LINES])
+    if len(lines) <= RELEASE_NOTES_LINES and len(text) <= RELEASE_NOTES_LIMIT:
+        return text or None
+    return text[:RELEASE_NOTES_LIMIT - 1].rstrip() + '…'
 
 
 def _transient(reason: str | None) -> bool:
@@ -111,6 +157,7 @@ class UpdateChecker:
                 _version(result.current_version)
             if result.kind == 'failed':
                 if (result.latest_version is not None or result.download_size is not None
+                        or result.release_notes is not None
                         or not isinstance(result.failure_reason, str)
                         or not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', result.failure_reason)):
                     return None
@@ -120,9 +167,13 @@ class UpdateChecker:
                 if result.failure_reason is not None:
                     return None
                 if result.kind == 'none':
-                    if result.download_size is not None:
+                    if result.download_size is not None or result.release_notes is not None:
                         return None
                 elif type(result.download_size) is not int or result.download_size <= 0:
+                    return None
+                elif result.release_notes is not None and (
+                        not isinstance(result.release_notes, str)
+                        or not 0 < len(result.release_notes) <= RELEASE_NOTES_LIMIT):
                     return None
             stale = result.current_version is None or result.current_version != self._installed_version()
             return replace(result, stale=stale)
@@ -135,6 +186,27 @@ class UpdateChecker:
         except Exception:
             # Unreadable installation info always counts as stale: check again.
             return None
+
+    def skipped_version(self) -> str | None:
+        value = self._settings.get(SKIPPED_VERSION_KEY)
+        try:
+            _version(value)
+        except ValueError:
+            return None
+        return value
+
+    def skip_version(self, version: str) -> None:
+        """Remember one release not to announce; a different latest version is announced again."""
+        _version(version)
+        self._settings.set(SKIPPED_VERSION_KEY, version)
+
+    def clear_skipped_version(self) -> None:
+        self._settings.reset(SKIPPED_VERSION_KEY)
+
+    def update_to_announce(self) -> UpdateCheckResult | None:
+        """The last result to announce: a current patch/full update whose version is not skipped."""
+        last = self.last_result()
+        return last if announces_update(last, self.skipped_version()) else None
 
     def should_check_on_startup(self) -> bool:
         if not self.automatic_enabled():
@@ -190,13 +262,15 @@ class UpdateChecker:
             if manifest.version != tag[1:]:
                 raise UpdateCheckError('release_version_mismatch')
             kind: UpdateKind = 'none'
-            size = None
+            size = notes = None
             if _version(manifest.version) > installed_version:
                 if manifest.patch_available and installed.runtime_fingerprint == manifest.previous_runtime_fingerprint:
                     kind, size = 'patch', manifest.patch.size
                 else:
                     kind, size = 'full', manifest.full.size
-            result = UpdateCheckResult(checked_at, kind, current, manifest.version, size)
+                # Reuse the release response already fetched; never a separate request.
+                notes = release_notes_summary(release.get('body'))
+            result = UpdateCheckResult(checked_at, kind, current, manifest.version, size, release_notes=notes)
         except (UpdateCheckError, ManifestError) as exc:
             result = UpdateCheckResult(checked_at, 'failed', current, failure_reason=exc.kind)
         except (TimeoutError, OSError) as exc:

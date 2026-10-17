@@ -199,6 +199,19 @@ class AppCore:
     def set_automatic_update_check_enabled(self, enabled: bool) -> None:
         self._update_checker().set_automatic_enabled(enabled)
 
+    def update_to_announce(self):
+        """알릴 업데이트 확인 결과. 이전 버전의 이력이거나 건너뛴 버전이면 None이다."""
+        return self._update_checker().update_to_announce()
+
+    def skipped_update_version(self) -> str | None:
+        return self._update_checker().skipped_version()
+
+    def skip_update_version(self, version: str) -> None:
+        self._update_checker().skip_version(version)
+
+    def clear_skipped_update_version(self) -> None:
+        self._update_checker().clear_skipped_version()
+
     def installed_update_info(self):
         """주입한 어댑터는 매번 부른다. 기본 설치 정보는 실행 중에 바뀌지 않으므로 처음 읽은 값을 쓴다."""
         if self.update_installation is not None:

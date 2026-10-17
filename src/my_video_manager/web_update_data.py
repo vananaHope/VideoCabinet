@@ -1,6 +1,8 @@
-"""설정 화면의 업데이트 확인 표시 데이터. 실패 이유 코드의 사용자 문구는 이 표 한 곳에서 정한다."""
+"""설정 화면과 셸 알림의 업데이트 표시 데이터. 실패 이유 코드의 사용자 문구는 이 표 한 곳에서 정한다."""
 import re
 from typing import TypedDict
+
+from .update_check import announces_update, offers_update
 
 
 class UpdateResultData(TypedDict):
@@ -11,6 +13,8 @@ class UpdateResultData(TypedDict):
     downloadSize: int | None
     failureReason: str | None
     failureMessage: str
+    # 서명되지 않은 GitHub 릴리스 본문의 짧은 요약. 화면은 글자로만 보인다(HTML·링크 해석 없음).
+    releaseNotes: str | None
     # 공개 키를 넣기 전 개발 빌드처럼 사용자가 할 일이 없는 실패는 경고 대신 정보로 조용히 보인다.
     failureQuiet: bool
     # 이전 버전에서 확인한 이력. 현재 설치본의 업데이트 안내로 쓰지 않는다.
@@ -24,6 +28,22 @@ class UpdateStatusData(TypedDict):
     # 확인 결과를 저장하지 못한 것처럼 기록으로 남지 않는 이번 실행의 실패.
     error: str
     last: UpdateResultData | None
+    # 마지막 결과가 현재 설치본의 업데이트인데 그 버전을 건너뛰었다.
+    skipped: bool
+    # 셸에 새 버전 알림이 보이는 중이다("나중에"·업데이트 선택 전).
+    noticeVisible: bool
+
+
+class UpdateNoticeData(TypedDict):
+    """셸 수준 새 버전 알림."""
+    version: str
+    kind: str
+    downloadSize: int
+    releaseNotes: str | None
+
+
+class ShellUpdateData(TypedDict):
+    notice: UpdateNoticeData | None
 
 
 QUIET_FAILURES = frozenset({'invalid_public_key'})
@@ -72,12 +92,24 @@ def update_result_data(result) -> UpdateResultData | None:
         checkedAt=result.checked_at.isoformat(), kind=result.kind,
         currentVersion=result.current_version, latestVersion=result.latest_version,
         downloadSize=result.download_size, failureReason=reason,
-        failureMessage=failure_message(reason) if reason else '',
+        failureMessage=failure_message(reason) if reason else '', releaseNotes=result.release_notes,
         failureQuiet=reason in QUIET_FAILURES, stale=result.stale)
 
 
 def update_status_data(core, controls) -> UpdateStatusData:
+    # 설정 화면은 1초마다 갱신하므로 확인 결과와 건너뛴 버전을 한 번씩만 읽는다.
+    last = core.last_update_check()
+    skipped_version = core.skipped_update_version()
     return UpdateStatusData(
         installedVersion=core.installed_update_info().version,
         automatic=core.automatic_update_check_enabled(), checking=controls.checking,
-        error=controls.error, last=update_result_data(core.last_update_check()))
+        error=controls.error, last=update_result_data(last),
+        skipped=offers_update(last) and last.latest_version == skipped_version,
+        noticeVisible=announces_update(last, skipped_version) and not controls.hidden(last))
+
+
+def shell_update_data(controls) -> ShellUpdateData:
+    result = controls.notice()
+    return ShellUpdateData(notice=None if result is None else UpdateNoticeData(
+        version=result.latest_version, kind=result.kind, downloadSize=result.download_size,
+        releaseNotes=result.release_notes))

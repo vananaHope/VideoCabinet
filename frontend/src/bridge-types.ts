@@ -7,24 +7,42 @@ export interface ShellData {
   status: string
 }
 
+export interface UpdateNoticeData {
+  version: string
+  kind: string
+  downloadSize: number
+  releaseNotes: string | null
+}
+
+export interface ShellUpdateData {
+  notice: UpdateNoticeData | null
+}
+
 export type Tab = "library" | "reel" | "search" | "queue" | "statistics" | "folders" | "settings"
+export type UpdateChoice = "update" | "later" | "skip" | "unskip"
 export const tabs = [["library", "라이브러리"], ["reel", "모아보기"], ["search", "검색"], ["queue", "자막 대기열"], ["statistics", "통계"], ["folders", "폴더 관리"], ["settings", "설정"]] as const
 export interface ShellBridge {
   ready: (reply: Reply) => void
   shellSnapshot: (reply: Reply) => void
   navigate: (tab: Tab, reply: Reply) => void
+  updateSnapshot: (reply: Reply) => void
+  updateChoice: (name: UpdateChoice, version: string, reply: Reply) => void
   shellChanged: Signal<string>
   shellStatusChanged: Signal<string>
   shellFocusRequested: Signal<string>
+  shellUpdateChanged: Signal<string>
 }
 export function publicShellBridge(raw: ShellBridge): ShellBridge {
   return Object.freeze({
     ready: raw.ready.bind(raw),
     shellSnapshot: raw.shellSnapshot.bind(raw),
     navigate: raw.navigate.bind(raw),
+    updateSnapshot: raw.updateSnapshot.bind(raw),
+    updateChoice: raw.updateChoice.bind(raw),
     shellChanged: Object.freeze({ connect: raw.shellChanged.connect.bind(raw.shellChanged), disconnect: raw.shellChanged.disconnect.bind(raw.shellChanged) }),
     shellStatusChanged: Object.freeze({ connect: raw.shellStatusChanged.connect.bind(raw.shellStatusChanged), disconnect: raw.shellStatusChanged.disconnect.bind(raw.shellStatusChanged) }),
     shellFocusRequested: Object.freeze({ connect: raw.shellFocusRequested.connect.bind(raw.shellFocusRequested), disconnect: raw.shellFocusRequested.disconnect.bind(raw.shellFocusRequested) }),
+    shellUpdateChanged: Object.freeze({ connect: raw.shellUpdateChanged.connect.bind(raw.shellUpdateChanged), disconnect: raw.shellUpdateChanged.disconnect.bind(raw.shellUpdateChanged) }),
   })
 }
 
@@ -638,6 +656,7 @@ export interface UpdateResultData {
   downloadSize: number | null
   failureReason: string | null
   failureMessage: string
+  releaseNotes: string | null
   failureQuiet: boolean
   stale: boolean
 }
@@ -648,6 +667,8 @@ export interface UpdateStatusData {
   checking: boolean
   error: string
   last: UpdateResultData | null
+  skipped: boolean
+  noticeVisible: boolean
 }
 
 export interface SettingKeyData {
