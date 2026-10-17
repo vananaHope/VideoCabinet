@@ -5,6 +5,7 @@
 확인 전·확인 중·없음·패치·전체·실패·공개 키 미설정·이전 버전에서 확인함을 1100×720으로 남긴다.
 """
 import argparse
+import sqlite3
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -60,12 +61,15 @@ core = AppCore(database=workspace / 'data.sqlite3', media=Media(), clock=lambda:
                update_installation=lambda: InstalledUpdateInfo('0.5.0', 'a' * 64))
 gate = threading.Event()
 started = []
+failures = []
 
 
 def gated_check():
     started.append(threading.get_ident())
     # 네트워크 대기를 흉내 낸다. 실제 서명 키가 없으므로 요청 없이 공개 키 미설정 실패로 끝난다.
     gate.wait(30)
+    if failures:
+        raise failures[0]
     return core.check_for_update()
 
 
@@ -202,6 +206,26 @@ try:
     click('#settings-update-automatic-toggle')
     wait(core.automatic_update_check_enabled, '자동 확인 켜기')
     checks.append('시작할 때 확인 끄기/켜기 저장과 포커스 유지')
+
+    # 닫은 저장 실패 안내는 다음 확인(직접 누름·시작 확인)에서 같은 문구로 나면 다시 보인다.
+    saving_error = '업데이트 확인 결과를 저장하지 못했습니다: database is locked'
+    failures.append(sqlite3.OperationalError('database is locked'))
+    for attempt in ('click', 'click-again', 'startup'):
+        if attempt == 'startup':
+            gate.clear()
+            window.updates.start()
+            wait(lambda: '확인 중' in section_text(), '시작 확인 표시')
+            gate.set()
+        else:
+            click('#settings-update-check')
+        wait(lambda: not window.updates.checking, '확인 끝')
+        wait(lambda: saving_error in section_text(), f'{attempt}: 저장 실패 안내')
+        if attempt == 'click':
+            capture('10-save-error')
+        click('[aria-label="업데이트 설정"] [aria-label="안내 닫기"]')
+        assert saving_error not in section_text()
+    failures.clear()
+    checks.append('닫은 저장 실패 안내가 다음 확인에서 다시 보임(직접 누름·시작 확인)')
 
     click('[data-category="general"]')
     general = js('document.querySelector(\'[aria-label="일반 설정"]\').innerText')

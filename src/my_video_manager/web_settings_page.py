@@ -109,9 +109,12 @@ class SettingsBridge(QObject):
 
     @SETTINGS.slot('checkUpdate')
     def checkUpdate(self):
-        # 이미 확인 중이면 새로 시작하지 않고 진행 중 상태를 돌려준다.
-        self.page.window.updates.start()
-        return self.snapshot()
+        try:
+            # 이미 확인 중이면 새로 시작하지 않고 진행 중 상태를 돌려준다.
+            self.page.window.updates.start()
+            return self.snapshot()
+        except (OSError, sqlite3.Error) as error:
+            return encode({'error': str(error)})
 
     @SETTINGS.slot('setAutomaticUpdateCheck')
     def setAutomaticUpdateCheck(self, enabled):

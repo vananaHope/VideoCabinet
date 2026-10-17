@@ -22,7 +22,7 @@ function resultNotice(last: UpdateResultData, releases: () => void): NoticeItem 
       : { key: 'update-result', tone: 'warning', title: '업데이트를 확인하지 못했습니다', message: last.failureMessage }
   if (last.kind === 'none')
     return { key: 'update-result', tone: 'info', title: '최신 버전입니다', message: `GitHub Release의 최신 버전은 ${last.latestVersion}입니다.` }
-  const download = last.kind === 'patch' ? `패치 설치 파일로 올릴 수 있습니다${size(last.downloadSize)}` : `실행 환경이 바뀌어 전체 설치 파일이 필요합니다${size(last.downloadSize)}`
+  const download = last.kind === 'patch' ? `패치 설치 파일로 올릴 수 있습니다${size(last.downloadSize)}` : `이번 업데이트는 전체 설치 파일로 설치합니다${size(last.downloadSize)}`
   return {
     key: 'update-result', tone: 'info', title: `새 버전이 있습니다 · ${last.latestVersion}`, message: `${download}. GitHub Release에서 받아 설치하세요.`,
     action: <Button variant="link" size="sm" onClick={releases}>GitHub Release 열기 ↗</Button>,
@@ -33,6 +33,12 @@ export function UpdateSettings({ data, onCheck, onAutomatic, onReleases }: { dat
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [dismissed, setDismissed] = useState('')
+  // 닫은 저장 실패 안내는 그 확인 한 번에만 숨긴다. 새 확인이 시작되면(시작 확인 포함) 같은 문구도 다시 보인다.
+  const [wasChecking, setWasChecking] = useState(data.checking)
+  if (data.checking !== wasChecking) {
+    setWasChecking(data.checking)
+    if (data.checking) setDismissed('')
+  }
   // 키보드로 누른 뒤 포커스가 body로 빠지지 않게 잠금은 aria-disabled로만 보이고 중복 실행을 막는다.
   const locked = data.checking || sending
   async function run(task: () => Promise<void>) {
@@ -49,7 +55,7 @@ export function UpdateSettings({ data, onCheck, onAutomatic, onReleases }: { dat
     <section className="space-y-3 rounded-xl border bg-card px-4 py-3" aria-labelledby="settings-update-heading">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div><h3 id="settings-update-heading" className="font-semibold">현재 버전 {data.installedVersion}</h3><p role="status" className="text-sm text-muted-foreground">{checked}</p></div>
-        <Button id="settings-update-check" variant="outline" aria-disabled={locked || undefined} onClick={() => { if (!locked) void run(onCheck) }}>{data.checking ? '확인 중…' : '지금 확인'}</Button>
+        <Button id="settings-update-check" variant="outline" aria-disabled={locked || undefined} onClick={() => { if (!locked) { setDismissed(''); void run(onCheck) } }}>{data.checking ? '확인 중…' : '지금 확인'}</Button>
       </div>
       <NoticeStack items={[
         error && { tone: 'error', message: error, onDismiss: () => setError('') },

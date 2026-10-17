@@ -295,6 +295,23 @@ def test_real_installation_adapter_uses_package_version_without_subprocess(core)
     assert info.runtime_fingerprint is None  # source checkout
 
 
+def test_default_installation_is_read_once_per_core(core, http, monkeypatch):
+    reads = []
+
+    def counted():
+        reads.append(None)
+        return InstalledUpdateInfo('1.0.0', FINGERPRINT)
+
+    monkeypatch.setattr(update_check, 'installed_update_info', counted)
+    core.update_installation = None
+    assert core.check_for_update(http=http).kind == 'patch'
+    for _ in range(5):  # 설정 화면의 1초 갱신마다 부르는 경로
+        core.installed_update_info()
+        assert not core.last_update_check().stale
+        core.should_check_for_update()
+    assert len(reads) == 1
+
+
 def test_bad_installed_version_is_failure_without_http(core, http):
     assert check(core, http, version='unknown').failure_reason == 'invalid_installed_version'
     assert not http.calls

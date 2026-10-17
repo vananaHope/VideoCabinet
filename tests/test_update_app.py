@@ -200,6 +200,14 @@ def test_payload_passes_stale_explicitly_and_hides_nothing_else(app):
     assert update_payload(window)['installedVersion'] == '0.9.0'
 
 
+def test_check_slot_reports_storage_error_like_other_slots(app, monkeypatch):
+    core, check, create = app
+    window = create(show=False)
+    monkeypatch.setattr(core, 'last_update_check', lambda: (_ for _ in ()).throw(sqlite3.OperationalError('disk I/O error')))
+    assert json.loads(settings(window).bridge.checkUpdate()) == {'error': 'disk I/O error'}
+    wait_for(lambda: not window.updates.checking)
+
+
 def test_automatic_toggle_persists_and_rejects_bad_value(app):
     core, check, create = app
     window = create(show=False)
