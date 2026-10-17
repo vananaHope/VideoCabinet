@@ -24,9 +24,13 @@ cuda_prefixes = ('cublas', 'cudnn', 'nvblas', 'cudart', 'nvrtc', 'cusparse', 'cu
 # QtWebEngineCore 내부 PDF 지원은 이 별도 QtPdf 모듈과 무관하다.
 unused_qt = {'Qt6Quick3DUtils.dll', 'Qt6VirtualKeyboard.dll', 'Qt6Pdf.dll',
              'QtPdf.pyd', 'QtVirtualKeyboard.pyd', 'qpdf.dll', 'qtvirtualkeyboardplugin.dll'}
+# Qt TLS 훅은 빌드 셸 PATH의 OpenSSL 3(예: Git의 mingw64\bin)을 찾으면 넣는다. 셸마다 동봉 파일과
+# 런타임 지문이 달라지므로 넣지 않는다. Python은 자체 OpenSSL 1.1을, Qt는 schannel 백엔드를 쓴다.
+path_openssl = {'libssl-3-x64.dll', 'libcrypto-3-x64.dll'}
 a.binaries = [entry for entry in a.binaries
               if not Path(entry[0]).name.lower().startswith(cuda_prefixes)
               and Path(entry[0]).name not in unused_qt
+              and Path(entry[0]).name.lower() not in path_openssl
               and '/qmltooling/' not in Path(entry[0]).as_posix()]
 # QML은 위 훅에서 수집하지 않는다. Qt의 release 리소스와 ko/en-US만 남긴다.
 def keep_data(entry):
