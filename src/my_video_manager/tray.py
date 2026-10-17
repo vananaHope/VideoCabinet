@@ -96,6 +96,8 @@ class TrayControls(QObject):
             self.icon.hide()
             # 감시를 먼저 멈춘 뒤 미룬 검사 요청을 정리한다. 검사 작업자는 위에서 끝난 것을 확인했다.
             window.folder_watch.stop()
+            # 진행 중인 업데이트 확인은 기다리지 않고 버린다.
+            window.updates.shutdown()
             window.resolutions.shutdown()
             window.thumbnails.shutdown()
             self.timer.stop()

@@ -630,6 +630,26 @@ export function publicFoldersBridge(raw: FoldersBridge): FoldersBridge {
   })
 }
 
+export interface UpdateResultData {
+  checkedAt: string
+  kind: string
+  currentVersion: string | null
+  latestVersion: string | null
+  downloadSize: number | null
+  failureReason: string | null
+  failureMessage: string
+  failureQuiet: boolean
+  stale: boolean
+}
+
+export interface UpdateStatusData {
+  installedVersion: string
+  automatic: boolean
+  checking: boolean
+  error: string
+  last: UpdateResultData | null
+}
+
 export interface SettingKeyData {
   id: string
   label: string
@@ -650,6 +670,7 @@ export interface SettingsData {
   translation: TranslationSettingsData
   heldTranslations: number
   failedTranslations: number
+  update: UpdateStatusData
 }
 
 export interface CapturedKeyData {
@@ -715,6 +736,8 @@ export interface SettingsBridge {
   cancelCapture: (reply: Reply) => void
   setMinimum: (seconds: number, reply: Reply) => void
   setAutomaticDetection: (enabled: boolean, reply: Reply) => void
+  checkUpdate: (reply: Reply) => void
+  setAutomaticUpdateCheck: (enabled: boolean, reply: Reply) => void
   action: (name: SettingsAction, reply: Reply) => void
   backupSnapshot: (reply: Reply) => void
   backupAction: (name: BackupAction, target: string, includeThumbnails: boolean, reply: Reply) => void
@@ -734,6 +757,8 @@ export function publicSettingsBridge(raw: SettingsBridge): SettingsBridge {
     cancelCapture: raw.cancelCapture.bind(raw),
     setMinimum: raw.setMinimum.bind(raw),
     setAutomaticDetection: raw.setAutomaticDetection.bind(raw),
+    checkUpdate: raw.checkUpdate.bind(raw),
+    setAutomaticUpdateCheck: raw.setAutomaticUpdateCheck.bind(raw),
     action: raw.action.bind(raw),
     backupSnapshot: raw.backupSnapshot.bind(raw),
     backupAction: raw.backupAction.bind(raw),

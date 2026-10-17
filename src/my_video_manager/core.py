@@ -116,6 +116,7 @@ class AppCore:
         translation_secret_store=None,
         translation_transport=None,
         reel_settings: ReelSettings | None = None,
+        update_installation=None,
     ):
         self.database = (Path(database) if database is not None else default_data_directory() / "library.sqlite3").resolve()
         self.database.parent.mkdir(parents=True, exist_ok=True)
@@ -123,6 +124,9 @@ class AppCore:
         self._thumbnails.mkdir(exist_ok=True)
         self._media = media
         self._clock = clock
+        # 업데이트 확인의 설치 정보 어댑터. None이면 실행 중인 앱 버전과 런타임 지문을 읽는다.
+        self.update_installation = update_installation
+        self._installed_update = None
         self._lock = RLock()
         self.settings = Settings(self._connect)
         self._folder_watch = None
@@ -174,31 +178,35 @@ class AppCore:
     def fill_next_thumbnail(self, *, cancellation):
         return self._thumbnail_backfill.step(cancellation)
 
-    def check_for_update(self, *, http=None, installation=None):
-        """Blocking update check for a worker; optional adapters support offline tests."""
+    def _update_checker(self, http=None):
         from .update_check import UpdateChecker
-        return UpdateChecker(self.settings, clock=self._clock, http=http, installation=installation).check()
+        return UpdateChecker(self.settings, clock=self._clock, http=http, installation=self.installed_update_info)
+
+    def check_for_update(self, *, http=None):
+        """Blocking update check for a worker; optional http adapter supports offline tests."""
+        return self._update_checker(http).check()
 
     def should_check_for_update(self) -> bool:
         """Startup decision only; does not start a thread or access the network."""
-        from .update_check import UpdateChecker
-        return UpdateChecker(self.settings, clock=self._clock).should_check_on_startup()
+        return self._update_checker().should_check_on_startup()
 
     def last_update_check(self):
-        from .update_check import UpdateChecker
-        return UpdateChecker(self.settings, clock=self._clock).last_result()
+        return self._update_checker().last_result()
 
     def automatic_update_check_enabled(self) -> bool:
-        from .update_check import UpdateChecker
-        return UpdateChecker(self.settings, clock=self._clock).automatic_enabled()
+        return self._update_checker().automatic_enabled()
 
     def set_automatic_update_check_enabled(self, enabled: bool) -> None:
-        from .update_check import UpdateChecker
-        UpdateChecker(self.settings, clock=self._clock).set_automatic_enabled(enabled)
+        self._update_checker().set_automatic_enabled(enabled)
 
     def installed_update_info(self):
-        from .update_check import installed_update_info
-        return installed_update_info()
+        """주입한 어댑터는 매번 부른다. 기본 설치 정보는 실행 중에 바뀌지 않으므로 처음 읽은 값을 쓴다."""
+        if self.update_installation is not None:
+            return self.update_installation()
+        if self._installed_update is None:
+            from .update_check import installed_update_info
+            self._installed_update = installed_update_info()
+        return self._installed_update
 
     def fill_next_resolution(self, *, cancellation) -> ResolutionResult:
         """작업자용 API. 한 영상 처리 후 반환하며 취소 시 다음 호출에서 이어진다."""

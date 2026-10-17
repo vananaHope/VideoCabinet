@@ -14,6 +14,7 @@ from .statistics import DistributionBucket, LibraryInventory, StatisticsDashboar
 from . import web_dialogs_data
 from . import web_folders_data
 from . import web_settings_data
+from . import web_update_data
 from . import web_backup_data
 
 TABS = (
@@ -144,6 +145,8 @@ SETTINGS = BridgeContract(name='settings', interface='SettingsBridge', slots={
     'captureKey': (Argument('key', str, 'string'),), 'cancelCapture': (),
     'setMinimum': (Argument('seconds', float, 'number'),),
     'setAutomaticDetection': (Argument('enabled', bool, 'boolean'),),
+    'checkUpdate': (),
+    'setAutomaticUpdateCheck': (Argument('enabled', bool, 'boolean'),),
     'action': (Argument('name', str, 'SettingsAction'),),
     'backupSnapshot': (),
     'backupAction': (Argument('name', str, 'BackupAction'), Argument('target', str, 'string'),
@@ -153,7 +156,8 @@ SETTINGS = BridgeContract(name='settings', interface='SettingsBridge', slots={
     aliases=(TypeAlias('SettingsAction', ('translation', 'quit', 'releases')),
              TypeAlias('BackupAction', ('refresh', 'create', 'choose', 'preview', 'schedule',
                                        'discard', 'cancel', 'restart', 'openFolder'))),
-    data_types=(web_settings_data.SettingKeyData, web_settings_data.SettingsData,
+    data_types=(web_update_data.UpdateResultData, web_update_data.UpdateStatusData,
+                web_settings_data.SettingKeyData, web_settings_data.SettingsData,
                 web_settings_data.CapturedKeyData, web_backup_data.BackupMetadataData,
                 web_backup_data.AutomaticBackupData, web_backup_data.BackupStartupData,
                 web_backup_data.BackupData))

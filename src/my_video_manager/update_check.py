@@ -1,5 +1,5 @@
 """Update decisions and persisted display state; no UI or installer execution."""
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 import json
 import re
@@ -53,15 +53,11 @@ class UpdateCheckResult:
     latest_version: str | None = None
     download_size: int | None = None
     failure_reason: str | None = None
-
-    @property
-    def stale(self) -> bool:
-        """Whether this history belongs to a different installed app version.
-
-        Computed on access, never persisted. UI consumers must distinguish stale
-        history from an update currently available for the installed app.
-        """
-        return self.current_version != current_version()
+    # Whether this history belongs to a different installed app version.
+    # UpdateChecker computes it from its installation adapter; never persisted.
+    # UI consumers must distinguish stale history from an update currently
+    # available for the installed app.
+    stale: bool = field(default=False, kw_only=True)
 
     @property
     def release_url(self) -> str | None:
@@ -73,6 +69,11 @@ def _version(value: str) -> tuple:
         raise ValueError('invalid version')
     # Numeric ordering without integer conversion limits on untrusted strings.
     return tuple((len(part), part) for part in value.split('.'))
+
+
+def _transient(reason: str | None) -> bool:
+    """Failures likely to clear soon: connectivity and GitHub server errors."""
+    return reason in ('network', 'timeout') or bool(re.fullmatch(r'http_5[0-9][0-9]', reason or ''))
 
 
 def _utc(value: datetime) -> datetime:
@@ -123,8 +124,16 @@ class UpdateChecker:
                         return None
                 elif type(result.download_size) is not int or result.download_size <= 0:
                     return None
-            return result
+            stale = result.current_version is None or result.current_version != self._installed_version()
+            return replace(result, stale=stale)
         except (TypeError, ValueError, KeyError, OverflowError):
+            return None
+
+    def _installed_version(self) -> str | None:
+        try:
+            return self._installation().version
+        except Exception:
+            # Unreadable installation info always counts as stale: check again.
             return None
 
     def should_check_on_startup(self) -> bool:
@@ -135,7 +144,7 @@ class UpdateChecker:
             return True
         elapsed = _utc(self._clock()) - last.checked_at
         interval = (TRANSIENT_FAILURE_CHECK_INTERVAL
-                    if last.kind == 'failed' and last.failure_reason in ('network', 'timeout')
+                    if last.kind == 'failed' and _transient(last.failure_reason)
                     else AUTO_CHECK_INTERVAL)
         # A clock correction must not suppress checks indefinitely.
         return elapsed < timedelta(0) or elapsed >= interval
@@ -197,5 +206,8 @@ class UpdateChecker:
             # Isolate adapter failures from ordinary app use; do not persist
             # exception strings, which may contain local paths or remote data.
             result = UpdateCheckResult(checked_at, 'failed', current, failure_reason='check_failed')
-        self._settings.set(LAST_CHECK_KEY, {**asdict(result), 'checked_at': checked_at.isoformat()})
-        return result
+        record = asdict(result)
+        del record['stale']
+        self._settings.set(LAST_CHECK_KEY, {**record, 'checked_at': checked_at.isoformat()})
+        # Same rule as last_result: without a readable installed version it is stale.
+        return replace(result, stale=current is None)

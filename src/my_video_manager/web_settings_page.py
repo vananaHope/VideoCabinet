@@ -14,6 +14,7 @@ from .qt_keys import key_name
 from .web_contract import SETTINGS
 from .web_json import encode
 from .web_page import WebPageController
+from .web_update_data import update_status_data
 
 
 class SettingsBridge(QObject):
@@ -106,6 +107,24 @@ class SettingsBridge(QObject):
         except (ValueError, TypeError, OSError, sqlite3.Error) as error:
             return encode({'error': str(error)})
 
+    @SETTINGS.slot('checkUpdate')
+    def checkUpdate(self):
+        try:
+            # 이미 확인 중이면 새로 시작하지 않고 진행 중 상태를 돌려준다.
+            self.page.window.updates.start()
+            return self.snapshot()
+        except (OSError, sqlite3.Error) as error:
+            return encode({'error': str(error)})
+
+    @SETTINGS.slot('setAutomaticUpdateCheck')
+    def setAutomaticUpdateCheck(self, enabled):
+        try:
+            self.page.core.set_automatic_update_check_enabled(enabled)
+            self.page.refresh()
+            return self.snapshot()
+        except (ValueError, OSError, sqlite3.Error) as error:
+            return encode({'error': str(error)})
+
     @SETTINGS.slot('action')
     def action(self, name):
         if name not in ('translation', 'quit', 'releases') or self.busy:
@@ -147,6 +166,7 @@ class WebSettingsPage(WebPageController):
         self.library.refreshed.connect(self.refresh)
         self.library.scan_state_changed.connect(lambda _: self.refresh())
         self.window.translations.video_changed.connect(lambda _: self.refresh())
+        self.window.updates.changed.connect(self.refresh)
         # 한도 보류/실패처럼 video_changed가 없는 결과도 활성 화면에서 갱신한다.
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
@@ -163,7 +183,8 @@ class WebSettingsPage(WebPageController):
                     automaticDetection=self.core.automatic_detection_enabled(),
                     translationCli=self.core.translation_cli, translation=self.core.translation_settings(),
                     heldTranslations=sum(entry.state == 'held' for entry in queue),
-                    failedTranslations=sum(entry.state == 'failed' for entry in queue))
+                    failedTranslations=sum(entry.state == 'failed' for entry in queue),
+                    update=update_status_data(self.core, self.window.updates))
 
     def refresh(self):
         if not self.is_active():
