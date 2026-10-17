@@ -346,6 +346,24 @@ def test_work_started_while_handing_off_is_asked_again_at_quit(app, monkeypatch)
     assert app.quits == [False]  # 받아쓰기 중 종료 확인 대화를 거친다
 
 
+def test_playback_started_while_handing_off_does_not_ask_about_transcription(app, monkeypatch):
+    window = app.create()
+    offer(app.core)
+    started = []
+    original = app.launcher.start
+
+    def start(command, *, cwd):
+        started.append(True)  # 보조 프로세스를 기다리는 사이 재생을 시작한다
+        return original(command, cwd=cwd)
+
+    app.launcher.start = start
+    monkeypatch.setattr(app.core, 'busy_reasons_for_update', lambda: update_busy_state(
+        playing=bool(started), transcriptions=(), translations=()))
+    choose(window, 'update')
+    wait_for(lambda: app.quits)
+    assert app.quits == [True]  # 받아쓰기 확인 대화는 받아쓰기에만 뜬다
+
+
 def test_closed_app_ignores_a_late_handoff(app):
     window = app.create()
     install = window.updates.install
