@@ -287,13 +287,14 @@ class UpdateInstall(QObject):
     def _quit_for_handoff(self):
         if self.closed:
             return
-        # 넘기는 동안(최대 20초) 새로 시작한 작업은 받아들인 적이 없으니 종료 확인을 다시 거친다(받아쓰기 확인 대화).
+        # 넘기는 동안(최대 20초) 새로 시작한 받아쓰기는 받아들인 적이 없으니 종료 확인을 다시 거친다.
+        # confirmed=False가 다시 묻는 것은 받아쓰기 확인 대화뿐이라, 다른 새 작업으로 받아들인 받아쓰기를 또 묻지 않는다.
         try:
             fresh = set(self._busy_state().blocking) - set(self._accepted)
         except Exception:
             log.exception('업데이트 종료 전 진행 중인 작업을 확인하지 못했습니다')
             fresh = {'unknown'}
-        if not self._quit_app(not fresh):
+        if not self._quit_app(not fresh & {'transcription', 'unknown'}):
             self._fail('install', 'quit_failed')
 
     def _quit_for_install(self, confirmed):
