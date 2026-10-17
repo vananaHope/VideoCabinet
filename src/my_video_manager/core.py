@@ -221,6 +221,52 @@ class AppCore:
             self._installed_update = installed_update_info()
         return self._installed_update
 
+    def download_update(self, result, *, full=False, progress=None, cancellation=None, http=None):
+        """작업자 스레드용 업데이트 내려받기. result(확인 이력)의 버전만 쓰고 서명된 매니페스트를 다시 받는다.
+
+        full=True면 패치 대신 전체 설치 파일을 받는다(패치 실패 뒤 다시 시도). 실패·취소는 결과 값으로 돌려준다.
+        """
+        from .update_install import download_update
+        if http is None:
+            from .update_http import UrllibUpdateHttp
+            http = UrllibUpdateHttp()
+        return download_update(self.database.parent, result, self.installed_update_info, http=http, full=full,
+                               progress=progress, cancellation=cancellation)
+
+    def busy_reasons_for_update(self):
+        """설치를 위한 재시작이 지금 끊을 작업과, 재시작 뒤 이어질 대기 항목 수."""
+        from .update_install import update_busy_state
+        return update_busy_state(playing=self.playback.session is not None,
+                                 transcriptions=self.subtitle_queue(), translations=self.translation_queue())
+
+    def prepare_update_install(self, update, *, launcher=None, relaunch=None, pid=None, ready_timeout=None):
+        """검증된 설치 파일을 앱 종료 뒤 실행할 보조 프로세스에 넘긴다. 돌아오면 호출자가 앱을 종료해야 한다.
+
+        보조 프로세스가 준비될 때까지 최대 수십 초 막으므로 작업자 스레드에서 부른다.
+        실패하면 UpdateInstallError를 던지고 아무것도 설치되지 않는다. relaunch는 (프로그램, 인자) 시험용 주입이다.
+        """
+        import os
+        import sys
+        from .update_install import READY_TIMEOUT, SubprocessHelperLauncher, UpdateInstallError, start_install
+        if relaunch is None:
+            if not getattr(sys, 'frozen', False):
+                raise UpdateInstallError('source_run')  # 소스 실행은 설치본을 고치지 않는다.
+            from .backup_recovery import restart_command
+            relaunch = restart_command(self.database.parent)
+        start_install(self.database.parent, update, pid=os.getpid() if pid is None else pid, relaunch=relaunch,
+                      started_at=self._clock(), launcher=launcher or SubprocessHelperLauncher(),
+                      ready_timeout=READY_TIMEOUT if ready_timeout is None else ready_timeout)
+
+    def last_update_install(self):
+        """지난 설치 시도의 결과. 패치 실패면 retry_full로 전체 설치 파일 다시 시도를 안내한다."""
+        from .update_install import last_install
+        return last_install(self.database.parent, self.installed_update_info)
+
+    def clear_update_install(self):
+        """결과를 안내한 뒤 설치 기록과 받은 설치 파일을 지운다."""
+        from .update_install import clear_install
+        clear_install(self.database.parent)
+
     def fill_next_resolution(self, *, cancellation) -> ResolutionResult:
         """작업자용 API. 한 영상 처리 후 반환하며 취소 시 다음 호출에서 이어진다."""
         return self._resolution.step(cancellation)

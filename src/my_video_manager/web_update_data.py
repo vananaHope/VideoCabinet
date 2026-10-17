@@ -70,6 +70,8 @@ FAILURE_MESSAGES = {
     'installation_unavailable': '설치된 앱 정보를 읽지 못했습니다.',
     'invalid_installed_version': '설치된 앱의 버전을 알 수 없습니다.',
     'check_failed': '알 수 없는 문제로 확인하지 못했습니다.',
+    'storage': '업데이트 파일을 저장하지 못했습니다. 디스크 공간과 데이터 폴더를 확인하세요.',
+    'cancelled': '업데이트 내려받기를 취소했습니다.',
 }
 
 
