@@ -301,12 +301,14 @@ class SubprocessHelperLauncher:
     """Starts the helper without a console window, outside the app's job if allowed."""
 
     def start(self, command: Sequence[str], *, cwd: Path) -> HelperProcess:
-        flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        # The installer handoff runs only on Windows, so the flags are always present.
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         options = dict(cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             # A parent job with kill-on-close (some terminals) would end the helper with the app.
-            return subprocess.Popen(list(command), creationflags=flags | getattr(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0),
-                                    **options)
+            return subprocess.Popen(list(command), creationflags=(
+                subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.CREATE_BREAKAWAY_FROM_JOB), **options)
         except OSError:
             # Jobs that forbid breakaway reject the flag; the helper then stays in that job.
             return subprocess.Popen(list(command), creationflags=flags, **options)
