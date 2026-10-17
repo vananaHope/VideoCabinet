@@ -9,9 +9,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 FILENAME = 'update-manifest.json'
 SCHEMA_VERSION = 1
-# Deliberately invalid placeholder: verification fails closed until a human
-# generates a release key and installs the printed public-key constant here.
-UPDATE_PUBLIC_KEY = b''
+# Ed25519 public key of the release signing key (scripts/generate_update_key.py).
+# The private key stays outside the repository; replacing this breaks updates for installed apps.
+UPDATE_PUBLIC_KEY = bytes.fromhex('a0f950dd440c69a105fe1d64361ae86012687ab8c09010e2b0d0312fd5d0fece')
 
 
 class ManifestError(ValueError):
