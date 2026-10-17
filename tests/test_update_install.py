@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import hashlib
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 import shlex
 import subprocess
@@ -21,7 +22,7 @@ from my_video_manager.update_check import InstalledUpdateInfo, UpdateCheckResult
 from my_video_manager.update_http import UpdateCheckError, UrllibUpdateHttp
 from my_video_manager.update_install import (
     INSTALLER_ARGUMENTS, INSTALLER_TIMEOUT_MS, PreparedUpdate, SubprocessHelperLauncher, UpdateInstallError,
-    start_install, update_busy_state,
+    helper_environment, start_install, update_busy_state,
 )
 
 
@@ -427,6 +428,7 @@ def test_patch_rejection_is_recorded_for_full_retry(core, prepared):
     ({'error': 'installer_start_failed'}, '1.0.0', 'failed', 'installer_start_failed', False),
     ({'error': 'installer_timeout'}, '1.0.0', 'failed', 'installer_timeout', False),
     ({'error': 'hash_mismatch'}, '1.0.0', 'failed', 'hash_mismatch', False),
+    ({'error': 'installer_unreadable'}, '1.0.0', 'failed', 'installer_unreadable', False),
     ({'error': 'C:\\not a code'}, '1.0.0', 'incomplete', 'no_result', False),
     (None, '1.0.0', 'incomplete', 'no_result', False),
     (None, '1.2.3', 'installed', None, False),  # result lost, but the new version runs
@@ -582,6 +584,60 @@ def test_real_helper_refuses_installer_changed_after_handoff(core, tmp_path):
     assert [line[0] for line in lines(order)] == ['app-exit', 'relaunch']
     outcome = core.last_update_install()
     assert (outcome.status, outcome.failure_reason, outcome.retry_full) == ('failed', 'hash_mismatch', False)
+
+
+@windows_only
+def test_real_helper_refuses_installer_it_cannot_read(core, tmp_path):
+    order, update, relaunch = stand_ins(core, tmp_path)
+    go = tmp_path / 'go'
+    app = fake_app(core, order, 'exit', go)
+    try:
+        core.prepare_update_install(update, relaunch=relaunch, pid=app.pid)
+        update.path.unlink()
+        go.write_text('')
+        wait_for(lambda: relaunched(order))
+    finally:
+        app.kill()
+    assert [line[0] for line in lines(order)] == ['app-exit', 'relaunch']
+    outcome = core.last_update_install()
+    assert (outcome.status, outcome.failure_reason, outcome.retry_full) == ('failed', 'installer_unreadable', False)
+
+
+POWERSHELL7_MODULES = Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'PowerShell' / '7' / 'Modules'
+
+
+class PowerShell7ModulePathLauncher(SubprocessHelperLauncher):
+    """Starts the helper as an app started from PowerShell 7 did before helper_environment."""
+
+    def start(self, command, *, cwd):
+        env = {key: value for key, value in os.environ.items() if key.upper() != 'PSMODULEPATH'}
+        # With PowerShell 7's modules first, Windows PowerShell 5.1 has no Get-FileHash.
+        env['PSModulePath'] = f'{POWERSHELL7_MODULES};{os.environ.get("PSModulePath", "")}'
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+        return subprocess.Popen(list(command), cwd=cwd, env=env, creationflags=flags, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+@windows_only
+@pytest.mark.skipif(not POWERSHELL7_MODULES.is_dir(), reason='PowerShell 7 is not installed')
+def test_real_helper_verifies_with_powershell7_module_path(core, tmp_path):
+    order, update, relaunch = stand_ins(core, tmp_path)
+    app = fake_app(core, order, 'exit')
+    try:
+        start_install(core.database.parent, update, pid=app.pid, relaunch=relaunch, started_at=NOW,
+                      launcher=PowerShell7ModulePathLauncher())
+        wait_for(lambda: relaunched(order))
+    finally:
+        app.kill()
+    assert [line[0] for line in lines(order)] == ['app-exit', 'install', 'relaunch']
+    assert core.last_update_install().status == 'installed'
+
+
+def test_helper_environment_drops_inherited_powershell_module_path(monkeypatch):
+    monkeypatch.setenv('PSModulePath', r'C:\Program Files\PowerShell\7\Modules')
+    monkeypatch.setenv('MVM_KEEP', '1')
+    env = helper_environment()
+    assert 'PSMODULEPATH' not in {key.upper() for key in env} and env['MVM_KEEP'] == '1'
 
 
 @windows_only

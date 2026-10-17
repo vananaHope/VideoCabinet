@@ -254,11 +254,23 @@ if (-not $app.WaitForExit([int]$plan.app_exit_timeout_ms)) {
 $result = $null
 $relaunch = $true
 $actual = $null
+$unreadable = $false
 try {
-    $actual = (Get-FileHash -LiteralPath $plan.installer -Algorithm SHA256).Hash.ToLowerInvariant()
+    # .NET directly: Get-FileHash lives in a module that may fail to load (see helper_environment).
+    $stream = [IO.File]::OpenRead($plan.installer)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $actual = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+    }
 } catch {
+    $unreadable = $true
 }
-if ($actual -ne [string]$plan.sha256) {
+if ($unreadable) {
+    # Missing or locked (e.g. by an antivirus): never run what we could not verify.
+    $result = @{ error = 'installer_unreadable' }
+} elseif ($actual -ne [string]$plan.sha256) {
     # Changed or unreadable since the app verified it: never run it.
     $result = @{ error = 'hash_mismatch' }
 } else {
@@ -297,13 +309,24 @@ class HelperLauncher(Protocol):
     def start(self, command: Sequence[str], *, cwd: Path) -> HelperProcess: ...
 
 
+def helper_environment() -> dict[str, str]:
+    """The app's environment without PSModulePath for the Windows PowerShell 5.1 helper.
+
+    An app started from PowerShell 7 inherits its PSModulePath; Windows PowerShell
+    then picks up PowerShell 7 modules and loses its own commands. Without the
+    variable it uses its default module path. The relaunched app inherits this too.
+    """
+    return {key: value for key, value in os.environ.items() if key.upper() != 'PSMODULEPATH'}
+
+
 class SubprocessHelperLauncher:
     """Starts the helper without a console window, outside the app's job if allowed."""
 
     def start(self, command: Sequence[str], *, cwd: Path) -> HelperProcess:
         # The installer handoff runs only on Windows, so the flags are always present.
         flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-        options = dict(cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        options = dict(cwd=cwd, env=helper_environment(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
         try:
             # A parent job with kill-on-close (some terminals) would end the helper with the app.
             return subprocess.Popen(list(command), creationflags=(

@@ -514,6 +514,7 @@ def test_successful_install_is_announced_once_and_everything_is_cleared(app):
     ({'exit_code': 7}, 'full', 'error'),
     ({'exit_code': 4}, 'full', 'error'),
     ({'error': 'hash_mismatch'}, 'same', 'error'),
+    ({'error': 'installer_unreadable'}, 'same', 'error'),
     ({'error': 'installer_start_failed'}, 'same', 'error'),
     ({'error': 'app_did_not_exit'}, 'same', 'error'),
     ({'error': 'installer_timeout'}, None, 'warning'),
@@ -585,6 +586,6 @@ def test_every_download_and_install_code_has_its_own_message():
     outcome = set(re.findall(r"error = '([a-z0-9_]+)'", HELPER_SCRIPT))
     outcome |= set(re.findall(r"'(patch_rejected|installer_failed)'", install))
     outcome |= set(re.findall(r"'incomplete', '([a-z0-9_]+)'", install))
-    assert {'app_did_not_exit', 'hash_mismatch', 'installer_timeout', 'installer_start_failed',
+    assert {'app_did_not_exit', 'hash_mismatch', 'installer_unreadable', 'installer_timeout', 'installer_start_failed',
             'patch_rejected', 'installer_failed', 'no_result'} <= outcome
     assert outcome - set(INSTALL_RESULT_MESSAGES) == set()
