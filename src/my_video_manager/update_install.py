@@ -32,6 +32,7 @@ from .update_manifest import FILENAME, ManifestError, verify_manifest
 log = logging.getLogger(__name__)
 
 UPDATES_DIRECTORY = 'updates'
+INSTALLER_LOG = 'installer.log'
 # Inno Setup: no UI or message boxes, never reboot, close (and do not restart)
 # leftover processes that hold install files; the helper restarts the app.
 INSTALLER_ARGUMENTS = ('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-',
@@ -359,7 +360,7 @@ def start_install(data_directory: Path, update: PreparedUpdate, *, pid: int,
             'app_pid': pid, 'app_exit_timeout_ms': app_exit_timeout_ms,
             'installer': str(path), 'sha256': update.sha256, 'installer_timeout_ms': installer_timeout_ms,
             'installer_arguments': subprocess.list2cmdline(
-                [*INSTALLER_ARGUMENTS, f'/LOG={directory.resolve() / "installer.log"}']),
+                [*INSTALLER_ARGUMENTS, f'/LOG={directory.resolve() / INSTALLER_LOG}']),
             'working_directory': str(directory.resolve()),
             'program': str(program), 'arguments': subprocess.list2cmdline([str(a) for a in arguments]),
             'program_directory': str(Path(program).resolve().parent),
@@ -437,9 +438,33 @@ def last_install(data_directory: Path, installation: Callable[[], InstalledUpdat
     return UpdateInstallOutcome(version, kind, started_at, 'incomplete', 'no_result')
 
 
-def clear_install(data_directory: Path) -> None:
-    """Forget the last handoff and remove downloaded installers and helper files."""
+def installer_log(data_directory: Path) -> Path:
+    return updates_directory(data_directory) / INSTALLER_LOG
+
+
+def clear_install(data_directory: Path, *, keep_log: bool = False) -> None:
+    """Forget the last handoff and remove downloaded installers and helper files.
+
+    keep_log keeps installer.log so a failed install can still be diagnosed;
+    the next successful install removes it.
+    """
     directory = updates_directory(data_directory)
     (directory / 'install.json').unlink(missing_ok=True)
     # Leftovers (e.g. an installer an antivirus still holds) are retried next time.
-    shutil.rmtree(directory, ignore_errors=True)
+    if not keep_log:
+        shutil.rmtree(directory, ignore_errors=True)
+        return
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name == INSTALLER_LOG:
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            try:
+                entry.unlink()
+            except OSError:
+                pass

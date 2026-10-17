@@ -105,6 +105,37 @@ def test_release_notes_are_plain_text_without_markup_links_or_controls():
                                            '방향바꿈 문자와 탭')
 
 
+@pytest.mark.parametrize('body,expected', [
+    ('자세히: https://evil.example/path', '자세히:'),
+    ('[글자][1]\n\n[1]: https://evil.example', '글자'),
+    ('[a [b] c](https://evil.example)', 'a [b] c'),
+    ('[x](https://a.com/(b))', 'x'),
+    ('<!--\n숨은 줄 1\n숨은 줄 2\n-->\n본문', '본문'),
+    ('<img\nsrc="https://evil/x.png"\nonerror="alert(1)">', None),
+    ('<<b>b>굵게', '굵게'),
+    ('* Fix by @x in https://github.com/o/r/pull/1\n\n**Full Changelog**: https://github.com/o/r/compare/a...b',
+     '· Fix by @x in\nFull Changelog:'),
+])
+def test_bare_urls_reference_links_nested_brackets_and_multiline_markup_are_removed(body, expected):
+    assert release_notes_summary(body) == expected
+
+
+@pytest.mark.parametrize('body', [
+    '## 수정\n- a\n  - b\n    - c `d`', '- [링크](https://x.example) 와 ![그림](https://y.example/a.png)',
+    '\n'.join(f'- 항목 {index}' for index in range(RELEASE_NOTES_LINES + 3)), '가' * 5000,
+    '  · 이미 요약한 하위 항목\n· 항목', 'a<b>c<<b>b>', '- \n-\n# \n#제목',
+    # 줄 안 마크업을 지우면 태그가 생기는 입력: 요약 전체를 안정될 때까지 반복한다.
+    'a <**b**> c', '<`x`\ny> b',
+])
+def test_summary_of_a_summary_is_the_same_so_saved_notes_load(core, body):
+    notes = release_notes_summary(body)
+    assert release_notes_summary(notes) == notes
+    core.settings.set(LAST_CHECK_KEY, {'checked_at': NOW.isoformat(), 'kind': 'patch', 'current_version': '1.0.0',
+                                       'latest_version': '1.2.3', 'download_size': 12, 'failure_reason': None,
+                                       'release_notes': notes})
+    assert core.last_update_check().release_notes == notes
+
+
 def test_long_release_notes_are_cut_for_display():
     many = '\n'.join(f'- 항목 {index}' for index in range(RELEASE_NOTES_LINES + 3))
     text = release_notes_summary(many)
@@ -115,7 +146,9 @@ def test_long_release_notes_are_cut_for_display():
     assert len(huge) <= RELEASE_NOTES_LIMIT
 
 
-@pytest.mark.parametrize('notes', ['', 12, 'x' * (RELEASE_NOTES_LIMIT + 1)])
+@pytest.mark.parametrize('notes', ['', 12, 'x' * (RELEASE_NOTES_LIMIT + 1),
+                                   # 설정 DB를 고쳐 넣은 방향 제어 문자·태그·주소: 다시 요약한 값과 다르다.
+                                   'A\u202eB<img src=x>', '자세히: https://evil.example/path', '[x](https://a.com)'])
 def test_damaged_saved_release_notes_reject_the_record(core, notes):
     core.settings.set(LAST_CHECK_KEY, {'checked_at': NOW.isoformat(), 'kind': 'patch', 'current_version': '1.0.0',
                                        'latest_version': '1.2.3', 'download_size': 12, 'failure_reason': None,

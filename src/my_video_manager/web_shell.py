@@ -17,7 +17,7 @@ from .web_json import encode
 from .web_shell_bridge import ShellBridge
 from .web_contract import CONTRACTS, TABS
 from .web_tokens import web_tokens
-from .web_update_data import shell_update_data
+from .web_update_data import shell_update_data, update_install_data
 from .web_thumbnail import ThumbnailHandler, register_thumbnail_scheme
 
 
@@ -109,12 +109,17 @@ class WebShellHost(QWidget):
         window.statusBar().messageChanged.connect(self.bridge.shellStatusChanged.emit)
         # 자동 확인·지금 확인의 결과와 알림 선택이 바뀌면 어느 탭에서든 새 버전 알림을 갱신한다.
         window.updates.changed.connect(self.update_changed)
+        # 내려받기 진행률은 설정을 읽지 않는 작은 값만 따로 보낸다(약 100ms마다).
+        window.updates.install.progressed.connect(self.update_progressed)
 
     def update_changed(self):
         try:
             self.bridge.shellUpdateChanged.emit(encode(shell_update_data(self.window.updates)))
         except (OSError, sqlite3.Error):
             pass  # 설정을 읽지 못하면 이전 알림을 둔다. 다음 변경이나 새로 연 화면에서 다시 읽는다.
+
+    def update_progressed(self):
+        self.bridge.shellUpdateInstallChanged.emit(encode(update_install_data(self.window.updates.install)))
 
     def register_page(self, controller):
         self._register_route(controller.tab, controller)

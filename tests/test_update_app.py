@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QSystemTrayIcon
 from my_video_manager import update_manifest
 from my_video_manager.core import AppCore
 from my_video_manager.update_check import LAST_CHECK_KEY, InstalledUpdateInfo
+from my_video_manager.update_http import UpdateCheckError
 from my_video_manager.web_update_data import FAILURE_MESSAGES, failure_message
 from my_video_manager.ui import MainWindow
 from qt_wait import wait_for
@@ -43,16 +44,19 @@ class GatedCheck:
         return self.core.check_for_update(http=self.http)
 
 
-class Opener:
-    """QDesktopServices.openUrl 대신 넘긴다. 테스트는 실제 브라우저를 열지 않는다."""
+class Downloads:
+    """내려받기 http 대신 넘긴다. 요청만 기록하고 연결 실패로 끝내 실제 네트워크에 닿지 않는다."""
 
     def __init__(self):
         self.urls = []
-        self.result = True
 
-    def __call__(self, url):
-        self.urls.append(url.toString())
-        return self.result
+    def get(self, url, *, max_bytes):
+        self.urls.append(url)
+        raise UpdateCheckError('network')
+
+    def download(self, url, *, size, write, cancellation=None):
+        self.urls.append(url)
+        raise UpdateCheckError('network')
 
 
 @pytest.fixture
@@ -61,15 +65,16 @@ def app(tmp_path, monkeypatch, qapp):
                    clock=lambda: datetime.now(timezone.utc),
                    update_installation=lambda: InstalledUpdateInfo('1.0.0', None))
     check = GatedCheck(core)
-    opener = Opener()
+    downloads = Downloads()
     monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
     windows = []
 
     def create(*, delay=0, show=True, restart=False):
         # restart: 같은 데이터로 앱을 다시 시작한다. 코어는 실행마다 새로 만든다.
         window = MainWindow(reopen(core) if restart else core, player_factory=Player,
-                            update_check_options=dict(startup_delay_ms=delay, check=check, open_url=opener))
-        window.opener = opener
+                            update_check_options=dict(startup_delay_ms=delay, check=check,
+                                                      install=dict(http=downloads, quit_app=lambda confirmed: False)))
+        window.downloads = downloads
         windows.append(window)
         window.subtitles.timer.stop()
         window.translations.timer.stop()
@@ -210,7 +215,8 @@ def test_payload_passes_stale_explicitly_and_hides_nothing_else(app):
     core, check, create = app
     window = create(show=False)
     assert update_payload(window) == dict(installedVersion='1.0.0', automatic=True, checking=False,
-                                          error='', last=None, skipped=False, noticeVisible=False)
+                                          error='', last=None, skipped=False, noticeVisible=False,
+                                          updateAllowed=True)
     save(core, kind='patch', current_version='0.9.0', latest_version='1.2.3', download_size=12)
     last = update_payload(window)['last']
     assert last == dict(checkedAt=NOW.isoformat(), kind='patch', currentVersion='0.9.0',
@@ -271,12 +277,17 @@ def test_real_public_key_path_is_offline_in_tests(app, monkeypatch):
     assert update_payload(window)['last']['failureMessage'] == FAILURE_MESSAGES['network']
 
 
+def notice_only(data):
+    """새 버전 알림만 본다. 내려받기·설치 진행(install)은 test_update_install_app에서 확인한다."""
+    return {key: value for key, value in data.items() if key != 'install'}
+
+
 def shell_update(window):
-    return json.loads(window.web_host.bridge.updateSnapshot())
+    return notice_only(json.loads(window.web_host.bridge.updateSnapshot()))
 
 
 def choose(window, name, version):
-    return json.loads(window.web_host.bridge.updateChoice(name, version))
+    return notice_only(json.loads(window.web_host.bridge.updateChoice(name, version)))
 
 
 @pytest.fixture
@@ -305,7 +316,7 @@ def test_startup_and_manual_results_raise_shell_notice_on_any_tab(app, releases)
     releases('1.2.3')
     window = create(delay=60_000)
     changes = []
-    window.web_host.bridge.shellUpdateChanged.connect(lambda value: changes.append(json.loads(value)))
+    window.web_host.bridge.shellUpdateChanged.connect(lambda value: changes.append(notice_only(json.loads(value))))
     window.navigate_web_tab('queue')
     window.updates._startup.timeout.emit()
     wait_for(lambda: not window.updates.checking)
@@ -373,21 +384,22 @@ def test_unskip_from_settings_announces_again(app, releases):
     assert update_payload(window)['skipped'] is False
 
 
-def test_update_choice_is_the_handoff_point_and_opens_release_page_for_now(app, releases):
+def test_update_choice_starts_the_download_instead_of_opening_a_browser(app, releases):
     core, check, create = app
     releases('1.2.3')
     window = create(show=False)
     run_check(window)
     requested = []
     window.updates.update_requested.connect(requested.append)
-    window.opener.result = False
-    assert choose(window, 'update', '1.2.3') == {'error': '브라우저에서 GitHub Release 페이지를 열지 못했습니다.'}
-    assert shell_update(window)['notice']['version'] == '1.2.3'
-    window.opener.result = True
     assert choose(window, 'update', '1.2.3') == {'notice': None}
-    assert window.opener.urls[-1] == 'https://github.com/vananaHope/my-video-manager/releases/tag/v1.2.3'
-    assert [result.latest_version for result in requested] == ['1.2.3', '1.2.3']
+    assert window.updates.install.phase == 'downloading'
+    assert [result.latest_version for result in requested] == ['1.2.3']
+    # 내려받기는 그 버전의 서명된 매니페스트부터 다시 받는다(가짜 http는 연결 실패로 끝낸다).
+    wait_for(lambda: window.updates.install.phase == 'failed')
+    assert window.downloads.urls == [
+        'https://github.com/vananaHope/my-video-manager/releases/download/v1.2.3/update-manifest.json']
     assert core.skipped_update_version() is None
+    assert not (SOURCE / 'update_controls.py').read_text(encoding='utf-8').count('openUrl')
 
 
 @pytest.mark.parametrize('name,version', [('skip', '1.2.2'), ('later', '9.9.9'), ('update', '1.2.2'),
@@ -399,7 +411,7 @@ def test_choice_for_a_version_no_longer_announced_changes_nothing(app, releases,
     run_check(window)
     assert 'error' in choose(window, name, version)
     assert shell_update(window)['notice']['version'] == '1.2.3'
-    assert core.skipped_update_version() is None and window.opener.urls == []
+    assert core.skipped_update_version() is None and window.updates.install.phase == 'idle'
 
 
 def test_stale_or_failed_results_never_raise_notice_or_accept_choices(app):
@@ -407,6 +419,6 @@ def test_stale_or_failed_results_never_raise_notice_or_accept_choices(app):
     window = create(show=False)
     save(core, kind='patch', current_version='0.9.0', latest_version='1.2.3', download_size=12)
     assert shell_update(window) == {'notice': None}
-    assert 'error' in choose(window, 'update', '1.2.3') and window.opener.urls == []
+    assert 'error' in choose(window, 'update', '1.2.3') and window.updates.install.phase == 'idle'
     run_check(window)  # 서명 키 없는 기본 빌드: 실패 결과
     assert shell_update(window) == {'notice': None}

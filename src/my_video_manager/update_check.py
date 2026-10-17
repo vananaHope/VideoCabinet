@@ -26,6 +26,7 @@ MANIFEST_LIMIT = 64 * 1024
 RELEASE_NOTES_LIMIT = 400
 RELEASE_NOTES_LINES = 8
 RELEASE_NOTES_SCAN = 20_000
+RELEASE_NOTES_PASSES = 5
 UpdateKind = Literal['none', 'patch', 'full', 'failed']
 
 
@@ -93,28 +94,65 @@ def announces_update(result: UpdateCheckResult | None, skipped_version: str | No
 def release_notes_summary(body) -> str | None:
     """Short display text from an unsigned release body; Markdown/HTML are never rendered.
 
-    Markup characters are dropped for readability, link targets are removed,
-    control and format characters (including bidi overrides) are stripped.
+    Markup characters are dropped for readability, link targets and bare URLs
+    are removed, control and format characters (including bidi overrides) are
+    stripped. The summary of a summary is the same text, so a saved summary
+    can be checked by summarizing it again.
     """
     if not isinstance(body, str):
         return None
+    text = _summary_once(body)
+    # Removing inline markup can join the pieces of a tag (a <**b**> c), so summarize
+    # again until nothing changes. Real notes settle in one or two passes.
+    for _ in range(RELEASE_NOTES_PASSES):
+        if text is None or (again := _summary_once(text)) == text:
+            break
+        text = again
+    return text
+
+
+def _summary_once(body: str) -> str | None:
+    # Comments and tags may span lines; GitHub hides them, so they never show here either.
+    text = _until_stable(lambda value: re.sub(r'<!--.*?(?:-->|$)|</?[A-Za-z][^>]*>', '', value, flags=re.DOTALL),
+                         body[:RELEASE_NOTES_SCAN])
     lines = []
-    for raw in body[:RELEASE_NOTES_SCAN].splitlines():
+    for raw in text.splitlines():
         line = ''.join(' ' if ch == '\t' else ch for ch in raw
                        if ch == '\t' or unicodedata.category(ch)[0] != 'C')
         nested = line[:1].isspace()
-        line = re.sub(r'<!--.*?(-->|$)|</?[A-Za-z][^>]*>', '', line).strip()
-        line = re.sub(r'^#{1,6}\s+', '', line)
-        line = re.sub(r'!?\[([^\]]*)\]\([^)]*\)', r'\1', line)
-        line = re.sub(r'\*\*|__|`', '', line).strip()
+        line = _until_stable(_plain_line, line.strip())
         if item := re.match(r'[-*+](?:\s+|$)(.*)', line):
             line = item[1] and ('  · ' if nested else '· ') + item[1]
+        elif nested and line.startswith('· '):
+            line = '  ' + line  # an already summarized nested item
         if line:
             lines.append(line)
     text = '\n'.join(lines[:RELEASE_NOTES_LINES])
     if len(lines) <= RELEASE_NOTES_LINES and len(text) <= RELEASE_NOTES_LIMIT:
         return text or None
     return text[:RELEASE_NOTES_LIMIT - 1].rstrip() + '…'
+
+
+# A link label with one level of brackets, and a target with one level of parentheses.
+_LABEL = r'((?:[^\[\]]|\[[^\[\]]*\])*)'
+_TARGET = r'(?:[^()\s]|\([^()\s]*\))*(?:\s+"[^"]*")?'
+
+
+def _plain_line(line: str) -> str:
+    if re.match(r'\[[^\]]+\]:\s', line):
+        return ''  # reference link definition: [1]: https://...
+    line = re.sub(r'^#{1,6}\s+', '', line)
+    line = re.sub(rf'!?\[{_LABEL}\]\({_TARGET}\)', r'\1', line)
+    line = re.sub(rf'!?\[{_LABEL}\]\[[^\[\]]*\]', r'\1', line)
+    line = re.sub(r'https?://\S+', '', line)
+    return re.sub(r'\*\*|__|`', '', line).strip()
+
+
+def _until_stable(clean: Callable[[str], str], value: str) -> str:
+    # Removing one piece of markup can join the pieces of another, e.g. <<b>b>.
+    while (cleaned := clean(value)) != value:
+        value = cleaned
+    return value
 
 
 def _transient(reason: str | None) -> bool:
@@ -173,7 +211,8 @@ class UpdateChecker:
                     return None
                 elif result.release_notes is not None and (
                         not isinstance(result.release_notes, str)
-                        or not 0 < len(result.release_notes) <= RELEASE_NOTES_LIMIT):
+                        or not 0 < len(result.release_notes) <= RELEASE_NOTES_LIMIT
+                        or release_notes_summary(result.release_notes) != result.release_notes):
                     return None
             stale = result.current_version is None or result.current_version != self._installed_version()
             return replace(result, stale=stale)

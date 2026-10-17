@@ -467,18 +467,20 @@ windows_only = pytest.mark.skipif(sys.platform != 'win32', reason='Windows Power
 FAKE_APP = '''
 import pathlib, sys, time
 ready, order = map(pathlib.Path, sys.argv[1:3])
+go = pathlib.Path(sys.argv[4]) if len(sys.argv) > 4 else None
 deadline = time.monotonic() + 30
 while not ready.exists() and time.monotonic() < deadline:
     time.sleep(0.05)
 time.sleep(0.5)  # an installer started without waiting would log first
+# The test creates go once it has changed files; only then may the app exit.
+while go is not None and not go.exists() and time.monotonic() < deadline:
+    time.sleep(0.05)
 if sys.argv[3] == 'exit':
     with order.open('a') as log:
         log.write('app-exit\\n')
 else:
     time.sleep(30)
 '''
-
-
 
 
 def stand_ins(core, tmp_path, installer_body='@exit /b 0'):
@@ -493,9 +495,10 @@ def stand_ins(core, tmp_path, installer_body='@exit /b 0'):
     return order, update, (str(relaunch), ['--data-dir', str(core.database.parent)])
 
 
-def fake_app(core, order, mode):
+def fake_app(core, order, mode, go=None):
     ready = core.database.parent / 'updates' / 'helper-ready'
-    return subprocess.Popen([sys.executable, '-c', FAKE_APP, str(ready), str(order), mode])
+    return subprocess.Popen([sys.executable, '-c', FAKE_APP, str(ready), str(order), mode,
+                             *([] if go is None else [str(go)])])
 
 
 def wait_for(predicate, timeout=60):
@@ -566,11 +569,13 @@ def test_real_helper_relaunches_even_if_the_result_cannot_be_saved(core, tmp_pat
 @windows_only
 def test_real_helper_refuses_installer_changed_after_handoff(core, tmp_path):
     order, update, relaunch = stand_ins(core, tmp_path)
-    app = fake_app(core, order, 'exit')
+    go = tmp_path / 'go'
+    app = fake_app(core, order, 'exit', go)
     try:
         core.prepare_update_install(update, relaunch=relaunch, pid=app.pid)
-        # The fake app is still running here, so the helper has not hashed the file yet.
+        # The fake app waits for go, so the helper hashes the file only after this change.
         update.path.write_text(f'@echo tampered>>"{order}"\r\n')
+        go.write_text('')
         wait_for(lambda: relaunched(order))
     finally:
         app.kill()

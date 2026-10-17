@@ -14,12 +14,35 @@ export interface UpdateNoticeData {
   releaseNotes: string | null
 }
 
+export interface UpdateInstallResultData {
+  tone: string
+  title: string
+  message: string
+  retry: string | null
+  logPath: string | null
+}
+
+export interface UpdateInstallData {
+  phase: string
+  version: string | null
+  kind: string | null
+  received: number
+  total: number | null
+  confirmation: string
+  failureMessage: string
+  canRetry: boolean
+  readyDismissed: boolean
+  result: UpdateInstallResultData | null
+}
+
 export interface ShellUpdateData {
   notice: UpdateNoticeData | null
+  install: UpdateInstallData
 }
 
 export type Tab = "library" | "reel" | "search" | "queue" | "statistics" | "folders" | "settings"
 export type UpdateChoice = "update" | "later" | "skip" | "unskip"
+export type UpdateAction = "cancel" | "install" | "later" | "retry" | "dismiss"
 export const tabs = [["library", "라이브러리"], ["reel", "모아보기"], ["search", "검색"], ["queue", "자막 대기열"], ["statistics", "통계"], ["folders", "폴더 관리"], ["settings", "설정"]] as const
 export interface ShellBridge {
   ready: (reply: Reply) => void
@@ -27,10 +50,12 @@ export interface ShellBridge {
   navigate: (tab: Tab, reply: Reply) => void
   updateSnapshot: (reply: Reply) => void
   updateChoice: (name: UpdateChoice, version: string, reply: Reply) => void
+  updateAction: (name: UpdateAction, reply: Reply) => void
   shellChanged: Signal<string>
   shellStatusChanged: Signal<string>
   shellFocusRequested: Signal<string>
   shellUpdateChanged: Signal<string>
+  shellUpdateInstallChanged: Signal<string>
 }
 export function publicShellBridge(raw: ShellBridge): ShellBridge {
   return Object.freeze({
@@ -39,10 +64,12 @@ export function publicShellBridge(raw: ShellBridge): ShellBridge {
     navigate: raw.navigate.bind(raw),
     updateSnapshot: raw.updateSnapshot.bind(raw),
     updateChoice: raw.updateChoice.bind(raw),
+    updateAction: raw.updateAction.bind(raw),
     shellChanged: Object.freeze({ connect: raw.shellChanged.connect.bind(raw.shellChanged), disconnect: raw.shellChanged.disconnect.bind(raw.shellChanged) }),
     shellStatusChanged: Object.freeze({ connect: raw.shellStatusChanged.connect.bind(raw.shellStatusChanged), disconnect: raw.shellStatusChanged.disconnect.bind(raw.shellStatusChanged) }),
     shellFocusRequested: Object.freeze({ connect: raw.shellFocusRequested.connect.bind(raw.shellFocusRequested), disconnect: raw.shellFocusRequested.disconnect.bind(raw.shellFocusRequested) }),
     shellUpdateChanged: Object.freeze({ connect: raw.shellUpdateChanged.connect.bind(raw.shellUpdateChanged), disconnect: raw.shellUpdateChanged.disconnect.bind(raw.shellUpdateChanged) }),
+    shellUpdateInstallChanged: Object.freeze({ connect: raw.shellUpdateInstallChanged.connect.bind(raw.shellUpdateInstallChanged), disconnect: raw.shellUpdateInstallChanged.disconnect.bind(raw.shellUpdateInstallChanged) }),
   })
 }
 
@@ -669,6 +696,7 @@ export interface UpdateStatusData {
   last: UpdateResultData | null
   skipped: boolean
   noticeVisible: boolean
+  updateAllowed: boolean
 }
 
 export interface SettingKeyData {

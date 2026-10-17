@@ -79,13 +79,16 @@ SHELL = BridgeContract(
     name='shell', interface='ShellBridge',
     slots={'ready': (), 'shellSnapshot': (), 'navigate': (Argument('tab', str, 'Tab'),),
            'updateSnapshot': (),
-           'updateChoice': (Argument('name', str, 'UpdateChoice'), Argument('version', str, 'string'))},
+           'updateChoice': (Argument('name', str, 'UpdateChoice'), Argument('version', str, 'string')),
+           'updateAction': (Argument('name', str, 'UpdateAction'),)},
     signals={'shellChanged': str, 'shellStatusChanged': str, 'shellFocusRequested': str,
-             'shellUpdateChanged': str},
+             'shellUpdateChanged': str, 'shellUpdateInstallChanged': str},
     aliases=(TypeAlias('Tab', tuple(name for name, _ in TABS)),
-             TypeAlias('UpdateChoice', ('update', 'later', 'skip', 'unskip'))),
+             TypeAlias('UpdateChoice', ('update', 'later', 'skip', 'unskip')),
+             TypeAlias('UpdateAction', ('cancel', 'install', 'later', 'retry', 'dismiss'))),
     constants=(Constant('tabs', TABS),),
-    data_types=(web_shell_data.ShellData, web_update_data.UpdateNoticeData, web_update_data.ShellUpdateData),
+    data_types=(web_shell_data.ShellData, web_update_data.UpdateNoticeData, web_update_data.UpdateInstallResultData,
+                web_update_data.UpdateInstallData, web_update_data.ShellUpdateData),
 )
 
 LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={

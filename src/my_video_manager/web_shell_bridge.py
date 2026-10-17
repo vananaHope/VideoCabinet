@@ -14,6 +14,7 @@ class ShellBridge(QObject):
     shellStatusChanged = SHELL.signal('shellStatusChanged')
     shellFocusRequested = SHELL.signal('shellFocusRequested')
     shellUpdateChanged = SHELL.signal('shellUpdateChanged')
+    shellUpdateInstallChanged = SHELL.signal('shellUpdateInstallChanged')
 
     def __init__(self, host):
         super().__init__(host)
@@ -39,6 +40,14 @@ class ShellBridge(QObject):
     def updateChoice(self, name, version):
         try:
             self.host.window.updates.choose(name, version)
+            return encode(shell_update_data(self.host.window.updates))
+        except (ValueError, RuntimeError, OSError, sqlite3.Error) as error:
+            return encode({'error': str(error)})
+
+    @SHELL.slot('updateAction')
+    def updateAction(self, name):
+        try:
+            self.host.window.updates.install.act(name)
             return encode(shell_update_data(self.host.window.updates))
         except (ValueError, RuntimeError, OSError, sqlite3.Error) as error:
             return encode({'error': str(error)})
