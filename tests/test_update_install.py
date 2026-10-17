@@ -4,6 +4,7 @@ import hashlib
 from io import BytesIO
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import threading
@@ -19,8 +20,8 @@ from my_video_manager.core import AppCore
 from my_video_manager.update_check import InstalledUpdateInfo, UpdateCheckResult
 from my_video_manager.update_http import UpdateCheckError, UrllibUpdateHttp
 from my_video_manager.update_install import (
-    INSTALLER_ARGUMENTS, PreparedUpdate, SubprocessHelperLauncher, UpdateInstallError, start_install,
-    update_busy_state,
+    INSTALLER_ARGUMENTS, INSTALLER_TIMEOUT_MS, PreparedUpdate, SubprocessHelperLauncher, UpdateInstallError,
+    start_install, update_busy_state,
 )
 
 
@@ -84,10 +85,14 @@ def installed(version='1.0.0', fingerprint=FINGERPRINT):
     return lambda: InstalledUpdateInfo(version, fingerprint)
 
 
+def make_core(directory):
+    return AppCore(media=object(), clock=lambda: NOW, database=directory / 'library.sqlite3',
+                   update_installation=installed())
+
+
 @pytest.fixture
 def core(tmp_path):
-    return AppCore(media=object(), clock=lambda: NOW, database=tmp_path / 'library.sqlite3',
-                   update_installation=installed())
+    return make_core(tmp_path)
 
 
 def checked(kind='patch', version='1.2.3', *, stale=False):
@@ -337,7 +342,19 @@ def prepared(core, http):
 RELAUNCH = ('C:/Programs/MyVideoManager/my-video-manager.exe', ['--data-dir', 'C:/data with space'])
 
 
-def test_handoff_starts_helper_with_silent_installer_and_relaunch(core, prepared):
+def tokens(command_line):
+    """Windows command-line tokens; these tests never embed quotes inside a token."""
+    return [token[1:-1] if token.startswith('"') else token for token in shlex.split(command_line, posix=False)]
+
+
+def installer_tokens(core):
+    return [*INSTALLER_ARGUMENTS, f'/LOG={(core.database.parent / "updates").resolve() / "installer.log"}']
+
+
+@pytest.mark.parametrize('folder', ['data', 'data dir with space'])
+def test_handoff_starts_helper_with_silent_installer_and_relaunch(tmp_path, http, folder):
+    core = make_core(tmp_path / folder)
+    prepared = core.download_update(checked(), http=http).update
     launcher = FakeLauncher()
     core.prepare_update_install(prepared, launcher=launcher, relaunch=RELAUNCH, pid=4242)
     command, cwd = launcher.commands[0]
@@ -348,7 +365,8 @@ def test_handoff_starts_helper_with_silent_installer_and_relaunch(core, prepared
     plan = launcher.plan
     assert plan['app_pid'] == 4242
     assert Path(plan['installer']) == prepared.path.resolve()
-    assert plan['installer_arguments'].startswith(' '.join(INSTALLER_ARGUMENTS) + ' /LOG=')
+    assert tokens(plan['installer_arguments']) == installer_tokens(core)
+    assert (plan['sha256'], plan['installer_timeout_ms']) == (prepared.sha256, INSTALLER_TIMEOUT_MS)
     assert plan['program'] == RELAUNCH[0]
     assert plan['arguments'] == '--data-dir "C:/data with space"'
     assert launcher.record_existed  # recorded before the helper could run
@@ -404,9 +422,13 @@ def test_patch_rejection_is_recorded_for_full_retry(core, prepared):
 @pytest.mark.parametrize('result,installed_version,status,reason,retry', [
     ({'exit_code': 0}, '1.0.0', 'installed', None, False),
     ({'exit_code': 4}, '1.0.0', 'failed', 'installer_failed', True),
-    ({'error': 'app_did_not_exit'}, '1.0.0', 'failed', 'app_did_not_exit', True),
-    ({'error': 'C:\\not a code'}, '1.0.0', 'incomplete', 'no_result', True),
-    (None, '1.0.0', 'incomplete', 'no_result', True),
+    # the patch never ran: retry the same (small) patch, not the full installer
+    ({'error': 'app_did_not_exit'}, '1.0.0', 'failed', 'app_did_not_exit', False),
+    ({'error': 'installer_start_failed'}, '1.0.0', 'failed', 'installer_start_failed', False),
+    ({'error': 'installer_timeout'}, '1.0.0', 'failed', 'installer_timeout', False),
+    ({'error': 'hash_mismatch'}, '1.0.0', 'failed', 'hash_mismatch', False),
+    ({'error': 'C:\\not a code'}, '1.0.0', 'incomplete', 'no_result', False),
+    (None, '1.0.0', 'incomplete', 'no_result', False),
     (None, '1.2.3', 'installed', None, False),  # result lost, but the new version runs
 ])
 def test_install_outcomes(core, prepared, result, installed_version, status, reason, retry):
@@ -457,13 +479,17 @@ else:
 '''
 
 
-def stand_ins(core, tmp_path, exit_code):
+
+
+def stand_ins(core, tmp_path, installer_body='@exit /b 0'):
     order = tmp_path / 'order.log'
+    downloads(core).mkdir(parents=True, exist_ok=True)
     installer = downloads(core) / 'MyVideoManager-Patch-1.2.3.exe.cmd'
-    installer.write_text(f'@echo install %*>>"{order}"\r\n@exit /b {exit_code}\r\n')
-    relaunch = tmp_path / 'relaunch.cmd'
+    installer.write_text(f'@echo install %*>>"{order}"\r\n{installer_body}\r\n')
+    relaunch = core.database.parent / 'relaunch.cmd'
     relaunch.write_text(f'@echo relaunch %*>>"{order}"\r\n')
-    update = PreparedUpdate('1.2.3', 'patch', installer, installer.stat().st_size, 'x')
+    update = PreparedUpdate('1.2.3', 'patch', installer, installer.stat().st_size,
+                            hashlib.sha256(installer.read_bytes()).hexdigest())
     return order, update, (str(relaunch), ['--data-dir', str(core.database.parent)])
 
 
@@ -479,37 +505,93 @@ def wait_for(predicate, timeout=60):
         time.sleep(0.1)
 
 
+def lines(order):
+    return [tokens(line) for line in order.read_text().splitlines()] if order.exists() else []
+
+
+def relaunched(order):
+    return any(line[0] == 'relaunch' for line in lines(order))
+
+
 @windows_only
-@pytest.mark.parametrize('exit_code,status', [(0, 'installed'), (7, 'failed')])
-def test_real_helper_waits_for_app_then_installs_then_relaunches(core, prepared, tmp_path, exit_code, status):
-    order, update, relaunch = stand_ins(core, tmp_path, exit_code)
+@pytest.mark.parametrize('exit_code,status,folder', [(0, 'installed', 'data'), (7, 'failed', 'data'),
+                                                     (0, 'installed', 'data dir with space')])
+def test_real_helper_waits_for_app_then_installs_then_relaunches(tmp_path, exit_code, status, folder):
+    core = make_core(tmp_path / folder)
+    order, update, relaunch = stand_ins(core, tmp_path, f'@exit /b {exit_code}')
     app = fake_app(core, order, 'exit')
     try:
         core.prepare_update_install(update, relaunch=relaunch, pid=app.pid)
-        wait_for(lambda: order.exists() and 'relaunch' in order.read_text())
+        wait_for(lambda: relaunched(order))
     finally:
         app.kill()
-    lines = order.read_text().splitlines()
-    assert lines[0] == 'app-exit'
-    assert lines[1].startswith('install ' + ' '.join(INSTALLER_ARGUMENTS) + ' /LOG=')
-    assert lines[2] == f'relaunch --data-dir {core.database.parent}'
+    assert lines(order) == [['app-exit'], ['install', *installer_tokens(core)],
+                            ['relaunch', '--data-dir', str(core.database.parent)]]
     outcome = core.last_update_install()
     assert (outcome.status, outcome.exit_code) == (status, exit_code)
     assert outcome.retry_full == (exit_code == 7)
 
 
 @windows_only
-def test_real_helper_does_not_install_while_app_keeps_running(core, prepared, tmp_path):
-    order, update, relaunch = stand_ins(core, tmp_path, 0)
+def test_real_helper_does_not_install_while_app_keeps_running(core, tmp_path):
+    order, update, relaunch = stand_ins(core, tmp_path)
     app = fake_app(core, order, 'stay')
     result = core.database.parent / 'updates' / 'install-result.json'
     try:
         start_install(core.database.parent, update, pid=app.pid, relaunch=relaunch, started_at=NOW,
-                      launcher=SubprocessHelperLauncher(),
-                      app_exit_timeout_ms=1500)
+                      launcher=SubprocessHelperLauncher(), app_exit_timeout_ms=1500)
         wait_for(result.exists)
     finally:
         app.kill()
     assert not order.exists()  # neither installed nor relaunched
     outcome = core.last_update_install()
     assert (outcome.status, outcome.failure_reason) == ('failed', 'app_did_not_exit')
+
+
+@windows_only
+def test_real_helper_relaunches_even_if_the_result_cannot_be_saved(core, tmp_path):
+    order, update, relaunch = stand_ins(core, tmp_path)
+    # A directory where the result's temporary file goes makes the write fail.
+    (core.database.parent / 'updates' / 'install-result.json.tmp').mkdir(parents=True)
+    app = fake_app(core, order, 'exit')
+    try:
+        core.prepare_update_install(update, relaunch=relaunch, pid=app.pid)
+        wait_for(lambda: relaunched(order))
+    finally:
+        app.kill()
+    assert [line[0] for line in lines(order)] == ['app-exit', 'install', 'relaunch']
+    assert core.last_update_install().status == 'incomplete'
+
+
+@windows_only
+def test_real_helper_refuses_installer_changed_after_handoff(core, tmp_path):
+    order, update, relaunch = stand_ins(core, tmp_path)
+    app = fake_app(core, order, 'exit')
+    try:
+        core.prepare_update_install(update, relaunch=relaunch, pid=app.pid)
+        # The fake app is still running here, so the helper has not hashed the file yet.
+        update.path.write_text(f'@echo tampered>>"{order}"\r\n')
+        wait_for(lambda: relaunched(order))
+    finally:
+        app.kill()
+    assert [line[0] for line in lines(order)] == ['app-exit', 'relaunch']
+    outcome = core.last_update_install()
+    assert (outcome.status, outcome.failure_reason, outcome.retry_full) == ('failed', 'hash_mismatch', False)
+
+
+@windows_only
+def test_real_helper_records_stuck_installer_and_does_not_relaunch(core, tmp_path):
+    done = f'@ping -n 4 127.0.0.1 >nul\r\n@echo install-done>>"{tmp_path / "order.log"}"'
+    order, update, relaunch = stand_ins(core, tmp_path, done)
+    app = fake_app(core, order, 'exit')
+    result = core.database.parent / 'updates' / 'install-result.json'
+    try:
+        start_install(core.database.parent, update, pid=app.pid, relaunch=relaunch, started_at=NOW,
+                      launcher=SubprocessHelperLauncher(), installer_timeout_ms=1000)
+        wait_for(result.exists)
+        assert core.last_update_install().failure_reason == 'installer_timeout'
+        # The installer is left running; once it ends, still no relaunch has happened.
+        wait_for(lambda: ['install-done'] in lines(order))
+    finally:
+        app.kill()
+    assert [line[0] for line in lines(order)] == ['app-exit', 'install', 'install-done']

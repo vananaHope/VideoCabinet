@@ -39,6 +39,8 @@ INSTALLER_ARGUMENTS = ('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-',
 # installer/patch-validation.iss: PrepareToInstall rejected the installed runtime.
 PATCH_REJECTED_EXIT_CODE = 7
 APP_EXIT_TIMEOUT_MS = 5 * 60 * 1000
+# A stuck installer is recorded as installer_timeout and left running.
+INSTALLER_TIMEOUT_MS = 30 * 60 * 1000
 READY_TIMEOUT = 20.0
 UpdateAssetKind = Literal['patch', 'full']
 
@@ -100,8 +102,12 @@ class UpdateInstallOutcome:
 
     @property
     def retry_full(self) -> bool:
-        """A failed or unfinished patch is retried with the full installer."""
-        return self.kind == 'patch' and self.status != 'installed'
+        """Only a patch that actually ran and failed is retried with the full installer.
+
+        Other failures (the app did not exit, the installer never started or
+        timed out, a changed file, no result) retry the same kind.
+        """
+        return self.kind == 'patch' and self.failure_reason in ('patch_rejected', 'installer_failed')
 
 
 def updates_directory(data_directory: Path) -> Path:
@@ -244,15 +250,39 @@ if (-not $app.WaitForExit([int]$plan.app_exit_timeout_ms)) {
     Save-Result @{ error = 'app_did_not_exit' }
     exit 1
 }
+$result = $null
+$relaunch = $true
+$actual = $null
 try {
-    $installer = Start-Program $plan.installer $plan.installer_arguments $plan.working_directory
-    $installer.WaitForExit()
-    Save-Result @{ exit_code = $installer.ExitCode }
+    $actual = (Get-FileHash -LiteralPath $plan.installer -Algorithm SHA256).Hash.ToLowerInvariant()
 } catch {
-    Save-Result @{ error = 'installer_start_failed' }
 }
-# Start the app even after a failure: it shows the result and the full retry.
-$null = Start-Program $plan.program $plan.arguments $plan.program_directory
+if ($actual -ne [string]$plan.sha256) {
+    # Changed or unreadable since the app verified it: never run it.
+    $result = @{ error = 'hash_mismatch' }
+} else {
+    try {
+        $installer = Start-Program $plan.installer $plan.installer_arguments $plan.working_directory
+        if ($installer.WaitForExit([int]$plan.installer_timeout_ms)) {
+            $result = @{ exit_code = $installer.ExitCode }
+        } else {
+            # Still installing: a relaunched app would race it for the same files.
+            $result = @{ error = 'installer_timeout' }
+            $relaunch = $false
+        }
+    } catch {
+        $result = @{ error = 'installer_start_failed' }
+    }
+}
+try {
+    Save-Result $result
+} catch {
+    # Without a result the next start reads incomplete (or installed).
+}
+# Start the app even after a failure: it shows the result and the retry.
+if ($relaunch) {
+    $null = Start-Program $plan.program $plan.arguments $plan.program_directory
+}
 """
 
 
@@ -296,6 +326,7 @@ def start_install(data_directory: Path, update: PreparedUpdate, *, pid: int,
                   relaunch: tuple[str, Sequence[str]], started_at: datetime,
                   launcher: HelperLauncher, ready_timeout: float = READY_TIMEOUT,
                   app_exit_timeout_ms: int = APP_EXIT_TIMEOUT_MS,
+                  installer_timeout_ms: int = INSTALLER_TIMEOUT_MS,
                   sleep: Callable[[float], None] = time.sleep) -> None:
     """Start the helper and block until it holds a handle to process pid.
 
@@ -326,7 +357,7 @@ def start_install(data_directory: Path, update: PreparedUpdate, *, pid: int,
         script.write_text(HELPER_SCRIPT, encoding='ascii')
         _write_json(plan, {
             'app_pid': pid, 'app_exit_timeout_ms': app_exit_timeout_ms,
-            'installer': str(path),
+            'installer': str(path), 'sha256': update.sha256, 'installer_timeout_ms': installer_timeout_ms,
             'installer_arguments': subprocess.list2cmdline(
                 [*INSTALLER_ARGUMENTS, f'/LOG={directory.resolve() / "installer.log"}']),
             'working_directory': str(directory.resolve()),

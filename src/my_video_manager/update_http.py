@@ -23,6 +23,8 @@ class UrllibUpdateHttp:
 
     The elapsed budget is checked between I/O operations; a pending operation
     can take up to the socket timeout. No retries, cookies, or auth tokens.
+    download has no elapsed budget (large installers): only the socket
+    timeout, cancellation between reads, and the exact size cap bound it.
     opener is an optional urllib-compatible transport for offline tests.
     """
 
