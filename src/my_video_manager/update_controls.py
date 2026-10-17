@@ -127,7 +127,9 @@ class UpdateControls(QObject):
         self.changed.emit()
 
     def request_update(self, result):
-        """"업데이트" 선택. 이미 내려받거나 설치를 넘기는 중이면 설치 흐름이 두 번째 요청을 무시한다."""
+        """"업데이트" 선택. 이미 내려받거나 설치를 넘기는 중이면 받지 않고 그 이유를 화면에 알린다."""
+        if refusal := self.install.refusal(result.latest_version):
+            raise ValueError(refusal)
         self.update_requested.emit(result)
 
     def shutdown(self):

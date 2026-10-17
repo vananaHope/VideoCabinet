@@ -73,7 +73,7 @@ def app(tmp_path, monkeypatch, qapp):
         # restart: 같은 데이터로 앱을 다시 시작한다. 코어는 실행마다 새로 만든다.
         window = MainWindow(reopen(core) if restart else core, player_factory=Player,
                             update_check_options=dict(startup_delay_ms=delay, check=check,
-                                                      install=dict(http=downloads, quit_app=lambda: False)))
+                                                      install=dict(http=downloads, quit_app=lambda confirmed: False)))
         window.downloads = downloads
         windows.append(window)
         window.subtitles.timer.stop()
@@ -215,7 +215,8 @@ def test_payload_passes_stale_explicitly_and_hides_nothing_else(app):
     core, check, create = app
     window = create(show=False)
     assert update_payload(window) == dict(installedVersion='1.0.0', automatic=True, checking=False,
-                                          error='', last=None, skipped=False, noticeVisible=False)
+                                          error='', last=None, skipped=False, noticeVisible=False,
+                                          updateAllowed=True)
     save(core, kind='patch', current_version='0.9.0', latest_version='1.2.3', download_size=12)
     last = update_payload(window)['last']
     assert last == dict(checkedAt=NOW.isoformat(), kind='patch', currentVersion='0.9.0',

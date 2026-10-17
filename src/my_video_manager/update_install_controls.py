@@ -5,9 +5,9 @@ import logging
 import threading
 from time import monotonic
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
-from .update_check import UpdateCheckResult
+from .update_check import UpdateCheckResult, _version
 from .update_install import UpdateInstallError
 
 log = logging.getLogger(__name__)
@@ -18,6 +18,15 @@ ACTIVE = ('downloading', 'cancelling', 'confirm', 'ready', 'preparing')
 NO_RETRY = frozenset({'source_run', 'not_newer', 'no_update', 'quit_failed'})
 CANCELLED = '업데이트 내려받기를 취소했습니다. 받던 파일은 지웠습니다.'
 STATE_CHANGED = '업데이트 진행 상태가 바뀌었습니다. 다시 확인해 주세요.'
+# 새 업데이트를 받지 않는 이유. 알림·설정의 "업데이트"가 조용히 무시되지 않게 화면에 보인다.
+HANDED = '설치를 이미 넘겼습니다. 앱을 완전 종료하면 설치가 이어집니다.'
+IN_PROGRESS = '업데이트를 진행하는 중입니다. 지금 진행이 끝난 뒤 다시 고르세요.'
+ALREADY_READY = '이 버전의 설치 파일을 이미 받았습니다. ‘지금 설치’로 설치하세요.'
+# 창이 숨었거나 재생 화면일 때 트레이 풍선으로 알린다.
+CONFIRM_WAITING = '업데이트 설치 확인을 기다립니다. 창을 열어 설치할지 골라 주세요.'
+CLOSING_FOR_INSTALL = '업데이트를 설치하려고 앱을 닫습니다. 설치가 끝나면 다시 실행합니다.'
+# 풍선이 보일 틈. 앱을 닫으면 트레이 아이콘과 함께 풍선도 사라진다.
+CLOSING_NOTICE_MS = 3000
 
 
 class _Signals(QObject):
@@ -39,13 +48,15 @@ class UpdateInstall(QObject):
     # 받은 크기만 바뀌었다(약 100ms마다).
     progressed = Signal()
 
-    def __init__(self, window, *, http=None, prepare=None, quit_app=None):
+    def __init__(self, window, *, http=None, prepare=None, quit_app=None, closing_notice_ms=CLOSING_NOTICE_MS):
         super().__init__(window)
         self.window, self.core = window, window.core
         self._http = http
         # prepare_update_install의 시험용 인자(launcher, relaunch, pid, ready_timeout).
         self._prepare = dict(prepare or {})
+        # quit_app(confirmed)는 완전 종료를 시작했으면 True. confirmed면 받아쓰기 중 종료를 다시 묻지 않는다.
         self._quit_app = quit_app or self._quit_for_install
+        self._closing_notice_ms = closing_notice_ms
         self.closed = False
         # 보조 프로세스가 앱 종료를 기다리는 중이다. 이번 실행에서는 두 번째 설치를 넘기지 않는다.
         self.handed = False
@@ -67,6 +78,10 @@ class UpdateInstall(QObject):
         self.failure, self.failure_text, self._stage = None, '', None
         self.busy = self.prepared = self._source = None
         self._full = False
+        # 사용자가 설치 전 확인에서 받아들인 막는 작업. 넘기는 동안 새로 생긴 작업은 종료 때 다시 묻는다.
+        self._accepted = ()
+        # "나중에" 뒤 준비됨 안내를 셸에서 닫았다. 설정 업데이트 구역에는 계속 보인다.
+        self.ready_dismissed = False
 
     @property
     def can_retry(self):
@@ -83,10 +98,24 @@ class UpdateInstall(QObject):
             return None
         return 'full' if outcome.retry_full else 'same'
 
+    def refusal(self, version):
+        """version을 지금 받기 시작할 수 없는 이유. 받을 수 있으면 빈 문자열."""
+        if self.handed:
+            return HANDED
+        if self.phase == 'ready':
+            # 받아 둔 파일보다 새 버전만 받는다. 받기 시작할 때 받아 둔 파일은 지운다.
+            try:
+                newer = _version(version) > _version(self.version)
+            except (TypeError, ValueError):
+                newer = False
+            return '' if newer else ALREADY_READY
+        return IN_PROGRESS if self.phase in ACTIVE else ''
+
     def hides(self, version):
-        """진행하는 동안에는(한 번에 하나) 새 버전 알림을 띄우지 않는다. 지난 설치 결과를 안내하는 동안에는
-        그 버전의 알림 대신 결과 안내의 다시 시도를 쓴다."""
-        return self.phase != 'idle' or (self.result is not None and self.result.version == version)
+        """셸 새 버전 알림을 띄우지 않을 버전. 받을 수 없는 동안과 실패 안내 중에는 숨기고(한 번에 하나),
+        지난 설치 결과를 안내하는 동안에는 그 버전의 알림 대신 결과 안내의 다시 시도를 쓴다."""
+        return (bool(self.refusal(version)) or self.phase == 'failed'
+                or (self.result is not None and self.result.version == version))
 
     def load_result(self):
         try:
@@ -102,9 +131,15 @@ class UpdateInstall(QObject):
         self.result_log = log_path if failed and log_path.is_file() else None
 
     def start(self, result, *, full=False):
-        """내려받기를 시작했으면 True. 이미 진행 중이면 그 진행을 그대로 둔다."""
-        if self.closed or self.handed or self.phase in ACTIVE:
+        """내려받기를 시작했으면 True. 받을 수 없으면(refusal) 지금 진행을 그대로 둔다."""
+        if self.closed or self.refusal(result.latest_version):
             return False
+        if self.prepared is not None:
+            # "나중에"로 받아 둔 이전 버전의 설치 파일. 새 버전을 받기 시작하면 쓰지 않는다.
+            try:
+                self.prepared.path.unlink(missing_ok=True)
+            except OSError:
+                log.warning('이전 업데이트 파일을 지우지 못했습니다: %s', self.prepared.path)
         self._reset()
         # 새 시도가 시작되면 지난 실행의 결과 안내는 내린다.
         self.result = self.result_log = None
@@ -193,16 +228,27 @@ class UpdateInstall(QObject):
         if busy.blocking:
             self.phase, self.busy = 'confirm', busy
             self.changed.emit()
+            self._notify_if_unseen(CONFIRM_WAITING)
         else:
             self._handoff()
 
-    def _handoff(self):
+    def _unseen(self):
+        """창이 숨었거나(트레이·최소화) 재생 화면이라 셸 안내가 보이지 않는다."""
+        window = self.window
+        return (not window.isVisible() or window.isMinimized()
+                or window.pages.currentWidget() is window.playback_page)
+
+    def _notify_if_unseen(self, message):
+        if self._unseen():
+            self.window.tray.notify(message)
+
+    def _handoff(self, accepted=()):
         # 앱을 닫을 수 없는 작업(백업·검사)이 있으면 보조 프로세스를 띄우기 전에 멈춘다.
         blocker = self.window.tray.quit_blocker()
         if blocker:
             self._fail('install', 'quit_blocked', blocker)
             return
-        self.phase, self.busy = 'preparing', None
+        self.phase, self.busy, self._accepted = 'preparing', None, tuple(accepted)
         self.changed.emit()
         signals, core, update, options = self._signals, self.core, self.prepared, self._prepare
 
@@ -223,19 +269,36 @@ class UpdateInstall(QObject):
         threading.Thread(target=run, name='update-handoff', daemon=True).start()
 
     def _handed_off(self, error):
-        if self.phase != 'preparing':
+        # 이미 완전 종료 중이면 보조 프로세스가 그 종료를 보고 설치를 이어 간다.
+        if self.closed or self.phase != 'preparing':
             return
         if error:
             self._fail('install', error)
             return
         # 보조 프로세스는 이 프로세스가 끝나기를 기다린다. 트레이로 숨기지 않고 완전 종료한다.
         self.handed = True
-        if not self._quit_app():
+        if not self._accepted and self._unseen():
+            # 묻지 않고 닫는다. 숨은 창 대신 트레이 풍선으로 알리고, 풍선이 보일 틈을 둔 뒤 닫는다.
+            self.window.tray.notify(CLOSING_FOR_INSTALL)
+            QTimer.singleShot(self._closing_notice_ms, self, self._quit_for_handoff)
+        else:
+            self._quit_for_handoff()
+
+    def _quit_for_handoff(self):
+        if self.closed:
+            return
+        # 넘기는 동안(최대 20초) 새로 시작한 작업은 받아들인 적이 없으니 종료 확인을 다시 거친다(받아쓰기 확인 대화).
+        try:
+            fresh = set(self._busy_state().blocking) - set(self._accepted)
+        except Exception:
+            log.exception('업데이트 종료 전 진행 중인 작업을 확인하지 못했습니다')
+            fresh = {'unknown'}
+        if not self._quit_app(not fresh):
             self._fail('install', 'quit_failed')
 
-    def _quit_for_install(self):
+    def _quit_for_install(self, confirmed):
         tray = self.window.tray
-        tray.quit(confirmed=True)
+        tray.quit(confirmed=confirmed)
         return tray.quitting
 
     def act(self, name):
@@ -244,14 +307,17 @@ class UpdateInstall(QObject):
             self._cancellation.set()
             self.phase = 'cancelling'
         elif name == 'install' and self.phase == 'confirm':
-            self._handoff()
+            self._handoff(self.busy.blocking)
             return
         elif name == 'install' and self.phase == 'ready':
             self._confirm_or_install()
             return
         elif name == 'later' and self.phase == 'confirm':
             # 받은 설치 파일은 이번 실행 동안 두고 "설치"로 다시 고를 수 있다.
-            self.phase, self.busy = 'ready', None
+            self.phase, self.busy, self.ready_dismissed = 'ready', None, False
+        elif name == 'dismiss' and self.phase == 'ready':
+            # 셸 안내에서만 내린다. 받은 파일과 설정 업데이트 구역의 "지금 설치"는 남는다.
+            self.ready_dismissed = True
         elif name == 'retry' and self.can_retry:
             self._retry()
             return
@@ -269,10 +335,9 @@ class UpdateInstall(QObject):
     def _retry(self):
         if self._stage == 'download' or self.failure == 'installer_missing':
             self.start(self._source, full=self._full)
-        elif self._stage == 'confirm':
-            self._confirm_or_install()
         else:
-            self._handoff()
+            # 실패한 사이 재생·받아쓰기가 시작됐을 수 있어 설치 단계 실패도 확인부터 다시 한다.
+            self._confirm_or_install()
 
     def _retry_result(self):
         """지난 실행의 설치 실패를 다시 시도한다. 받기는 그 버전의 서명된 매니페스트부터 다시 확인한다."""
@@ -281,6 +346,8 @@ class UpdateInstall(QObject):
             installed = self.core.installed_update_info().version
         except Exception:
             installed = None
+        if refusal := self.refusal(outcome.version):
+            raise ValueError(refusal)
         source = UpdateCheckResult(datetime.now(timezone.utc), outcome.kind, installed, outcome.version, None)
         self.start(source, full=self.result_retry == 'full' or outcome.kind == 'full')
 

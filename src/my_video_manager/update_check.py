@@ -26,6 +26,7 @@ MANIFEST_LIMIT = 64 * 1024
 RELEASE_NOTES_LIMIT = 400
 RELEASE_NOTES_LINES = 8
 RELEASE_NOTES_SCAN = 20_000
+RELEASE_NOTES_PASSES = 5
 UpdateKind = Literal['none', 'patch', 'full', 'failed']
 
 
@@ -100,6 +101,17 @@ def release_notes_summary(body) -> str | None:
     """
     if not isinstance(body, str):
         return None
+    text = _summary_once(body)
+    # Removing inline markup can join the pieces of a tag (a <**b**> c), so summarize
+    # again until nothing changes. Real notes settle in one or two passes.
+    for _ in range(RELEASE_NOTES_PASSES):
+        if text is None or (again := _summary_once(text)) == text:
+            break
+        text = again
+    return text
+
+
+def _summary_once(body: str) -> str | None:
     # Comments and tags may span lines; GitHub hides them, so they never show here either.
     text = _until_stable(lambda value: re.sub(r'<!--.*?(?:-->|$)|</?[A-Za-z][^>]*>', '', value, flags=re.DOTALL),
                          body[:RELEASE_NOTES_SCAN])

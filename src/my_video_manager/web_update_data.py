@@ -32,6 +32,8 @@ class UpdateStatusData(TypedDict):
     skipped: bool
     # 셸에 새 버전 알림이 보이는 중이다("나중에"·업데이트 선택 전).
     noticeVisible: bool
+    # 마지막 결과의 버전을 지금 받기 시작할 수 있다. 진행 중이거나 설치를 넘겼으면 "업데이트"를 보이지 않는다.
+    updateAllowed: bool
 
 
 class UpdateNoticeData(TypedDict):
@@ -68,6 +70,8 @@ class UpdateInstallData(TypedDict):
     confirmation: str
     failureMessage: str
     canRetry: bool
+    # ready 안내를 셸에서 닫았다. 설정 업데이트 구역에는 계속 보인다.
+    readyDismissed: bool
     result: UpdateInstallResultData | None
 
 
@@ -185,7 +189,8 @@ def update_status_data(core, controls) -> UpdateStatusData:
         automatic=core.automatic_update_check_enabled(), checking=controls.checking,
         error=controls.error, last=update_result_data(last),
         skipped=offers_update(last) and last.latest_version == skipped_version,
-        noticeVisible=announces_update(last, skipped_version) and not controls.hidden(last))
+        noticeVisible=announces_update(last, skipped_version) and not controls.hidden(last),
+        updateAllowed=not controls.install.refusal(last.latest_version if offers_update(last) else None))
 
 
 def shell_update_data(controls) -> ShellUpdateData:
@@ -243,4 +248,4 @@ def update_install_data(install) -> UpdateInstallData:
         phase=install.phase, version=install.version, kind=install.kind, received=install.received,
         total=install.total, confirmation=busy_confirmation(install.busy) if install.phase == 'confirm' else '',
         failureMessage=install.failure_text or download_failure_message(install.failure) if failed else '',
-        canRetry=failed and install.can_retry, result=install_result_data(install.result, install.result_retry, install.result_log))
+        canRetry=failed and install.can_retry, readyDismissed=install.ready_dismissed, result=install_result_data(install.result, install.result_retry, install.result_log))

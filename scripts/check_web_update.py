@@ -157,9 +157,9 @@ launcher = GatedLauncher()
 quits = []
 
 
-def quit_app():
+def quit_app(confirmed):
     # 실제 완전 종료 대신 기록만 한다. 보조 프로세스는 가짜라 아무것도 설치하지 않는다.
-    quits.append(time.monotonic())
+    quits.append(confirmed)
     return True
 
 
@@ -445,19 +445,30 @@ try:
         wait(lambda: install.phase == 'ready', '나중에')
         assert '설치 파일이 준비되었습니다 · 0.6.0' in updates_text() and launcher.starts == []
         capture('install-7-ready-later')
-        click('#update-progress-now')
+        # 준비됨 안내는 셸에서만 닫는다. 받은 파일과 설정 업데이트 구역의 지금 설치는 남는다.
+        click('[aria-label="업데이트 알림"] [aria-label="안내 닫기"]')
+        wait(lambda: install.ready_dismissed and updates_text() == '', '준비됨 안내 닫기')
+        assert install.phase == 'ready' and js('document.activeElement.dataset.tab') == 'library'
+        window.navigate_web_tab('settings')
+        settle()
+        section = section_text()
+        assert '설치 파일이 준비되었습니다 · 0.6.0' in section and '지금 설치' in section and '이 버전 건너뛰기' not in section
+        capture('install-7b-ready-dismissed-settings')
+        click('#settings-update-progress-now')
         wait(lambda: '지금 설치' in dialog_text(), '다시 확인')
         click('[role="alertdialog"] button:last-child')
         wait(lambda: install.phase == 'preparing' and launcher.starts, '설치 준비 중')
+        window.navigate_web_tab('library')
         settle()
         assert '설치 준비 중 · 0.6.0' in updates_text() and quits == []
         capture('install-8-preparing')
         launcher.gate.set()
         wait(lambda: quits, '완전 종료')
+        assert quits == [True]  # 대화에서 받아들인 작업뿐이라 받아쓰기 종료를 다시 묻지 않는다
         assert len(launcher.starts) == 1 and launcher.starts[0]['installer'].endswith('MyVideoManager-Setup-0.6.0.exe')
         window.subtitles.preparation_worker = None
         del core.busy_reasons_for_update
-        checks.append('전체 내려받기·설치 전 확인(막는 작업+대기 항목, 시작 포커스 나중에, Esc=나중에)·준비됨·설치 준비 중·완전 종료 한 번')
+        checks.append('전체 내려받기·설치 전 확인(막는 작업+대기 항목, 시작 포커스 나중에, Esc=나중에)·준비됨(셸에서 닫아도 설정에 지금 설치)·설치 준비 중·완전 종료 한 번')
         reset_install()
 
         # 다음 실행의 결과 안내: 시작할 때처럼 기록을 읽고 지운다.
@@ -495,6 +506,7 @@ try:
         install.act('cancel')
         http.gate.set()
         wait(lambda: install.phase == 'idle', '다시 시도 취소')
+        window.statusBar().clearMessage()  # 5초 뒤 사라지는 취소 알림이 뒤 장면의 배치를 움직이지 않게 지운다.
         next_start({'version': '0.6.0', 'kind': 'full'}, {'error': 'installer_timeout'}, log=False)
         text = updates_text()
         assert '앱을 다시 켜 보세요' in text and '다시 시도' not in text and 'installer.log' not in text
@@ -558,7 +570,7 @@ try:
         if attempt == 'click':
             capture('10-save-error')
         click('[aria-label="업데이트 설정"] [aria-label="안내 닫기"]')
-        assert saving_error not in section_text()
+        assert saving_error not in section_text(), section_text()
     failures.clear()
     checks.append('닫은 저장 실패 안내가 다음 확인에서 다시 보임(직접 누름·시작 확인)')
 

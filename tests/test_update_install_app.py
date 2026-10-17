@@ -62,10 +62,11 @@ def app(tmp_path, monkeypatch, qapp, key):
                    clock=lambda: datetime.now(timezone.utc),
                    update_installation=lambda: InstalledUpdateInfo('1.0.0', FINGERPRINT))
     monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
-    state = SimpleNamespace(core=core, http=GatedHttp(key), launcher=FakeLauncher(), quits=[], windows=[])
+    state = SimpleNamespace(core=core, http=GatedHttp(key), launcher=FakeLauncher(), quits=[], windows=[], notes=[])
 
-    def quit_app():
-        state.quits.append(True)
+    def quit_app(confirmed):
+        # confirmed: 설치 전 확인에서 받아들인 작업만 있다(받아쓰기 종료를 다시 묻지 않는다).
+        state.quits.append(confirmed)
         return True
 
     def create(*, show=False, restart=False):
@@ -74,8 +75,10 @@ def app(tmp_path, monkeypatch, qapp, key):
                           update_installation=core.update_installation) if restart else core
         window = MainWindow(current, player_factory=Player, update_check_options=dict(
             startup_delay_ms=600_000, check=lambda: None,
-            install=dict(http=state.http, prepare=dict(launcher=state.launcher, relaunch=RELAUNCH), quit_app=quit_app)))
+            install=dict(http=state.http, prepare=dict(launcher=state.launcher, relaunch=RELAUNCH), quit_app=quit_app,
+                         closing_notice_ms=0)))
         state.windows.append(window)
+        window.tray.notify = state.notes.append  # 트레이 풍선 대신 기록한다
         window.subtitles.timer.stop()
         window.translations.timer.stop()
         if show:
@@ -137,7 +140,8 @@ def test_update_choice_downloads_on_worker_then_hands_off_and_quits_once(app):
     wait_for(lambda: threads)
     assert threads[0] != threading.get_ident() and phase(window) == 'downloading'
     # 같은 업데이트를 다시 눌러도 두 번째 내려받기는 없다.
-    assert choose(window, 'update')['notice'] is None and shell(window)['install']['phase'] == 'downloading'
+    assert choose(window, 'update') == {'error': update_install_controls.IN_PROGRESS}
+    assert shell(window)['install']['phase'] == 'downloading'
     install = shell(window)['install']
     assert (install['version'], install['kind']) == ('1.2.3', 'patch')
     app.http.gate.set()
@@ -302,6 +306,139 @@ def test_work_that_blocks_quitting_stops_before_the_helper(app):
     window.web_host.controllers['settings'].backups.busy = False
     act(window, 'retry')
     wait_for(lambda: app.quits)
+
+
+def test_retry_after_install_failure_asks_again_when_work_started_meanwhile(app, monkeypatch):
+    window = app.create()
+    offer(app.core)
+    window.web_host.controllers['settings'].backups.busy = True
+    choose(window, 'update')
+    wait_for(lambda: phase(window) == 'failed')
+    # 실패 안내를 보는 사이 재생과 받아쓰기가 시작됐다.
+    entry = lambda state: SimpleNamespace(state=state, kind='translation')  # noqa: E731
+    monkeypatch.setattr(app.core, 'busy_reasons_for_update', lambda: update_busy_state(
+        playing=True, transcriptions=(entry('transcribing'),), translations=()))
+    window.web_host.controllers['settings'].backups.busy = False
+    assert act(window, 'retry')['install']['phase'] == 'confirm'
+    assert window.updates.install.busy.blocking == ('playback', 'transcription')
+    assert app.launcher.commands == [] and app.quits == []
+    act(window, 'install')
+    wait_for(lambda: app.quits)
+    assert app.quits == [True]  # 대화에서 받아들인 받아쓰기는 종료 때 다시 묻지 않는다
+
+
+def test_work_started_while_handing_off_is_asked_again_at_quit(app, monkeypatch):
+    window = app.create()
+    offer(app.core)
+    started = []
+    original = app.launcher.start
+
+    def start(command, *, cwd):
+        started.append(True)  # 보조 프로세스를 기다리는 사이 대기열이 받아쓰기를 시작한다
+        return original(command, cwd=cwd)
+
+    app.launcher.start = start
+    entry = lambda state: SimpleNamespace(state=state, kind='translation')  # noqa: E731
+    monkeypatch.setattr(app.core, 'busy_reasons_for_update', lambda: update_busy_state(
+        playing=False, transcriptions=(entry('transcribing' if started else 'queued'),), translations=()))
+    choose(window, 'update')
+    wait_for(lambda: app.quits)
+    assert app.quits == [False]  # 받아쓰기 중 종료 확인 대화를 거친다
+
+
+def test_closed_app_ignores_a_late_handoff(app):
+    window = app.create()
+    install = window.updates.install
+    install.phase = 'preparing'
+    install.shutdown()
+    install._handed_off('')
+    assert app.quits == [] and not install.handed
+
+
+def test_quit_failure_hides_update_and_explains_why(app):
+    window = app.create()
+    offer(app.core)
+    window.updates.install._quit_app = lambda confirmed: False
+    choose(window, 'update')
+    wait_for(lambda: phase(window) == 'failed')
+    assert shell(window)['install']['failureMessage'] == DOWNLOAD_FAILURE_MESSAGES['quit_failed']
+    act(window, 'dismiss')
+    # 보조 프로세스가 앱 종료를 기다리고 있어 두 번째 설치를 넘기지 않는다. 버튼을 숨기고 눌러도 이유를 보인다.
+    assert shell(window)['notice'] is None
+    assert window.web_host.controllers['settings'].payload()['update']['updateAllowed'] is False
+    assert choose(window, 'update') == {'error': update_install_controls.HANDED}
+    assert len(app.launcher.commands) == 1
+
+
+def test_settings_hides_update_for_any_version_while_in_progress(app):
+    window = app.create()
+    offer(app.core)
+    app.http.gate.clear()
+    choose(window, 'update')
+    offer(app.core, version='1.3.0')  # 받는 사이 더 새 버전이 확인됐다
+    window.updates.changed.emit()
+    update = window.web_host.controllers['settings'].payload()['update']
+    assert update['last']['latestVersion'] == '1.3.0' and update['updateAllowed'] is False
+    assert choose(window, 'update', '1.3.0') == {'error': update_install_controls.IN_PROGRESS}
+    app.http.gate.set()
+    wait_for(lambda: app.quits)
+
+
+def test_ready_notice_can_be_dismissed_from_shell_and_newer_version_is_announced(app, monkeypatch, key):
+    window = app.create()
+    offer(app.core)
+    entry = lambda state: SimpleNamespace(state=state, kind='translation')  # noqa: E731
+    monkeypatch.setattr(app.core, 'busy_reasons_for_update', lambda: update_busy_state(
+        playing=True, transcriptions=(), translations=()))
+    choose(window, 'update')
+    wait_for(lambda: phase(window) == 'confirm')
+    act(window, 'later')
+    install = act(window, 'dismiss')['install']
+    # 셸에서만 내린다: 받은 파일과 준비됨 단계(설정의 지금 설치)는 남는다.
+    assert (install['phase'], install['readyDismissed']) == ('ready', True)
+    assert downloads(app.core) == ['MyVideoManager-Patch-1.2.3.exe']
+    assert shell(window)['notice'] is None
+    assert choose(window, 'update') == {'error': update_install_controls.ALREADY_READY}
+    # 더 새 버전이 확인되면 셸 새 버전 알림이 다시 보이고, 받기 시작하면 받아 둔 파일은 정리한다.
+    offer(app.core, version='1.3.0')
+    assert shell(window)['notice']['version'] == '1.3.0'
+    assert window.web_host.controllers['settings'].payload()['update']['updateAllowed'] is True
+    newer = GatedHttp(key, version='1.3.0')
+    newer.bodies = {'MyVideoManager-Patch-1.2.3.exe': PATCH, 'MyVideoManager-Setup-1.2.3.exe': FULL}
+    newer.gate.clear()
+    window.updates.install._http = newer
+    assert 'error' not in choose(window, 'update', '1.3.0')
+    assert phase(window) == 'downloading' and window.updates.install.version == '1.3.0'
+    wait_for(lambda: newer.downloads)
+    newer.gate.set()
+    wait_for(lambda: phase(window) == 'confirm')
+
+
+def test_tray_balloon_when_the_window_cannot_show_the_shell(app, monkeypatch):
+    window = app.create()  # 트레이로 숨긴 창
+    offer(app.core)
+    monkeypatch.setattr(app.core, 'busy_reasons_for_update', lambda: update_busy_state(
+        playing=True, transcriptions=(), translations=()))
+    choose(window, 'update')
+    wait_for(lambda: phase(window) == 'confirm')
+    assert app.notes == [update_install_controls.CONFIRM_WAITING]
+    monkeypatch.undo()
+    act(window, 'later')
+    act(window, 'install')  # 막는 작업이 없어 묻지 않고 넘긴다
+    wait_for(lambda: app.quits)
+    assert app.notes == [update_install_controls.CONFIRM_WAITING, update_install_controls.CLOSING_FOR_INSTALL]
+
+
+def test_no_tray_balloon_while_the_shell_is_on_screen(app, monkeypatch):
+    window = app.create(show=True)
+    offer(app.core)
+    monkeypatch.setattr(app.core, 'busy_reasons_for_update', lambda: update_busy_state(
+        playing=True, transcriptions=(), translations=()))
+    choose(window, 'update')
+    wait_for(lambda: phase(window) == 'confirm')
+    act(window, 'install')
+    wait_for(lambda: app.quits)
+    assert app.notes == []
 
 
 @pytest.mark.parametrize('failure,ready', [('helper_failed', False), ('source_run', True)])

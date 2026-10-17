@@ -44,6 +44,10 @@ class TrayControls(QObject):
         self.open()
         self.window.web_host.controllers['queue'].refresh()
 
+    def notify(self, message):
+        """창이 숨었을 때 알릴 일. 트레이 풍선으로 보인다."""
+        self.icon.showMessage("영상 라이브러리", message)
+
     def notify_completion(self):
         counts = self.core.take_subtitle_queue_completion()
         if counts is not None:

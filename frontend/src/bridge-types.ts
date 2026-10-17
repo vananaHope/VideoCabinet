@@ -31,6 +31,7 @@ export interface UpdateInstallData {
   confirmation: string
   failureMessage: string
   canRetry: boolean
+  readyDismissed: boolean
   result: UpdateInstallResultData | null
 }
 
@@ -695,6 +696,7 @@ export interface UpdateStatusData {
   last: UpdateResultData | null
   skipped: boolean
   noticeVisible: boolean
+  updateAllowed: boolean
 }
 
 export interface SettingKeyData {

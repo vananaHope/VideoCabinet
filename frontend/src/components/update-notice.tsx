@@ -64,7 +64,7 @@ function progressText(install: UpdateInstallData) {
 }
 
 /** 내려받기·설치 진행 안내. 셸과 설정 업데이트 구역이 같은 모양을 쓴다. idle이면 그리지 않는다. */
-export function UpdateProgress({ idPrefix, install, locked, onAction }: { idPrefix: string; install: UpdateInstallData; locked: boolean; onAction: (name: UpdateAction) => void }) {
+export function UpdateProgress({ idPrefix, install, locked, onAction, readyDismissible = false }: { idPrefix: string; install: UpdateInstallData; locked: boolean; onAction: (name: UpdateAction) => void; readyDismissible?: boolean }) {
   if (install.phase === 'idle') return null
   const act = (name: UpdateAction) => () => { if (!locked) onAction(name) }
   const downloading = install.phase === 'downloading' || install.phase === 'cancelling'
@@ -77,7 +77,7 @@ export function UpdateProgress({ idPrefix, install, locked, onAction }: { idPref
       : install.phase === 'failed' && install.canRetry
         ? <Button id={`${idPrefix}-retry`} size="sm" aria-disabled={locked || undefined} onClick={act('retry')}>다시 시도</Button>
         : undefined
-  return <Notice tone={tone} title={title} clamp={false} action={action} onDismiss={install.phase === 'failed' ? act('dismiss') : undefined}>
+  return <Notice tone={tone} title={title} clamp={false} action={action} onDismiss={install.phase === 'failed' || (readyDismissible && install.phase === 'ready') ? act('dismiss') : undefined}>
     {downloading && <>
       <p className="tabular-nums">{progressText(install)}</p>
       <Progress value={install.total ? Math.floor(install.received * 100 / install.total) : 0} aria-label="업데이트 내려받기 진행률" />
@@ -132,11 +132,12 @@ export default function UpdateNotice() {
   const choose = (name: UpdateChoice) => notice && void send(shell => request<ShellUpdateData>(reply => shell.updateChoice(name, notice.version, reply)))
   const act = (name: UpdateAction) => void send(shell => request<ShellUpdateData>(reply => shell.updateAction(name, reply)))
   const answer = (name: UpdateAction) => { if (!answered.current) { answered.current = true; act(name) } }
-  const busy = install && install.phase !== 'idle'
+  const busy = install && install.phase !== 'idle' && !(install.phase === 'ready' && install.readyDismissed)
   if (!notice && !busy && !install?.result && !error) return null
   return <section ref={section} aria-label="업데이트 알림" className="flex flex-col gap-2 border-b px-4 py-2">
     {install?.result && <UpdateResult result={install.result} locked={sending} onAction={act} />}
-    {install && <UpdateProgress idPrefix="update-progress" install={install} locked={sending} onAction={act} />}
+    {/* 준비됨 안내는 셸에서만 닫는다. 닫아도 받은 파일과 설정 업데이트 구역의 ‘지금 설치’는 남는다. */}
+    {install && !(install.phase === 'ready' && install.readyDismissed) && <UpdateProgress idPrefix="update-progress" install={install} locked={sending} onAction={act} readyDismissible />}
     {notice && <Notice tone="info" aria-label="새 버전 알림" title={<UpdateTitle {...notice} />} action={<UpdateChoices idPrefix="update-notice" later locked={sending} onChoose={choose} />}>
       {notice.releaseNotes ?? undefined}
     </Notice>}

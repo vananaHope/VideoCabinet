@@ -34,7 +34,8 @@ function resultNotice(data: UpdateStatusData, last: UpdateResultData, locked: bo
   // 릴리스 노트는 서명되지 않은 GitHub 본문의 요약이라 글자로만 보인다. 못 받았으면 노트 없이 보인다.
   return {
     key: 'update-result', tone: 'info', title: <UpdateTitle version={version} kind={last.kind} downloadSize={last.downloadSize} />, message: last.releaseNotes ?? undefined,
-    action: <UpdateChoices idPrefix="settings-update" later={data.noticeVisible} locked={locked} onChoose={name => choose(name, version)} />,
+    // 진행 중이거나 설치를 넘겼으면 버전과 무관하게 선택지를 두지 않는다(눌러도 받지 않는 버튼을 남기지 않는다).
+    action: data.updateAllowed ? <UpdateChoices idPrefix="settings-update" later={data.noticeVisible} locked={locked} onChoose={name => choose(name, version)} /> : undefined,
   }
 }
 

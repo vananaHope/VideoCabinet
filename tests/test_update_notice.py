@@ -124,6 +124,8 @@ def test_bare_urls_reference_links_nested_brackets_and_multiline_markup_are_remo
     '## 수정\n- a\n  - b\n    - c `d`', '- [링크](https://x.example) 와 ![그림](https://y.example/a.png)',
     '\n'.join(f'- 항목 {index}' for index in range(RELEASE_NOTES_LINES + 3)), '가' * 5000,
     '  · 이미 요약한 하위 항목\n· 항목', 'a<b>c<<b>b>', '- \n-\n# \n#제목',
+    # 줄 안 마크업을 지우면 태그가 생기는 입력: 요약 전체를 안정될 때까지 반복한다.
+    'a <**b**> c', '<`x`\ny> b',
 ])
 def test_summary_of_a_summary_is_the_same_so_saved_notes_load(core, body):
     notes = release_notes_summary(body)
