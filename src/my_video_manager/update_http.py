@@ -1,4 +1,4 @@
-"""Bounded, unauthenticated HTTPS transport for release metadata only."""
+"""Bounded, unauthenticated HTTPS transport for release metadata and installers."""
 from http.client import HTTPException
 import socket
 import time
@@ -33,7 +33,30 @@ class UrllibUpdateHttp:
         self._opener = opener if opener is not None else request.build_opener(_NoRedirect())
 
     def get(self, url: str, *, max_bytes: int) -> bytes:
-        deadline = time.monotonic() + 30
+        chunks = bytearray()
+        self._transfer(url, max_bytes, chunks.extend, deadline=time.monotonic() + 30)
+        return bytes(chunks)
+
+    def download(self, url: str, *, size: int, write, cancellation=None) -> None:
+        """Stream exactly size bytes to write(chunk), for release installers.
+
+        Same hosts, redirects, headers and 10s socket timeout as get, but no
+        elapsed budget: a large installer may take minutes. A stalled read still
+        times out. cancellation (threading.Event-like) is checked between reads
+        and raises UpdateCheckError('cancelled'). A short body is invalid_response.
+        """
+        received = self._transfer(url, size, write, deadline=None, cancellation=cancellation)
+        if received != size:
+            raise UpdateCheckError('invalid_response')
+
+    def _transfer(self, url, max_bytes, write, *, deadline, cancellation=None) -> int:
+        def expired():
+            return deadline is not None and time.monotonic() >= deadline
+
+        def check_cancel():
+            if cancellation is not None and cancellation.is_set():
+                raise UpdateCheckError('cancelled')
+
         try:
             for redirects in range(4):
                 parts = parse.urlsplit(url)
@@ -41,8 +64,9 @@ class UrllibUpdateHttp:
                         or parts.username is not None or parts.password is not None
                         or parts.port not in (None, 443) or parts.fragment):
                     raise UpdateCheckError('unsafe_redirect')
-                if time.monotonic() >= deadline:
+                if expired():
                     raise UpdateCheckError('timeout')
+                check_cancel()
                 req = request.Request(url, headers={
                     'User-Agent': 'my-video-manager-update-check',
                     'Accept': 'application/vnd.github+json' if parts.hostname == 'api.github.com'
@@ -50,7 +74,8 @@ class UrllibUpdateHttp:
                     'Accept-Encoding': 'identity',
                 })
                 try:
-                    response = self._opener.open(req, timeout=min(10, deadline - time.monotonic()))
+                    timeout = 10 if deadline is None else min(10, deadline - time.monotonic())
+                    response = self._opener.open(req, timeout=timeout)
                 except error.HTTPError as exc:
                     with exc:
                         if exc.code in (301, 302, 303, 307, 308):
@@ -72,22 +97,28 @@ class UrllibUpdateHttp:
                         length = int(length)
                         if length > max_bytes:
                             raise UpdateCheckError('response_too_large')
-                    chunks = bytearray()
+                    received = 0
                     while True:
-                        if time.monotonic() >= deadline:
+                        if expired():
                             raise UpdateCheckError('timeout')
+                        check_cancel()
                         # read1 does not wait for an entire buffer of drip-fed data.
-                        chunk = response.read1(min(65536, max_bytes + 1 - len(chunks)))
-                        if time.monotonic() >= deadline:
+                        chunk = response.read1(min(65536, max_bytes + 1 - received))
+                        if expired():
                             raise UpdateCheckError('timeout')
                         if not chunk:
                             break
-                        chunks.extend(chunk)
-                        if len(chunks) > max_bytes:
+                        received += len(chunk)
+                        if received > max_bytes:
                             raise UpdateCheckError('response_too_large')
-                    if length is not None and len(chunks) != length:
+                        try:
+                            write(chunk)
+                        except OSError:
+                            # A local disk failure is not a network failure.
+                            raise UpdateCheckError('storage') from None
+                    if length is not None and received != length:
                         raise UpdateCheckError('invalid_response')
-                    return bytes(chunks)
+                    return received
         except (TimeoutError, socket.timeout):
             raise UpdateCheckError('timeout') from None
         except error.URLError as exc:
