@@ -66,6 +66,8 @@ def app(tmp_path, monkeypatch, qapp):
                    update_installation=lambda: InstalledUpdateInfo('1.0.0', None))
     check = GatedCheck(core)
     downloads = Downloads()
+    # 키 미설정 빌드를 기본으로 둬 실제 키가 들어간 뒤에도 기본 확인이 네트워크에 닿지 않게 한다.
+    monkeypatch.setattr(update_manifest, 'UPDATE_PUBLIC_KEY', b'')
     monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
     windows = []
 
@@ -397,7 +399,7 @@ def test_update_choice_starts_the_download_instead_of_opening_a_browser(app, rel
     # 내려받기는 그 버전의 서명된 매니페스트부터 다시 받는다(가짜 http는 연결 실패로 끝낸다).
     wait_for(lambda: window.updates.install.phase == 'failed')
     assert window.downloads.urls == [
-        'https://github.com/vananaHope/my-video-manager/releases/download/v1.2.3/update-manifest.json']
+        'https://github.com/vananaHope/my-video-manager-releases/releases/download/v1.2.3/update-manifest.json']
     assert core.skipped_update_version() is None
     assert not (SOURCE / 'update_controls.py').read_text(encoding='utf-8').count('openUrl')
 

@@ -208,6 +208,14 @@ FFmpeg 원본 `LICENSE`·`README.txt`도 함께 추출합니다. 번들은 불�
 `release.ps1`은 의존성을 설치하지 않고 `build.ps1`을 호출합니다. `main`에서만 실행하며 작업 트리가 깨끗하고 `main`,
 `origin/main`, 실제 원격 main이 모두 같아야 합니다. 기존 로컬/원격 태그나 GitHub Release가 있으면 멈춥니다.
 
+소스 저장소(`origin`, `vananaHope/my-video-manager`)는 비공개이므로 토큰 없이 요청하는 앱은 그 Release를 볼 수 없습니다.
+그래서 설치 파일·체크섬·매니페스트·서명은 공개 **배포 저장소** `vananaHope/my-video-manager-releases`에만 발행합니다.
+`origin`에는 지금처럼 버전 커밋과 `v<version>` 태그만 push하고, 이전 Release 조회·같은 태그의 Release 확인·
+`gh release create`·실패 시 안내 명령은 모두 배포 저장소를 씁니다. 배포 저장소 이름은 앱의
+`src/my_video_manager/app_version.py`의 `RELEASE_REPOSITORY`와 `release.ps1`의 `-ReleaseRepository` 기본값에 있으며
+테스트가 두 값이 같은지 검사합니다. 배포 저장소에 이전 Release가 없으면 첫 릴리스(전체 설치만)로 처리하며,
+소스 저장소에 남은 옛 Release(v0.5.0·v0.5.1)는 조회하지 않습니다.
+
 첫 서명 릴리스는 다음 순서로 준비합니다.
 
 1. 아래 키 생성 도구로 기본 경로 `%APPDATA%\my-video-manager\release-keys\update-ed25519.pem`에 키를 생성하고 ACL을 확인한 뒤 안전하게 백업합니다.
@@ -234,7 +242,7 @@ powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.4.2
 성공·실패 시 환경 변수를 지웁니다(호출한 PowerShell 프로세스에 설정한 값도 제거).
 서명 시에도 동일 키 검사를 다시 합니다.
 
-이전 메타데이터는 GitHub의 `releases/latest`가 가리키는 정식(비 draft·비 prerelease)
+이전 메타데이터는 배포 저장소의 `releases/latest`가 가리키는 정식(비 draft·비 prerelease)
 Release에서 읽습니다. 태그는 `vX.Y.Z`여야 하며 새 버전 이상이면 발행을 중단합니다.
 매니페스트와 `.sig`가 함께 있으면 앱 내장 공개 키로 정확한 바이트를 검증한 후 읽습니다.
 서명 없는 이전 매니페스트는 지문을 신뢰하지 않고 "패치 불가(이전 매니페스트 서명 없음)"으로 전체 설치만 발행합니다.
@@ -251,8 +259,9 @@ Release에서 읽습니다. 태그는 `vX.Y.Z`여야 하며 새 버전 이상이
 특히 v0.4.1 이전 설치본에는 지문 파일이 없으므로 전체 설치를 한 번 거쳐야 합니다.
 #140에서 `cryptography`를 번들에 포함하는 변경도 실제 지문 비교가 자동으로 감지합니다.
 
-모든 파일 생성·서명이 성공하면 `v<version>` 태그와 main을 atomic push하고,
-`gh release create --verify-tag`로 전체 설치 파일·체크섬·매니페스트·서명과 해당하는 패치를 게시합니다.
+모든 파일 생성·서명이 성공하면 `v<version>` 태그와 main을 `origin`에 atomic push하고,
+배포 저장소에는 그 태그가 없으므로 `gh release create --target main`으로 배포 저장소 기본 브랜치에 같은 이름의 태그를 만들며
+전체 설치 파일·체크섬·매니페스트·서명과 해당하는 패치를 게시합니다.
 노트는 현재 main에 포함된 가장 높은 버전 태그 이후의 커밋 제목입니다(태그가 없으면 전체).
 설치 파일은 `dist/installer/MyVideoManager-Setup-<version>.exe`, 체크섬은 그 옆의 `.exe.sha256`입니다.
 패치는 `dist/installer/MyVideoManager-Patch-<version>.exe`, 메타데이터는
@@ -262,7 +271,7 @@ GitHub Release 자산 이름에는 버전 하위 폴더가 붙지 않습니다. 
 기존 태그·Release를 덮어쓰거나 강제 push하지 않습니다.
 빌드 실패나 원격에서 거부한 push는 로컬 버전 커밋과 이번에 만든 태그를 자동 복구합니다.
 다른 파일 변경이나 불확실한 원격 상태가 있으면 보존하고 복구 명령을 안내합니다.
-push 뒤 Release 생성이 실패하면 원격 main과 태그를 유지하며 Release 확인·생성·자산 추가 명령을 안내합니다.
+push 뒤 Release 생성이 실패하면 `origin`의 main과 태그를 유지하며 배포 저장소 기준의 Release 확인·생성·자산 추가 명령을 안내합니다.
 안내된 `gh release upload` 목록에는 매니페스트·서명과 해당하는 패치도 포함됩니다.
 이미 올라간 자산은 그대로 두고 목록에서 **누락된 파일만 골라** 업로드합니다(`--clobber` 사용 안 함).
 자동 재발행하지 않으므로 안내에 따라 상태를 확인하세요.

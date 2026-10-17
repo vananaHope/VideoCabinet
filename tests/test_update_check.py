@@ -7,7 +7,7 @@ from urllib import error, request, response
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import pytest
 
-from my_video_manager.app_version import current_version
+from my_video_manager.app_version import RELEASES_URL, current_version
 from my_video_manager.core import AppCore
 from my_video_manager import update_check, update_manifest
 from my_video_manager.update_check import (
@@ -18,7 +18,7 @@ from my_video_manager.update_http import UpdateCheckError, UrllibUpdateHttp
 
 NOW = datetime(2026, 10, 17, 12, tzinfo=timezone.utc)
 FINGERPRINT = 'a' * 64
-BASE = 'https://github.com/vananaHope/my-video-manager/releases/download/v1.2.3'
+BASE = 'https://github.com/vananaHope/my-video-manager-releases/releases/download/v1.2.3'
 
 
 class FakeClock:
@@ -125,6 +125,12 @@ def test_version_and_installed_runtime_decide_update(core, key, version, fingerp
 
 def test_numeric_version_order_not_lexical(core, key):
     assert check(core, FakeHttp(key, version='1.10.0'), version='1.9.99').kind == 'patch'
+
+
+def test_update_endpoints_use_public_release_repository():
+    # 소스 저장소는 비공개라 토큰 없는 앱 요청은 배포 저장소로만 간다.
+    assert LATEST_RELEASE_URL == 'https://api.github.com/repos/vananaHope/my-video-manager-releases/releases/latest'
+    assert RELEASES_URL == 'https://github.com/vananaHope/my-video-manager-releases/releases'
 
 
 def test_one_tag_pins_both_metadata_requests(core, http):

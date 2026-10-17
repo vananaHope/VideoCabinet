@@ -7,14 +7,14 @@ import unicodedata
 from typing import Callable, Literal, Protocol
 
 from . import update_manifest
-from .app_version import RELEASES_URL, current_version
+from .app_version import RELEASE_REPOSITORY, RELEASES_URL, current_version
 from .runtime_fingerprint import installed_runtime_fingerprint
 from .settings import Settings
 from .update_http import UpdateCheckError, UrllibUpdateHttp
 from .update_manifest import FILENAME, ManifestError, verify_manifest
 
 
-LATEST_RELEASE_URL = 'https://api.github.com/repos/vananaHope/my-video-manager/releases/latest'
+LATEST_RELEASE_URL = f'https://api.github.com/repos/{RELEASE_REPOSITORY}/releases/latest'
 AUTO_CHECK_INTERVAL = timedelta(days=1)
 TRANSIENT_FAILURE_CHECK_INTERVAL = timedelta(hours=3)
 AUTO_CHECK_KEY = 'updates.check_on_startup'
