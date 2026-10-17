@@ -139,8 +139,9 @@ class SubtitleControls(QObject):
         self.worker.deleteLater()
         self.worker = None
 
-    def shutdown(self):
-        if self.worker and self.worker.isRunning():
+    def shutdown(self, *, confirm=True):
+        """confirm=False는 이미 다른 확인(업데이트 설치 전 확인)에서 받아쓰기를 멈추기로 한 경우다."""
+        if confirm and self.worker and self.worker.isRunning():
             dialog = QMessageBox(QMessageBox.Icon.Question, "받아쓰기 중 종료",
                                  "받아쓰기 중입니다. 지금 종료하면 다음 실행 때 처음부터 다시 받아씁니다.",
                                  parent=self.window)

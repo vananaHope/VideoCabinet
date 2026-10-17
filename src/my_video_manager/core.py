@@ -262,10 +262,15 @@ class AppCore:
         from .update_install import last_install
         return last_install(self.database.parent, self.installed_update_info)
 
-    def clear_update_install(self):
-        """결과를 안내한 뒤 설치 기록과 받은 설치 파일을 지운다."""
+    def clear_update_install(self, *, keep_log=False):
+        """결과를 안내한 뒤 설치 기록과 받은 설치 파일을 지운다. keep_log면 실패 진단용 installer.log를 남긴다."""
         from .update_install import clear_install
-        clear_install(self.database.parent)
+        clear_install(self.database.parent, keep_log=keep_log)
+
+    def update_installer_log(self):
+        """설치 프로그램 기록(installer.log) 위치. 파일이 없을 수 있다."""
+        from .update_install import installer_log
+        return installer_log(self.database.parent)
 
     def fill_next_resolution(self, *, cancellation) -> ResolutionResult:
         """작업자용 API. 한 영상 처리 후 반환하며 취소 시 다음 호출에서 이어진다."""

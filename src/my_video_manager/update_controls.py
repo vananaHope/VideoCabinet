@@ -2,8 +2,9 @@
 import logging
 import threading
 
-from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+
+from .update_install_controls import UpdateInstall
 
 log = logging.getLogger(__name__)
 NOTICE_CHANGED = '업데이트 안내가 바뀌었습니다. 다시 확인해 주세요.'
@@ -21,21 +22,25 @@ class UpdateControls(QObject):
 
     새 버전 알림의 선택(업데이트·나중에·건너뛰기)도 받는다. "나중에"는 이번 실행에서 그 확인 결과만 숨기므로
     다음 확인(지금 확인·다음 시작)에서 같은 버전이 나오면 다시 알린다.
+    "업데이트"는 update_requested로 내려받기·설치(UpdateInstall)를 시작하고, 진행하는 동안 같은 알림을 숨긴다.
     """
     changed = Signal()
-    # "업데이트"를 고른 확인 결과. 내려받기·설치(#142)가 여기에 연결한다.
+    # "업데이트"를 고른 확인 결과. 설치 흐름(UpdateInstall.start)이 연결되어 내려받기를 시작한다.
     update_requested = Signal(object)
 
-    def __init__(self, window, *, startup_delay_ms=5000, check=None, open_url=None):
+    def __init__(self, window, *, startup_delay_ms=5000, check=None, install=None):
         super().__init__(window)
         self.core = window.core
         self.checking = False
         self.error = ''
         self.closed = False
         self._check = check or self.core.check_for_update
-        self._open_url = open_url or QDesktopServices.openUrl
-        # "나중에"(또는 업데이트 선택)로 숨긴 확인 결과의 시각. 새 확인 결과는 시각이 달라 다시 알린다.
+        # "나중에"로 숨긴 확인 결과의 시각. 새 확인 결과는 시각이 달라 다시 알린다.
         self._postponed = None
+        # install: UpdateInstall의 시험용 어댑터(http, prepare, quit_app).
+        self.install = UpdateInstall(window, **(install or {}))
+        self.install.changed.connect(self.changed)
+        self.update_requested.connect(self.install.start)
         # 작업자가 늦게 끝나도 지워진 객체로 보내지 않게 신호는 부모 없는 객체가 따로 쥔다.
         self._signals = _Signals()
         self._signals.finished.connect(self._finished, Qt.ConnectionType.QueuedConnection)
@@ -98,8 +103,8 @@ class UpdateControls(QObject):
         return None if result is None or self.hidden(result) else result
 
     def hidden(self, result):
-        """이번 실행에서 "나중에"(또는 업데이트 선택)로 숨긴 확인 결과인가."""
-        return result.checked_at == self._postponed
+        """이번 실행에서 "나중에"로 숨겼거나, 업데이트를 진행·결과 안내하는 동안이라 띄우지 않는 확인 결과인가."""
+        return result.checked_at == self._postponed or self.install.hides(result.latest_version)
 
     def choose(self, name, version):
         """알림·설정에서 고른 선택. 화면이 보던 버전이 지금 알릴 버전과 다르면 바꾸지 않고 거절한다."""
@@ -122,15 +127,11 @@ class UpdateControls(QObject):
         self.changed.emit()
 
     def request_update(self, result):
-        """"업데이트" 선택을 다음 단계로 넘기는 자리. #142가 update_requested에 내려받기·설치를 연결한다."""
+        """"업데이트" 선택. 이미 내려받거나 설치를 넘기는 중이면 설치 흐름이 두 번째 요청을 무시한다."""
         self.update_requested.emit(result)
-        # 임시 동작: #142 전까지는 사용자가 직접 받을 수 있게 그 버전의 GitHub Release 페이지를 연다.
-        # #142에서 내려받기·설치로 바뀌면 이 브라우저 열기는 없앤다.
-        if not self._open_url(QUrl(result.release_url)):
-            raise RuntimeError('브라우저에서 GitHub Release 페이지를 열지 못했습니다.')
-        # 고른 알림은 이번 실행에서 다시 띄우지 않는다. 설정의 업데이트 구역에는 남는다.
-        self._postponed = result.checked_at
 
     def shutdown(self):
         self.closed = True
         self._startup.stop()
+        # 받는 중이면 취소만 알리고 기다리지 않는다. 남은 파일은 다음 시작 때 지운다.
+        self.install.shutdown()

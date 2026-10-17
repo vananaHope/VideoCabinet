@@ -9,6 +9,7 @@ class TrayControls(QObject):
         super().__init__(window)
         self.window, self.core = window, window.core
         self.quitting = False
+        self._confirmed = False
         self.icon = QSystemTrayIcon(window.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay), self)
         self.icon.setToolTip("영상 라이브러리 · 자막 대기열")
         menu = QMenu(window)
@@ -58,9 +59,22 @@ class TrayControls(QObject):
         # 종료를 취소하면 종료 확인 중 미뤄 둔 감시 묶음을 이어서 검사한다.
         self.window.folder_watch.flush()
 
-    def quit(self):
+    def quit(self, *, confirmed=False):
+        """완전 종료. confirmed면 받아쓰기 중 종료 확인을 다시 묻지 않는다(업데이트 설치 전에 이미 물었다)."""
         self.quitting = True
-        self.window.close()
+        self._confirmed = confirmed
+        try:
+            self.window.close()
+        finally:
+            self._confirmed = False
+
+    def quit_blocker(self):
+        """완전 종료를 막는 작업의 안내. 막는 작업이 없으면 빈 문자열."""
+        if self.window.web_host.controllers['settings'].backups.busy:
+            return "백업 작업이 끝난 뒤 완전 종료해 주세요."
+        if self.window.worker and self.window.worker.isRunning():
+            return "검사가 끝난 뒤 완전 종료해 주세요."
+        return ""
 
     def restart(self):
         self.quit()
@@ -71,11 +85,11 @@ class TrayControls(QObject):
         window = self.window
         try:
             if self.quitting:
-                if window.web_host.controllers['settings'].backups.busy:
-                    raise RuntimeError("백업 작업이 끝난 뒤 완전 종료해 주세요.")
-                if window.worker and window.worker.isRunning():
-                    raise RuntimeError("검사가 끝난 뒤 완전 종료해 주세요.")
-                if not window.subtitles.shutdown():
+                if blocker := self.quit_blocker():
+                    raise RuntimeError(blocker)
+                # 업데이트 설치 전 확인에서 이미 물었으면 받아쓰기 중 종료를 다시 묻지 않는다.
+                stopped = window.subtitles.shutdown(confirm=False) if self._confirmed else window.subtitles.shutdown()
+                if not stopped:
                     event.ignore()
                     self.quitting = False
                     self.resume()

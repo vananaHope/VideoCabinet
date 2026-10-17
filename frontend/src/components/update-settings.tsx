@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from "react"
-import type { UpdateChoice, UpdateResultData, UpdateStatusData } from "@/bridge-types"
+import { request } from "@/bridge"
+import type { ShellUpdateData, UpdateAction, UpdateChoice, UpdateResultData, UpdateStatusData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
 import { NoticeStack, type NoticeItem } from "@/components/ui/notice"
-import { UpdateChoices, UpdateTitle } from "@/components/update-notice"
+import { UpdateChoices, UpdateProgress, UpdateTitle, useShellUpdate } from "@/components/update-notice"
 
 function date(value: string) {
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime()) ? '시각 정보 없음' : parsed.toLocaleString('ko-KR')
 }
 
-// 고른 뒤 사라지는 버튼 대신 포커스를 둘 자리. 건너뛰기와 건너뛰기 취소는 서로 자리를 바꾼다.
+// 고른 뒤 사라지는 버튼 대신 포커스를 둘 자리. 건너뛰기와 건너뛰기 취소는 서로 자리를 바꾸고, 업데이트는 진행 안내의 취소로 간다.
 const focusAfter: Record<UpdateChoice, string> = {
-  update: 'settings-update-install', later: 'settings-update-install', skip: 'settings-update-unskip', unskip: 'settings-update-skip',
+  update: 'settings-update-progress-cancel', later: 'settings-update-install', skip: 'settings-update-unskip', unskip: 'settings-update-skip',
 }
 
 /** 마지막 확인 결과의 안내. 이전 버전에서 확인한 결과는 현재 설치본의 업데이트 안내로 쓰지 않는다. */
@@ -41,6 +42,10 @@ export function UpdateSettings({ data, onCheck, onAutomatic, onChoose }: { data:
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [dismissed, setDismissed] = useState('')
+  // 내려받기·설치 진행은 셸 알림과 같은 값을 셸 신호로 받는다(진행률은 약 100ms마다).
+  const shellUpdate = useShellUpdate()
+  const install = shellUpdate.data?.install ?? null
+  const installing = !!install && install.phase !== 'idle'
   const pendingFocus = useRef('')
   // 닫은 저장 실패 안내는 그 확인 한 번에만 숨긴다. 새 확인이 시작되면(시작 확인 포함) 같은 문구도 다시 보인다.
   const [wasChecking, setWasChecking] = useState(data.checking)
@@ -67,6 +72,12 @@ export function UpdateSettings({ data, onCheck, onAutomatic, onChoose }: { data:
     if (document.activeElement?.id.startsWith('settings-update-')) pendingFocus.current = focusAfter[name]
     void run(() => onChoose(name, version))
   }
+  function act(name: UpdateAction) {
+    const shell = shellUpdate.bridge
+    // 진행 안내의 버튼이 사라지면(취소·닫기) 지금 확인으로 포커스를 옮긴다.
+    if (document.activeElement?.id.startsWith('settings-update-')) pendingFocus.current = 'settings-update-check'
+    if (shell) void run(async () => { shellUpdate.setData(await request<ShellUpdateData>(reply => shell.updateAction(name, reply))) })
+  }
   const last = data.last
   const checked = data.checking ? '확인 중…' : last ? `마지막 확인: ${date(last.checkedAt)}` : '아직 확인하지 않았습니다.'
   return <div className="space-y-6">
@@ -78,9 +89,11 @@ export function UpdateSettings({ data, onCheck, onAutomatic, onChoose }: { data:
       <NoticeStack items={[
         error && { tone: 'error', message: error, onDismiss: () => setError('') },
         data.error && data.error !== dismissed && { tone: 'error', message: data.error, onDismiss: () => setDismissed(data.error) },
-        last && resultNotice(data, last, locked, choose),
+        // 내려받거나 설치를 넘기는 동안에는 같은 버전의 선택지 대신 진행 안내를 보인다.
+        last && !(installing && last.latestVersion === install.version) && resultNotice(data, last, locked, choose),
       ]} />
-      <p className="text-xs text-muted-foreground">GitHub Release에서 새 버전을 확인합니다. 지금은 ‘업데이트’를 누르면 그 버전의 GitHub Release 페이지가 열리고, 받은 설치 파일로 직접 설치합니다.</p>
+      {installing && <UpdateProgress idPrefix="settings-update-progress" install={install} locked={sending} onAction={act} />}
+      <p className="text-xs text-muted-foreground">GitHub Release에서 새 버전을 확인합니다. ‘업데이트’를 누르면 설치 파일을 받아 크기와 SHA-256을 확인한 뒤, 앱을 닫고 설치하고 다시 실행합니다.</p>
     </section>
     <section className="space-y-1 rounded-xl border bg-card px-4 py-3" aria-labelledby="settings-update-automatic">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2"><div><h3 id="settings-update-automatic" className="font-semibold">시작할 때 업데이트 확인</h3><p className="text-sm text-muted-foreground">앱을 시작할 때 하루에 한 번 새 버전을 확인합니다.</p></div><Button id="settings-update-automatic-toggle" variant={data.automatic ? 'secondary' : 'outline'} aria-pressed={data.automatic} aria-disabled={sending || undefined} onClick={() => void run(() => onAutomatic(!data.automatic))}>시작할 때 확인: {data.automatic ? '켜짐' : '꺼짐'}</Button></div>
