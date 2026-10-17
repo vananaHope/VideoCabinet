@@ -1,8 +1,9 @@
-"""설정의 업데이트 구역 상태별 화면과 실제 Qt/WebEngine 포커스 검사 (독립 임시 라이브러리, 네트워크 없음).
+"""설정의 업데이트 구역과 셸 새 버전 알림의 상태별 화면, 실제 Qt/WebEngine 포커스 검사 (독립 임시 라이브러리, 네트워크 없음).
 
 스크린샷: python scripts/check_web_update.py --offscreen --output <폴더>
-실창: desktop_lock.py run --owner issue-140 -- python scripts/check_web_update.py
-확인 전·확인 중·없음·패치·전체·실패·공개 키 미설정·이전 버전에서 확인함을 1100×720으로 남긴다.
+실창: desktop_lock.py run --owner issue-141 -- python scripts/check_web_update.py
+확인 전·확인 중·없음·패치·전체·실패·공개 키 미설정·이전 버전에서 확인함과
+새 버전 알림(패치·전체, 노트 있음·없음·긴 노트)·건너뛴 버전을 1100×720으로 남긴다. 브라우저는 열지 않는다.
 """
 import argparse
 import sqlite3
@@ -30,7 +31,7 @@ from PySide6.QtWidgets import QApplication
 from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.core import AppCore, MediaInfo
-from my_video_manager.update_check import LAST_CHECK_KEY, InstalledUpdateInfo
+from my_video_manager.update_check import LAST_CHECK_KEY, InstalledUpdateInfo, release_notes_summary
 from my_video_manager.ui import MainWindow
 
 
@@ -73,7 +74,17 @@ def gated_check():
     return core.check_for_update()
 
 
-window = MainWindow(core, player_factory=Player, update_check_options=dict(startup_delay_ms=600_000, check=gated_check))
+opened = []
+
+
+def open_url(url):
+    # "업데이트"의 임시 동작(릴리스 페이지 열기)을 가로채 실제 브라우저를 열지 않는다.
+    opened.append(url.toString())
+    return True
+
+
+window = MainWindow(core, player_factory=Player,
+                    update_check_options=dict(startup_delay_ms=600_000, check=gated_check, open_url=open_url))
 window.resize(1100, 720)
 window.show()
 window.raise_()
@@ -124,6 +135,10 @@ def section_text():
     return js('document.querySelector(\'[aria-label="업데이트 설정"]\').innerText')
 
 
+def notice_text():
+    return js('document.querySelector(\'[aria-label="새 버전 알림"]\')?.innerText ?? ""')
+
+
 def show(record):
     if record is None:
         core.settings.reset(LAST_CHECK_KEY)
@@ -131,7 +146,8 @@ def show(record):
         checked = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         core.settings.set(LAST_CHECK_KEY, {'checked_at': checked, 'current_version': '0.5.0', 'latest_version': None,
                                            'download_size': None, 'failure_reason': None, **record})
-    host.controllers['settings'].refresh()
+    # 확인이 끝났을 때처럼 셸 알림과 설정 화면에 알린다.
+    window.updates.changed.emit()
     settle()
 
 
@@ -193,9 +209,86 @@ try:
     capture('6-failed')
     show({'kind': 'patch', 'current_version': '0.4.1', 'latest_version': '0.5.0', 'download_size': 1024})
     text = section_text()
-    assert '이전 버전(0.4.1)에서 확인한 결과입니다' in text and '새 버전이 있습니다' not in text and 'GitHub Release 열기' not in text
+    assert '이전 버전(0.4.1)에서 확인한 결과입니다' in text and '새 버전이 있습니다' not in text
+    assert js('document.getElementById("settings-update-install") === null') and notice_text() == ''
     capture('8-stale')
-    checks.append('없음·패치·전체·실패·이전 버전에서 확인함(업데이트 안내 없음) 표시')
+    checks.append('없음·패치·전체·실패·이전 버전에서 확인함(업데이트 안내·셸 알림 없음) 표시')
+
+    # 셸 새 버전 알림: 어느 탭에서나 탭 아래 안내 영역에 보인다.
+    notes = release_notes_summary('## 수정\n\n- **재생 위치** 저장 문제를 고쳤습니다 (#150)\n- [자막 대기열](https://example.com) 안내 중복을 정리했습니다')
+    patch = {'kind': 'patch', 'latest_version': '0.6.0', 'download_size': 12 * 1024 * 1024, 'release_notes': notes}
+    window.navigate_web_tab('library')
+    show(patch)
+    text = notice_text()
+    assert '새 버전이 있습니다 · 0.6.0' in text and '패치 설치 파일 12.0 MB' in text and '재생 위치 저장 문제를 고쳤습니다' in text
+    assert all(label in text for label in ('업데이트', '나중에', '이 버전 건너뛰기')) and 'https://' not in text
+    capture('notice-1-patch-notes')
+    window.navigate_web_tab('statistics')
+    settle()
+    assert '새 버전이 있습니다 · 0.6.0' in notice_text()
+    window.navigate_web_tab('library')
+    show({'kind': 'full', 'latest_version': '0.6.0', 'download_size': 310 * 1024 * 1024})
+    text = notice_text()
+    assert '전체 설치 파일 310.0 MB' in text and '전체 보기' not in text
+    capture('notice-2-full-no-notes')
+    checks.append('셸 알림: 패치(노트 있음)·전체(노트 없음), 다른 탭에서도 보임, 링크 주소 없음')
+
+    long_body = '\n'.join(f'- 긴 릴리스 노트 항목 {index}: ' + '설명이 아주 길게 이어집니다. ' * 6 for index in range(20))
+    show({**patch, 'release_notes': release_notes_summary(long_body)})
+    assert js('document.documentElement.scrollWidth <= innerWidth')
+    assert '전체 보기' in notice_text()
+    capture('notice-3-long-notes')
+    click('[aria-label="새 버전 알림"] [aria-expanded="false"]')
+    region = json.loads(js('JSON.stringify(document.querySelector(\'[aria-label="앱 안내"]\').getBoundingClientRect())'))
+    assert region['height'] <= 720 / 4 + 1, region
+    capture('notice-4-long-notes-expanded')
+    # 저장값을 고쳐 HTML을 넣어도 글자로만 보인다.
+    show({**patch, 'release_notes': '<img src=x onerror="document.title=1"><b>굵게</b>'})
+    assert js('document.querySelector(\'[aria-label="새 버전 알림"] img, [aria-label="새 버전 알림"] b\') === null')
+    assert '<img src=x' in notice_text()
+    checks.append('긴 노트는 두 줄로 접고 전체 보기, 펼쳐도 안내 영역 1/4 안, HTML은 글자로만')
+
+    # 나중에: 키보드로 고르면 알림이 사라지고 포커스는 현재 탭으로 간다. 다음 확인 결과에서 다시 알린다.
+    show(patch)
+    js('document.getElementById("update-notice-later").focus()')
+    host.view.setFocus()
+    key(Qt.Key.Key_Return)
+    wait(lambda: notice_text() == '', '나중에')
+    assert js('document.activeElement.dataset.tab') == 'library'
+    assert core.skipped_update_version() is None
+    show(patch)
+    assert '새 버전이 있습니다 · 0.6.0' in notice_text()
+    checks.append('나중에: 알림 숨김·포커스 현재 탭·다음 확인에서 다시 알림')
+
+    # 업데이트: #142 전까지 그 버전의 릴리스 페이지를 연다(가로챔).
+    click('#update-notice-install')
+    wait(lambda: opened, '릴리스 페이지')
+    assert opened == ['https://github.com/vananaHope/my-video-manager/releases/tag/v0.6.0'] and notice_text() == ''
+    checks.append('업데이트: 릴리스 페이지 열기(임시)·알림 숨김')
+
+    # 이 버전 건너뛰기 → 설정에 건너뛴 버전과 건너뛰기 취소 → 다시 선택지.
+    show(patch)
+    click('#update-notice-skip')
+    wait(lambda: notice_text() == '', '건너뛰기')
+    assert core.skipped_update_version() == '0.6.0'
+    window.navigate_web_tab('settings')
+    settle()
+    text = section_text()
+    assert '건너뛴 버전입니다 · 0.6.0' in text and '건너뛰기 취소' in text and notice_text() == ''
+    capture('settings-skipped')
+    js('document.getElementById("settings-update-unskip").focus()')
+    host.view.setFocus()
+    key(Qt.Key.Key_Return)
+    wait(lambda: '새 버전이 있습니다 · 0.6.0' in notice_text(), '건너뛰기 취소')
+    assert core.skipped_update_version() is None
+    assert js('document.activeElement.id') == 'settings-update-skip'
+    text = section_text()
+    assert all(label in text for label in ('업데이트', '나중에', '이 버전 건너뛰기', '재생 위치'))
+    capture('settings-available')
+    click('#settings-update-later')
+    wait(lambda: notice_text() == '', '설정에서 나중에')
+    assert '나중에' not in section_text() and js('document.activeElement.id') == 'settings-update-install'
+    checks.append('건너뛰기: 설정에 건너뛴 버전·건너뛰기 취소, 취소 뒤 선택지와 포커스, 설정에서 나중에')
 
     click('#settings-update-automatic-toggle')
     wait(lambda: not core.automatic_update_check_enabled(), '자동 확인 끄기')

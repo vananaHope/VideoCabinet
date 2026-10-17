@@ -6,6 +6,7 @@ import { Tabs } from "@/components/page-parts"
 import DialogsLayer from "@/dialogs/DialogsLayer"
 import ShellModals from "@/dialogs/ShellModals"
 import SubtitlePreparation from "@/components/subtitle-preparation"
+import UpdateNotice from "@/components/update-notice"
 import { NoticeStack } from "@/components/ui/notice"
 import { shellStatusTone } from "@/lib/shell-status"
 
@@ -43,7 +44,7 @@ export default function App() {
       <span className="shrink-0 text-sm font-semibold">영상 라이브러리</span>
       <Tabs label="페이지 이동" value={tab} items={tabs.map(([value, label], index) => ({ value, label, shortcut: `Ctrl+${index + 1}` }))} onChange={navigate} variant="navigation" />
     </header>
-    {/* 셸 안내는 탭 아래 한곳에 쌓는다. 자막 기능 준비가 먼저, 그 아래 연결 오류와 작업 알림이 온다.
+    {/* 셸 안내는 탭 아래 한곳에 쌓는다. 자막 기능 준비가 먼저, 그 아래 연결 오류와 작업 알림, 마지막에 새 버전 알림이 온다.
         모두 펼쳐도 창 높이의 1/4까지만 쓰고 안에서 스크롤해 페이지 목록 자리를 남긴다. */}
     <div aria-label="앱 안내" className="max-h-1/4 shrink-0 overflow-y-auto">
       <SubtitlePreparation />
@@ -51,6 +52,7 @@ export default function App() {
         error && { tone: "error", message: error, onDismiss: () => setError("") },
         status && { tone: shellStatusTone(status), message: status, label: "작업 알림", onDismiss: () => setStatus("") },
       ]} /></div>}
+      <UpdateNotice />
     </div>
     {/* 페이지 영역. 목록 최소 높이와 안내를 합친 높이가 창보다 크면(작은 창) 여기서 세로로 스크롤해 아래 작업 버튼에 닿는다.
         기본 창에서는 각 페이지가 높이에 맞춰 내부 목록만 스크롤하므로 바깥 스크롤이 생기지 않는다. */}
