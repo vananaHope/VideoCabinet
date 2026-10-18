@@ -33,6 +33,16 @@
 
 브리지 계약, DB 버전, 재생/Qt 코드.
 
+## 등급별 배치
+
+| 등급 | 구현 목록(앞부터) |
+| --- | --- |
+| `light` | opencode → codex@medium |
+| `standard` | opencode@high → codex@medium |
+| `hard` | codex@high → claude@high |
+
+- OpenCode `standard` 크기 상한: 파일 4개·변경 200줄 안팎
+
 ## 추가 완료 조건
 
 웹 UI 이슈(ADR-0004):
