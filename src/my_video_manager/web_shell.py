@@ -133,7 +133,10 @@ class WebShellHost(QWidget):
         self.routes[tab] = route
 
     def start(self):
-        if set(self.routes) != {name for name, _ in TABS}:
+        tab_names = {name for name, _ in TABS}
+        if len(tab_names) != len(TABS):
+            raise ValueError('TABS에 중복 웹 탭이 있습니다.')
+        if set(self.routes) != tab_names:
             raise ValueError('TABS와 페이지 등록부가 일치하지 않습니다.')
         if self.active_tab not in self.controllers:
             raise ValueError('첫 탭은 웹 페이지여야 합니다.')

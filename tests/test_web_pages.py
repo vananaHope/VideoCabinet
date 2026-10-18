@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QApplication
 from test_web_library_page import window_factory
 from test_web_library_data import core
 from my_video_manager import web_page_registry, web_shell
-from my_video_manager.web_contract import Argument, BridgeContract, CONTRACTS, TABS
+from my_video_manager.web_contract import CONTRACTS, TABS
+from my_video_manager.web_contract_types import Argument, BridgeContract
 from my_video_manager.web_page import WebPageController
 from qt_wait import wait_for
 
@@ -109,6 +110,14 @@ def test_incomplete_or_duplicate_routes_fail_at_start(window_factory, change):
         if change == 'missing':
             host.routes.pop(next(iter(host.routes)))
         host.start()
+
+
+@pytest.mark.parametrize('label', [TABS[0][1], '다른 표시 이름'])
+def test_duplicate_tab_names_fail_at_start(window_factory, monkeypatch, label):
+    window = window_factory()
+    monkeypatch.setattr(web_shell, 'TABS', (*TABS, (TABS[0][0], label)))
+    with pytest.raises(ValueError, match='TABS'):
+        window.web_host.start()
 
 
 def test_unregistered_bridge_contract_fails_at_start(window_factory, monkeypatch):

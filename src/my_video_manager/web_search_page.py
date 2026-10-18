@@ -3,7 +3,7 @@ from PySide6.QtCore import QObject, QTimer
 
 from .search_preparation import SearchPreparation
 from .search import SEARCH_LIMIT
-from .web_contract import SEARCH
+from .web_search_contract import SEARCH
 from .web_json import encode
 from .web_page import WebPageController
 from .web_search_data import result_data

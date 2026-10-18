@@ -92,7 +92,7 @@ $env:MVM_WEB_DEV_URL = 'http://127.0.0.1:5173/'
 Remove-Item Env:MVM_WEB_DEV_URL
 ```
 
-웹 데이터 계약은 `web_library_data.py`, 슬롯·신호·작업·탭 계약은 `web_contract.py`가 원본입니다.
+웹 데이터 계약은 `web_library_data.py`, 슬롯·신호·작업 계약은 페이지별 `web_<name>_contract.py`, 탭은 `web_tabs.py`가 원본이며 `web_contract.py`가 이를 `CONTRACTS`로 조립합니다.
 웹은 생성된 `publicShellBridge()`·`publicLibraryBridge()` 래퍼만 사용하며 QObject 내부 메서드는 공개 API에 포함하지 않습니다.
 `connectBridge()`가 이 공개 래퍼들의 묶음(`{ shell, library }`)을 돌려줍니다.
 `web_tokens.json`은 웹 CSS와 네이티브 재생 화면에서 공유하는 색·간격·글꼴의 단일 원본입니다.
@@ -506,13 +506,17 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
 
 예를 들어 새 탭을 추가할 때(아래는 `search`를 예로 듭니다) 다음 순서로 작업합니다.
 
-1. `src/my_video_manager/web_contract.py`에 불변 `SEARCH = BridgeContract(name='search',
-   interface='SearchBridge', slots=..., signals=..., aliases=..., constants=..., data_types=...)`를 선언하고
-   `CONTRACTS`에 `SEARCH` 한 줄을 추가합니다. 슬롯 인수는 `Argument`, 문자열 유니온은 `TypeAlias`,
-   페이지 고유 상수는 `Constant`로 선언합니다. 필요하면 새 데이터 모듈에 TypedDict를 정의하고
+1. 새 `src/my_video_manager/web_search_contract.py`에 불변 `SEARCH = BridgeContract(name='search',
+   interface='SearchBridge', slots=..., signals=..., aliases=..., constants=..., data_types=...)`를 선언합니다.
+   공통 선언은 `web_contract_types.py`에서 import하고 `web_contract.py`나 다른 계약 파일은 import하지 않아 순환을 만들지 않습니다. 슬롯 인수는 `Argument`,
+   문자열 유니온은 `TypeAlias`, 페이지 고유 상수는 `Constant`로 선언하고, 그 페이지만 쓰는 Python 상수와
+   데이터 모듈 import도 이 파일에 둡니다. 필요하면 새 데이터 모듈에 TypedDict를 정의하고
    `data_types`에 넣습니다. 공용 TypedDict는 소유 계약에 한 번만 등록합니다.
+   조립 지점 `web_contract.py`에는 `from .web_search_contract import SEARCH` 한 줄과
+   `CONTRACTS`의 `SEARCH,` 한 줄만 추가합니다.
 2. 새 `src/my_video_manager/web_search_page.py`에 QObject 브리지와 `WebPageController`를 구현합니다
-   (브리지가 커지면 `web_search_bridge.py`로 분리). `@SEARCH.slot('find')`,
+   (브리지가 커지면 `web_search_bridge.py`로 분리). 계약은 `web_search_contract.py`에서 import하고
+   `@SEARCH.slot('find')`,
    `SEARCH.signal('resultsChanged')`처럼 계약으로 Qt 표면을 선언합니다.
    컨트롤러의 `tab = 'search'`, `bridge`, `refresh()`를 구현하고 초기화 마지막에
    `host.register_page(self)`를 호출합니다. 필요하면 기본 빈 함수인 `activated()`와 `deactivated()`를
@@ -527,7 +531,7 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
    `focus_requested` 신호를 지정하고, 웹 첫 렌더 후 호출하는 `ready` 슬롯에서
    `self.page.frontend_ready()`를 호출합니다. 포커스 요청은 호스트가 준비될 때까지 보존합니다.
 3. `web_page_registry.py`에 컨트롤러를 import하고 `WEB_PAGES`에 한 줄 등록합니다.
-   새 탭이면 `web_contract.py`의 `TABS`에도 추가합니다. 모든 탭은 웹 컨트롤러로 등록합니다.
+   새 탭이면 `web_tabs.py`의 `TABS`에도 `('search', '검색'),` 한 줄을 추가합니다. 모든 탭은 웹 컨트롤러로 등록합니다.
 4. 새 `frontend/src/pages/SearchPage.tsx`를 작성합니다. `connectBridge()`에서
    `{ search, shell }`을 받아 생성된 공개 메서드만 사용하고, 효과를 정리할 때 신호 구독을 해제합니다.
    페이지 사이 브리지 호출은 공통 `shell` 외에는 하지 않습니다.
@@ -544,13 +548,17 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
 `tests/test_web_generator.py`는 예시 계약을 앞·중간·뒤에 추가해도 기존 페이지 출력이 그대로인지,
 `tests/test_web_pages.py`는 새 컨트롤러의 브리지·갱신·포커스 연결과 양쪽 등록부 일치를 확인합니다.
 탭 누락·중복은 Qt 시작 또는 테스트에서 실패합니다. 웹 등록부 오타는 typecheck가, Python 등록부와의 누락·불일치는 계약 테스트가 검출합니다.
-추가만 하는 Python·웹 등록부 두 파일에는 `.gitattributes`의 `merge=union`을 적용해 양쪽 추가 항목을 합칩니다.
-`web_contract.py`는 일반 병합을 유지합니다. 새 계약 선언·`CONTRACTS` 항목의 추가 충돌은 양쪽을 보존하고
-`CONTRACTS`는 하나의 튜플로 합칩니다. 충돌 블록 밖의 공통 꼬리 부분까지 확인해 각 계약 선언이 완전한 문장이 되게 합니다.
-기존 계약의 같은 슬롯·신호·상수를 양쪽에서 수정했다면 내용을 검토해 하나로 결정합니다.
-dict의 중복 키가 조용히 덮어써질 수 있으므로 계약 파일에 union 병합을 적용하지 않습니다.
+추가만 하는 네 파일, 곧 Python·웹 페이지 등록부(`web_page_registry.py`, `pages/index.ts`)와
+계약 조립 지점(`web_contract.py`)·탭 목록(`web_tabs.py`)에는 `.gitattributes`의 `merge=union`을 적용해
+양쪽 추가 줄을 합칩니다. `tests/test_web_contract_registry.py`가 임시 저장소에서 두 브랜치의 새 계약을 병합해 이를 확인합니다.
+union 병합은 충돌 없이 양쪽 줄을 모두 남기므로 이 네 파일에서는 등록 항목을 한 줄에 하나만 두고,
+dict처럼 중복 키가 조용히 덮어써지거나 여러 줄 항목이 섞일 수 있는 구조를 두지 않습니다.
+union은 서로 다른 항목을 추가할 때 쓰는 규칙입니다.
+두 브랜치가 같은 기존 줄을 고치거나 한쪽이 기존 줄을 지우거나 순서를 바꾸면 Git이 충돌 표시 없이 양쪽 줄을 남겨 삭제가 되살아나거나 중복이 생길 수 있으므로, 병합 뒤 해당 파일의 최종 목록을 직접 확인해 하나로 정리하고 생성기·관련 테스트를 다시 실행합니다.
+새 항목끼리의 순서는 병합 순서에 따라 정해지므로 탭 순서(`Ctrl+숫자` 단축키)가 중요하면 병합 뒤 확인합니다.
+페이지별 계약 파일(`web_<name>_contract.py`)은 일반 병합을 유지합니다. 서로 다른 페이지 작업은 다른 파일을 고치므로
+충돌하지 않고, 같은 계약의 슬롯·신호·상수를 양쪽에서 수정했다면 내용을 검토해 하나로 결정합니다.
 생성 파일 충돌은 원본 계약을 합친 뒤 생성기로 다시 만듭니다.
-`CONTRACTS`, Python·웹 등록부는 한 줄에 한 항목을 유지합니다.
 공용 JSON 직렬화는 `web_json.py`, 셸 데이터는 `web_shell_data.py`가 소유합니다.
 생성 파일은 직접 수정하지 않습니다. 페이지 객체로 나뉘어 `library` 신호 접두어는 기술적으로
 필수가 아니지만 기존 호출부와 병렬 작업의 호환성을 위해 유지합니다.
@@ -563,7 +571,7 @@ dict의 중복 키가 조용히 덮어써질 수 있으므로 계약 파일에 u
 번역 CLI 선택지와 표시 이름은 `translation_cli.TRANSLATION_CLI_CHOICES`에서 읽습니다.
 
 `web_dialogs_host.py`는 기존 웹 뷰 한 개의 대화상자 수명과 포커스를 관리하고,
-`web_dialogs_models.py`는 `AppCore` 공개 메서드를 호출합니다. `web_contract.py`의
+`web_dialogs_models.py`는 `AppCore` 공개 메서드를 호출합니다. `web_dialogs_contract.py`의
 `DIALOGS` 계약을 생성하면 웹 `DialogsLayer`가 같은 데이터·명령을 사용합니다.
 태그 변경은 즉시 저장하고, 나머지 편집은 저장·취소로 확정합니다. 태그 후보를
 명시적으로 선택하지 않은 Enter는 입력한 이름을 추가하며, IME 조합 Enter는 추가하지 않습니다.

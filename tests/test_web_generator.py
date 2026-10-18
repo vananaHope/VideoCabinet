@@ -5,9 +5,10 @@ from pathlib import Path
 import runpy
 
 import pytest
-from my_video_manager.web_contract import (
-    Argument, BridgeContract, Constant, CONTRACTS, LIBRARY, SHELL, TypeAlias,
-)
+from my_video_manager.web_contract import CONTRACTS
+from my_video_manager.web_contract_types import Argument, BridgeContract, Constant, TypeAlias
+from my_video_manager.web_library_contract import LIBRARY
+from my_video_manager.web_shell_contract import SHELL
 
 
 def generator():
@@ -87,7 +88,7 @@ def test_duplicate_channel_or_export_names_fail_instead_of_overwriting(example):
 
 
 def test_dataclass_and_tuple_extension_preserves_existing_contract_output():
-    from my_video_manager.web_contract import STATISTICS
+    from my_video_manager.web_statistics_contract import STATISTICS
     from my_video_manager.statistics import ViewingStatistics
     api = generator()
     assert api['ts_type'](tuple[int, ...]) == 'Array<number>'
