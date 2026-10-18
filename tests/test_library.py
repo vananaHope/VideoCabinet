@@ -4,9 +4,11 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import threading
 
 import pytest
 
+from my_video_manager import scan_prefetch
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.library import ScanIssue, ScanResult
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
@@ -370,19 +372,30 @@ def test_scan_retries_failed_files_with_unchanged_signature(tmp_path, stage, fai
     assert len(media.reads) == 3
 
 
-def test_scan_registers_final_content_changed_before_its_registration(tmp_path):
+@pytest.mark.parametrize("workers", [1, 4])
+def test_scan_registers_final_content_changed_before_its_registration(tmp_path, monkeypatch, workers):
+    monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
     final_content = b"finished copying the second video"
     paths = [video_file(tmp_path / "watched", name, name.encode())
              for name in ("a.mkv", "b.mkv")]
     changed = []
+    # 검사 순서상 첫 파일을 읽을 때 다음 파일의 복사가 끝난다. 동시 실행에서는 다음 파일의
+    # 미리 읽기·캡처가 옛 내용으로 끝난 뒤 바꿔, 그 값을 버리고 최종 내용으로 등록하는지 본다.
+    first, second = (paths[0].parent / entry.name for entry in os.scandir(paths[0].parent))
+    second_captured = threading.Event()
 
     class ChangingMedia(Media):
         def read(self, path):
-            if not changed:
-                other = next(candidate for candidate in paths if candidate != path)
-                other.write_bytes(final_content)
-                changed.append(other)
+            if path == first and not changed:
+                assert workers == 1 or second_captured.wait(10)
+                second.write_bytes(final_content)
+                changed.append(second)
             return super().read(path)
+
+        def capture(self, path, destination, seconds):
+            super().capture(path, destination, seconds)
+            if path == second:
+                second_captured.set()
 
     core = open_core(tmp_path / "data/library.sqlite3", ChangingMedia())
     core.add_watched_folder(paths[0].parent)
@@ -391,6 +404,9 @@ def test_scan_registers_final_content_changed_before_its_registration(tmp_path):
               if video.locations[0].path == changed[0])
     digest = hashlib.sha256(str(len(final_content)).encode("ascii") + final_content * 3)
     assert video.fingerprint == f"v1:{len(final_content)}:{digest.hexdigest()}"
+    assert video.thumbnail.is_file()
+    assert sorted(path.name for path in video.thumbnail.parent.iterdir()) == sorted(
+        video.thumbnail.name for video in core.videos())
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows directory entry metadata cache")
