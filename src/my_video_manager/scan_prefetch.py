@@ -85,7 +85,7 @@ class ScanPrefetch:
         try:
             info, fingerprint = _read_media(self._media, path)
         except Exception as error:
-            return _Prepared(signature, error=error)
+            return self._checked(path, _Prepared(signature, error=error))
         prepared = _Prepared(signature, info, fingerprint)
         # 이미 등록된 영상과 최소 길이 미만은 등록 때도 캡처하지 않는다.
         if info is not None and fingerprint not in self._known and info.duration >= self._minimum:
@@ -96,7 +96,17 @@ class ScanPrefetch:
                     prepared.capture = temporary
                 except Exception as error:
                     prepared.capture_error = error
-        return prepared
+        return self._checked(path, prepared)
+
+    @staticmethod
+    def _checked(path, prepared) -> _Prepared:
+        # 작업 중 변경된 결과는 나중에 원래 서명으로 돌아와도 재사용하지 않는다.
+        try:
+            if _signature(path) == prepared.signature:
+                return prepared
+        except (OSError, ValueError):
+            pass
+        return _Prepared(None)
 
     def _prepared(self, path, signature) -> _Prepared | None:
         future = self._futures.get(path)
@@ -121,6 +131,10 @@ class ScanPrefetch:
             if prepared.capture_error is not None:
                 raise prepared.capture_error
             if prepared.capture is not None:
-                os.replace(prepared.capture, destination)
-                return
+                try:
+                    os.replace(prepared.capture, destination)
+                    return
+                except OSError:
+                    # 교체가 막혀도 직접 덮어쓰기는 가능할 수 있다. 순차와 같은 경로로 재시도한다.
+                    pass
         self._media.capture(path, destination, seconds)

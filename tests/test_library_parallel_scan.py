@@ -43,7 +43,7 @@ class ContentMedia:
             raise RuntimeError(f"썸네일 실패: {path.name}")
         with self.lock:
             self.captures.append(path.read_bytes())
-        destination.write_bytes(b"thumbnail")
+        destination.write_bytes(b"thumbnail of " + path.read_bytes())
 
 
 def open_library(root, media):
@@ -160,7 +160,7 @@ def test_same_content_in_one_scan_is_captured_once_and_registered_as_one_video(t
     assert same.title == "copy1"
     assert {location.path for location in same.locations} == set(copies)
     assert media.captures.count(b"same") == 1
-    assert same.thumbnail.read_bytes() == b"thumbnail"
+    assert same.thumbnail.read_bytes() == b"thumbnail of same"
     files, referenced = thumbnail_files(tmp_path, library)
     assert files == referenced
 
@@ -191,7 +191,15 @@ def test_content_replaced_after_prefetch_is_registered_with_thumbnail_of_final_c
     folder = tmp_path / "watched"
     write(folder / "a.mkv", b"first")
     second = write(folder / "b.mkv", b"old content")
-    library = open_library(tmp_path, SecondFirstMedia(folder, workers))
+    class CompletedMedia(SecondFirstMedia):
+        def capture(self, path, destination, seconds):
+            ContentMedia.capture(self, path, destination, seconds)
+
+    media = CompletedMedia(folder, workers)
+    # capture 반환뿐 아니라 작업 후 서명 확인까지 끝난 뒤 교체해야 한다.
+    prepared = observe_preparation(monkeypatch, second)
+    media.second_captured = prepared
+    library = open_library(tmp_path, media)
     library.add_watched_folder(folder)
 
     def replace(video_id):
@@ -201,9 +209,102 @@ def test_content_replaced_after_prefetch_is_registered_with_thumbnail_of_final_c
     assert library.scan(on_registered=replace) == ScanResult(2, ())
     video, = (video for video in library.videos() if video.locations[0].path == second)
     assert video.fingerprint.startswith(f"v1:{len(b'new final content')}:")
-    assert video.thumbnail.read_bytes() == b"thumbnail"
+    assert video.thumbnail.read_bytes() == b"thumbnail of new final content"
     files, referenced = thumbnail_files(tmp_path, library)
     assert files == referenced
+
+
+def observe_preparation(monkeypatch, target):
+    completed = threading.Event()
+    original = scan_prefetch.ScanPrefetch._prepare
+
+    def prepare(self, path):
+        result = original(self, path)
+        if path == target:
+            completed.set()
+        return result
+
+    monkeypatch.setattr(scan_prefetch.ScanPrefetch, "_prepare", prepare)
+    return completed
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+def test_content_restored_after_preparation_discards_changed_thumbnail(tmp_path, monkeypatch, workers):
+    monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
+    folder = tmp_path / "watched"
+    first = write(folder / "a.mkv", b"first")
+    second = write(folder / "b.mkv", b"original")
+    before = second.stat()
+    completed = observe_preparation(monkeypatch, second)
+
+    class RestoringMedia(ContentMedia):
+        def read(self, path):
+            if path == first and workers > 1:
+                assert completed.wait(10)
+                second.write_bytes(b"original")
+                os.utime(second, ns=(before.st_atime_ns, before.st_mtime_ns))
+            return super().read(path)
+
+        def capture(self, path, destination, seconds):
+            if path == second and threading.current_thread() is not scan_thread:
+                second.write_bytes(b"replaced")
+                os.utime(second, ns=(before.st_atime_ns, before.st_mtime_ns + 10_000_000))
+            super().capture(path, destination, seconds)
+
+    scan_thread = threading.current_thread()
+    library = open_library(tmp_path, RestoringMedia())
+    library.add_watched_folder(folder)
+    assert library.scan() == ScanResult(2, ())
+    video, = (video for video in library.videos() if video.title == "b")
+    assert video.thumbnail.read_bytes() == b"thumbnail of original"
+    assert [location.path for location in video.locations] == [second]
+    files, referenced = thumbnail_files(tmp_path, library)
+    assert files == referenced
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+@pytest.mark.parametrize("capture_fails", [False, True])
+def test_thumbnail_replace_denied_falls_back_to_direct_capture(tmp_path, monkeypatch, workers, capture_fails):
+    monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
+    scan_thread = threading.current_thread()
+    direct_threads = []
+
+    class OverwritingMedia(ContentMedia):
+        def capture(self, path, destination, seconds):
+            if not destination.name.startswith(scan_prefetch.TEMPORARY_PREFIX):
+                direct_threads.append(threading.current_thread())
+                if capture_fails:
+                    raise PermissionError(f"capture denied: {destination}")
+            super().capture(path, destination, seconds)
+
+    library = open_library(tmp_path, OverwritingMedia())
+    folder = tmp_path / "watched"
+    source = write(folder / "a.mkv", b"original")
+    from my_video_manager.library import _fingerprint
+    destination = tmp_path / "data/thumbnails" / f"{_fingerprint(source).rsplit(':', 1)[1]}.640.jpg"
+    destination.write_bytes(b"old cached thumbnail")
+    original_replace = os.replace
+
+    def deny_replace(src, dst):
+        if Path(dst) == destination:
+            raise PermissionError(f"replace denied: {src} -> {dst}")
+        return original_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", deny_replace)
+    library.add_watched_folder(folder)
+    result = library.scan()
+    assert direct_threads == [scan_thread]
+    if capture_fails:
+        assert result == ScanResult(0, (ScanIssue(source, f"capture denied: {destination}"),))
+        assert library.videos() == ()
+        assert destination.read_bytes() == b"old cached thumbnail"
+    else:
+        assert result == ScanResult(1, ())
+        video, = library.videos()
+        assert video.title == "a" and video.thumbnail == destination
+        assert [location.path for location in video.locations] == [source]
+        assert destination.read_bytes() == b"thumbnail of original"
+    assert list(destination.parent.iterdir()) == [destination]
 
 
 @pytest.mark.parametrize("workers", [1, 4])
