@@ -57,7 +57,7 @@ def render_types(contracts=CONTRACTS):
         *(alias.name for alias in contract.aliases), *(constant.name for constant in contract.constants))]
     if len(set(names)) != len(names) or len(set(exports)) != len(exports):
         raise ValueError('브리지 등록 이름 또는 TypeScript 공개 이름이 중복됩니다.')
-    blocks = ['// scripts/generate_web_types.py로 생성. web_contract.py의 페이지 계약을 수정하세요.\n',
+    blocks = ['// scripts/generate_web_types.py로 생성. 페이지별 web_<name>_contract.py와 조립 지점 web_contract.py를 수정하세요.\n',
               'export type Reply = (json: string) => void\nexport type Signal<T> = { connect: (handler: (value: T) => void) => void; disconnect: (handler: (value: T) => void) => void }']
     blocks.extend(render_contract(contract) for contract in contracts)
     blocks.append('export interface Bridges {\n' + ''.join(
