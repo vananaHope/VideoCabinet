@@ -1,4 +1,6 @@
 src/my_video_manager/web_page_registry.py merge=union
+src/my_video_manager/web_contract.py merge=union
+src/my_video_manager/web_tabs.py merge=union
 frontend/src/pages/index.ts merge=union
 installer/THIRD-PARTY-NOTICES.txt text eol=lf
 installer/hooks/*.py text eol=lf

@@ -473,7 +473,7 @@ Enter를 누르거나 카드를 한 번 클릭하면 바로 재생합니다. 보
 영상 수와 무관하게 SELECT 8회이며 시청 기록은 한 번만 순회합니다.
 `web_statistics_page.py`는 활성화/시청 종료 때 100ms 뒤 작업자에서 계산하고,
 연속 요청을 합치며 오래된 응답을 폐기합니다. 비활성화 시 시작 전 계산은 취소합니다.
-`web_contract.py`의 `STATISTICS`에 dataclass를 등록하며 생성기는 가변 길이 tuple을
+`web_statistics_contract.py`의 `STATISTICS`에 dataclass를 등록하며 생성기는 가변 길이 tuple을
 TypeScript 배열, 고정 길이 tuple을 TypeScript tuple로 확장합니다. 기존 TypedDict 출력은 유지합니다.
 차트는 shadcn Chart 합성 구조와 정확히 고정한 `recharts@3.10.1`을 쓰며 색은 기존 토큰을 사용합니다.
 
