@@ -545,7 +545,8 @@ class Library:
                   and not any(path.is_relative_to(gone) for gone in disconnected)]
         processed.update(stored)
         from .scan_prefetch import ScanPrefetch
-        with ScanPrefetch(self._media, self._thumbnail_path, known=known_fingerprints, minimum=minimum) as prefetch:
+        with ScanPrefetch(self._media, self._thumbnail_path, directory=self._thumbnails,
+                          known=known_fingerprints, minimum=minimum) as prefetch:
             # 다시 읽을 파일의 ffprobe·지문·썸네일을 처리 순서대로 미리 맡기고,
             # DB 반영과 등록 알림은 아래에서 이 스레드가 원래 순서대로 한다.
             for path in [*stored, *(entry for entry in entries_in_order

@@ -1,6 +1,5 @@
 """새 파일 등록의 ffprobe·지문·썸네일 동시 실행(#173)."""
 
-from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import os
@@ -43,7 +42,7 @@ class ContentMedia:
         if self.broken and path.read_bytes().startswith(b"nothumb"):
             raise RuntimeError(f"썸네일 실패: {path.name}")
         with self.lock:
-            self.captures.append(destination.name)
+            self.captures.append(path.read_bytes())
         destination.write_bytes(b"thumbnail")
 
 
@@ -70,6 +69,13 @@ def write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return path
+
+
+def thumbnail_files(root, library):
+    # 썸네일 폴더에는 등록된 영상이 가리키는 파일만 남아야 한다(미리 캡처 임시 파일 포함).
+    videos = library.videos() + library.videos(excluded=True)
+    return (sorted(path.name for path in (root / "data/thumbnails").iterdir()),
+            sorted(video.thumbnail.name for video in videos))
 
 
 def scan(library):
@@ -126,38 +132,144 @@ def test_on_registered_runs_on_scan_thread_in_registration_order(tmp_path):
     assert [titles[video_id] for video_id, _ in calls] == [Path(name).stem for name in names]
 
 
-def test_same_content_in_one_scan_is_captured_once_and_registered_as_one_video(tmp_path):
-    active, most = Counter(), Counter()
-    meeting = threading.Barrier(2, timeout=10)
+@pytest.mark.parametrize("workers", [1, 4])
+def test_same_content_in_one_scan_is_captured_once_and_registered_as_one_video(tmp_path, monkeypatch, workers):
+    monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
+    first_capture = threading.Event()
 
-    class CountingMedia(ContentMedia):
+    class OrderedMedia(ContentMedia):
         def read(self, path):
-            if path.read_bytes() == b"same" and path.parent.name in ("a", "b"):
-                meeting.wait()  # 같은 내용의 두 파일이 동시에 지문을 계산한다.
+            # 뒤 복사본은 앞 복사본이 캡처를 맡은 뒤 지문을 계산한다(처리 순서대로 끝나는 일반 경우).
+            if workers > 1 and path.name != "copy1.mkv" and path.read_bytes() == b"same":
+                assert first_capture.wait(10)
             return super().read(path)
 
         def capture(self, path, destination, seconds):
-            with self.lock:
-                active[destination.name] += 1
-                most[destination.name] = max(most[destination.name], active[destination.name])
-            try:
-                super().capture(path, destination, seconds)
-            finally:
-                with self.lock:
-                    active[destination.name] -= 1
+            if path.name == "copy1.mkv":
+                first_capture.set()
+            super().capture(path, destination, seconds)
 
-    media = CountingMedia()
+    media = OrderedMedia()
     library = open_library(tmp_path, media)
     folder = tmp_path / "watched"
-    copies = [write(folder / name / "copy.mkv", b"same") for name in ("a", "b", "c")]
-    write(folder / "d/other.mkv", b"other")
+    copies = [write(folder / f"copy{index}.mkv", b"same") for index in (1, 2, 3)]
+    write(folder / "other.mkv", b"other")
     library.add_watched_folder(folder)
     assert library.scan() == ScanResult(2, ())
     same, = (video for video in library.videos() if video.fingerprint.startswith("v1:4:"))
+    assert same.title == "copy1"
     assert {location.path for location in same.locations} == set(copies)
-    assert Counter(media.captures)[same.thumbnail.name] == 1
-    assert max(most.values()) == 1
-    assert same.thumbnail.is_file()
+    assert media.captures.count(b"same") == 1
+    assert same.thumbnail.read_bytes() == b"thumbnail"
+    files, referenced = thumbnail_files(tmp_path, library)
+    assert files == referenced
+
+
+class SecondFirstMedia(ContentMedia):
+    """동시 실행이면 a를 읽기 전에 b의 미리 읽기·캡처가 끝나게 한다."""
+
+    def __init__(self, folder, workers):
+        super().__init__()
+        self.first, self.second, self.workers = folder / "a.mkv", folder / "b.mkv", workers
+        self.second_captured = threading.Event()
+
+    def read(self, path):
+        if path == self.first:
+            assert self.workers == 1 or self.second_captured.wait(10)
+        return super().read(path)
+
+    def capture(self, path, destination, seconds):
+        super().capture(path, destination, seconds)
+        if path == self.second:
+            self.second_captured.set()
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+def test_content_replaced_after_prefetch_is_registered_with_thumbnail_of_final_content(
+        tmp_path, monkeypatch, workers):
+    monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
+    folder = tmp_path / "watched"
+    write(folder / "a.mkv", b"first")
+    second = write(folder / "b.mkv", b"old content")
+    library = open_library(tmp_path, SecondFirstMedia(folder, workers))
+    library.add_watched_folder(folder)
+
+    def replace(video_id):
+        if library.video(video_id).title == "a":
+            second.write_bytes(b"new final content")  # a 반영 뒤, b 반영 전에 내용이 바뀐다.
+
+    assert library.scan(on_registered=replace) == ScanResult(2, ())
+    video, = (video for video in library.videos() if video.locations[0].path == second)
+    assert video.fingerprint.startswith(f"v1:{len(b'new final content')}:")
+    assert video.thumbnail.read_bytes() == b"thumbnail"
+    files, referenced = thumbnail_files(tmp_path, library)
+    assert files == referenced
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+def test_later_copy_capture_does_not_hide_earlier_copy_failure(tmp_path, monkeypatch, workers):
+    monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
+    folder = tmp_path / "watched"
+    first = write(folder / "a.mkv", b"same")
+    second = write(folder / "b.mkv", b"same")
+
+    class DeniedMedia(SecondFirstMedia):
+        # 동시 실행이면 뒤 복사본 b가 먼저 캡처를 맡아 성공한다. a의 캡처만 실패한다.
+        def capture(self, path, destination, seconds):
+            if path == first:
+                raise RuntimeError("capture denied: a.mkv")
+            super().capture(path, destination, seconds)
+
+    library = open_library(tmp_path, DeniedMedia(folder, workers))
+    library.add_watched_folder(folder)
+    assert library.scan() == ScanResult(1, (ScanIssue(first, "capture denied: a.mkv"),))
+    video, = library.videos()
+    assert video.title == "b"
+    assert [location.path for location in video.locations] == [second]
+    files, referenced = thumbnail_files(tmp_path, library)
+    assert files == referenced
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+@pytest.mark.parametrize("change", ["delete", "error"])
+def test_unused_prefetched_thumbnail_is_removed(tmp_path, monkeypatch, workers, change):
+    monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
+    folder = tmp_path / "watched"
+    write(folder / "a.mkv", b"first")
+    second = write(folder / "b.mkv", b"second")
+    library = open_library(tmp_path, SecondFirstMedia(folder, workers))
+    library.add_watched_folder(folder)
+
+    def registered(video_id):
+        # b를 미리 캡처한 뒤 a 반영 직후에 b가 사라지거나 검사가 예외로 끝난다.
+        if change == "delete":
+            second.unlink()
+        else:
+            raise KeyError("예상하지 못한 오류")
+
+    if change == "delete":
+        result = library.scan(on_registered=registered)
+        assert result.added == 1 and [issue.path for issue in result.issues] == [second]
+    else:
+        with pytest.raises(KeyError):
+            library.scan(on_registered=registered)
+    assert [video.title for video in library.videos()] == ["a"]
+    files, referenced = thumbnail_files(tmp_path, library)
+    assert files == referenced
+
+
+@pytest.mark.parametrize("workers", [1, 4])
+def test_scan_removes_prefetch_files_left_by_interrupted_scan(tmp_path, monkeypatch, workers):
+    monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
+    library = open_library(tmp_path, ContentMedia())
+    folder = tmp_path / "watched"
+    write(folder / "a.mkv", b"first")
+    library.add_watched_folder(folder)
+    left = tmp_path / "data/thumbnails" / f"{scan_prefetch.TEMPORARY_PREFIX}left-by-crash.jpg"
+    left.write_bytes(b"partial")
+    assert library.scan() == ScanResult(1, ())
+    files, referenced = thumbnail_files(tmp_path, library)
+    assert files == referenced
 
 
 def test_failed_read_or_capture_does_not_block_others_and_is_retried(tmp_path):
@@ -207,6 +319,8 @@ def run_scenario(root, monkeypatch, workers):
         result, calls = scan(library)
         assert {thread for _, thread in calls} <= {threading.current_thread()}
         titles = {video.id: video.title for video in library.videos() + library.videos(excluded=True)}
+        files, referenced = thumbnail_files(root, library)
+        assert files == referenced
         steps.append((
             result.added, result.reconnected,
             [(issue.path.relative_to(root), issue.message, issue.failed) for issue in result.issues],
@@ -227,7 +341,7 @@ def run_scenario(root, monkeypatch, workers):
     library.set_minimum_duration(10)
     media.broken = False
     step()
-    return steps, sorted(media.captures)
+    return steps, sorted(set(media.captures))
 
 
 def test_parallel_scan_matches_sequential_scan(tmp_path, monkeypatch):
