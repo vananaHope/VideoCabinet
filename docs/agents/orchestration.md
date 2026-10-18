@@ -2,6 +2,25 @@
 
 `orchestrate-issues` 스킬(agent-orchestra 플러그인)이 읽는 이 프로젝트의 설정이다.
 
+## 이슈 저장소
+
+- 종류: GitHub 이슈(vananaHope/my-video-manager)
+- 맡길 이슈: 라벨 `ready-for-agent`
+- 선행 관계: GitHub 이슈 의존 관계를 먼저 보고, 없으면 본문의 `## Blocked by` 절
+- 완료 기준: 본문의 "Acceptance criteria" 절
+
+## 병합
+
+- 기본 브랜치: main
+- 병합 방식: 자동
+- 병합 방법: squash
+- 메인 폴더의 main에 바로 커밋하지 않는다. 브랜치에서 PR을 올려 병합한다.
+
+## 작성 규칙
+
+- 메시지 언어: 한국어(명세·커밋·PR·이슈 댓글 모두). 코드 식별자·파일 경로·기술 용어는 원문 그대로
+- PR 서명 줄: 뺌
+
 ## 스펙과 먼저 읽을 문서
 
 - `gh issue view 1` : 전체 스펙. 특히 "Implementation Decisions", "Testing Decisions", "Out of Scope".
@@ -37,9 +56,9 @@
 
 | 등급 | 구현 목록(앞부터) |
 | --- | --- |
-| `light` | opencode → codex@medium |
+| `light` | opencode@low → codex@medium |
 | `standard` | opencode@high → codex@medium |
-| `hard` | codex@high → claude@high |
+| `hard` | claude@high → codex@high |
 
 - OpenCode `standard` 크기 상한: 파일 4개·변경 200줄 안팎
 
