@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QApplication
 from test_web_library_page import window_factory
 from test_web_library_data import core
 from my_video_manager import web_page_registry, web_shell
-from my_video_manager.web_contract import Argument, BridgeContract, CONTRACTS, TABS
+from my_video_manager.web_contract import CONTRACTS, TABS
+from my_video_manager.web_contract_types import Argument, BridgeContract
 from my_video_manager.web_page import WebPageController
 from qt_wait import wait_for
 

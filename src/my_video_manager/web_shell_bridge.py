@@ -4,7 +4,7 @@ import sqlite3
 
 from PySide6.QtCore import QObject, QTimer
 
-from .web_contract import SHELL
+from .web_shell_contract import SHELL
 from .web_json import encode
 from .web_update_data import shell_update_data
 

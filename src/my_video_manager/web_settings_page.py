@@ -11,7 +11,7 @@ from .app_version import current_version, RELEASES_URL
 from .key_bindings import KeyBindings, RESERVED_KEYS, normalize_key
 from .key_display import display_keys
 from .qt_keys import key_name
-from .web_contract import SETTINGS
+from .web_settings_contract import SETTINGS
 from .web_json import encode
 from .web_page import WebPageController
 from .web_update_data import update_status_data

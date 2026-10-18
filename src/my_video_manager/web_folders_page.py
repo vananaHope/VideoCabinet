@@ -4,7 +4,7 @@ import sqlite3
 
 from PySide6.QtCore import QObject, QTimer
 
-from .web_contract import FOLDERS
+from .web_folders_contract import FOLDERS
 from .web_json import encode
 from .web_page import WebPageController
 

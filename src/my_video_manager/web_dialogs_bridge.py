@@ -3,7 +3,7 @@ import json
 
 from PySide6.QtCore import QObject
 
-from .web_contract import DIALOGS
+from .web_dialogs_contract import DIALOGS
 from .web_dialogs_data import row
 from .web_json import encode
 

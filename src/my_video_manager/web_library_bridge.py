@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject, QTimer
 import json
 
 from .web_library_data import details_data, highlights_data
-from .web_contract import MENU_ACTIONS, GEM_ACTIONS, SCAN_LOCKED_ACTIONS, LIBRARY
+from .web_library_contract import MENU_ACTIONS, GEM_ACTIONS, SCAN_LOCKED_ACTIONS, LIBRARY
 from .web_json import encode
 
 

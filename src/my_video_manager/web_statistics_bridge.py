@@ -1,7 +1,7 @@
 """통계 페이지 전용 공개 채널."""
 from PySide6.QtCore import QObject, QTimer
 
-from .web_contract import STATISTICS
+from .web_statistics_contract import STATISTICS
 from .web_json import encode
 
 

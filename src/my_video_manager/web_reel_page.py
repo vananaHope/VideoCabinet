@@ -3,7 +3,7 @@ from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QMessageBox
 
 from .reel_controls import ReelControls
-from .web_contract import REEL
+from .web_reel_contract import REEL
 from .web_json import encode
 from .web_page import WebPageController
 from .web_reel_data import entries_data, guidance

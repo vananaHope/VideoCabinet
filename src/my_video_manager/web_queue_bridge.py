@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
-from .web_contract import QUEUE
+from .web_queue_contract import QUEUE
 from .web_json import encode
 
 
