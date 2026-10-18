@@ -1,6 +1,7 @@
 """페이지별 계약 파일과 union 병합 등록부가 병렬 페이지 추가를 충돌 없이 합치는지 검증한다."""
 import importlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -22,9 +23,15 @@ def test_each_contract_lives_in_its_own_page_file():
 
 
 def git(repo, *args):
-    return subprocess.run(['git', '-c', 'user.name=test', '-c', 'user.email=test@example.com',
-                           '-c', 'core.autocrlf=false', *args],
-                          cwd=repo, capture_output=True, text=True, encoding='utf-8')
+    env = {**os.environ, 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1',
+           'GIT_TEMPLATE_DIR': ''}
+    result = subprocess.run(
+        ['git', '-c', 'user.name=test', '-c', 'user.email=test@example.com',
+         '-c', 'core.autocrlf=false', '-c', 'commit.gpgsign=false', '-c', 'merge.ff=true',
+         '-c', 'core.hooksPath=', '-c', 'init.templateDir=', *args],
+        cwd=repo, env=env, capture_output=True, text=True, encoding='utf-8')
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result
 
 
 def add_page(repo, name):

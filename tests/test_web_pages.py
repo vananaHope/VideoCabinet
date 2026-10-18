@@ -112,6 +112,14 @@ def test_incomplete_or_duplicate_routes_fail_at_start(window_factory, change):
         host.start()
 
 
+@pytest.mark.parametrize('label', [TABS[0][1], '다른 표시 이름'])
+def test_duplicate_tab_names_fail_at_start(window_factory, monkeypatch, label):
+    window = window_factory()
+    monkeypatch.setattr(web_shell, 'TABS', (*TABS, (TABS[0][0], label)))
+    with pytest.raises(ValueError, match='TABS'):
+        window.web_host.start()
+
+
 def test_unregistered_bridge_contract_fails_at_start(window_factory, monkeypatch):
     window = window_factory()
     monkeypatch.setattr(web_shell, 'CONTRACTS', (*CONTRACTS, BridgeContract('example', 'ExampleBridge')))
