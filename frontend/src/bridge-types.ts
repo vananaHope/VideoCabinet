@@ -1,4 +1,4 @@
-// scripts/generate_web_types.py로 생성. web_contract.py의 페이지 계약을 수정하세요.
+// scripts/generate_web_types.py로 생성. 페이지별 web_<name>_contract.py와 조립 지점 web_contract.py를 수정하세요.
 
 export type Reply = (json: string) => void
 export type Signal<T> = { connect: (handler: (value: T) => void) => void; disconnect: (handler: (value: T) => void) => void }
