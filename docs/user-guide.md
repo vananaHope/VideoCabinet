@@ -315,7 +315,7 @@ Tab으로 버튼 사이를 이동하고 Space로 실행할 수 있습니다.
 
 이미지와 결과 JSON은 `.local/screens-51/`에 생성합니다. `--offscreen` 없이 실행하면 캡처 없이
 실제 Windows 창의 WebEngine 포커스·키 입력·재생 왕복을 검사합니다. 병렬 작업 중에는 공용
-`desktop_lock.py run --owner issue-51 -- <검사 명령>`으로 잠금을 잡고 실행합니다.
+agent-orchestra 플러그인의 `desktop_lock.py run`으로 잠금(`~/.agent-orchestra/desktop.lock`)을 잡고 실행합니다.
 이 검사는 QTest 키 입력과 테스트 재생 어댑터를 사용합니다. Windows 한국어 IME, 기본 파일 선택
 대화상자에서의 실제 경로 선택과 실제 mpv 영상·음성은 사람이 추가 확인합니다.
 
@@ -489,7 +489,7 @@ $env:QTWEBENGINE_CHROMIUM_FLAGS='--disable-gpu' # 아래 화면 검사 스크립
 
 1100×720의 기간 4개·지표 2개 및 요일/시간대·현황 화면을 `.local/screens-52/`에 저장합니다.
 `--verify`는 실제 창에서 키보드 선택과 실제 mpv 재생·복귀를 검사하며 화면 캡처는 하지 않습니다.
-여러 작업자가 공유하는 데스크톱에서는 반드시 관리자에게 지정받은 `desktop_lock.py run` 안에서 실행합니다.
+여러 작업자가 공유하는 데스크톱에서는 반드시 agent-orchestra 플러그인의 `desktop_lock.py run` 안에서 실행합니다.
 
 ### 원어 자막
 
@@ -892,7 +892,7 @@ DB v4의 기존 번역 자막 자리에 `ko` 영상에서는 **다듬은 자막*
 **새 원어로 다시 다듬기**를 선택합니다. 확인창을 닫으면 원어 변경도 저장하지 않습니다.
 **원어 SRT 저장 / 다듬은 SRT 저장**으로 선택하며 기본 파일명은 각각 `.ko.srt` / `.ko.refined.srt`입니다.
 `scripts/check_web_refinement.py --offscreen`은 1100×720 화면과 공개 UI 흐름을 검사합니다.
-`--real`은 `desktop_lock.py run --owner issue-73 --` 안에서 실행하며 실제 mpv 자막과 전환 키를 확인합니다.
+`--real`은 agent-orchestra 플러그인의 `desktop_lock.py run` 안에서 실행하며 실제 mpv 자막과 전환 키를 확인합니다.
 
 라이브러리나 재생 화면의 **자막 검수 / SRT 내보내기**에서 원어·번역을 나란히 봅니다.
 방향키로 줄을 고르고 Enter 또는 클릭으로 그 장면에 이동합니다. 같은 영상은 탐색하고,
@@ -971,7 +971,7 @@ Windows 플레이어가 한글을 ANSI로 오인하지 않도록 **UTF-8 BOM**�
 
 `--offscreen`은 1100×720 웹 이미지와 300행 측정 결과를 `.local/screens-50/`에 저장합니다.
 `--verify`는 캡처 없이 실제 WebEngine 포커스·키보드·확인 대화상자·트레이 경로를 검사합니다.
-공유 데스크톱에서는 관리자의 `desktop_lock.py run --owner issue-50 --` 아래에서 실행합니다.
+공유 데스크톱에서는 agent-orchestra 플러그인의 `desktop_lock.py run` 아래에서 실행합니다.
 측정은 같은 AppCore 조회에 첫 행 진행률만 바꾸며, DB 포함 비용·표시 계층 비용·웹 DOM 반영과
 다음 프레임 대기 시간을 구별합니다. 실 OS 한국어 IME 후보창과 시스템 트레이 메뉴의 실제 클릭은
 사람이 직접 확인합니다. 합성 composition 검사는 조합 중 저장 방지만 확인합니다.

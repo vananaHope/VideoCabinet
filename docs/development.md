@@ -489,7 +489,7 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
 라이브러리의 해당 영상 하이라이트 편집에서 확인할 수 있습니다.
 두 번째 명령은 짧은 검증 영상을 작업 폴더에 생성해 실제 mpv 왕복, 키보드 조작,
 조합 이벤트 중 검색 억제, 자동 전환·반복·복습을 검사합니다. 여러 작업자가 같은
-데스크톱을 쓰는 환경에서는 반드시 관리자의 `desktop_lock.py run --owner issue-49 --`
+데스크톱을 쓰는 환경에서는 반드시 agent-orchestra 플러그인의 `desktop_lock.py run`(잠금 파일 `~/.agent-orchestra/desktop.lock`)
 아래에서 두 번째 명령을 실행합니다. 실제 한국어 IME 자판 입력과 다중 모니터·배율별
 포커스 복귀는 별도 수동 확인 항목입니다.
 
@@ -598,8 +598,8 @@ Esc·Tab·Enter는 해당 모달이 처리합니다. 탐색·재생 진입·웹 
 
 ```powershell
 .venv/Scripts/python scripts/check_web_dialogs.py --offscreen
-# 실창은 공유 데스크톱 잠금 안에서만 실행
-.venv/Scripts/python C:/Users/Rho/orca/projects/my-video-manager/.local/orchestration/desktop_lock.py run --owner issue-53 -- .venv/Scripts/python scripts/check_web_dialogs.py --real
+# 실창은 공유 데스크톱 잠금 안에서만 실행(agent-orchestra 플러그인 스크립트, 잠금 파일 ~/.agent-orchestra/desktop.lock)
+python <agent-orchestra 스크립트 폴더>/desktop_lock.py run --owner issue-53 -- .venv/Scripts/python scripts/check_web_dialogs.py --real
 ```
 
 1100×720 웹 화면과 검사 JSON은 `.local/screens-53/`에 남습니다. 실창 검사는
