@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import threading
 
 import pytest
 
@@ -375,13 +376,19 @@ def test_scan_registers_final_content_changed_before_its_registration(tmp_path):
     paths = [video_file(tmp_path / "watched", name, name.encode())
              for name in ("a.mkv", "b.mkv")]
     changed = []
+    # 검사 순서상 첫 파일을 읽을 때 다음 파일의 복사가 끝난다. 동시 실행에서는 다음 파일을
+    # 옛 내용으로 먼저 읽게 하고, 그 값을 버리고 등록 때 최종 내용으로 다시 읽는지 본다.
+    first, second = (paths[0].parent / entry.name for entry in os.scandir(paths[0].parent))
+    second_read = threading.Event()
 
     class ChangingMedia(Media):
         def read(self, path):
-            if not changed:
-                other = next(candidate for candidate in paths if candidate != path)
-                other.write_bytes(final_content)
-                changed.append(other)
+            if path == second:
+                second_read.set()
+            if path == first and not changed:
+                assert second_read.wait(10)
+                second.write_bytes(final_content)
+                changed.append(second)
             return super().read(path)
 
     core = open_core(tmp_path / "data/library.sqlite3", ChangingMedia())

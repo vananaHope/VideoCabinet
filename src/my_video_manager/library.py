@@ -82,6 +82,14 @@ def _fingerprint(path: Path) -> str:
     return f"v1:{size}:{digest.hexdigest()}"
 
 
+def _read_media(media, path: Path) -> tuple[MediaInfo | None, str | None]:
+    """영상 정보와 지문을 읽는다. GIF는 영상이 아니므로 지문도 계산하지 않는다."""
+    info = media.read(path)
+    if info is not None and "gif" in info.format.lower().split(","):
+        info = None
+    return info, (_fingerprint(path) if info is not None else None)
+
+
 def _disconnected(directory: Path, watched_roots) -> bool:
     """directory를 담는 감시 폴더가 모두 없으면 끊긴 것으로 본다. 남은 감시 폴더가 있으면 삭제다."""
     roots = [root for root in watched_roots if directory.is_relative_to(root)]
@@ -225,8 +233,14 @@ class Library:
                               reconnected=True)
         return self._not_added(path, "이미 등록된 영상입니다.")
 
+    def _thumbnail_path(self, fingerprint: str) -> Path:
+        from .thumbnails import THUMBNAIL_SUFFIX
+        return self._thumbnails / (fingerprint.split(":")[-1] + THUMBNAIL_SUFFIX)
+
     def _register(self, path: Path, *, on_registered=None, missing_at_start=None,
-                  signature=None, minimum=None) -> ScanResult:
+                  signature=None, minimum=None, prefetch=None) -> ScanResult:
+        from .scan_prefetch import ScanPrefetch
+        prefetch = ScanPrefetch(self._media, self._thumbnail_path, workers=1) if prefetch is None else prefetch
         signature = _signature(path) if signature is None else signature
         minimum = self.minimum_duration if minimum is None else minimum
         with self._connect() as db:
@@ -266,10 +280,7 @@ class Library:
                 db.execute("DELETE FROM library_file_checks WHERE path=?", (str(path),))
             return self._already_registered(path, legacy_gif["excluded"], reconnected=was_missing
                                             and (missing_at_start is None or legacy_gif["id"] in missing_at_start))
-        info = self._media.read(path)
-        if info is not None and "gif" in info.format.lower().split(","):
-            info = None
-        fingerprint = _fingerprint(path) if info is not None else None
+        info, fingerprint = prefetch.read(path, signature)
         with self._connect() as db:
             existing = db.execute("SELECT id, excluded FROM videos WHERE fingerprint=?", (fingerprint,)).fetchone()
         if info is None or (not existing and info.duration < minimum):
@@ -279,10 +290,9 @@ class Library:
                            (str(path), *signature, info.duration if info else None, fingerprint))
             return self._not_added(path, "영상이 아닙니다(GIF 포함)." if info is None
                                    else f"최소 길이({minimum:g}초) 미만입니다.")
-        from .thumbnails import THUMBNAIL_SUFFIX
-        thumbnail = self._thumbnails / (fingerprint.split(":")[-1] + THUMBNAIL_SUFFIX)
+        thumbnail = self._thumbnail_path(fingerprint)
         if not existing:
-            self._media.capture(path, thumbnail, min(10, info.duration / 10))
+            prefetch.capture(path, signature, fingerprint, min(10, info.duration / 10))
         self._check_unchanged(path, signature)
         with self._connect() as db:
             if existing:
@@ -440,6 +450,9 @@ class Library:
             known_fingerprints = {row[0] for row in db.execute("SELECT fingerprint FROM videos")}
             missing_at_start = {row[0] for row in db.execute(
                 "SELECT id FROM videos WHERE NOT EXISTS (SELECT 1 FROM locations WHERE video_id = videos.id)")}
+            # 이전 DB의 GIF와 크기가 같은 파일은 _register가 영상 정보를 읽지 않고 지문으로 연결한다.
+            legacy_gif_prefixes = {row[0].rsplit(":", 1)[0] for row in db.execute(
+                "SELECT fingerprint FROM videos WHERE ',' || lower(format) || ',' LIKE '%,gif,%'")}
         minimum = self.minimum_duration
         check_paths = set(checks)
 
@@ -449,7 +462,18 @@ class Library:
                 known_fingerprints.add(db.execute("SELECT fingerprint FROM videos WHERE id=?", (video_id,)).fetchone()[0])
             (on_registered or self._on_registered)(video_id)
 
-        def register(path, signature):
+        def reads_media(path, signature):
+            # register와 _register가 영상 정보를 읽지 않고 끝내는 파일은 미리 읽지 않는다.
+            if locations.get(path) == signature:
+                return False
+            check = checks.get(path)
+            if check and (check["size"], check["mtime_ns"]) == signature and (
+                    check["duration"] is None or check["duration"] < minimum
+                    or check["fingerprint"] in known_fingerprints):
+                return False
+            return f"v1:{signature[0]}" not in legacy_gif_prefixes
+
+        def register(path, signature, prefetch):
             nonlocal reconnected
             # scan은 이미 등록됨/제외됨/비영상/최소 길이 미만 안내를 결과에 싣지 않는다.
             if locations.get(path) == signature:
@@ -462,7 +486,7 @@ class Library:
                     return 0
             # 순회 뒤 파일이 바뀌었거나 DirEntry 값이 늦을 수 있어 등록 시 서명을 새로 읽는다.
             result = self._register(path, on_registered=registered, missing_at_start=missing_at_start,
-                                    minimum=minimum)
+                                    minimum=minimum, prefetch=prefetch)
             check_paths.add(path)
             if result.reconnected:
                 reconnected = True
@@ -516,29 +540,40 @@ class Library:
                     missing and not include_direct and directory not in watched_roots)
                 entries_in_order.append(ScanIssue(directory, str(error), failed=failed))
 
-        for path in locations:
-            if not include_direct and any(path.is_relative_to(blocked) for blocked in skipped):
-                continue
-            if any(path.is_relative_to(gone) for gone in disconnected):
-                continue
-            processed.add(path)
-            try:
-                signature = signatures.get(path)
-                added += register(path, _signature(path) if signature is None else signature)
-            except (FileNotFoundError, NotADirectoryError):
-                self._forget_location(path)
-            except (OSError, ValueError, RuntimeError) as error:
-                issues.append(ScanIssue(path, str(error)))
-        for entry in entries_in_order:
-            if isinstance(entry, ScanIssue):
-                issues.append(entry)
-            elif entry not in processed:
-                processed.add(entry)
+        stored = [path for path in locations
+                  if (include_direct or not any(path.is_relative_to(blocked) for blocked in skipped))
+                  and not any(path.is_relative_to(gone) for gone in disconnected)]
+        processed.update(stored)
+        from .scan_prefetch import ScanPrefetch
+        with ScanPrefetch(self._media, self._thumbnail_path, known=known_fingerprints, minimum=minimum) as prefetch:
+            # 다시 읽을 파일의 ffprobe·지문·썸네일을 처리 순서대로 미리 맡기고,
+            # DB 반영과 등록 알림은 아래에서 이 스레드가 원래 순서대로 한다.
+            for path in [*stored, *(entry for entry in entries_in_order
+                                    if isinstance(entry, Path) and entry not in processed)]:
                 try:
-                    added += register(entry, signatures[entry])
+                    signature = signatures.get(path) or _signature(path)
+                except (OSError, ValueError):
+                    continue
+                if reads_media(path, signature):
+                    prefetch.submit(path)
+            for path in stored:
+                try:
+                    signature = signatures.get(path)
+                    added += register(path, _signature(path) if signature is None else signature, prefetch)
+                except (FileNotFoundError, NotADirectoryError):
+                    self._forget_location(path)
                 except (OSError, ValueError, RuntimeError) as error:
-                    inaccessible.add(entry)
-                    issues.append(ScanIssue(entry, str(error)))
+                    issues.append(ScanIssue(path, str(error)))
+            for entry in entries_in_order:
+                if isinstance(entry, ScanIssue):
+                    issues.append(entry)
+                elif entry not in processed:
+                    processed.add(entry)
+                    try:
+                        added += register(entry, signatures[entry], prefetch)
+                    except (OSError, ValueError, RuntimeError) as error:
+                        inaccessible.add(entry)
+                        issues.append(ScanIssue(entry, str(error)))
         with self._connect() as db:
             stale = [path for path in check_paths if path not in seen
                      and any(path.is_relative_to(root) for root in roots)
