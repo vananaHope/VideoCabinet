@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QShortcut
+from PySide6.QtGui import QGuiApplication, QShortcut
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
 
 from .adapters import MpvPlayer
@@ -173,6 +173,12 @@ class MainWindow(QMainWindow):
         재생 세션과 현재 화면은 그대로 두므로 트레이 열기로 같은 장면의 일시정지 상태로 돌아온다.
         """
         focus = QApplication.focusWidget()
+        # 조합 중인 글자는 초점이 옮겨 가기 전에 지금 입력란에 확정한다.
+        QGuiApplication.inputMethod().reset()
+        # 메뉴·드롭다운 팝업은 닫는다. 대화상자는 창과 함께 감췄다가 복귀 때 그대로 보인다.
+        while (popup := QApplication.activePopupWidget()) is not None:
+            if not popup.close():
+                break
         if self.player:
             try:
                 # 이미 엔진이 보낸 구간 끝·EOF 보고가 다음 항목을 자동 재생하지 않게 먼저 보류한다.
@@ -184,7 +190,13 @@ class MainWindow(QMainWindow):
                 # 숨기기가 먼저다. 실패는 복귀한 화면에 보인다.
                 self.playback_page.show_error(f"일시정지 실패: {error}")
         self.set_playback_fullscreen(False)
+        self.web_host.dialogs.hide_for_emergency()
         self.tray.hide_for_emergency(focus)
+
+    def has_emergency_focus(self):
+        """앱 창이나 재생 중 옮겨 띄운 대화상자가 활성 창이다. 메뉴·드롭다운 팝업은 활성 창을 바꾸지 않는다."""
+        active = QApplication.activeWindow()
+        return active is not None and active in (self, self.web_host.dialogs.container)
 
     @property
     def worker(self):
@@ -386,6 +398,13 @@ class MainWindow(QMainWindow):
             settings = self.web_host.controllers.get('settings')
             if settings is not None and settings.capture_event(event):
                 return True
+        if (event.type() == QEvent.Type.KeyPress and self.has_emergency_focus()
+                and self.core.command_for_key(key_name(event) or "") == Command(CommandType.EMERGENCY_HIDE)):
+            # 재생 화면, 웹 셸의 모든 탭, 열린 대화상자·메뉴·팝업, 입력·IME 조합 중에도 이 필터 한 곳에서 받는다.
+            # 키 배치 화면의 키 캡처는 위에서 먼저 소비한다.
+            if not event.isAutoRepeat():
+                self.emergency_hide()
+            return True
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()
                 or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):
             return super().eventFilter(watched, event)
@@ -402,13 +421,6 @@ class MainWindow(QMainWindow):
                 return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
                 self.show_fullscreen_settings_menu()
-            return True
-        if self.core.command_for_key(key_name(event) or "") == Command(CommandType.EMERGENCY_HIDE):
-            # 재생 화면과 웹 셸의 모든 탭이 이 필터 한 곳에서 받는다.
-            if self.web_host.dialogs.blocks_shell_actions:
-                return super().eventFilter(watched, event)
-            if not event.isAutoRepeat():
-                self.emergency_hide()
             return True
         handle_key = getattr(self.pages.currentWidget(), "handle_key", None)
         return handle_key(event) if callable(handle_key) else False

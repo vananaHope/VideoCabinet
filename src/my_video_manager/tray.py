@@ -42,11 +42,14 @@ class TrayControls(QObject):
             self.window._return_to_gems = False
         self.window.raise_()
         self.window.activateWindow()
+        if emergency:
+            # 창과 함께 감춘 대화상자를 입력 내용 그대로 다시 보인다.
+            self.window.web_host.dialogs.show_container()
         focus, self._emergency_focus = self._emergency_focus, None
         if emergency and focus is not None:
             from shiboken6 import isValid
             # 전체 화면 풀기와 숨기기로 옮겨 간 초점을 숨기기 전 위젯으로 되돌린다.
-            if isValid(focus) and focus.isVisible() and self.window.isAncestorOf(focus):
+            if isValid(focus) and focus.isVisible() and focus.window() in (self.window, self.window.web_host.dialogs.container):
                 focus.setFocus()
 
     def activated(self, reason):
