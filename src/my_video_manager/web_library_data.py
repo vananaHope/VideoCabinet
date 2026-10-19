@@ -106,6 +106,7 @@ def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
     for video in snapshot.videos:
         status = snapshot.statuses[video.id]
         statistics = snapshot.video_statistics.get(video.id)
+        modified = video.modified_at
         result.append(VideoData(
             id=video.id, title=video.title, duration=video.duration,
             # 숫자 host는 Chromium이 IP로 정규화하므로 고정 host 아래에 ID를 둔다.
@@ -118,7 +119,7 @@ def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
             viewingCount=statistics.viewing_count if statistics else 0,
             watchedSeconds=statistics.watched_seconds if statistics else 0,
             lastViewedAt=statistics.last_viewed_at if statistics else None,
-            modifiedAt=video.modified_at.isoformat() if video.modified_at else None,
+            modifiedAt=modified.isoformat() if modified else None,
             hasSubtitles=video.id in subtitled_ids,
         ))
     return result
