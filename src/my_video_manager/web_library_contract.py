@@ -11,7 +11,6 @@ MENU_ACTIONS = MappingProxyType({
     'review': '자막 검수 / SRT 내보내기', 'series': '시리즈 편집',
     'rename': '제목 변경', 'reconnect': '파일 다시 연결', 'exclude': '제외',
 })
-GEM_ACTIONS = MappingProxyType({'playGem': '추천 재생', 'dismiss': '관심 없음'})
 SCAN_LOCKED_ACTIONS = ('rename', 'reconnect', 'exclude')
 
 LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
@@ -26,12 +25,12 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
 }, signals={
     'thumbnailsChanged': str, 'libraryChanged': str, 'libraryDetailsChanged': int,
     'libraryFocusRequested': str, 'libraryError': str,
-}, aliases=(TypeAlias('Action', (*MENU_ACTIONS, *GEM_ACTIONS)),), constants=(
+}, aliases=(TypeAlias('Action', tuple(MENU_ACTIONS)),), constants=(
     Constant('actions', tuple(MENU_ACTIONS.items())),
     Constant('scanLockedActions', SCAN_LOCKED_ACTIONS, 'readonly Action[]'),
     Constant('libraryChoices', CHOICES),
     Constant('libraryFilterDefaults', FILTER_DEFAULTS),
-), data_types=(web_library_data.TagData, web_library_data.VideoData, web_library_data.GemData,
+), data_types=(web_library_data.TagData, web_library_data.VideoData,
                LibraryViewOptions, LibraryFolder, LibraryChip,
                web_library_data.ExternalSubtitleTrackData, web_library_data.ExternalSubtitleFileData,
                web_library_data.DetailsData, web_library_data.HighlightData, web_library_data.LibraryData))

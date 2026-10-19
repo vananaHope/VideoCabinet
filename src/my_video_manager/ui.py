@@ -42,7 +42,6 @@ class MainWindow(QMainWindow):
         self.player = None
         self.player_factory = player_factory
         self.playback_list = ()
-        self._return_to_gems = False
         # 긴급 탈출로 멈춘 엔진. 사용자가 재개하기 전까지 모아보기 자동 전환을 미룬다.
         self._hold = None
         # 긴급 탈출로 닫은 메뉴와 그때의 화면. 복귀 때 같은 화면이면 메뉴를 다시 연다.
@@ -260,8 +259,8 @@ class MainWindow(QMainWindow):
     def worker(self):
         return self.library_page.worker
 
-    def refresh(self, *, focus_gems=None):
-        self.library_page.refresh(focus_gems=focus_gems)
+    def refresh(self):
+        self.library_page.refresh()
 
     def show_status(self, text):
         """현재 페이지와 관계없이 창 아래에 작업 결과를 표시한다."""
@@ -277,11 +276,9 @@ class MainWindow(QMainWindow):
     def show_search(self):
         self.navigate_web_tab('search')
 
-    def play_video(self, video_id, *, start=None, from_gems=False):
+    def play_video(self, video_id, *, start=None):
         if self.pages.currentWidget() is not self.playback_page:
             self._return_page = self.pages.currentWidget()
-        if self.pages.currentIndex() == 0:
-            self._return_to_gems = from_gems
         try:
             self.stop_player()
             self.load_player(video_id, self.core.switch_to(video_id, start=start))
@@ -399,15 +396,13 @@ class MainWindow(QMainWindow):
         self.end_playback()
         self.web_host.set_tab("library")
         self.pages.setCurrentIndex(0)
-        self.refresh(focus_gems=self._return_to_gems)
-        self._return_to_gems = False
+        self.library_page.refresh(focus=True)
 
     def back_to_list(self):
         if self.reel.shown is not None or self.core.reel_playback is not None:
             self.reel.open()
         else:
-            self.web_host.return_from_playback(focus_gems=self._return_to_gems)
-            self._return_to_gems = False
+            self.web_host.return_from_playback()
 
     def refresh_key_help(self):
         self.playback_page.refresh_key_help()
@@ -467,7 +462,7 @@ class MainWindow(QMainWindow):
                 or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):
             return super().eventFilter(watched, event)
         if (event.modifiers() == Qt.KeyboardModifier.ControlModifier
-                and Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_7):
+                and Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_8):
             if self.web_host.dialogs.blocks_shell_actions:
                 return super().eventFilter(watched, event)
             if not event.isAutoRepeat():

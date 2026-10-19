@@ -6,6 +6,7 @@
 from .web_tabs import TABS
 from .web_shell_contract import SHELL
 from .web_library_contract import LIBRARY
+from .web_recommend_contract import RECOMMEND
 from .web_queue_contract import QUEUE
 from .web_reel_contract import REEL
 from .web_search_contract import SEARCH
@@ -17,6 +18,7 @@ from .web_settings_contract import SETTINGS
 CONTRACTS = (
     SHELL,
     LIBRARY,
+    RECOMMEND,
     QUEUE,
     REEL,
     SEARCH,

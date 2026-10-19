@@ -69,11 +69,14 @@ def library_window(tmp_path, app, monkeypatch):
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
+def recommended(window):
+    return [item['video']['id'] for row in window.web_host.controllers['recommend'].rows for item in row['items']]
+
+
 def test_tray_reopen_updates_finished_viewing_without_refreshing_while_hidden(library_window, app):
     window, core, video = library_window
     assert window.library_page.snapshot.statuses[video.id].abandoned
-    assert len(window.library_page.gems) == 1
-    window.play_video(video.id, start=0, from_gems=True)
+    window.play_video(video.id, start=0)
     # 마지막 엔진 보고를 닫기 경로에서 받아 시청을 저장한다.
     window.player.positions.append((95, False))
     window.close()
@@ -81,14 +84,35 @@ def test_tray_reopen_updates_finished_viewing_without_refreshing_while_hidden(li
     assert not window.isVisible()
     assert core.viewing_status(video.id).finished
     assert window.library_page.snapshot.statuses[video.id].abandoned
-    assert len(window.library_page.gems) == 1
 
     window.tray.open()
     app.processEvents()
     assert window.isVisible()
     assert window.library_page.snapshot.statuses[video.id].finished
-    assert len(window.library_page.gems) == 0
     assert window.web_host._pending_focus == 'grid' or window.web_host.view.hasFocus()
+
+
+def test_tray_reopen_after_recommendation_playback_returns_to_refreshed_recommend_tab(library_window, app):
+    window, core, video = library_window
+    host = window.web_host
+    window.navigate_web_tab('recommend')
+    assert recommended(window) == [video.id]
+    host.controllers['recommend'].bridge.perform_play(video.id)
+    assert window.pages.currentWidget() is window.playback_page
+    # 이어 보기 위치에서 시작하므로 처음으로 돌아가 끝까지 본다.
+    window.player.positions += [(0, True), (95, False)]
+    window.close()
+    app.processEvents()
+    assert core.viewing_status(video.id).finished
+    # 숨은 동안에는 다시 계산하지 않고, 출발한 추천 탭에 복귀 초점을 남긴다.
+    assert host.active_tab == 'recommend' and recommended(window) == [video.id]
+    assert host._pending_focus == 'recommendations'
+
+    window.tray.open()
+    app.processEvents()
+    assert host.active_tab == 'recommend' and window.pages.currentWidget() is host
+    assert recommended(window) == []
+    assert host._pending_focus == 'recommendations' or host.view.hasFocus()
 
 
 def test_tray_open_of_visible_playback_does_not_end_viewing(library_window):
@@ -108,18 +132,21 @@ def test_tray_queue_during_playback_finishes_viewing(library_window):
 
 
 @pytest.mark.parametrize("return_first", [False, True])
-def test_reel_return_does_not_reuse_previous_gem_focus(library_window, app, return_first):
+def test_reel_return_does_not_reuse_previous_recommendation_focus(library_window, app, return_first):
     window, core, video = library_window
-    window.library_page.bridge.perform('playGem', video.id)
+    host = window.web_host
+    window.navigate_web_tab('recommend')
+    host.controllers['recommend'].bridge.perform_play(video.id)
     if return_first:
-        window.show_library()
+        window.back_to_list()
         app.processEvents()
-        assert window.web_host._pending_focus == 'gems' or window.web_host.view.hasFocus()
+        assert host.active_tab == 'recommend'
+        assert host._pending_focus == 'recommendations' or host.view.hasFocus()
     window.reel.open()
     window.show_library()
     app.processEvents()
-    assert len(window.library_page.gems) == 1
-    assert window.web_host._pending_focus == 'grid' or window.web_host.view.hasFocus()
+    assert host.active_tab == 'library'
+    assert host._pending_focus == 'grid' or host.view.hasFocus()
 
 
 def test_playback_return_builds_library_index_once(library_window, app, monkeypatch):

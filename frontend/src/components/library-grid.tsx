@@ -81,7 +81,7 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
   return <div ref={scroll} id="library-grid" role="grid" aria-label="라이브러리 영상 격자" aria-rowcount={Math.ceil(videos.length / columns)} aria-colcount={columns} aria-activedescendant={selectedId === null ? undefined : `video-${selectedId}`} tabIndex={0} onKeyDown={keyDown} className={gridVariants({ cardSize: cardSize as "small" | "medium" | "large" })}>
     {!videos.length ? <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
       <h2 className="text-base font-semibold text-foreground">{total ? "조건에 맞는 영상이 없습니다" : "라이브러리가 비어 있습니다"}</h2>
-      <p>{total ? "검색 조건이나 선택한 폴더를 바꿔 보세요." : "폴더 관리(Ctrl+6)에서 감시 폴더나 영상 파일을 추가하세요."}</p>
+      <p>{total ? "검색 조건이나 선택한 폴더를 바꿔 보세요." : "폴더 관리(Ctrl+7)에서 감시 폴더나 영상 파일을 추가하세요."}</p>
     </div> : <div className="virtual-canvas" style={{ "--virtual-height": `${virtual.getTotalSize()}px` } as CSSProperties}>
       {virtual.getVirtualItems().map(row => <div key={row.key} role="row" aria-rowindex={row.index + 1} className="virtual-row gap-3 pb-3" style={{ "--virtual-top": `${row.start}px`, "--virtual-columns": columns } as CSSProperties}>
         {videos.slice(row.index * columns, (row.index + 1) * columns).map((video, index) => <VideoMenu key={video.id} id={video.id} scanning={scanning} onAction={onAction}>

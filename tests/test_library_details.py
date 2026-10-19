@@ -143,7 +143,7 @@ def test_spoken_transcripts_are_not_no_speech_and_unknown_language_reason(tmp_pa
     assert unknown.translation_skip_reason == "unknown_language"
 
 
-def test_snapshot_and_gems_do_not_read_details_and_selected_summaries_are_isolated(tmp_path, monkeypatch):
+def test_snapshot_and_recommendations_do_not_read_details_and_selected_summaries_are_isolated(tmp_path, monkeypatch):
     core = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
                    database=tmp_path / "data/library.sqlite3", transcriber=Transcriber())
     for name in ("a", "b"):
@@ -158,4 +158,4 @@ def test_snapshot_and_gems_do_not_read_details_and_selected_summaries_are_isolat
     assert core.library_details(b.id).translated_lines == 0
     monkeypatch.setattr(core, "library_details", lambda *_: pytest.fail("목록에서 상세 조회"))
     assert core.library_snapshot().videos == core.videos()
-    core.hidden_gems()
+    core.recommendations()

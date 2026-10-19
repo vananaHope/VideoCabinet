@@ -40,10 +40,10 @@ export interface ShellUpdateData {
   install: UpdateInstallData
 }
 
-export type Tab = "library" | "reel" | "search" | "queue" | "statistics" | "folders" | "settings"
+export type Tab = "library" | "recommend" | "reel" | "search" | "queue" | "statistics" | "folders" | "settings"
 export type UpdateChoice = "update" | "later" | "skip" | "unskip"
 export type UpdateAction = "cancel" | "install" | "later" | "retry" | "dismiss"
-export const tabs = [["library", "라이브러리"], ["reel", "모아보기"], ["search", "검색"], ["queue", "자막 대기열"], ["statistics", "통계"], ["folders", "폴더 관리"], ["settings", "설정"]] as const
+export const tabs = [["library", "라이브러리"], ["recommend", "추천"], ["reel", "모아보기"], ["search", "검색"], ["queue", "자막 대기열"], ["statistics", "통계"], ["folders", "폴더 관리"], ["settings", "설정"]] as const
 export interface ShellBridge {
   ready: (reply: Reply) => void
   shellSnapshot: (reply: Reply) => void
@@ -96,11 +96,6 @@ export interface VideoData {
   watchedSeconds: number
   lastViewedAt: string | null
   hasSubtitles: boolean
-}
-
-export interface GemData {
-  videoId: number
-  reason: string
 }
 
 export interface LibraryViewOptions {
@@ -182,8 +177,6 @@ export interface HighlightData {
 export interface LibraryData {
   videos: Array<VideoData>
   tags: Array<TagData>
-  gems: Array<GemData>
-  gemError: string
   visibleIds: Array<number>
   selectedId: number | null
   scanning: boolean
@@ -192,7 +185,7 @@ export interface LibraryData {
   chips: Array<LibraryChip>
 }
 
-export type Action = "play" | "tags" | "subtitles" | "review" | "series" | "rename" | "reconnect" | "exclude" | "playGem" | "dismiss"
+export type Action = "play" | "tags" | "subtitles" | "review" | "series" | "rename" | "reconnect" | "exclude"
 export const actions = [["play", "재생"], ["tags", "태그 편집"], ["subtitles", "자막 만들기 / 원어 지정"], ["review", "자막 검수 / SRT 내보내기"], ["series", "시리즈 편집"], ["rename", "제목 변경"], ["reconnect", "파일 다시 연결"], ["exclude", "제외"]] as const
 export const scanLockedActions: readonly Action[] = ["rename", "reconnect", "exclude"]
 export const libraryChoices = {"mode": [["all", "영상 전체"], ["folders", "폴더별"]], "viewing": [["", "모든 시청 상태"], ["unwatched", "안 봄"], ["abandoned", "보다 만"], ["finished", "다 봄"], ["favorite", "즐겨 보는 영상"]], "original": [["", "원어 자막 전체"], ["yes", "원어 자막 있음"], ["no", "원어 자막 없음"]], "translated": [["", "번역·다듬은 자막 전체"], ["yes", "번역·다듬은 자막 있음"], ["no", "번역·다듬은 자막 없음"]], "added_preset": [["", "추가일 전체"], ["today", "오늘"], ["7", "최근 7일"], ["30", "최근 30일"], ["custom", "직접 지정"]], "viewed_preset": [["", "마지막 시청 전체"], ["today", "오늘"], ["7", "최근 7일"], ["30", "최근 30일"], ["custom", "직접 지정"]], "sort": [["title", "제목"], ["added", "추가일"], ["viewed", "마지막 시청"], ["duration", "길이"], ["count", "시청 횟수"]], "card_size": [["small", "작게"], ["medium", "보통"], ["large", "크게"]]} as const
@@ -231,6 +224,48 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
     libraryDetailsChanged: Object.freeze({ connect: raw.libraryDetailsChanged.connect.bind(raw.libraryDetailsChanged), disconnect: raw.libraryDetailsChanged.disconnect.bind(raw.libraryDetailsChanged) }),
     libraryFocusRequested: Object.freeze({ connect: raw.libraryFocusRequested.connect.bind(raw.libraryFocusRequested), disconnect: raw.libraryFocusRequested.disconnect.bind(raw.libraryFocusRequested) }),
     libraryError: Object.freeze({ connect: raw.libraryError.connect.bind(raw.libraryError), disconnect: raw.libraryError.disconnect.bind(raw.libraryError) }),
+  })
+}
+
+export interface RecommendationItemData {
+  video: VideoData
+  reason: string
+}
+
+export interface RecommendationRowData {
+  kind: string
+  title: string
+  items: Array<RecommendationItemData>
+}
+
+export interface RecommendData {
+  loaded: boolean
+  rows: Array<RecommendationRowData>
+  error: string
+}
+
+export interface RecommendBridge {
+  ready: (reply: Reply) => void
+  snapshot: (reply: Reply) => void
+  play: (videoId: number, reply: Reply) => void
+  dismiss: (videoId: number, reply: Reply) => void
+  restore: (videoId: number, reply: Reply) => void
+  showDismissed: (reply: Reply) => void
+  changed: Signal<string>
+  focusRequested: Signal<string>
+  error: Signal<string>
+}
+export function publicRecommendBridge(raw: RecommendBridge): RecommendBridge {
+  return Object.freeze({
+    ready: raw.ready.bind(raw),
+    snapshot: raw.snapshot.bind(raw),
+    play: raw.play.bind(raw),
+    dismiss: raw.dismiss.bind(raw),
+    restore: raw.restore.bind(raw),
+    showDismissed: raw.showDismissed.bind(raw),
+    changed: Object.freeze({ connect: raw.changed.connect.bind(raw.changed), disconnect: raw.changed.disconnect.bind(raw.changed) }),
+    focusRequested: Object.freeze({ connect: raw.focusRequested.connect.bind(raw.focusRequested), disconnect: raw.focusRequested.disconnect.bind(raw.focusRequested) }),
+    error: Object.freeze({ connect: raw.error.connect.bind(raw.error), disconnect: raw.error.disconnect.bind(raw.error) }),
   })
 }
 
@@ -823,6 +858,7 @@ export function publicSettingsBridge(raw: SettingsBridge): SettingsBridge {
 export interface Bridges {
   readonly shell: ShellBridge
   readonly library: LibraryBridge
+  readonly recommend: RecommendBridge
   readonly queue: QueueBridge
   readonly reel: ReelBridge
   readonly search: SearchBridge
@@ -835,6 +871,7 @@ export function publicBridges(raw: Bridges): Bridges {
   return Object.freeze({
     shell: publicShellBridge(raw.shell),
     library: publicLibraryBridge(raw.library),
+    recommend: publicRecommendBridge(raw.recommend),
     queue: publicQueueBridge(raw.queue),
     reel: publicReelBridge(raw.reel),
     search: publicSearchBridge(raw.search),

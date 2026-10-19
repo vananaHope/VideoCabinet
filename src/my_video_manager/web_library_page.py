@@ -10,14 +10,6 @@ from .web_json import encode
 from .web_page import WebPageController
 
 
-class GemDialogs:
-    def __init__(self, page):
-        self.page = page
-
-    def show_dismissed(self):
-        self.page.host.controllers['folders'].open_section('dismissed')
-
-
 class WebLibraryPage(LibraryOperations, WebPageController):
     tab = 'library'
     default_focus = 'grid'
@@ -33,15 +25,12 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.cards = []
         self.video_ids = set()
         self.visible_ids = []
-        self.gems, self.gem_ids = [], []
-        self.gem_error = ''
         self.selected_id = None
         self.options = self.core.library_view_options()
         self.index = None
         self.tags = []
         self.pending_thumbnails = set()
         self.library_controls = LibraryControls(window)
-        self.hidden_gems = GemDialogs(self)
         self.bridge = LibraryBridge(self)
         self.focus_requested = self.bridge.libraryFocusRequested
         host.register_page(self)
@@ -49,8 +38,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         window.translations.video_changed.connect(self.refresh_details)
 
     def payload(self):
-        return dict(videos=self.cards, tags=self.tags, gems=self.gems, gemError=self.gem_error,
-                    scanning=self.worker is not None, folders=self.index.folders if self.index else [],
+        return dict(videos=self.cards, tags=self.tags, scanning=self.worker is not None, folders=self.index.folders if self.index else [],
                     **self.view_payload())
 
     def view_payload(self):
@@ -78,7 +66,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
     def tag_id(self, value):
         self.options['tags'] = [value] if value is not None else []
 
-    def refresh(self, *, focus_gems=None):
+    def refresh(self, *, focus=False):
         self.snapshot = self.core.library_snapshot()
         self.index = self.core.library_view_index(self.snapshot)
         self.cards = snapshot_data(self.snapshot, self.index.original)
@@ -87,26 +75,19 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.options['tags'] = [tid for tid in self.options['tags'] if tid in {t['id'] for t in self.tags}]
         if self.options['folder'] not in self.index.members:
             self.options['folder'] = ''
-        try:
-            self.gems = [dict(videoId=g.video.id, reason=g.reason)
-                         for g in self.core.hidden_gems(snapshot=self.snapshot)]
-            self.gem_error = ''
-        except Exception as error:
-            self.gems, self.gem_error = [], str(error)
-        self.gem_ids = [g['videoId'] for g in self.gems]
         self.apply_filters()
         self.bridge.libraryChanged.emit(encode(self.payload()))
         self.refreshed.emit()
-        if focus_gems is not None and self.is_active():
-            self.request_focus('gems' if focus_gems and self.gems else 'grid')
+        if focus and self.is_active():
+            self.request_focus('grid')
 
     def apply_filters(self):
         self.visible_ids = self.core.library_view_ids(self.options, index=self.index) if self.index else []
         if self.selected_id not in self.visible_ids:
             self.selected_id = next(iter(self.visible_ids), None)
 
-    def return_from_playback(self, *, focus_gems=False):
-        self.refresh(focus_gems=focus_gems)
+    def return_from_playback(self):
+        self.refresh(focus=True)
 
     def refresh_details(self, changed_video_id=None):
         # 자막·번역·하이라이트 변경은 현재 조건의 결과에도 즉시 반영한다.

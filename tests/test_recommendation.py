@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 import sqlite3
 
 import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
+from my_video_manager.recommendation import Recommendation, RecommendationRow, assign_rows
 from my_video_manager.viewing import ViewingSettings
 
 
@@ -55,8 +57,44 @@ def mark(core, video, position=10):
     return next(h for h in core.highlights(video.id) if h.start == position)
 
 
+def items(core):
+    return [item for row in core.recommendations() for item in row.items]
+
+
 def ids(core):
-    return [g.video.id for g in core.hidden_gems()]
+    return [item.video.id for item in items(core)]
+
+
+def pairs(core):
+    return [(item.video.id, row.kind) for row in core.recommendations() for item in row.items]
+
+
+def candidate(kind, *video_ids):
+    return RecommendationRow(kind, kind, tuple(Recommendation(SimpleNamespace(id=vid), f"{kind} 이유") for vid in video_ids))
+
+
+def placed(rows):
+    return [(row.kind, [item.video.id for item in row.items]) for row in rows]
+
+
+def test_rows_keep_priority_and_each_video_appears_only_in_its_highest_row():
+    rows = assign_rows([candidate("위", 1, 2), candidate("가운데", 2, 3), candidate("아래", 3, 1, 4)])
+    assert placed(rows) == [("위", [1, 2]), ("가운데", [3]), ("아래", [4])]
+    assert rows[0].title == "위" and rows[2].items[0].reason == "아래 이유"
+
+
+def test_overflow_from_upper_row_moves_down_and_lower_row_refills_to_limit():
+    rows = assign_rows([candidate("위", *range(1, 26)), candidate("아래", 21, 3, 22, 30, 31)], limit=20)
+    assert placed(rows) == [("위", list(range(1, 21))), ("아래", [21, 22, 30, 31])]
+    # 위 줄에 들어간 영상을 먼저 빼고 자르므로 아래 줄도 상한까지 채운다.
+    rows = assign_rows([candidate("위", 1, 2), candidate("아래", 1, 2, 3, 4)], limit=2)
+    assert placed(rows) == [("위", [1, 2]), ("아래", [3, 4])]
+
+
+def test_empty_rows_are_hidden_including_rows_emptied_by_upper_rows():
+    assert assign_rows([]) == ()
+    rows = assign_rows([candidate("빈 줄"), candidate("위", 1), candidate("겹침", 1), candidate("아래", 2)])
+    assert placed(rows) == [("위", [1]), ("아래", [2])]
 
 
 @pytest.mark.parametrize("days, expected", [(29, False), (30, True), (31, True)])
@@ -69,7 +107,7 @@ def test_unwatched_boundary_and_glance(library, days, expected, glance):
     clock.days(days)
     assert (ids(core) == [video.id]) == expected
     if expected:
-        assert core.hidden_gems()[0].criterion == "unwatched"
+        assert [row.kind for row in core.recommendations()] == ["unwatched"]
 
 
 @pytest.mark.parametrize("days, expected", [(29, False), (30, True), (31, True)])
@@ -118,7 +156,7 @@ def test_abandoned_reason_resume_and_recent_order(library):
     core.playback.report(78)
     core.playback.end()
     assert ids(core) == [first.id, second.id]
-    assert "78%" in core.hidden_gems()[0].reason
+    assert "78%" in items(core)[0].reason
     assert core.switch_to(first.id) == 75
     core.playback.report(0, seeked=True)
     core.playback.report(90)
@@ -149,10 +187,11 @@ def test_priority_dedup_and_tag_order(library):
         core.add_video_tag(video.id, "과학")
     core.add_video_tag(both.id, "우주")
     clock.days(31)
-    gems = core.hidden_gems()
-    assert [g.video.id for g in gems] == [abandoned.id, revisit.id, both.id, tag_old.id, tag_new.id, old.id]
-    assert [g.criterion for g in gems] == ["abandoned", "revisit", "similar_tags", "similar_tags", "similar_tags", "unwatched"]
-    assert "과학" in gems[2].reason and "우주" in gems[2].reason
+    assert pairs(core) == [(abandoned.id, "abandoned"), (revisit.id, "revisit"), (both.id, "similar_tags"),
+                           (tag_old.id, "similar_tags"), (tag_new.id, "similar_tags"), (old.id, "unwatched")]
+    rows = core.recommendations()
+    assert [row.title for row in rows] == ["보다 만", "복습할 때가 됨", "태그가 비슷함", "오래 시청 없음"]
+    assert "과학" in rows[2].items[0].reason and "우주" in rows[2].items[0].reason
 
 
 def test_similar_tags_requires_favorite_video_tags_and_no_meaningful_viewing(library):
@@ -166,7 +205,7 @@ def test_similar_tags_requires_favorite_video_tags_and_no_meaningful_viewing(lib
     watch(core, favorite)
     assert ids(core) == [target.id]
     watch(core, target, 4)
-    assert core.hidden_gems()[0].criterion == "similar_tags"
+    assert pairs(core) == [(target.id, "similar_tags")]
     watch(core, target, 90)
     assert ids(core) == []
     third = add("하이라이트만 겹침")
@@ -242,10 +281,10 @@ def test_dismissal_persists_is_independent_of_library_and_restores(library):
         core.dismiss_video(9999)
 
 
-def test_limit_oldest_first_and_nonseries_exclusions(library):
+def test_row_limit_oldest_first_and_nonseries_exclusions(library):
     core, clock, add = library
     videos = []
-    for i in range(15):
+    for i in range(26):
         videos.append(add(f"독립영상{chr(65 + i)}"))
         clock.days(1)
     core.exclude_video(videos[0].id)
@@ -253,7 +292,32 @@ def test_limit_oldest_first_and_nonseries_exclusions(library):
     core.scan()
     core.dismiss_video(videos[2].id)
     clock.days(30)
-    assert ids(core) == [v.id for v in videos[3:13]]
+    assert ids(core) == [v.id for v in videos[3:23]]
+
+
+def test_similar_tags_overflow_appears_in_unwatched_row(library):
+    core, clock, add = library
+    favorite = add("즐겨 보는 영상")
+    watch(core, favorite)
+    watch(core, favorite)
+    core.add_video_tag(favorite.id, "주제")
+    tagged = []
+    for i in range(22):
+        tagged.append(add(f"태그 영상{i:02}"))
+        core.add_video_tag(tagged[-1].id, "주제")
+        clock.days(1)
+    plain = add("태그 없는 영상")
+    clock.days(30)
+    rows = core.recommendations()
+    assert [(row.kind, len(row.items)) for row in rows] == [("similar_tags", 20), ("unwatched", 3)]
+    assert [i.video.id for i in rows[0].items] == [v.id for v in tagged[:20]]
+    # 태그 줄에서 밀려난 두 편은 오래 시청 없음 조건에도 맞아 그 줄에 나온다.
+    assert [i.video.id for i in rows[1].items] == [tagged[20].id, tagged[21].id, plain.id]
+    core.dismiss_video(tagged[0].id)
+    rows = core.recommendations()
+    assert tagged[0].id not in ids(core)
+    assert [i.video.id for i in rows[0].items] == [v.id for v in tagged[1:21]]
+    assert [i.video.id for i in rows[1].items] == [tagged[21].id, plain.id]
 
 
 def test_settings_persist_and_use_injected_clock(library):
@@ -275,7 +339,7 @@ def test_invalid_period_rejected(library, value):
     core, _, _ = library
     core.settings.set("recommend.revisit_days", value)
     with pytest.raises(ValueError):
-        core.hidden_gems()
+        core.recommendations()
 
 
 def test_bulk_status_and_tags_match_single_reads_and_include_empty_and_excluded(library):
@@ -310,7 +374,7 @@ def test_finished_series_recommends_only_oldest_overdue_revisit(library):
     mark(core, a)
     mark(core, c)
     clock.days(30)
-    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == [(b.id, "revisit")]
+    assert pairs(core) == [(b.id, "revisit")]
     core.start_reel(highlight_id=core.highlights(b.id)[0].id)
     core.playback.report(13)
     core.playback.end()
@@ -337,7 +401,7 @@ def test_series_allows_first_unfinished_plus_one_finished_revisit(library, norma
     expected = [(finished.id, "revisit"), (first.id, normal)]
     if normal == "abandoned":
         expected.reverse()
-    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == expected
+    assert pairs(core) == expected
 
 
 def test_series_same_first_unfinished_and_oldest_revisit_is_not_duplicated(library):
@@ -351,7 +415,7 @@ def test_series_same_first_unfinished_and_oldest_revisit_is_not_duplicated(libra
     mark(core, later)
     clock.days(30)
     # 가장 오래 밀린 복습이 보다 만 기준으로 나와도 뒤 화로 복습 자리를 채우지 않는다.
-    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == [(first.id, "abandoned")]
+    assert pairs(core) == [(first.id, "abandoned")]
 
 
 def test_series_later_abandoned_can_only_appear_for_revisit(library):
@@ -362,7 +426,7 @@ def test_series_later_abandoned_can_only_appear_for_revisit(library):
     mark(core, later)
     core.settings.set("recommend.unwatched_days", 100)
     clock.days(30)
-    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == [(later.id, "revisit")]
+    assert pairs(core) == [(later.id, "revisit")]
     core.dismiss_video(first.id)  # 일반 후보 관심 없음도 복습 예외를 막지 않는다.
     assert ids(core) == [later.id]
 
@@ -388,7 +452,7 @@ def test_series_revisit_skips_ineligible_overdue_video(library, state):
     assert ids(core) == [b.id]
 
 
-def test_series_revisit_exceptions_still_share_ten_item_limit(library):
+def test_series_revisit_exceptions_fill_their_own_row(library):
     core, clock, add = library
     for letter in "ABCDEF":
         finished, first = add(letter + "다 본 강의"), add(letter + "미완료")
@@ -397,9 +461,8 @@ def test_series_revisit_exceptions_still_share_ten_item_limit(library):
         mark(core, finished)
         watch(core, first, 40)
     clock.days(30)
-    gems = core.hidden_gems()
-    assert len(gems) == len({g.video.id for g in gems}) == 10
-    assert [g.criterion for g in gems] == ["abandoned"] * 6 + ["revisit"] * 4
+    assert len(ids(core)) == len(set(ids(core))) == 12
+    assert [(row.kind, len(row.items)) for row in core.recommendations()] == [("abandoned", 6), ("revisit", 6)]
 
 
 @pytest.mark.parametrize("state, expected", [("excluded", False), ("missing", True), ("dismissed", True)])
@@ -436,10 +499,10 @@ def test_library_snapshot_reuses_public_state_and_preserves_tag_filter_scope(lib
     assert snapshot.statuses == core.viewing_status_map()
     assert snapshot.tags == core.video_tags_map()
     assert snapshot.series == core.series()
-    assert core.hidden_gems(snapshot=snapshot) == core.hidden_gems()
+    assert core.recommendations(snapshot=snapshot) == core.recommendations()
     # 이후 시청은 기존 스냅숏에 섞이지 않고 새 갱신에서 반영된다.
     watch(core, b)
-    assert b.id in [g.video.id for g in core.hidden_gems(snapshot=snapshot)]
+    assert b.id in [i.video.id for row in core.recommendations(snapshot=snapshot) for i in row.items]
     assert b.id not in ids(core)
 
 
@@ -479,7 +542,7 @@ def test_legacy_highlight_upgrade_baseline_is_preserved_on_reopen(tmp_path):
     core = AppCore(media=Media(), clock=clock, database=database)
     assert ids(core) == []
     clock.days(1)
-    assert [(g.video.id, g.criterion) for g in core.hidden_gems()] == [(1, "revisit")]
+    assert pairs(core) == [(1, "revisit")]
     clock.days(1)
     core = AppCore(media=Media(), clock=clock, database=database)
     assert ids(core) == [1]

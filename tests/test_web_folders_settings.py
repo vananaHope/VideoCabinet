@@ -28,7 +28,7 @@ def test_library_restore_entry_opens_existing_folder_section(window_factory, sec
     if section == 'excluded':
         window.library_page.library_controls.show_excluded()
     else:
-        window.library_page.hidden_gems.show_dismissed()
+        host.controllers['recommend'].show_dismissed()
     assert host.active_tab == 'folders' and window.pages.currentWidget() is host
     assert requested[-1] == 'folders-' + section
 
@@ -199,7 +199,7 @@ def test_conflicts_reserved_keys_and_reset_do_not_partially_save(window_factory,
     before = draft(bridge)
     proposed = {**before, 'point_highlight:0': ['Enter']}
     assert '같은 키' in json.loads(bridge.saveKeys(json.dumps(proposed)))['error']
-    for key in ('Ctrl+1', 'Ctrl+7', 'Alt+S', 'F1', 'Esc'):
+    for key in ('Ctrl+1', 'Ctrl+8', 'Alt+S', 'F1', 'Esc'):
         proposed['point_highlight:0'] = [key]
         assert 'error' in json.loads(bridge.saveKeys(json.dumps(proposed)))
         assert draft(bridge) == before
@@ -215,7 +215,7 @@ def test_conflicts_reserved_keys_and_reset_do_not_partially_save(window_factory,
 
 @pytest.mark.parametrize('key,modifier', [
     (Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier),
-    (Qt.Key.Key_7, Qt.KeyboardModifier.ControlModifier),
+    (Qt.Key.Key_8, Qt.KeyboardModifier.ControlModifier),
     (Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier),
     (Qt.Key.Key_F1, Qt.KeyboardModifier.NoModifier),
     (Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier),

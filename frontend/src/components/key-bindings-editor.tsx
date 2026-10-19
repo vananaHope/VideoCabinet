@@ -88,7 +88,7 @@ export function KeyBindingsEditor({ rows, bridge }: { rows: SettingKeyData[]; br
   return <section className="flex min-h-0 flex-1 flex-col gap-3" aria-label="키 배치 편집">
     <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-lg font-semibold">키 배치</h2><div className="flex gap-2"><Button variant="outline" disabled={saving} onClick={() => { setDraft(Object.fromEntries(rows.map(row => [row.id, { keys: row.defaults, display: row.defaultDisplay }]))); setMessage({ tone: 'info', text: '전체 기본값을 선택했습니다. 적용을 눌러 저장하세요.' }); setError('') }}>전체 기본값</Button><Button variant="outline" disabled={saving || changed.length === 0} onClick={() => { setDraft({}); setError(''); setMessage({ tone: 'info', text: '적용하지 않은 변경을 취소했습니다.' }) }}>변경 취소</Button><Button disabled={saving || changed.length === 0 || conflicts.length > 0} onClick={() => void save()}>적용</Button></div></div>
     <p className="text-sm text-muted-foreground">키 바꾸기에서 입력한 뒤 적용을 누르세요. Esc는 캡처 취소입니다. 목록 탐색과 편집 대화상자의 키는 바뀌지 않습니다.</p>
-    <p className="text-sm text-muted-foreground">예약 키: Ctrl+1~Ctrl+7 · Alt+S (설정) · F1 (키 안내) · Esc (취소·복귀)</p>
+    <p className="text-sm text-muted-foreground">예약 키: Ctrl+1~Ctrl+8 · Alt+S (설정) · F1 (키 안내) · Esc (취소·복귀)</p>
     {/* 저장 실패·키 충돌(오류) → 적용 전 변경 수·작업 결과(정보·성공) 순으로 쌓는다. 충돌 목록은 한 안내로 묶는다. */}
     <NoticeStack layout="yield" items={[
       error && { tone: "error", message: error, onDismiss: () => setError("") },

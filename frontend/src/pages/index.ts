@@ -1,6 +1,7 @@
 import type { ComponentType } from "react"
 import type { Tab } from "@/bridge-types"
 import LibraryPage from "./LibraryPage"
+import RecommendPage from "./RecommendPage"
 import QueuePage from "./QueuePage"
 import StatisticsPage from "./StatisticsPage"
 import ReelPage from "./ReelPage"
@@ -11,6 +12,7 @@ import SettingsPage from "./SettingsPage"
 // 웹 페이지만 추가한다. Python 등록부와의 불일치는 계약 테스트가 검출한다.
 export const pages = {
   library: LibraryPage,
+  recommend: RecommendPage,
   queue: QueuePage,
   statistics: StatisticsPage,
   reel: ReelPage,

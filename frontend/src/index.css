@@ -57,12 +57,12 @@
 /* 측정 결과만 사용자 정의 속성으로 전달한다. 모양은 테마와 전용 컴포넌트가 소유한다. */
 @utility virtual-canvas { height: var(--virtual-height); position: relative; }
 @utility scroll-stable { overflow-anchor: none; }
-/* 추천 상한은 10개다. 네 장 폭을 유지하고 한 행에서만 가로로 이동한다.
-   얇은 스크롤바 공간을 항상 예약해 4/5개 경계에서도 아래 패널 높이를 유지한다. */
-@utility gem-row {
+/* 추천 줄은 다섯 장 폭을 유지하고 그 줄 안에서만 가로로 이동한다.
+   얇은 스크롤바 공간을 항상 예약해 5/6개 경계에서도 줄 높이가 같다. */
+@utility recommendation-row {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: calc((100% - 6 * var(--spacing)) / 4);
+  grid-auto-columns: calc((100% - 8 * var(--spacing)) / 5);
   grid-template-rows: auto;
   gap: calc(2 * var(--spacing));
   overflow-x: scroll;
