@@ -338,6 +338,8 @@ def press_in_modal(window, kind):
         press_emergency(modal)
         # 아직 호출부의 exec 안이다. 창은 이미 숨었고 대화상자는 닫혔다.
         seen["inside_exec"] = (window.isVisible(), modal.isVisible())
+        if modal.isVisible():
+            modal.done(0)  # 탈출이 대화상자를 닫지 못했다. 테스트가 멈추지 않고 실패하게 끝낸다.
     QTimer.singleShot(50, press)
     return seen
 
