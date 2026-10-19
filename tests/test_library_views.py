@@ -31,7 +31,7 @@ def ids(core, **changes):
 def test_state_filters_use_shared_viewing_summary_including_glances_and_favorites(library):
     core = library
     a, b, c = core.videos()
-    for vid, ends in ((a.id, [4]), (b.id, [40, 1]), (c.id, [95, 40, 40, 2])):
+    for vid, ends in ((a.id, [4, 4, 4]), (b.id, [40, 1]), (c.id, [95, 40, 40, 2])):
         for end in ends:
             core.playback.start(vid, 0)
             core.playback.report(end)
@@ -40,6 +40,8 @@ def test_state_filters_use_shared_viewing_summary_including_glances_and_favorite
     assert ids(core, viewing='abandoned') == [b.id]
     assert ids(core, viewing='finished') == [c.id]
     assert ids(core, viewing='favorite') == [c.id]
+    # 틀어보기 3회인 a는 즐겨 보는 영상이 아니므로 필터에도 나오지 않는다.
+    assert a.id not in ids(core, viewing='favorite')
     assert ids(core, sort='count', descending=True) == [c.id, b.id, a.id]
     assert ids(core, viewed_preset='today') == [a.id, b.id, c.id]
     assert core.library_snapshot().statuses[b.id].resume_point == 1

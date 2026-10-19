@@ -210,12 +210,20 @@ def test_favorite_count_can_be_lowered(library):
 def test_settings_are_injected_and_history_reclassified(library):
     core, video_id, clock = library
     watch(core, video_id, 0, 75)
-    settings = ViewingSettings(finished_ratio=0.8, abandoned_ratio=0.1, favorite_count=3, resume_rewind=7)
+    settings = ViewingSettings(finished_ratio=0.8, abandoned_ratio=0.1, favorite_count=4, resume_rewind=7)
     reopened = AppCore(media=Media(), clock=clock, database=core.database, viewing_settings=settings)
     assert reopened.resume_start(video_id) == 68
     watch(reopened, video_id, 0, 80)
+    # 80% 시청은 주입한 finished_ratio=0.8에서만 다 봄이다(기본 0.9라면 보다 만).
+    assert reopened.viewing_status(video_id).finished
+    assert reopened.viewing_status(video_id).viewing_count == 2
+    # 주입한 favorite_count=4 미만이라 즐겨 보는 영상이 아니다(기본 3이라면 참).
     assert not reopened.viewing_status(video_id).favorite
     watch(reopened, video_id, 0, 80)
+    assert reopened.viewing_status(video_id).viewing_count == 3
+    assert not reopened.viewing_status(video_id).favorite
+    watch(reopened, video_id, 0, 80)
+    assert reopened.viewing_status(video_id).viewing_count == 4
     assert reopened.viewing_status(video_id).favorite
 
 
