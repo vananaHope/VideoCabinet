@@ -500,6 +500,17 @@ python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-196 -- .venv
 두 번째 명령은 짧은 검증 영상을 만들어 실창에서 `Ctrl+2`, 실제 mpv 재생 왕복, 긴급 탈출 뒤 트레이 열기,
 재생 중 창 닫기 뒤 트레이 열기가 같은 탭·같은 카드로 돌아오는지 확인합니다.
 
+추천 기간은 설정의 '추천' 절(`recommendation-periods.tsx`)에서 바꾸며, 이름·설명·기본값·허용 범위는 `RECOMMENDATION_PERIODS`에서 받습니다.
+
+```powershell
+.venv/Scripts/python.exe scripts/check_web_settings_recommend.py --offscreen
+python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-204 -- .venv/Scripts/python.exe scripts/check_web_settings_recommend.py --verify
+```
+
+첫 명령은 `.local/screens-204/`에 1100×720 화면(기본값·모두 바꾼 값·여러 칸 오류 위/아래·긴 이름과 설명)과 배치 측정을 남기고,
+키보드 입력 + Enter 저장, 기본값 단추, 추천 탭 재진입 반영을 확인합니다. 두 번째 명령은 실창에서 `Ctrl+8` → Tab·Enter로
+새로 추가됨 기간을 바꾸고 `Ctrl+2`로 추천 탭에 반영되는지, 기본값 단추로 되돌아오는지 확인합니다.
+
 모아보기(`Ctrl+3`)와 검색(`Ctrl+4`)도 웹 페이지입니다.
 모아보기는 기존 `ReelControls`의 재생·반복·복습 흐름을 쓰며, 검색은 장면 재생 후
 `Esc`로 돌아왔을 때 검색어·결과·선택을 보존합니다. 검색 입력의 `↓`/`Enter`는
