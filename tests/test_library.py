@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ import pytest
 
 from my_video_manager import scan_prefetch
 from my_video_manager.core import AppCore, MediaInfo
-from my_video_manager.library import ScanIssue, ScanResult
+from my_video_manager.library import Location, ScanIssue, ScanResult
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.translation import TranslatedLine
 
@@ -961,3 +962,87 @@ def test_series_edit_preserves_excluded_slots_during_reorder_and_removal(core, t
     core.restore_video(d)
     assert core.series()[0].video_ids == (e, b, c, d)
     assert core.series_for_video(a) is None
+
+
+def set_modified(path, moment):
+    stamp = int(moment.timestamp()) * 1_000_000_000
+    os.utime(path, ns=(stamp, stamp))
+
+
+def test_modified_date_uses_earliest_location_mtime_and_ignores_unknown(core, tmp_path):
+    content = b"same video"
+    first = video_file(tmp_path / "first", "video.mkv", content)
+    second = video_file(tmp_path / "second", "copy.mkv", content)
+    newer = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+    older = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    set_modified(first, newer)
+    set_modified(second, older)
+    core.add_file(first)
+    core.add_file(second)
+    video, = core.videos()
+    assert video.modified_at == older
+
+    # 수정 시각을 기록하지 않은 옛 위치 행은 계산에서 뺀다.
+    with sqlite3.connect(core.database) as db:
+        db.execute("UPDATE locations SET mtime_ns=NULL WHERE path=?", (str(second),))
+    assert core.video(video.id).modified_at == newer
+    with sqlite3.connect(core.database) as db:
+        db.execute("UPDATE locations SET mtime_ns=NULL WHERE path=?", (str(first),))
+    assert core.video(video.id).modified_at is None
+
+    second.unlink()
+    first.unlink()
+    core.scan()
+    assert core.video(video.id).missing
+    assert core.video(video.id).modified_at is None
+
+
+def test_modified_date_skips_mtime_outside_local_date_range(core, tmp_path):
+    content = b"same video"
+    known = video_file(tmp_path / "known", "video.mkv", content)
+    ancient = video_file(tmp_path / "ancient", "ancient.mkv", content)
+    moment = datetime(2026, 3, 1, 12, tzinfo=timezone.utc)
+    set_modified(known, moment)
+    os.utime(ancient, ns=(-86400 * 10**9, -86400 * 10**9))
+    for path in (known, ancient):
+        core.add_file(path)
+    video, = core.videos()
+    # 로컬 날짜로 바꿀 수 없는 값은 기록되지 않은 값처럼 빠지고 남는 값이 쓰인다.
+    assert video.modified_at == moment
+
+    # SQLite INTEGER 범위를 넘어 DB에 저장할 수 없는 3001년 이후 값도 모름으로 본다.
+    far = int((datetime(3005, 1, 1, tzinfo=timezone.utc) - datetime(1970, 1, 1, tzinfo=timezone.utc))
+              .total_seconds()) * 10**9
+    assert replace(video, locations=(Location(video.locations[0].path, far),)).modified_at is None
+
+    known.unlink()
+    core.scan()
+    current = core.video(video.id)
+    assert not current.missing
+    assert current.modified_at is None
+
+
+def test_rescan_updates_modified_date_after_replacing_file(core, tmp_path):
+    path = video_file(tmp_path / "watched")
+    core.add_watched_folder(path.parent)
+    core.scan()
+    video, = core.videos()
+    first = datetime(2026, 9, 10, 12, tzinfo=timezone.utc)
+    set_modified(path, first)
+    core.scan()
+    assert core.video(video.id).modified_at == first
+
+    # 같은 내용이면 영상은 그대로이고 수정 시각만 새 값으로 바뀐다.
+    second = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+    set_modified(path, second)
+    core.scan()
+    assert core.video(video.id).modified_at == second
+
+    # 내용까지 바뀌면 새 영상이 되고 새 수정 시각을 쓴다.
+    third = datetime(2026, 10, 12, 12, tzinfo=timezone.utc)
+    path.write_bytes(b"replaced content")
+    set_modified(path, third)
+    core.scan()
+    current = next(v for v in core.videos() if not v.missing)
+    assert current.id != video.id
+    assert current.modified_at == third

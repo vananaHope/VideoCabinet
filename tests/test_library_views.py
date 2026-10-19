@@ -1,12 +1,13 @@
 """공개 AppCore 조건 조합, 폴더 복사본, 날짜·정렬과 설정 복원."""
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import os
 import sqlite3
 
 import pytest
 
 from my_video_manager.core import AppCore, Command, CommandType
-from my_video_manager.library_views import default_options
+from my_video_manager.library_views import FILTER_DEFAULTS, default_options, filter_chips
 from test_library_details import Media, Transcriber, Translator
 
 
@@ -135,7 +136,9 @@ def test_options_persist_and_invalid_options_preserve_saved_settings(library):
     reopened = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database)
     assert reopened.library_view_options() == options
     for invalid in ({'sort': 'unknown'}, {'descending': 1}, {'tags': [True]}, {'added_from': 'bad-date'},
-                    {'added_preset': 'custom', 'added_from': '2026-02-02', 'added_to': '2026-01-01'}):
+                    {'modified_to': 'bad-date'},
+                    {'added_preset': 'custom', 'added_from': '2026-02-02', 'added_to': '2026-01-01'},
+                    {'modified_preset': 'custom', 'modified_from': '2026-02-02', 'modified_to': '2026-01-01'}):
         with pytest.raises(ValueError):
             core.save_library_view_options({**options, **invalid})
         assert core.library_view_options() == options
@@ -144,7 +147,6 @@ def test_options_persist_and_invalid_options_preserve_saved_settings(library):
 
 
 def test_date_chips_and_reset_follow_python_defaults():
-    from my_video_manager.library_views import filter_chips, FILTER_DEFAULTS
     options = {**default_options(), 'added_preset': 'custom'}
     assert filter_chips(options, {}) == []
     options['added_from'] = '2026-01-01'
@@ -156,3 +158,125 @@ def test_date_chips_and_reset_follow_python_defaults():
     chips = filter_chips(options, {1: 'one', 2: 'two'})
     assert chips[0]['reset']['external'] is False
     assert chips[1]['reset']['tags'] == [2]
+
+
+def set_mtime(path, nanoseconds):
+    os.utime(path, ns=(nanoseconds, nanoseconds))
+
+
+def local_noon_ns(day):
+    return int(datetime(day.year, day.month, day.day, 12).timestamp()) * 1_000_000_000
+
+
+@pytest.fixture
+def dated_library(tmp_path):
+    now = [datetime(2026, 10, 15, 12, tzinfo=timezone.utc)]
+    core = AppCore(media=Media(), clock=lambda: now[0], database=tmp_path / 'data/library.sqlite3',
+                   transcriber=Transcriber(), translator=Translator())
+    today = now[0].astimezone().date()
+    offsets = {'오늘': 0, '닷새': 5, '스무아흐레': 29, '서른': 30, '없음': 3}
+    paths = {}
+    for title, offset in offsets.items():
+        path = tmp_path / f'{title}.mp4'
+        path.write_bytes(title.encode())
+        core.add_file(path)
+        set_mtime(path, local_noon_ns(today - timedelta(days=offset)))
+        paths[title] = path
+    paths['없음'].unlink()
+    core.scan()
+    return core, today
+
+
+def test_modified_date_presets_custom_range_and_missing(dated_library):
+    core, today = dated_library
+    videos = {video.title: video.id for video in core.videos()}
+    day = lambda offset: (today - timedelta(days=offset)).isoformat()
+
+    assert set(ids(core, modified_preset='today')) == {videos['오늘']}
+    assert set(ids(core, modified_preset='7')) == {videos['오늘'], videos['닷새']}
+    # 30일 프리셋은 29일 전까지 포함하고 30일 전은 뺀다.
+    assert set(ids(core, modified_preset='30')) == {
+        videos['오늘'], videos['닷새'], videos['스무아흐레']}
+    assert videos['없음'] not in ids(core, modified_preset='30')
+
+    assert set(ids(core, modified_preset='custom', modified_from=day(5), modified_to=day(5))) == {videos['닷새']}
+    assert set(ids(core, modified_preset='custom', modified_from=day(0), modified_to=day(0))) == {videos['오늘']}
+    assert set(ids(core, modified_preset='custom', modified_from=day(30))) == {
+        videos['오늘'], videos['닷새'], videos['스무아흐레'], videos['서른']}
+    assert set(ids(core, modified_preset='custom', modified_to=day(5))) == {
+        videos['닷새'], videos['스무아흐레'], videos['서른']}
+
+
+def test_modified_date_sort_keeps_missing_last_both_ways(dated_library):
+    core, _ = dated_library
+    videos = {video.title: video.id for video in core.videos()}
+    ascending = ids(core, sort='modified')
+    descending = ids(core, sort='modified', descending=True)
+    assert ascending == [videos['서른'], videos['스무아흐레'], videos['닷새'], videos['오늘'], videos['없음']]
+    assert descending == [videos['오늘'], videos['닷새'], videos['스무아흐레'], videos['서른'], videos['없음']]
+
+
+def test_modified_date_ignores_out_of_range_mtime_in_views(tmp_path):
+    now = [datetime(2026, 10, 15, 12, tzinfo=timezone.utc)]
+    core = AppCore(media=Media(), clock=lambda: now[0], database=tmp_path / 'data/library.sqlite3',
+                   transcriber=Transcriber(), translator=Translator())
+    today = now[0].astimezone().date()
+    stamps = {'보통': local_noon_ns(today), '옛날': -86400 * 1_000_000_000}
+    for title, stamp in stamps.items():
+        path = tmp_path / f'{title}.mp4'
+        path.write_bytes(title.encode())
+        core.add_file(path)
+        set_mtime(path, stamp)
+    core.scan()
+    videos = {video.title: video.id for video in core.videos()}
+
+    # 범위 밖 값이 있어도 기본 보기와 정렬·거르기가 실패하지 않는다.
+    assert set(ids(core)) == set(videos.values())
+    assert ids(core, sort='modified') == [videos['보통'], videos['옛날']]
+    assert ids(core, sort='modified', descending=True) == [videos['보통'], videos['옛날']]
+    assert ids(core, modified_preset='today') == [videos['보통']]
+    # 범위 밖 값은 없는 날짜로 다뤄 조건에서 빠진다.
+    assert ids(core, modified_preset='custom', modified_from='1970-01-01', modified_to='1970-01-01') == []
+    assert ids(core, modified_preset='custom', modified_to='1970-01-02') == []
+
+
+def test_modified_date_filter_compares_local_dates_not_utc(dated_library, tmp_path):
+    core, today = dated_library
+    target = today - timedelta(days=7)
+    # 로컬 날짜와 UTC 날짜가 갈리는 자정 근처 시각을 고른다. 시간대에 따라 00:30이나
+    # 23:30 중 하나가 UTC에서는 다른 날짜가 된다.
+    for hour, minute in ((0, 30), (23, 30)):
+        seconds = int(datetime(target.year, target.month, target.day, hour, minute).timestamp())
+        utc_day = datetime.fromtimestamp(seconds, timezone.utc).date()
+        if utc_day != target:
+            break
+    else:
+        pytest.skip('로컬 시간대가 UTC와 같아 로컬 날짜와 UTC 날짜가 갈리지 않는다.')
+
+    path = tmp_path / '자정.mp4'
+    path.write_bytes(b'night')
+    core.add_file(path)
+    set_mtime(path, seconds * 1_000_000_000)
+    core.scan()
+    video = next(video for video in core.videos() if video.title == '자정')
+
+    assert ids(core, modified_preset='custom', modified_from=target.isoformat(),
+               modified_to=target.isoformat()) == [video.id]
+    # UTC 날짜로 거르면 이 영상이 나오므로, 위 결과가 로컬 날짜 기준임을 알 수 있다.
+    assert ids(core, modified_preset='custom', modified_from=utc_day.isoformat(),
+               modified_to=utc_day.isoformat()) == []
+
+
+def test_modified_date_chip_resets_condition_and_is_in_filter_defaults(dated_library):
+    core, _ = dated_library
+    options = {**default_options(), 'modified_preset': '7'}
+    chip, = filter_chips(options, {})
+    assert chip['key'] == 'modified_preset'
+    assert chip['label'] == '수정한 날짜: 최근 7일'
+    assert core.library_view_ids(chip['reset']) == core.library_view_ids(default_options())
+    assert FILTER_DEFAULTS['modified_preset'] == FILTER_DEFAULTS['modified_from'] == FILTER_DEFAULTS['modified_to'] == ''
+
+    custom = {**default_options(), 'modified_preset': 'custom', 'modified_from': '2026-10-01'}
+    chip, = filter_chips(custom, {})
+    assert chip['label'] == '수정한 날짜: 2026-10-01 ~ 끝 없음'
+    assert chip['reset']['modified_preset'] == chip['reset']['modified_from'] == ''

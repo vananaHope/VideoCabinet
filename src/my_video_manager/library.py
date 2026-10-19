@@ -1,7 +1,7 @@
 """내용 지문으로 영상을 식별하고 위치와 제외 상태를 보존한다."""
 
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import math
@@ -30,11 +30,23 @@ class MediaReader(Protocol):
 @dataclass(frozen=True)
 class Location:
     path: Path
+    # 수정 시각은 위치의 정체성이 아니라 계산에 쓰는 곁정보이므로 비교에서 뺀다.
+    mtime_ns: int | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
 class WatchedFolder:
     path: Path
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+# 파일 수정 시각을 로컬 날짜로 바꿀 수 있는 범위. Windows의 로컬 시각 변환은
+# 1970년 이전과 3000년 이후에서 OSError를 내고, NTFS는 1601년부터의 시각을
+# 허용하므로 실제로 범위 밖 값이 생길 수 있다. 그 밖의 값은 수정 시각을
+# 모르는 것으로 본다(mtime을 기록하지 않은 위치 행과 같다). 아래쪽은 서쪽
+# 시간대에서도 1970년으로 남도록 하루를 둔다.
+_MODIFIED_MIN_NS = 86_400 * 1_000_000_000
+_MODIFIED_MAX_NS = int((datetime(3000, 1, 1, tzinfo=timezone.utc) - _EPOCH).total_seconds()) * 1_000_000_000
 
 
 @dataclass(frozen=True)
@@ -54,6 +66,19 @@ class Video:
     @property
     def missing(self) -> bool:
         return not self.locations
+
+    @property
+    def modified_at(self) -> datetime | None:
+        """위치들의 파일 수정 시각 가운데 가장 이른 값. 파일 없음이거나 수정 시각을 모르면 없다.
+
+        로컬 날짜로 바꿀 수 없는 범위의 값은 기록되지 않은 값(NULL)처럼 계산에서 뺀다.
+        """
+        known = [location.mtime_ns for location in self.locations
+                 if location.mtime_ns is not None and _MODIFIED_MIN_NS <= location.mtime_ns <= _MODIFIED_MAX_NS]
+        if not known:
+            return None
+        seconds, nanoseconds = divmod(min(known), 1_000_000_000)
+        return _EPOCH + timedelta(seconds=seconds, microseconds=nanoseconds // 1000)
 
 
 @dataclass(frozen=True)
@@ -209,8 +234,8 @@ class Library:
         with self._connect() as db:
             db.execute("BEGIN")
             locations: dict[int, list[Location]] = {}
-            for row in db.execute("SELECT video_id, path FROM locations ORDER BY path"):
-                locations.setdefault(row["video_id"], []).append(Location(Path(row["path"])))
+            for row in db.execute("SELECT video_id, path, mtime_ns FROM locations ORDER BY path"):
+                locations.setdefault(row["video_id"], []).append(Location(Path(row["path"]), row["mtime_ns"]))
             return tuple(
                 Video(row["id"], row["title"], row["fingerprint"], row["duration"], row["format"],
                       self._thumbnails / Path(row["thumbnail"]).name, datetime.fromisoformat(row["registered_at"]),
@@ -321,8 +346,8 @@ class Library:
             row = db.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
             if row is None:
                 raise ValueError("영상을 찾을 수 없습니다.")
-            locations = tuple(Location(Path(r[0])) for r in db.execute(
-                "SELECT path FROM locations WHERE video_id = ? ORDER BY path", (video_id,)))
+            locations = tuple(Location(Path(r[0]), r[1]) for r in db.execute(
+                "SELECT path, mtime_ns FROM locations WHERE video_id = ? ORDER BY path", (video_id,)))
             return Video(row["id"], row["title"], row["fingerprint"], row["duration"], row["format"],
                          self._thumbnails / Path(row["thumbnail"]).name, datetime.fromisoformat(row["registered_at"]),
                          locations, bool(row["excluded"]), row["width"], row["height"])
@@ -364,13 +389,14 @@ class Library:
     def playback_location(self, video_id: int) -> Location:
         with self._connect() as db:
             video = db.execute("SELECT excluded FROM videos WHERE id=?", (video_id,)).fetchone()
-            paths = [Path(row[0]) for row in db.execute("SELECT path FROM locations WHERE video_id=? ORDER BY path", (video_id,))]
+            locations = [Location(Path(row[0]), row[1]) for row in db.execute(
+                "SELECT path, mtime_ns FROM locations WHERE video_id=? ORDER BY path", (video_id,))]
         if video and video[0]:
             raise ValueError("제외된 영상입니다. 제외 목록에서 되돌려 주세요.")
-        for path in paths:
-            if path.is_file():
-                return Location(path)
-            self._forget_location(path)
+        for location in locations:
+            if location.path.is_file():
+                return location
+            self._forget_location(location.path)
         raise ValueError("파일 없음: 영상의 위치가 없습니다. 다시 검사하거나 파일을 다시 연결해 주세요.")
 
     def _scan_roots(self, folders):

@@ -11,8 +11,9 @@ CHOICES = {
     'original': (('', '원어 자막 전체'), ('yes', '원어 자막 있음'), ('no', '원어 자막 없음')),
     'translated': (('', '번역·다듬은 자막 전체'), ('yes', '번역·다듬은 자막 있음'), ('no', '번역·다듬은 자막 없음')),
     'added_preset': (('', '추가일 전체'), ('today', '오늘'), ('7', '최근 7일'), ('30', '최근 30일'), ('custom', '직접 지정')),
+    'modified_preset': (('', '수정한 날짜 전체'), ('today', '오늘'), ('7', '최근 7일'), ('30', '최근 30일'), ('custom', '직접 지정')),
     'viewed_preset': (('', '마지막 시청 전체'), ('today', '오늘'), ('7', '최근 7일'), ('30', '최근 30일'), ('custom', '직접 지정')),
-    'sort': (('title', '제목'), ('added', '추가일'), ('viewed', '마지막 시청'), ('duration', '길이'), ('count', '시청 횟수')),
+    'sort': (('title', '제목'), ('added', '추가일'), ('modified', '수정한 날짜'), ('viewed', '마지막 시청'), ('duration', '길이'), ('count', '시청 횟수')),
     'card_size': (('small', '작게'), ('medium', '보통'), ('large', '크게')),
 }
 
@@ -31,6 +32,9 @@ class LibraryViewOptions(TypedDict):
     added_preset: str
     added_from: str
     added_to: str
+    modified_preset: str
+    modified_from: str
+    modified_to: str
     viewed_preset: str
     viewed_from: str
     viewed_to: str
@@ -43,6 +47,7 @@ class LibraryViewOptions(TypedDict):
 def default_options() -> LibraryViewOptions:
     return dict(query='', mode='all', folder='', tags=[], viewing='', original='', translated='',
                 external=False, highlights=False, missing=False, added_preset='', added_from='', added_to='',
+                modified_preset='', modified_from='', modified_to='',
                 viewed_preset='', viewed_from='', viewed_to='', sort='title', descending=False, card_size='medium', collapsed_folders=[])
 
 
@@ -72,7 +77,7 @@ def normalize_options(value) -> LibraryViewOptions:
         if key.endswith(('_from', '_to')) and item:
             date.fromisoformat(item)
         result[key] = item
-    for prefix in ('added', 'viewed'):
+    for prefix in ('added', 'modified', 'viewed'):
         start, end = result[prefix + '_from'], result[prefix + '_to']
         if result[prefix + '_preset'] == 'custom' and start and end and start > end:
             raise ValueError('시작 날짜는 끝 날짜보다 늦을 수 없습니다.')
@@ -108,7 +113,7 @@ def filter_chips(options, tags) -> list[LibraryChip]:
     for key, label in (('external', '외부 자막 있음'), ('highlights', '하이라이트 있음'), ('missing', '파일 없음')):
         if options[key]:
             chips.append(dict(key=key, label=label))
-    for prefix, label in (('added', '추가일'), ('viewed', '마지막 시청')):
+    for prefix, label in (('added', '추가일'), ('modified', '수정한 날짜'), ('viewed', '마지막 시청')):
         preset = options[prefix + '_preset']
         if preset and (preset != 'custom' or options[prefix + '_from'] or options[prefix + '_to']):
             text = (f"{options[prefix + '_from'] or '처음'} ~ {options[prefix + '_to'] or '끝 없음'}"
@@ -131,6 +136,27 @@ def filter_chips(options, tags) -> list[LibraryChip]:
     return chips
 
 
+def date_range(preset, start, end, today):
+    """프리셋이나 직접 지정 범위를 로컬 날짜 경계로 바꾼다. 양 끝 날짜를 포함한다."""
+    if preset in ('today', '7', '30'):
+        days = 1 if preset == 'today' else int(preset)
+        return today - timedelta(days=days - 1), today
+    if preset == 'custom':
+        return (date.fromisoformat(start) if start else None,
+                date.fromisoformat(end) if end else None)
+    return None, None
+
+
+def local_date(value):
+    """시각을 로컬 날짜로 바꾼다. 플랫폼이 변환하지 못하는 값은 모름(None)으로 본다."""
+    if value is None:
+        return None
+    try:
+        return value.astimezone().date()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
 @dataclass
 class LibraryViewIndex:
     snapshot: object
@@ -149,14 +175,15 @@ class LibraryViewIndex:
         required_tags = set(options['tags'])
         members = self.members.get(options['folder'], set()) if options['mode'] == 'folders' and options['folder'] else None
         ranges = {}
-        for prefix in ('added', 'viewed'):
-            preset = options[prefix + '_preset']
-            today = now.astimezone().date()
-            ranges[prefix] = ((today - timedelta(days=(1 if preset == 'today' else int(preset)) - 1), today)
-                             if preset in ('today', '7', '30') else
-                             (date.fromisoformat(options[prefix + '_from']) if options[prefix + '_from'] else None,
-                              date.fromisoformat(options[prefix + '_to']) if options[prefix + '_to'] else None)
-                             if preset == 'custom' else (None, None))
+        today = now.astimezone().date()
+        for prefix in ('added', 'modified', 'viewed'):
+            ranges[prefix] = date_range(options[prefix + '_preset'], options[prefix + '_from'],
+                                        options[prefix + '_to'], today)
+        active = {prefix: bounds for prefix, bounds in ranges.items()
+                  if bounds[0] is not None or bounds[1] is not None}
+        # 수정한 날짜는 조건이나 정렬이 있을 때만, 영상마다 한 번만 계산해 재사용한다.
+        modified = ({video.id: video.modified_at for video in self.snapshot.videos}
+                    if 'modified' in active or options['sort'] == 'modified' else {})
 
         def matches(video):
             vid = video.id
@@ -175,14 +202,12 @@ class LibraryViewIndex:
                 return False
             if options['missing'] and not video.missing:
                 return False
-            for prefix, value in (('added', video.registered_at), ('viewed', status.last_viewed_at)):
-                start, end = ranges[prefix]
-                if start is not None or end is not None:
-                    if value is None:
-                        return False
-                    day = value.astimezone().date()
-                    if (start and day < start) or (end and day > end):
-                        return False
+            for prefix, (start, end) in active.items():
+                value = (modified[vid] if prefix == 'modified'
+                         else video.registered_at if prefix == 'added' else status.last_viewed_at)
+                day = local_date(value)
+                if day is None or (start and day < start) or (end and day > end):
+                    return False
             return True
 
         def sort_key(video):
@@ -190,6 +215,9 @@ class LibraryViewIndex:
                 return self.titles[video.id]
             if options['sort'] == 'added':
                 return video.registered_at.timestamp()
+            if options['sort'] == 'modified':
+                value = modified[video.id]
+                return value.timestamp() if value else 0
             if options['sort'] == 'viewed':
                 value = self.snapshot.statuses[video.id].last_viewed_at
                 return value.timestamp() if value else 0
@@ -202,6 +230,8 @@ class LibraryViewIndex:
         videos.sort(key=sort_key, reverse=options['descending'])
         if options['sort'] == 'viewed':
             videos.sort(key=lambda v: self.snapshot.statuses[v.id].last_viewed_at is None)
+        elif options['sort'] == 'modified':
+            videos.sort(key=lambda v: modified[v.id] is None)
         return [v.id for v in videos]
 
 
