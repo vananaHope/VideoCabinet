@@ -107,6 +107,29 @@ class SettingsBridge(QObject):
         except (ValueError, TypeError, OSError, sqlite3.Error) as error:
             return encode({'error': str(error)})
 
+    @SETTINGS.slot('setRecommendationPeriod')
+    def setRecommendationPeriod(self, criterion, days):
+        # 글자를 수로 읽기만 하고 범위 검증은 코어가 한다. 추천 탭은 열릴 때 새 기간으로 다시 계산한다.
+        try:
+            try:
+                value = float(days)
+            except ValueError:
+                raise ValueError('일수를 숫자로 입력하세요.') from None
+            self.page.core.set_recommendation_period_days(criterion, value)
+            self.page.refresh()
+            return self.snapshot()
+        except (ValueError, OSError, sqlite3.Error) as error:
+            return encode({'error': str(error)})
+
+    @SETTINGS.slot('resetRecommendationPeriod')
+    def resetRecommendationPeriod(self, criterion):
+        try:
+            self.page.core.reset_recommendation_period_days(criterion)
+            self.page.refresh()
+            return self.snapshot()
+        except (ValueError, OSError, sqlite3.Error) as error:
+            return encode({'error': str(error)})
+
     @SETTINGS.slot('checkUpdate')
     def checkUpdate(self):
         try:
@@ -181,10 +204,18 @@ class WebSettingsPage(WebPageController):
                     defaultDisplay=display_keys(row.default_keys), note=row.note) for row in self.core.key_bindings()],
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,
                     automaticDetection=self.core.automatic_detection_enabled(),
+                    recommendationPeriods=self.recommendation_periods(),
                     translationCli=self.core.translation_cli, translation=self.core.translation_settings(),
                     heldTranslations=sum(entry.state == 'held' for entry in queue),
                     failedTranslations=sum(entry.state == 'failed' for entry in queue),
                     update=update_status_data(self.core, self.window.updates))
+
+    def recommendation_periods(self):
+        days = self.core.recommendation_period_days()
+        return [dict(criterion=period.criterion, label=period.label, description=period.description,
+                     days=days[period.criterion], defaultDays=period.default_days,
+                     minimumDays=period.minimum_days, maximumDays=period.maximum_days)
+                for period in self.core.recommendation_period_definitions()]
 
     def refresh(self):
         if not self.is_active():
