@@ -49,6 +49,9 @@ args.output.mkdir(parents=True, exist_ok=True)
 media = FFmpegMediaReader()
 core = AppCore(media=media, clock=lambda: datetime.now(timezone.utc), database=directory / 'library.sqlite3')
 core.set_minimum_duration(0)
+# 합성 위치에는 실제 파일이 없다. 시작 검사가 돌면 위치를 지워 폴더 계층이 사라지고,
+# 검사가 끝나기 전에 종료하면 quit_blocker 경고 대화상자에서 멈추므로 자동 감지(시작 검사 포함)를 끈다.
+core.set_automatic_detection_enabled(False)
 metrics = {'count': args.count, 'checks': [], 'screenshots': [], 'app_data': str(directory)}
 playable = None
 if args.source and args.count:
@@ -139,6 +142,59 @@ def key(value):
     settle()
 
 
+TOGGLE = "document.querySelector('button[aria-label=\"폴더 패널\"]')"
+
+
+def layout(name):
+    """#194: 검색줄·격자·폴더 패널이 1100px 창 폭을 넘지 않는지 잰다."""
+    value = json.loads(js("""JSON.stringify((() => {
+      const row = document.querySelector('[aria-label="영상 제목 빠른 검색"]').parentElement.parentElement, bounds = row.getBoundingClientRect()
+      const grid = document.getElementById('library-grid'), panel = document.getElementById('library-folder-panel')
+      return {rowOverflow: row.scrollWidth - row.clientWidth, outside: [...row.children].filter(c => c.getBoundingClientRect().right > bounds.right + 0.5).length,
+        searchWidth: document.querySelector('[aria-label="영상 제목 빠른 검색"]').clientWidth,
+        pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        gridWidth: grid.clientWidth, columns: Number(grid.getAttribute('aria-colcount')), panelWidth: panel ? panel.offsetWidth : 0,
+        panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : 0,
+        truncatedFolders: panel ? [...panel.querySelectorAll('[role=treeitem] .truncate')].filter(e => e.scrollWidth > e.clientWidth).length : 0}
+    })())"""))
+    assert value['rowOverflow'] <= 0 and value['outside'] == 0 and value['pageOverflow'] <= 0, (name, value)
+    assert value['panelOverflow'] <= 0 and value['gridWidth'] > 0 and value['columns'] >= 1, (name, value)
+    metrics.setdefault('layout', {})[name] = value
+
+
+def check_folder_toggle():
+    """#194: 아이콘 버튼은 Tab으로 닿고 Enter·Space로 패널을 여닫는다. 닫아도 고른 폴더를 저장해 둔다."""
+    # 전체와 같은 결과를 내는 폴더로는 거르기 해제·복원을 구별할 수 없으므로 일부만 담은 폴더를 고른다.
+    subset = next((n['id'] for n in page.index.folders if 0 < len(page.index.members.get(n['id'], ())) < args.count), '')
+    assert subset or not args.count, '일부 영상만 담은 폴더가 없음'
+    view(mode='folders', folder=subset, collapsed_folders=page.options['collapsed_folders'])
+    assert not args.count or 0 < len(page.visible_ids) < args.count, (subset, len(page.visible_ids))
+    js("document.getElementById('library-folders').focus()")
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+    settle()
+    assert js('document.activeElement.getAttribute("aria-label")') == '폴더 패널'
+    assert js(TOGGLE + '.getAttribute("aria-expanded")') == 'true' and js(TOGGLE + '.title') == '폴더 패널 닫기'
+    folder, members = page.options['folder'], list(page.visible_ids)
+    layout(f'{args.count}-panel-open')
+    key(Qt.Key.Key_Return)
+    wait(lambda: page.options['mode'] == 'all')
+    assert page.options['folder'] == folder and core.library_view_options()['folder'] == folder
+    assert len(page.visible_ids) == args.count
+    assert js(TOGGLE + '.getAttribute("aria-expanded")') == 'false' and js(TOGGLE + '.title') == '폴더 패널 열기'
+    assert not js("!!document.getElementById('library-folder-panel')")
+    assert js('document.activeElement.getAttribute("aria-label")') == '폴더 패널'
+    capture(f'{args.count}-panel-closed')
+    layout(f'{args.count}-panel-closed')
+    key(Qt.Key.Key_Space)
+    wait(lambda: page.options['mode'] == 'folders')
+    assert page.options['folder'] == folder and page.visible_ids == members
+    assert js(TOGGLE + '.getAttribute("aria-expanded")') == 'true'
+    reopened = AppCore(media=media, clock=lambda: datetime.now(timezone.utc), database=core.database)
+    assert reopened.library_view_options()['mode'] == 'folders' and reopened.library_view_options()['folder'] == folder
+    shown = f'일부 폴더 {len(members)}/{args.count}개 → 닫기 전체 → 열기 {len(members)}개' if args.count else '폴더 없음'
+    metrics['checks'].append(f'#194 폴더 패널 아이콘 Shift+Tab 도달·Enter 닫기(폴더 거르기 해제, 선택 보존)·Space 열기(폴더 복원)·설정 저장 ({shown})')
+
+
 try:
     wait(lambda: js("!!document.getElementById('library-grid')"))
     settle()
@@ -172,25 +228,35 @@ try:
                 settle()
         view(mode='folders')
         capture(f'{args.count}-folders-deep-long')
+        js("document.getElementById('library-folders').focus()")
         if args.count:
-            js("document.getElementById('library-folders').focus()")
+            # 합성 위치는 감시 루트 아래 여러 하위 폴더를 만든다. 계층이 없으면 접기/펴기를 검사할 수 없으므로 실패로 본다.
+            folders = page.index.folders
+            parents = {n['parent'] for n in folders if n['parent']}
+            assert any(not n['parent'] and n['id'] in parents for n in folders), folders
             key(Qt.Key.Key_Down)
             root_id = page.options['folder']
-            assert root_id
+            assert root_id in parents, root_id
             key(Qt.Key.Key_Left)
             assert js("document.querySelector('[role=treeitem][aria-selected=true]').getAttribute('aria-expanded')") == 'false'
             key(Qt.Key.Key_Right)
             assert js("document.querySelector('[role=treeitem][aria-selected=true]').getAttribute('aria-expanded')") == 'true'
             key(Qt.Key.Key_Down)
-            assert page.options['folder'] != root_id
-            key(Qt.Key.Key_Return)
-            assert js('document.activeElement.id') == 'library-grid'
-            metrics['checks'].append('실제 QTest 트리 ↑↓·←→ 접기/펴기·Enter 격자 이동')
-            js("document.getElementById('library-folders').focus()")
-            key(Qt.Key.Key_Up)
-            key(Qt.Key.Key_Tab)
-            assert js('document.activeElement.id') == 'library-grid'
-            metrics['checks'].append('트리 Tab 격자 이동')
+            assert next(n for n in folders if n['id'] == page.options['folder'])['parent'] == root_id
+            metrics['checks'].append('실제 QTest 트리 ↑↓·←→ 접기/펴기(부모·자식 폴더)')
+        else:
+            # 감시 폴더에 영상이 없으면 트리에는 '모든 폴더'만 남는다. Enter·Tab 격자 이동은 그대로 검사한다.
+            assert page.index.folders == [] and js("document.querySelectorAll('[role=treeitem]').length") == 1
+        key(Qt.Key.Key_Return)
+        assert js('document.activeElement.id') == 'library-grid'
+        metrics['checks'].append('트리 Enter 격자 이동')
+        js("document.getElementById('library-folders').focus()")
+        key(Qt.Key.Key_Up)
+        key(Qt.Key.Key_Tab)
+        assert js('document.activeElement.id') == 'library-grid'
+        metrics['checks'].append('트리 Tab 격자 이동')
+        check_folder_toggle()
+        if args.count:
             view(viewing='unwatched', tags=[t.id for t in core.tags()])
             capture(f'{args.count}-filter-chips')
             js("[...document.querySelectorAll('button')].find(b=>b.textContent==='필터').click()")
@@ -278,4 +344,6 @@ except Exception as error:
 finally:
     (args.output / 'metrics.json').write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
+    # 검사·백업 작업이 남은 채 완전 종료하면 quit_blocker 경고 대화상자가 offscreen에서 프로세스를 멈춘다.
+    wait(lambda: not window.tray.quit_blocker(), 120)
     window.tray.quit()

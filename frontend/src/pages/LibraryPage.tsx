@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { LibraryChoice, LibraryFilters, LibraryFilterChips } from "@/components/library-filters"
 import { LibraryFolders } from "@/components/library-folders"
@@ -106,6 +107,7 @@ export default function LibraryPage() {
 
   const byId = useMemo(() => new Map(data?.videos.map(video => [video.id, video]) ?? []), [data?.videos])
   const visible = useMemo(() => data?.visibleIds.flatMap(id => byId.get(id) ?? []) ?? [], [data?.visibleIds, byId])
+  const foldersOpen = data?.options.mode === 'folders'
 
   function filter(patch: Partial<LibraryViewOptions>) {
     if (!bridge || !optionsRef.current) return
@@ -166,7 +168,6 @@ export default function LibraryPage() {
         <div className="min-w-24 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목 검색" value={data.options.query}
           onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter({ query: event.currentTarget.value }) }}
           onChange={event => { const query = event.target.value; if (!composing.current) filter({ query }); else { optionsRef.current = { ...data.options, query }; setData({ ...data, options: { ...data.options, query } }) } }} /></div>
-        <LibraryChoice name="mode" label="보기" options={data.options} onChange={filter} />
         <LibraryChoice name="card_size" label="카드 크기" options={data.options} onChange={filter} />
         <LibraryChoice name="sort" label="정렬" options={data.options} onChange={filter} />
         <Button size="sm" variant="outline" aria-label="정렬 방향" onClick={() => filter({ descending: !data.options.descending })}>{data.options.descending ? "내림차순 ↓" : "오름차순 ↑"}</Button>
@@ -178,7 +179,10 @@ export default function LibraryPage() {
     <NoticeStack layout="yield" items={[error && { tone: "error", message: error, onDismiss: () => setError("") }]} />
     {/* 안내가 길어도 카드 격자·상세 패널이 최소 높이를 지킨다. */}
     <div className="flex min-h-40 flex-1 gap-2">
-      {data?.options.mode === 'folders' && <LibraryFolders collapsedIds={data.options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
+      {/* 패널을 닫아도 고른 폴더(folder)는 옵션에 남아 다시 열 때 복원된다. */}
+      {data && <Button size="icon-sm" variant={foldersOpen ? "secondary" : "outline"} aria-label="폴더 패널" aria-expanded={foldersOpen} aria-controls={foldersOpen ? "library-folder-panel" : undefined}
+        title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>}
+      {foldersOpen && <LibraryFolders collapsedIds={data.options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
       <LibraryGrid cardSize={data?.options.card_size ?? 'medium'} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} />
       <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} />
     </div>

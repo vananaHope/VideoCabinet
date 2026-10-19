@@ -418,8 +418,8 @@ if args.verify:
     QTest.mouseClick(host.view.focusProxy(), Qt.MouseButton.LeftButton, pos=QPoint(*map(int, point)))
     wait_until(lambda: js('document.activeElement.tagName') == 'INPUT')
     QTest.qWait(100)
-    # 검색 다음에는 보기·카드 크기·정렬 Select 트리거와 정렬 방향 버튼이 Tab 순서대로 온다.
-    for label in ('보기', '카드 크기', '정렬', '정렬 방향'):
+    # 검색 다음에는 카드 크기·정렬 Select 트리거와 정렬 방향 버튼이 Tab 순서대로 온다.
+    for label in ('카드 크기', '정렬', '정렬 방향'):
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
         wait_until(lambda: js('document.activeElement.getAttribute("aria-label")') == label)
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)

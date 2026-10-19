@@ -54,7 +54,7 @@ export function LibraryFolders({ folders, selected, onSelect, collapsedIds, onCo
       document.getElementById('library-grid')?.focus()
     }
   }
-  return <aside className="flex w-48 shrink-0 flex-col gap-2 rounded-lg border p-2">
+  return <aside id="library-folder-panel" className="flex w-48 shrink-0 flex-col gap-2 rounded-lg border p-2">
     <h2 className="text-xs font-semibold">폴더 · 하위 폴더 포함</h2>
     <div id="library-folders" role="tree" aria-label="라이브러리 폴더" aria-activedescendant={`folder-${positions.get(selected)}`} tabIndex={0} onKeyDown={keyDown} className="min-h-0 flex-1 overflow-y-auto rounded-md focus-visible:outline-2 focus-visible:outline-ring">
       {visible.map(node => <button id={`folder-${positions.get(node.id)}`} key={node.id} role="treeitem" aria-level={Math.max(1, node.depth + 1)} aria-selected={selected === node.id} aria-expanded={parents.has(node.id) ? !collapsed.has(node.id) : undefined} tabIndex={-1}
