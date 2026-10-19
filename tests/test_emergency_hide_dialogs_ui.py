@@ -701,9 +701,10 @@ def test_context_menu_closes_on_hiding_and_returns_closed(window):
         card.dispatchEvent(new MouseEvent('contextmenu', {{bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 20}})) }})()""")
     wait_shown(window, "[role=menu]")
     # 포인터를 항목 위에 올려 고르는 중인 상태로 둔다(실행하지 않음).
+    # 탭 이동 뒤 라이브러리가 늦게 격자로 초점을 되돌릴 수 있으므로 항목 초점이 아니라 메뉴가 열려 항목이 보이는지로 준비를 확인한다.
     js(window, f"{shown('[role=menuitem]')}.dispatchEvent(new PointerEvent('pointermove', {{bubbles: true, pointerType: 'mouse'}}))")
-    # offscreen 페이지는 초점 이벤트를 보내지 않으므로 강조 대신 항목 초점으로 확인한다.
-    wait_for(lambda: js(window, "document.activeElement.getAttribute('role')") == "menuitem")
+    settle(window)
+    wait_shown(window, "[role=menu] [role=menuitem]")
     press_emergency(view(window))
     assert not window.isVisible()
     settle_hidden(window)

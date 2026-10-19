@@ -1,11 +1,10 @@
 """Qt Windows 키 매퍼(qt_keys.key_name)와 Win32Dialogs.key_name을 같은 가상 키·수정자로 대조한다.
 
-실제 Windows 창을 띄우므로 이 실행이 데스크톱 잠금을 소유했을 때만 창을 만든다. 잠금 파일의 pid가
-현재 프로세스의 부모 계통에 있고 잠금이 신선할 때만 통과한다. 잠금이 없거나 다른 작업자가 잡고 있으면
-`desktop_lock.py run --owner issue-183-probe -- ...`로 감싸 실행한다. test_native_dialogs.py의 실창
-검사는 probe_command()로 그 래퍼를 거치고, `--record 경로`로 실행하면 기본 pytest가 실창 없이 대조할
-기대값을 기록한다. 창은 화면 밖 투명 창이고 초점을 옮기지 않는다. 이 스레드의 키보드 상태
-(SetKeyboardState)로 수정자를 정하고 키 메시지를 그 Qt 창에 보낸다.
+실제 Windows 창을 띄우므로 데스크톱 잠금 래퍼(`desktop_lock.py run`) 안에서만 실행한다. 탐침은 잠금을
+잡거나 풀지 않고 확인만 한다: 잠금 파일의 pid가 현재 프로세스 자신이나 조상일 때만 창을 만든다(owner 이름과
+잠금 나이는 보지 않는다). test_native_dialogs.py의 실창 검사가 하위 프로세스로 실행하고, `--record 경로`로
+실행하면 기본 pytest가 실창 없이 대조할 기대값을 기록한다. 창은 화면 밖 투명 창이고 초점을 옮기지 않는다.
+이 스레드의 키보드 상태(SetKeyboardState)로 수정자를 정하고 키 메시지를 그 Qt 창에 보낸다.
 """
 import ctypes
 from ctypes import wintypes
@@ -13,7 +12,6 @@ import json
 import os
 from pathlib import Path
 import sys
-import time
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QApplication, QWidget
@@ -23,11 +21,8 @@ from my_video_manager.native_dialogs import Win32Dialogs
 from my_video_manager.qt_keys import key_name
 
 LOCK = Path.home() / ".agent-orchestra" / "desktop.lock"
-LOCK_SCRIPT = Path.home() / ".agent-orchestra" / "bin" / "desktop_lock.py"
-OWNER = "issue-183-probe"
+LOCK_COMMAND = f"python {(Path.home() / '.agent-orchestra' / 'bin' / 'desktop_lock.py').as_posix()} run --owner <이름> -- <명령>"
 PROBE = Path(__file__).resolve()
-# desktop_lock.py가 오래된 잠금을 넘겨받는 기준과 같은 값이다.
-STALE_SECONDS = 15 * 60
 
 KEYS = [0x48, 0x41, 0x5A, 0x31, 0x30, 0x32, 0x36, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE,
         0x61, 0x69, 0x6A, 0x6B, 0x6D, 0x6E, 0x6F, 0x74, 0x25, 0x20, 0x2E]
@@ -103,24 +98,24 @@ def process_chain(pid=None, parent_of=None, limit=32):
     return chain
 
 
-def desktop_lock_problem(path=None, pid=None, parent_of=None, now=None):
-    """이 실행이 쓸 수 있는 데스크톱 잠금인지 검사한다. 문제가 없으면 None, 있으면 이유."""
+def desktop_lock_problem(path=None, pid=None, parent_of=None):
+    """이 실행을 감싼 데스크톱 잠금인지 읽기만 해서 검사한다. 문제가 없으면 None, 있으면 이유와 실행 방법.
+
+    잠금 pid가 현재 프로세스 자신이나 조상이면 통과한다. 조상이 잡은 잠금은 오래됐어도 정당하므로
+    나이와 owner 이름은 보지 않는다.
+    """
     path = LOCK if path is None else path
-    now = time.time() if now is None else now
     holder = read_lock(path)
+    owner_pid = holder.get("pid") if holder else None
     if holder is None:
-        return f"데스크톱 잠금이 없습니다: {path}. desktop_lock.py run --owner {OWNER} -- 로 실행하세요."
-    owner_pid = holder.get("pid")
-    if isinstance(owner_pid, bool) or not isinstance(owner_pid, int) or owner_pid <= 0:
-        return f"데스크톱 잠금 pid가 무효합니다: {owner_pid!r}"
-    since = holder.get("since")
-    if isinstance(since, bool) or not isinstance(since, (int, float)) or not 0 <= now - since <= STALE_SECONDS:
-        return f"데스크톱 잠금이 오래되었거나 시각이 잘못됐습니다: {since!r}"
-    chain = process_chain(pid, parent_of)
-    if owner_pid not in chain:
-        return (f"데스크톱 잠금 소유자 {owner_pid}({holder.get('owner')!r})이(가) 현재 프로세스 계통 "
-                f"{chain}에 없습니다. desktop_lock.py run --owner {OWNER} -- 로 실행하세요.")
-    return None
+        reason = f"데스크톱 잠금이 없습니다({path})"
+    elif isinstance(owner_pid, bool) or not isinstance(owner_pid, int) or owner_pid <= 0:
+        reason = f"데스크톱 잠금 pid가 무효합니다({owner_pid!r})"
+    elif owner_pid not in (chain := process_chain(pid, parent_of)):
+        reason = f"데스크톱 잠금 소유자 {owner_pid}({holder.get('owner')!r})이(가) 현재 프로세스 계통 {chain}에 없습니다"
+    else:
+        return None
+    return f"{reason}. 실창 검사는 `{LOCK_COMMAND}`으로 감싸 실행하세요."
 
 
 def ensure_desktop_lock_owned(**kwargs):
@@ -129,18 +124,6 @@ def ensure_desktop_lock_owned(**kwargs):
     if problem:
         raise SystemExit(problem)
     return read_lock(kwargs.get("path"))
-
-
-def probe_command(probe=None):
-    """실창 검사가 실행할 탐침 명령.
-
-    이미 이 프로세스 계통이 잠금을 소유했으면 그대로 실행하고(중첩 획득·해제 방지),
-    아니면 desktop_lock.py가 잠금을 잡은 뒤 탐침을 실행하게 감싼다.
-    """
-    direct = [sys.executable, str(PROBE if probe is None else probe)]
-    if desktop_lock_problem() is None:
-        return direct
-    return [sys.executable, str(LOCK_SCRIPT), "run", "--owner", OWNER, "--", *direct]
 
 
 def user32_api():

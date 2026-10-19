@@ -1,15 +1,15 @@
 """Windows 기본 파일 창 어댑터: Qt와 같은 키 이름, 가짜 Win32 경계로 훅 수명과 긴급 탈출.
 
-Qt Windows 키 매퍼와의 실제 대조는 실창을 띄우므로 기본 실행에서 빠진다. 켜면 탐침 자식 프로세스만
-`desktop_lock.py run`으로 감싸 잠금을 잡고, 탐침은 잠금 pid가 자기 부모 계통에 있을 때만 창을 만든다.
+Qt Windows 키 매퍼와의 실제 대조는 실창을 띄우므로 기본 실행에서 빠진다. 켤 때는 pytest 전체를 데스크톱 잠금
+래퍼로 감싼다. 탐침은 잠금을 잡거나 풀지 않고, 잠금 pid가 자기 조상일 때만 창을 만든다.
 
     $env:MVM_REAL_WINDOW_TESTS = '1'
-    .venv/Scripts/python -m pytest tests/test_native_dialogs.py -q
+    python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scripts/python -m pytest tests/test_native_dialogs.py -q
     Remove-Item Env:MVM_REAL_WINDOW_TESTS
 
 기본 실행은 그 탐침이 기록한 Qt 이름과 키보드 배열 글자(`fixtures/windows_key_names.json`)로 이름 규칙을 대조한다.
-기록을 새로 만들 때는 잠금 래퍼를 써서
-`python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-183-probe -- .venv/Scripts/python tests/windows_key_probe.py --record tests/fixtures/windows_key_names.json`을 실행한다.
+기록을 새로 만들 때도 같은 래퍼로 감싼다:
+`python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scripts/python tests/windows_key_probe.py --record tests/fixtures/windows_key_names.json`
 """
 
 import json
@@ -55,80 +55,106 @@ def fake_parent_chain(monkeypatch):
     monkeypatch.setattr(windows_key_probe, "parent_pid", lambda pid: {os.getpid(): 4242, 4242: 1}.get(pid))
 
 
-def write_lock(path, *, owner="issue-183-probe", pid=4242, since=None):
+def write_lock(path, *, owner="issue-183", pid=4242, since=None):
     path.write_text(json.dumps({"owner": owner, "pid": pid, "since": time.time() if since is None else since}),
                     encoding="utf-8")
 
 
-@pytest.mark.parametrize("case", ["missing", "foreign", "invalid-pid", "stale"])
-def test_probe_stops_before_window_without_its_own_fresh_lock(tmp_path, monkeypatch, case):
-    """잠금 없음/다른 owner/무효 pid/오래된 잠금이면 창 생성 경계에 도달하지 않는다."""
+def lock_state(path):
+    return (path.read_bytes(), path.stat().st_mtime_ns) if path.exists() else None
+
+
+@pytest.fixture
+def probe_lock(tmp_path, monkeypatch):
+    """임시 잠금 파일과 창 생성 경계 대역. 창을 만들면 created에 남고 기록 행은 비어 있다."""
     lock = tmp_path / "desktop.lock"
-    if case == "foreign":
-        write_lock(lock, owner="another-worker", pid=987654321)
-    elif case == "invalid-pid":
-        write_lock(lock, pid=0)
-    elif case == "stale":
-        write_lock(lock, since=time.time() - windows_key_probe.STALE_SECONDS - 1)
-    created = []
-    monkeypatch.setattr(windows_key_probe, "LOCK", lock)
-    fake_parent_chain(monkeypatch)
-    monkeypatch.setattr(windows_key_probe, "create_window", lambda: created.append(True))
-    with pytest.raises(SystemExit):
-        windows_key_probe.main([])
-    assert created == []
-
-
-def test_record_probe_also_stops_before_window_without_lock(tmp_path, monkeypatch):
-    """--record 경로도 같은 잠금 확인을 지나므로 잠금이 없으면 기대값 파일도 만들지 않는다."""
-    output = tmp_path / "windows_key_names.json"
-    created = []
-    monkeypatch.setattr(windows_key_probe, "LOCK", tmp_path / "desktop.lock")
-    fake_parent_chain(monkeypatch)
-    monkeypatch.setattr(windows_key_probe, "create_window", lambda: created.append(True))
-    with pytest.raises(SystemExit):
-        windows_key_probe.main(["--record", str(output)])
-    assert created == [] and not output.exists()
-
-
-def test_probe_creates_window_only_with_parent_owned_fresh_lock(tmp_path, monkeypatch):
-    lock = tmp_path / "desktop.lock"
-    write_lock(lock)
     created = []
     monkeypatch.setattr(windows_key_probe, "LOCK", lock)
     fake_parent_chain(monkeypatch)
     monkeypatch.setattr(windows_key_probe, "create_window", lambda: created.append(True) or ("app", "widget"))
-    monkeypatch.setattr(windows_key_probe, "collect_rows", lambda app, widget: [])
-    windows_key_probe.main([])
+    monkeypatch.setattr(windows_key_probe, "collect_rows", lambda app, widget: [{"qt": "Ctrl+H", "native": "Ctrl+H"}])
+    return lock, created
+
+
+@pytest.mark.parametrize("case", ["missing", "foreign", "same-owner-foreign", "invalid-pid"])
+@pytest.mark.parametrize("argv", [[], ["--record", "out.json"]], ids=["direct", "record"])
+def test_probe_stops_before_window_unless_an_ancestor_holds_the_lock(probe_lock, tmp_path, monkeypatch, case, argv):
+    """잠금 없음/계통 밖 pid(같은 owner 이름 포함)/무효 pid면 창도 기록 파일도 만들지 않고 실행 방법을 안내한다.
+
+    잠금 파일은 읽기만 한다.
+    """
+    lock, created = probe_lock
+    if case == "foreign":
+        write_lock(lock, owner="another-worker", pid=987654321)
+    elif case == "same-owner-foreign":
+        write_lock(lock, owner="issue-183", pid=987654321)
+    elif case == "invalid-pid":
+        write_lock(lock, pid=0)
+    before = lock_state(lock)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as stopped:
+        windows_key_probe.main(argv)
+    assert "desktop_lock.py run --owner" in str(stopped.value.code)
+    assert created == [] and not (tmp_path / "out.json").exists()
+    assert lock_state(lock) == before
+
+
+@pytest.mark.parametrize("argv", [[], ["--record", "out.json"]], ids=["direct", "record"])
+def test_probe_runs_under_an_ancestor_lock_even_when_it_is_old(probe_lock, tmp_path, monkeypatch, argv):
+    """조상(래퍼)이 잡은 잠금이면 오래돼도 창을 만들고, 잠금은 그대로 둔다."""
+    lock, created = probe_lock
+    write_lock(lock, since=time.time() - 24 * 60 * 60)
+    before = lock_state(lock)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(windows_key_probe, "user32_api", lambda: type("User32", (), {"GetKeyboardLayout": staticmethod(lambda _: 0x04120412)}))
+    windows_key_probe.main(argv)
     assert created == [True]
+    assert lock_state(lock) == before
+    if argv:
+        assert json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))["rows"] == [{"qt": "Ctrl+H"}]
 
 
-def test_probe_command_wraps_with_desktop_lock_when_this_process_does_not_own_it(tmp_path, monkeypatch):
-    monkeypatch.setattr(windows_key_probe, "LOCK", tmp_path / "missing.lock")
-    command = windows_key_probe.probe_command()
-    assert command[:6] == [sys.executable, str(windows_key_probe.LOCK_SCRIPT), "run", "--owner",
-                           windows_key_probe.OWNER, "--"]
-    assert command[6:] == [sys.executable, str(windows_key_probe.PROBE)]
+def real_window_rows(probe=None):
+    """opt-in 실창 대조: 이 pytest가 잠금 래퍼 안에 있는지 확인한 뒤 탐침을 하위 프로세스로 실행하고 그 stdout만 읽는다.
+
+    래퍼(desktop_lock.py run)는 pytest 바깥에 있으므로 그 획득·해제 로그는 탐침 stdout에 섞이지 않는다.
+    """
+    problem = windows_key_probe.desktop_lock_problem()
+    if problem:
+        pytest.fail(problem)
+    env = dict(os.environ, QT_QPA_PLATFORM="windows", PYTHONPATH=os.pathsep.join(sys.path))
+    result = subprocess.run([sys.executable, str(probe or windows_key_probe.PROBE)], capture_output=True, text=True,
+                            encoding="utf-8", env=env, timeout=120)
+    assert result.returncode == 0, result.stderr[-2000:]
+    return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-def test_probe_command_does_not_nest_lock_when_this_process_already_owns_it(tmp_path, monkeypatch):
-    """바깥에서 이미 잠금을 잡고 pytest를 돌리는 경우 같은 owner로 다시 잡았다 풀지 않는다."""
-    lock = tmp_path / "desktop.lock"
+def test_real_window_check_fails_clearly_outside_the_lock_wrapper(probe_lock):
+    lock, _ = probe_lock
+    write_lock(lock, pid=987654321)
+    before = lock_state(lock)
+    with pytest.raises(pytest.fail.Exception, match="desktop_lock.py run --owner"):
+        real_window_rows()
+    assert lock_state(lock) == before
+
+
+def test_real_window_check_reads_only_the_probe_output_under_the_wrapper(probe_lock, tmp_path):
+    """래퍼 안에서는 탐침만 직접 실행하고(다시 감싸지 않음), 래퍼 로그 없이 탐침 stdout의 결과를 읽는다."""
+    lock, _ = probe_lock
     write_lock(lock)
-    monkeypatch.setattr(windows_key_probe, "LOCK", lock)
-    fake_parent_chain(monkeypatch)
-    assert windows_key_probe.probe_command() == [sys.executable, str(windows_key_probe.PROBE)]
+    before = lock_state(lock)
+    probe = tmp_path / "fake_probe.py"
+    probe.write_text("import json, sys\nprint('탐침 진행', file=sys.stderr)\nprint(json.dumps([{'qt': 'Ctrl+H'}]))\n",
+                     encoding="utf-8")
+    assert real_window_rows(probe) == [{"qt": "Ctrl+H"}]
+    assert lock_state(lock) == before
 
 
-@pytest.mark.skipif(os.environ.get("MVM_REAL_WINDOW_TESTS") != "1", reason="실창 검사: MVM_REAL_WINDOW_TESTS=1로 연다")
+@pytest.mark.skipif(os.environ.get("MVM_REAL_WINDOW_TESTS") != "1", reason="실창 검사: MVM_REAL_WINDOW_TESTS=1로 잠금 래퍼 안에서 연다")
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows 키 매퍼 대조")
 def test_native_key_names_match_qt_capture_names_in_real_windows():
     """같은 가상 키·수정자를 실제 Qt Windows 키 매퍼(qt_keys.key_name)와 지금 키보드 배열의 네이티브 이름으로 만들어 대조한다."""
-    env = dict(os.environ, QT_QPA_PLATFORM="windows", PYTHONPATH=os.pathsep.join(sys.path))
-    result = subprocess.run(windows_key_probe.probe_command(), capture_output=True, text=True, encoding="utf-8",
-                            env=env, timeout=120)
-    assert result.returncode == 0, result.stderr[-2000:]
-    rows = json.loads(result.stdout.strip().splitlines()[-1])
+    rows = real_window_rows()
     assert len(rows) > 150 and all(row["qt"] for row in rows)
     assert [row for row in rows if row["qt"] != row["native"]] == []
     assert SHIFTED_SYMBOLS <= {row["qt"] for row in rows}
