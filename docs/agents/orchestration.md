@@ -56,11 +56,13 @@
 
 | 등급 | 구현 목록(앞부터) |
 | --- | --- |
-| `light` | opencode@high → codex@medium |
-| `standard` | opencode@high → codex@medium |
-| `hard` | claude@high → codex@high |
+| `light` | opencode@high → codex@high |
+| `standard` | opencode@high → codex@high |
+| `hard` | codex@high → claude@high |
 
-- OpenCode `standard` 크기 상한: 파일 4개·변경 200줄 안팎
+- OpenCode `standard` 크기 상한: 제품 코드 변경 300줄 안팎. 테스트·문서 줄과 파일 수는 세지 않는다.
+- UI 작업은 등급과 따로 Claude가 구현한다. 위 `hard` 순서는 UI가 아닌 일에만 적용된다.
+- 동시성·잠금·프로세스 수명을 다루는 일은 작아 보여도 `standard` 이상으로 정한다(#183에서 `light`로 맡긴 잠금 수정이 새 결함 3개를 만듦).
 
 ## 추가 완료 조건
 
