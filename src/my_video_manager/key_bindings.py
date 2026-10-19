@@ -65,6 +65,7 @@ def command_label(command: Command) -> str:
         "toggle_fullscreen": "전체 화면 켜기 / 끄기",
         "toggle_highlight_list": "하이라이트 패널 접기 / 펴기",
         "emergency_hide": "긴급 탈출(창 숨기기)",
+        "random_play": "무작위 재생",
     }.get(kind, kind)
 
 
@@ -72,16 +73,18 @@ def command_note(command: Command) -> str:
     """키 배치 화면의 명령 안내. 다른 명령은 재생 화면에서만 동작한다."""
     if command.kind.value == "emergency_hide":
         return "재생 화면 밖 모든 탭에서도 동작합니다. 일시정지하고 창을 트레이로 숨깁니다. Ctrl·Alt·Win 중 하나가 들어간 조합만 지정할 수 있습니다."
+    if command.kind.value == "random_play":
+        return "재생 화면 밖 모든 탭에서도 영상 전체에서 고릅니다. 대화상자·IME 조합 중에는 동작하지 않습니다. Ctrl·Alt·Win 중 하나가 들어간 조합만 지정할 수 있습니다."
     return ""
 
 
 def check_command_key(command: Command, key: str) -> None:
     """정규화한 키가 이 명령에 쓸 수 있는지 검사한다.
 
-    긴급 탈출은 웹 셸의 입력 중에도 받으므로 글자 입력과 겹치지 않게 Ctrl·Alt·Meta 조합만 허용한다.
+    앱 수준 명령은 웹 셸의 입력 중에도 받으므로 글자 입력과 겹치지 않게 Ctrl·Alt·Meta 조합만 허용한다.
     Shift만 붙은 키는 대문자 입력이라 수정자 없는 키로 본다.
     """
-    if command.kind.value == "emergency_hide" and not {"Ctrl", "Alt", "Meta"} & set(key.split("+")[:-1]):
+    if command.kind.value in ("emergency_hide", "random_play") and not {"Ctrl", "Alt", "Meta"} & set(key.split("+")[:-1]):
         raise ValueError(f"{key}: ‘{command_label(command)}’은 Ctrl·Alt·Win 중 하나가 들어간 조합만 지정할 수 있습니다.")
 
 

@@ -16,6 +16,7 @@ class TrayControls(QObject):
         self.icon.setToolTip("영상 라이브러리 · 자막 대기열")
         menu = QMenu(window)
         menu.addAction("열기", self.open)
+        menu.addAction("무작위 재생", self.random_play)
         menu.addAction("대기열 보기", self.show_queue)
         menu.addSeparator()
         menu.addAction("완전 종료", self.quit)
@@ -63,6 +64,17 @@ class TrayControls(QObject):
         self.window.navigate_web_tab('queue')
         self.open()
         self.window.web_host.controllers['queue'].refresh()
+
+    def random_play(self):
+        self.open()
+        # 긴급 탈출 복귀도 열기와 같은 경로를 쓴다. 열린 대화상자를 재생 화면으로 덮지 않는다.
+        modal = QApplication.activeModalWidget()
+        if self.window.web_host.dialogs.blocks_shell_actions or modal is not None:
+            if modal is not None:
+                modal.raise_()
+                modal.activateWindow()
+            return
+        self.window.random_play()
 
     def hide_for_emergency(self, focus=None):
         """긴급 탈출. 창 X와 달리 재생 세션과 화면을 그대로 두고 첫 트레이 안내도 쓰지 않는다.

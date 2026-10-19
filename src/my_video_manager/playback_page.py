@@ -288,10 +288,12 @@ class PlaybackPage(QWidget):
                 self.reveal_bar()
         return super().eventFilter(watched, event)
 
-    def show_notice(self, text):
+    def show_notice(self, text, *, reveal=False):
         self.notice_timer.stop()
         self.message_label.setText(self._error or text)
-        self.message_label.setVisible(bool(self._error or (text and not self.fullscreen)))
+        self.message_label.setVisible(bool(self._error or (text and (reveal or not self.fullscreen))))
+        if reveal and text:
+            self.reveal_bar()
         if text and not self._error:
             self.notice_timer.start()
 
