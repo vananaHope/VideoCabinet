@@ -11,6 +11,7 @@ class SettingKeyData(TypedDict):
     defaults: list[str]
     display: str
     defaultDisplay: str
+    note: str
 
 
 class SettingsData(TypedDict):

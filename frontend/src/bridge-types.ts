@@ -706,6 +706,7 @@ export interface SettingKeyData {
   defaults: Array<string>
   display: string
   defaultDisplay: string
+  note: string
 }
 
 export interface SettingsData {
