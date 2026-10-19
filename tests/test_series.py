@@ -73,13 +73,14 @@ def test_normalize_title_case_separators_and_technical_labels(title):
     ({99}, 1),                  # 시리즈 밖 영상의 시청은 세지 않는다
 ])
 def test_next_episode_follows_latest_watched_episode(watched, expected):
-    assert next_episode((1, 2, 3, 4, 5), watched) == expected
+    statuses = {video_id: ViewingStatus(finished=True) for video_id in watched}
+    assert next_episode((1, 2, 3, 4, 5), statuses) == expected
 
 
 def test_next_episode_of_empty_or_single_episode_series():
-    assert next_episode((), set()) is None
-    assert next_episode((7,), set()) == 7
-    assert next_episode((7,), {7}) is None
+    assert next_episode((), {}) is None
+    assert next_episode((7,), {}) == 7
+    assert next_episode((7,), {7: ViewingStatus(finished=True)}) is None
 
 
 def test_next_episode_reads_watching_state_and_skips_glance_only_episodes():

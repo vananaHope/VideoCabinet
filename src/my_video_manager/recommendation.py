@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from math import isfinite
 
 from .library import Video
+from .series import next_episode
 from .tags import Tag
 
 ROW_LIMIT = 20
@@ -52,30 +53,38 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
     """기준마다 후보 줄을 만들고 줄 배정 규칙을 적용한다. 틀어보기만 있으면 시청 없음이다."""
     playable = {v.id: v for v in videos if not v.missing and not v.excluded}
     allowed = set(playable)
+    abandoned_allowed = set()
     revisit_allowed = {vid for vid in playable if vid not in dismissed and vid in revisit_times
                        and now - revisit_times[vid] >= timedelta(days=revisit_days)}
     for group in series:
         allowed.difference_update(group.video_ids)
-        first = next((vid for vid in group.video_ids
-                      if vid in playable and not statuses[vid].finished), None)
-        if first is not None:
-            allowed.add(first)
+        candidate = next_episode(group.video_ids, statuses)
+        if candidate in playable and candidate not in dismissed:
+            allowed.add(candidate)
+        # 보다 만 화는 다음 볼 화가 아니어도 '보다 만' 줄에만 후보로 남을 수 있다.
+        # 시리즈마다 가장 최근에 멈춘 한 편만 남기고, 같으면 앞 화가 먼저다.
+        abandoned = [vid for vid in group.video_ids
+                     if vid in playable and vid not in dismissed and statuses[vid].abandoned]
+        if abandoned:
+            abandoned_allowed.add(max(abandoned, key=lambda vid: (
+                statuses[vid].last_viewed_at or playable[vid].registered_at).timestamp()))
         overdue = revisit_allowed.intersection(group.video_ids)
         if overdue:
-            # 복습은 미완료 화 규칙의 예외지만 시리즈마다 가장 오래 밀린 한 편만 남긴다.
+            # 복습은 다음 볼 화 규칙의 예외지만 시리즈마다 가장 오래 밀린 한 편만 남긴다.
             revisit_allowed.difference_update(overdue)
             revisit_allowed.add(min(overdue, key=lambda vid: (revisit_times[vid], vid)))
-    # 관심 없음은 첫 미완료 화를 고른 뒤 적용한다. 뒤 화로 넘어가지 않는다.
+    # 관심 없음은 다음 볼 화를 고른 뒤 적용한다. 뒤 화로 넘어가지 않는다.
     allowed.difference_update(dismissed)
+    abandoned_allowed.update(allowed)
     visible = {v.id for v in videos if not v.excluded}
     favorite_tags = {tag.id for vid, status in statuses.items() if vid in visible and status.favorite
                      for tag in tags.get(vid, ())}
     ranked = {kind: [] for kind in ROW_TITLES}
     # 한 영상이 여러 기준에 맞으면 모든 후보 줄에 넣는다. 어느 줄에 나올지는 assign_rows가 정한다.
-    for vid in allowed | revisit_allowed:
+    for vid in allowed | revisit_allowed | abandoned_allowed:
         video, status = playable[vid], statuses[vid]
         unwatched = not status.finished and not status.abandoned
-        if vid in allowed and status.abandoned:
+        if vid in abandoned_allowed and status.abandoned:
             ranked["abandoned"].append(((-(status.last_viewed_at or video.registered_at).timestamp(), vid),
                                         Recommendation(video, f"{status.stopped_percent:.0f}%에서 멈췄어요")))
         if vid in revisit_allowed:
