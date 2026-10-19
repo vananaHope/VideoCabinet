@@ -239,6 +239,14 @@ def screenshots():
     capture(window, 'settings-recommend-errors-bottom')
     checks.append(f"여러 칸 오류: {sum(row['error'] is not None for row in state['rows'])}칸에 오류 안내·aria-invalid, 저장값 그대로 (세로 스크롤 {state['clientHeight']}/{state['scrollHeight']})")
 
+    # Esc: 저장 전 입력만 버리고 저장된 값으로 돌아간다.
+    read(window, "(() => { const e = document.getElementById('settings-recommend-unwatched'); e.focus(); return true })()")
+    key(window, Qt.Key.Key_Escape)
+    wait_until(lambda: layout(window)['rows'][4]['value'] == '45' and not layout(window)['rows'][4]['unsaved'], 'Esc 초안 버리기')
+    assert core.recommendation_period_days()['unwatched'] == 45
+    assert window.web_host.active_tab == 'settings' and read(window, "document.activeElement.id") == 'settings-recommend-unwatched'
+    checks.append('Esc: 저장 전 입력(1e)과 오류 안내를 버리고 저장된 값 45 표시')
+
     # 기본값 단추: 키보드 Enter로 누르면 초안·오류를 버리고 기본값을 저장한다.
     for criterion in CRITERIA:
         read(window, f"(() => {{ const e = document.querySelector('[aria-label=\"' + document.querySelector('label[for=settings-recommend-{criterion}]').textContent + ' 기본값\"]'); e.scrollIntoView({{block: 'nearest'}}); e.focus(); return true }})()")

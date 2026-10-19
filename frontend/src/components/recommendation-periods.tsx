@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/page-parts"
 type Save = (criterion: string, days: string) => Promise<void>
 type Reset = (criterion: string) => Promise<void>
 
-/** 추천 기간 하나. 입력은 그대로 보내고 수 읽기·범위 검증은 Python과 코어가 한다. Enter나 저장으로 저장한다. */
+/** 추천 기간 하나. 입력은 그대로 보내고 수 읽기·범위 검증은 Python과 코어가 한다. Enter나 저장으로 저장하고 Esc는 저장 전 입력을 버린다. */
 function PeriodRow({ period, onSave, onReset }: { period: RecommendationPeriodData; onSave: Save; onReset: Reset }) {
   const [draft, setDraft] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -34,7 +34,7 @@ function PeriodRow({ period, onSave, onReset }: { period: RecommendationPeriodDa
         <p id={`${id}-description`} className="text-sm text-muted-foreground">{period.description}</p>
       </div>
       <div className="flex items-center gap-2">
-        <Input id={id} className="w-28" inputMode="decimal" autoComplete="off" value={text} aria-invalid={!!(error || period.error) || undefined} aria-describedby={describedBy} onChange={event => { setDraft(event.target.value); setError("") }} />
+        <Input id={id} className="w-28" inputMode="decimal" autoComplete="off" value={text} aria-invalid={!!(error || period.error) || undefined} aria-describedby={describedBy} onChange={event => { setDraft(event.target.value); setError("") }} onKeyDown={event => { if (event.key === "Escape" && changed) { event.preventDefault(); setDraft(null); setError("") } }} />
         <span>일</span>
         <Button type="submit" variant="outline" aria-disabled={saving || !changed || undefined}>저장</Button>
         <Button type="button" variant="ghost" aria-label={`${period.label} 기본값`} aria-disabled={saving || atDefault || undefined} onClick={() => { if (!atDefault) void run(() => onReset(period.criterion)) }}>기본값</Button>
