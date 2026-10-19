@@ -52,7 +52,7 @@ def test_snapshot_lists_rows_with_video_cards_and_reasons(recommend, core):
     first, second, third = core.videos()
     state = json.loads(page.bridge.snapshot())
     assert state['loaded'] and state['error'] == '' and state['rowLimit'] == 20
-    assert [(row['kind'], row['title']) for row in state['rows']] == [('abandoned', '보다 만')]
+    assert [(row['kind'], row['title']) for row in state['rows']] == [('continue_watching', '이어 보기')]
     assert {item['video']['id'] for item in state['rows'][0]['items']} == {first.id, second.id}
     item = state['rows'][0]['items'][0]
     assert item['reason'] == '40%에서 멈췄어요' and item['video']['abandoned']
@@ -68,11 +68,11 @@ def test_dismiss_and_restore_apply_to_every_row_and_reject_unknown_ids(recommend
     assert 'error' in json.loads(page.bridge.dismiss(third.id))
     assert 'error' in json.loads(page.bridge.restore(first.id))
     assert json.loads(page.bridge.dismiss(ids[0])) == {'ok': True}
-    assert rows(page) == [('abandoned', ids[1:])]
+    assert rows(page) == [('continue_watching', ids[1:])]
     assert [v.id for v in core.dismissed_videos()] == [ids[0]]
     assert ids[0] in {v.id for v in core.videos()}  # 라이브러리에는 남는다.
     assert json.loads(page.bridge.restore(ids[0])) == {'ok': True}
-    assert rows(page) == [('abandoned', ids)]
+    assert rows(page) == [('continue_watching', ids)]
     assert core.dismissed_videos() == ()
     for video_id in ids:
         page.bridge.dismiss(video_id)
@@ -141,4 +141,4 @@ def test_library_refresh_updates_visible_recommendations(recommend, core):
     core.playback.report(95)
     core.playback.end()
     window.refresh()
-    assert rows(page) == [('abandoned', ids[1:])]
+    assert rows(page) == [('continue_watching', ids[1:])]

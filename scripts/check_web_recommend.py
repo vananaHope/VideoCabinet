@@ -1,4 +1,4 @@
-"""#196 추천 탭 1100×720 배치와 실제 Chromium 키 입력·mpv 왕복 검사.
+"""#196·#197 추천 탭 1100×720 배치와 실제 Chromium 키 입력·mpv 왕복 검사.
 
 스크린샷: python scripts/check_web_recommend.py --offscreen
 실창: desktop_lock.py run --owner issue-196 -- python scripts/check_web_recommend.py --verify --no-screenshots
@@ -227,7 +227,7 @@ def screenshots():
     close(window)
     checks.append('추천 0개: 빈 상태 안내·관심 없음 되돌리기 버튼')
 
-    # 적음: 보다 만 줄 하나에 세 장.
+    # 적음: 이어 보기 줄 하나에 세 장.
     core, clock, folder = library('few')
     videos = [add(core, folder, title) for title in titles(5)]
     for video in videos[:3]:
@@ -237,24 +237,30 @@ def screenshots():
     capture(window, 'recommend-few')
     layouts['few'] = layout(window)
     rows = layouts['few']['rows']
-    assert [(row['label'], row['cards']) for row in rows] == [('보다 만 · 3개', 3)], rows
+    assert [(row['label'], row['cards']) for row in rows] == [('이어 보기 · 3개', 3)], rows
     assert not rows[0]['stripOverflow'] and not layouts['few']['pageOverflow'], layouts['few']
     close(window)
     checks.append('추천 적음: 줄 하나·카드 세 장, 넘침 없음')
 
-    # 최대: 네 줄 모두 20개, 태그 줄에서 밀려난 영상은 오래 시청 없음 줄로 내려간다.
+    # 최대: 다섯 줄 모두 20개. 전용 줄이 먼저 배정받고 넘친 영상은 일반 줄의 후보로 남는다.
     core, clock, folder = library('full')
-    names = iter(titles(95))
-    abandoned = [add(core, folder, next(names)) for _ in range(22)]
-    revisit = [add(core, folder, next(names)) for _ in range(22)]
+    names = iter(titles(150))
+    continuing = [add(core, folder, next(names)) for _ in range(22)]
+    review = [add(core, folder, next(names)) for _ in range(22)]
     favorite = add(core, folder, next(names))
     tagged = [add(core, folder, next(names)) for _ in range(24)]
     plain = [add(core, folder, next(names)) for _ in range(22)]
-    for video in abandoned:
-        watch(core, video, 25)
-    for video in revisit:
-        watch(core, video, 58)
+    episodes = []
+    for index in range(22):
+        first, second = (add(core, folder, next(names)) for _ in range(2))
+        core.create_series(f'시리즈 {index}', (first.id, second.id))
+        episodes.append((first, second))
+    for video in review:
+        # 안 본 하이라이트 영상으로 태그·잊고 있던 영상 조건과 겹치게 한다.
         mark(core, video)
+        core.add_video_tag(video.id, '자연')
+    for video in continuing:
+        mark(core, video)  # 이어 보기와 복습이 겹쳐도 이어 보기부터 배정한다.
     watch(core, favorite, 58)
     watch(core, favorite, 58)
     watch(core, favorite, 58)
@@ -262,40 +268,53 @@ def screenshots():
     for video in tagged:
         core.add_video_tag(video.id, '자연')
     clock.now += timedelta(days=40)
+    for video in continuing:
+        watch(core, video, 25)
+    for first, second in episodes:
+        watch(core, first, 58)
+        core.add_video_tag(second.id, '자연')  # 오래된 다음 화도 전용 줄이 먼저 가져간다.
     window = make_window(core)
     page = open_recommend(window)
     assert [(row['kind'], len(row['items'])) for row in page.rows] == [
-        ('abandoned', 20), ('revisit', 20), ('similar_tags', 20), ('unwatched', 20)], page.rows
-    overflow = {tagged[20].id, tagged[21].id}
-    assert overflow <= {item['video']['id'] for item in page.rows[3]['items']}
+        ('similar_tags', 20), ('forgotten', 20), ('continue_watching', 20),
+        ('next_episode', 20), ('highlight_review', 20)], page.rows
+    shown = {row['kind']: {item['video']['id'] for item in row['items']} for row in page.rows}
+    assert shown['continue_watching'] == {video.id for video in continuing[:20]}
+    assert shown['next_episode'] == {second.id for _, second in episodes[:20]}
+    # 이어 보기 넘침 두 편이 복습 자리를 먼저 차지하고, 복습 줄 넘침은 태그 줄로 간다.
+    assert shown['highlight_review'] == {video.id for video in continuing[20:] + review[:18]}
+    assert {video.id for video in review[18:]} <= shown['similar_tags']
+    assert {video.id for video in tagged[16:]} <= shown['forgotten']
+    all_shown = [item['video']['id'] for row in page.rows for item in row['items']]
+    assert len(all_shown) == len(set(all_shown))
     capture(window, 'recommend-full')
     layouts['full'] = layout(window)
     full = layouts['full']
-    assert [row['cards'] for row in full['rows']] == [20] * 4, full
+    assert [row['cards'] for row in full['rows']] == [20] * len(page.rows), full
     assert all(row['visibleCards'] == 5 and row['stripOverflow'] for row in full['rows']), full
     assert len({row['cardWidth'] for row in full['rows']}) == 1 and all(len(row['cardHeights']) == 1 for row in full['rows']), full
     assert full['scrollHeight'] > full['clientHeight'] and not full['pageOverflow'], full
     # 키보드로 마지막 줄의 끝 카드까지 가면 세로·가로 모두 보이게 움직인다.
     js(window, "document.getElementById('recommendations').focus()")
     first = active(window)
-    for _ in range(3):
+    for _ in range(len(page.rows) - 1):
         key(window, Qt.Key.Key_Down)
     key(window, Qt.Key.Key_End)
-    last = f"recommendation-{page.rows[3]['items'][-1]['video']['id']}"
+    last = f"recommendation-{page.rows[-1]['items'][-1]['video']['id']}"
     wait_until(lambda: active(window) == last)
     assert card_visible(window, last)
     assert read(window, "document.getElementById('recommendations').scrollTop") > 0
     capture(window, 'recommend-full-bottom')
     key(window, Qt.Key.Key_Up)
     key(window, Qt.Key.Key_Right)
-    third_row = page.rows[2]['items']
-    wait_until(lambda: active(window) == f"recommendation-{third_row[1]['video']['id']}")
-    for _ in range(2):
+    previous_row = page.rows[-2]['items']
+    wait_until(lambda: active(window) == f"recommendation-{previous_row[1]['video']['id']}")
+    for _ in range(len(page.rows) - 2):
         key(window, Qt.Key.Key_Up)
     key(window, Qt.Key.Key_Home)
     wait_until(lambda: active(window) == first)
     assert card_visible(window, first) and read(window, "document.getElementById('recommendations').scrollTop") == 0
-    checks.append('네 줄 × 20개: 줄마다 다섯 장 노출·가로 넘침, 세로 스크롤로 마지막 줄 끝까지 키 이동')
+    checks.append('다섯 줄 × 20개: 전용 줄 우선 배정·넘침·중복 없음, 가로·세로 스크롤과 줄 사이 왕복 키 이동')
     # Backspace는 모든 줄에서 빼고, 안내의 되돌리기로 같은 카드에 돌아온다.
     key(window, Qt.Key.Key_Backspace)
     removed = int(first.removeprefix('recommendation-'))
