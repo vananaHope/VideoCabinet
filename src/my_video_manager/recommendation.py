@@ -12,6 +12,8 @@ from .viewing import ViewingKind, ViewingSettings, classify_viewing
 ROW_LIMIT = 20
 RECENT_VIEWING_DAYS = 14
 TASTE_HALF_LIFE_DAYS = 30
+PERIOD_MINIMUM_DAYS = 0
+PERIOD_MAXIMUM_DAYS = 365000
 
 
 @dataclass(frozen=True)
@@ -21,17 +23,54 @@ class RecommendationRowDefinition:
     dedicated: bool = False
 
 
+@dataclass(frozen=True)
+class RecommendationPeriodDefinition:
+    """설정 화면이 그릴 수 있는 기간 하나의 이름·기본값·허용 범위."""
+    criterion: str
+    label: str
+    default_days: float
+    minimum_days: float = PERIOD_MINIMUM_DAYS
+    maximum_days: float = PERIOD_MAXIMUM_DAYS
+
+
+# 설정 화면에 표시하는 순서다. 설정 키는 recommend.<criterion>_days다.
+RECOMMENDATION_PERIODS = (
+    RecommendationPeriodDefinition("continue_watching", "이어 보기", 30),
+    RecommendationPeriodDefinition("revisit", "하이라이트 복습", 30),
+    RecommendationPeriodDefinition("new_arrivals", "새로 추가됨", 14),
+    RecommendationPeriodDefinition("rewatch", "다시 보기", 60),
+    RecommendationPeriodDefinition("unwatched", "잊고 있던 영상", 30),
+)
+RECOMMENDATION_PERIODS_BY_CRITERION = {period.criterion: period for period in RECOMMENDATION_PERIODS}
+
 # 표시 순서가 원본이다. 전용 줄부터 배정하며, 각 그룹 안의 배정 순서는 표시 순서다.
 # 새 줄은 정의와 select_recommendations의 후보를 더한다. 일반 줄은 dedicated=False다.
 ROW_DEFINITIONS = (
     RecommendationRowDefinition("because_watched", "『제목』을 봤다면"),
     RecommendationRowDefinition("taste", "취향 맞춤"),
+    RecommendationRowDefinition("new_arrivals", "새로 추가됨"),
+    RecommendationRowDefinition("rewatch", "다시 보기"),
     RecommendationRowDefinition("forgotten", "잊고 있던 영상"),
     RecommendationRowDefinition("continue_watching", "이어 보기", dedicated=True),
     RecommendationRowDefinition("next_episode", "다음 화", dedicated=True),
     RecommendationRowDefinition("highlight_review", "하이라이트 복습", dedicated=True),
 )
 ROW_TITLES = {row.kind: row.title for row in ROW_DEFINITIONS}
+
+
+def recommendation_period_definition(criterion: str) -> RecommendationPeriodDefinition:
+    try:
+        return RECOMMENDATION_PERIODS_BY_CRITERION[criterion]
+    except KeyError:
+        raise ValueError("알 수 없는 추천 기간입니다.") from None
+
+
+def validate_period_days(definition: RecommendationPeriodDefinition, days) -> float:
+    """유한한 수이며 정의된 범위 안인지 확인한다. 불리언과 문자열은 수가 아니다."""
+    if (isinstance(days, bool) or not isinstance(days, (int, float)) or not isfinite(days)
+            or not definition.minimum_days <= days <= definition.maximum_days):
+        raise ValueError("추천 기간은 0 이상 365000 이하의 유한한 일수여야 합니다.")
+    return days
 
 
 @dataclass(frozen=True)
@@ -88,12 +127,14 @@ def because_watched_title(title):
 
 def select_recommendations(videos, statuses, tags, series, dismissed, revisit_times, *,
                            now, viewing_records=(), viewing_settings=ViewingSettings(),
-                           unwatched_days=30, revisit_days=30,
-                           continue_watching_days=30) -> tuple[RecommendationRow, ...]:
+                           unwatched_days=30, revisit_days=30, continue_watching_days=30,
+                           new_arrivals_days=14, rewatch_days=60) -> tuple[RecommendationRow, ...]:
     """기준마다 후보 줄을 만들고 줄 배정 규칙을 적용한다. 틀어보기만 있으면 시청 없음이다."""
     playable = {v.id: v for v in videos if not v.missing and not v.excluded}
     allowed = set(playable)
     continue_period = timedelta(days=continue_watching_days)
+    new_arrivals_period = timedelta(days=new_arrivals_days)
+    rewatch_period = timedelta(days=rewatch_days)
     stopped_at = {vid: statuses[vid].last_viewed_at or video.registered_at
                   for vid, video in playable.items() if statuses[vid].abandoned}
     continue_allowed = {vid for vid, stopped in stopped_at.items()
@@ -177,6 +218,13 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
                 top_tags = tuple(scored_tags[:2])
                 ranked["taste"].append(((-score, video.registered_at.timestamp(), vid), Recommendation(
                     video, "자주 본 태그 · " + ", ".join(tag.name for tag in top_tags), top_tags)))
+        if vid in allowed and unwatched and now - video.registered_at <= new_arrivals_period:
+            ranked["new_arrivals"].append(((-video.registered_at.timestamp(), vid), Recommendation(
+                video, f"{_elapsed_days(now, video.registered_at)}일 전에 추가했어요")))
+        if (vid in allowed and status.favorite and status.last_viewed_at is not None
+                and now - status.last_viewed_at > rewatch_period):
+            ranked["rewatch"].append(((status.last_viewed_at.timestamp(), vid), Recommendation(
+                video, f"{_elapsed_days(now, status.last_viewed_at)}일 동안 다시 보지 않았어요")))
         if vid in allowed and unwatched and now - video.registered_at > timedelta(days=unwatched_days):
             ranked["forgotten"].append(((video.registered_at.timestamp(), vid), Recommendation(
                 video, f"등록하고 {_elapsed_days(now, video.registered_at)}일 동안 시청하지 않았어요")))
@@ -254,7 +302,16 @@ class RecommendationStore:
         return times
 
     def days(self, criterion: str) -> float:
-        days = self._settings.get(f"recommend.{criterion}_days", 30)
-        if isinstance(days, bool) or not isinstance(days, (int, float)) or not isfinite(days) or not 0 <= days <= 365000:
-            raise ValueError("추천 기간은 0 이상 365000 이하의 유한한 일수여야 합니다.")
-        return days
+        definition = recommendation_period_definition(criterion)
+        value = self._settings.get(f"recommend.{criterion}_days", definition.default_days)
+        return validate_period_days(definition, value)
+
+    def set_days(self, criterion: str, days: float) -> None:
+        """검증한 기간만 저장한다. 잘못된 값은 저장하지 않고 예외로 거부한다."""
+        definition = recommendation_period_definition(criterion)
+        self._settings.set(f"recommend.{criterion}_days", validate_period_days(definition, days))
+
+    def reset_days(self, criterion: str) -> None:
+        """저장값을 지워 다음 읽기부터 정의된 기본값을 쓴다."""
+        recommendation_period_definition(criterion)
+        self._settings.reset(f"recommend.{criterion}_days")

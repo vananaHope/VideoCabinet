@@ -14,7 +14,8 @@ from .library import Library, Location, MediaInfo, MediaReader, ScanIssue, ScanR
 from .settings import Settings
 from .highlights import Highlight, Highlights
 from .key_bindings import KeyBinding, KeyBindings
-from .recommendation import RecommendationRow, RecommendationStore, select_recommendations
+from .recommendation import (
+    RECOMMENDATION_PERIODS, RecommendationRow, RecommendationStore, select_recommendations)
 from .playback import PlaybackHub
 from .reel import HighlightReel, ReelEntry, ReelPlayback, ReelSettings
 from .revisit import Revisits
@@ -556,7 +557,26 @@ class AppCore:
             self._recommendations.dismissed_ids(), self._recommendations.revisit_times(), now=self._clock(),
             viewing_records=snapshot.viewing_records, viewing_settings=self._viewings.settings,
             unwatched_days=self._recommendations.days("unwatched"), revisit_days=self._recommendations.days("revisit"),
-            continue_watching_days=self._recommendations.days("continue_watching"))
+            continue_watching_days=self._recommendations.days("continue_watching"),
+            new_arrivals_days=self._recommendations.days("new_arrivals"),
+            rewatch_days=self._recommendations.days("rewatch"))
+
+    def recommendation_period_definitions(self):
+        """설정 화면이 기간 이름·기본값·허용 범위를 그릴 수 있게 정의를 내보낸다."""
+        return RECOMMENDATION_PERIODS
+
+    def recommendation_period_days(self) -> dict[str, float]:
+        """다섯 기간의 현재 일수. 저장값이 없으면 정의된 기본값이다."""
+        return {period.criterion: self._recommendations.days(period.criterion)
+                for period in RECOMMENDATION_PERIODS}
+
+    def set_recommendation_period_days(self, criterion: str, days: float) -> None:
+        """기간 하나를 검증해 저장한다. 잘못된 값은 예외로 거부하고 저장하지 않는다."""
+        self._recommendations.set_days(criterion, days)
+
+    def reset_recommendation_period_days(self, criterion: str) -> None:
+        """기간 하나를 기본값으로 되돌린다."""
+        self._recommendations.reset_days(criterion)
 
     def dismiss_video(self, video_id: int) -> None:
         self._recommendations.set_dismissed(video_id, True)
