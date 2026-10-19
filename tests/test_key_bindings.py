@@ -478,9 +478,9 @@ def test_emergency_hide_rejects_keys_without_ctrl_alt_or_meta(tmp_path, key):
     bindings = draft(core)
     bindings[Command(CommandType.TOGGLE_PAUSE)] = ("P",)
     bindings[command] = (key,)
-    with pytest.raises(ValueError, match="Ctrl·Alt 조합"):
+    with pytest.raises(ValueError, match="Ctrl·Alt·Win 중 하나"):
         core.save_key_bindings(bindings)
-    with pytest.raises(ValueError, match="Ctrl·Alt 조합"):
+    with pytest.raises(ValueError, match="Ctrl·Alt·Win 중 하나"):
         core.set_key_bindings({key: command})
     reopened = open_core(tmp_path)
     assert reopened.command_for_key("Ctrl+Shift+H") == command

@@ -336,16 +336,16 @@ def test_emergency_hide_capture_requires_ctrl_or_alt_and_does_not_hide(window_fa
                           (Qt.Key.Key_H, Qt.KeyboardModifier.ShiftModifier)):
         QTest.keyClick(target, key, modifier)
         assert results[-1]['continuing'] and not results[-1]['key']
-        assert 'Ctrl·Alt 조합' in results[-1]['error']
+        assert 'Ctrl·Alt·Win 중 하나' in results[-1]['error']
     # 캡처 중의 긴급 탈출 키는 창을 숨기지 않고 캡처된다.
     QTest.keyClick(target, Qt.Key.Key_H, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
     assert window.isVisible()
     assert results[-1]['key'] == 'Ctrl+Shift+H' and not results[-1]['continuing']
     keys = {row['id']: row['keys'] for row in json.loads(bridge.snapshot())['bindings']}
     note = next(row['note'] for row in json.loads(bridge.snapshot())['bindings'] if row['id'] == 'emergency_hide:0')
-    assert '재생 화면 밖' in note and 'Ctrl·Alt' in note
+    assert '재생 화면 밖' in note and 'Ctrl·Alt·Win' in note
     keys['emergency_hide:0'] = ['H']
-    assert 'Ctrl·Alt 조합' in json.loads(bridge.saveKeys(json.dumps(keys)))['error']
+    assert 'Ctrl·Alt·Win 중 하나' in json.loads(bridge.saveKeys(json.dumps(keys)))['error']
     assert window.core.command_for_key('Ctrl+Shift+H').kind == CommandType.EMERGENCY_HIDE
 
 

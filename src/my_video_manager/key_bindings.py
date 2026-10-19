@@ -71,7 +71,7 @@ def command_label(command: Command) -> str:
 def command_note(command: Command) -> str:
     """키 배치 화면의 명령 안내. 다른 명령은 재생 화면에서만 동작한다."""
     if command.kind.value == "emergency_hide":
-        return "재생 화면 밖 모든 탭에서도 동작합니다. 일시정지하고 창을 트레이로 숨깁니다. Ctrl·Alt 조합만 지정할 수 있습니다."
+        return "재생 화면 밖 모든 탭에서도 동작합니다. 일시정지하고 창을 트레이로 숨깁니다. Ctrl·Alt·Win 중 하나가 들어간 조합만 지정할 수 있습니다."
     return ""
 
 
@@ -82,7 +82,7 @@ def check_command_key(command: Command, key: str) -> None:
     Shift만 붙은 키는 대문자 입력이라 수정자 없는 키로 본다.
     """
     if command.kind.value == "emergency_hide" and not {"Ctrl", "Alt", "Meta"} & set(key.split("+")[:-1]):
-        raise ValueError(f"{key}: ‘{command_label(command)}’은 Ctrl·Alt 조합 키만 지정할 수 있습니다.")
+        raise ValueError(f"{key}: ‘{command_label(command)}’은 Ctrl·Alt·Win 중 하나가 들어간 조합만 지정할 수 있습니다.")
 
 
 def _allowed(command: Command, key: str) -> bool:
