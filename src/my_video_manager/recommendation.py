@@ -10,8 +10,13 @@ from .tags import Tag
 
 ROW_LIMIT = 20
 # 줄 우선순위 순서. 새 줄은 여기와 select_recommendations의 후보에 함께 더한다.
-ROW_TITLES = {"abandoned": "보다 만", "revisit": "복습할 때가 됨",
-              "similar_tags": "태그가 비슷함", "unwatched": "오래 시청 없음"}
+ROW_TITLES = {
+    "similar_tags": "태그가 비슷함",  # #203의 취향 맞춤이 대체할 때까지 유지한다.
+    "forgotten": "잊고 있던 영상",
+    "continue_watching": "이어 보기",
+    "next_episode": "다음 화",
+    "highlight_review": "하이라이트 복습",
+}
 
 
 @dataclass(frozen=True)
@@ -49,11 +54,17 @@ def _elapsed_days(now, then):
 
 
 def select_recommendations(videos, statuses, tags, series, dismissed, revisit_times, *,
-                           now, unwatched_days=30, revisit_days=30) -> tuple[RecommendationRow, ...]:
+                           now, unwatched_days=30, revisit_days=30,
+                           continue_watching_days=30) -> tuple[RecommendationRow, ...]:
     """기준마다 후보 줄을 만들고 줄 배정 규칙을 적용한다. 틀어보기만 있으면 시청 없음이다."""
     playable = {v.id: v for v in videos if not v.missing and not v.excluded}
     allowed = set(playable)
-    abandoned_allowed = set()
+    continue_period = timedelta(days=continue_watching_days)
+    stopped_at = {vid: statuses[vid].last_viewed_at or video.registered_at
+                  for vid, video in playable.items() if statuses[vid].abandoned}
+    continue_allowed = {vid for vid, stopped in stopped_at.items()
+                        if vid not in dismissed and now - stopped <= continue_period}
+    next_episode_times = {}
     revisit_allowed = {vid for vid in playable if vid not in dismissed and vid in revisit_times
                        and now - revisit_times[vid] >= timedelta(days=revisit_days)}
     for group in series:
@@ -61,13 +72,19 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
         candidate = next_episode(group.video_ids, statuses)
         if candidate in playable and candidate not in dismissed:
             allowed.add(candidate)
-        # 보다 만 화는 다음 볼 화가 아니어도 '보다 만' 줄에만 후보로 남을 수 있다.
+            # 틀어보기만 한 시리즈에는 '다음 화' 줄을 만들지 않는다.
+            # 시청이 있는 영상의 마지막 시각에는 이후 틀어보기도 포함한다.
+            viewed_at = [statuses[vid].last_viewed_at for vid in group.video_ids
+                         if (statuses[vid].finished or statuses[vid].abandoned)
+                         and statuses[vid].last_viewed_at is not None]
+            if viewed_at:
+                next_episode_times[candidate] = max(viewed_at)
+        # 기한 안의 보다 만 화는 다음 볼 화가 아니어도 '이어 보기'에만 남을 수 있다.
         # 시리즈마다 가장 최근에 멈춘 한 편만 남기고, 같으면 앞 화가 먼저다.
-        abandoned = [vid for vid in group.video_ids
-                     if vid in playable and vid not in dismissed and statuses[vid].abandoned]
+        abandoned = [vid for vid in group.video_ids if vid in continue_allowed]
         if abandoned:
-            abandoned_allowed.add(max(abandoned, key=lambda vid: (
-                statuses[vid].last_viewed_at or playable[vid].registered_at).timestamp()))
+            continue_allowed.difference_update(abandoned)
+            continue_allowed.add(max(abandoned, key=lambda vid: stopped_at[vid]))
         overdue = revisit_allowed.intersection(group.video_ids)
         if overdue:
             # 복습은 다음 볼 화 규칙의 예외지만 시리즈마다 가장 오래 밀린 한 편만 남긴다.
@@ -75,29 +92,35 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
             revisit_allowed.add(min(overdue, key=lambda vid: (revisit_times[vid], vid)))
     # 관심 없음은 다음 볼 화를 고른 뒤 적용한다. 뒤 화로 넘어가지 않는다.
     allowed.difference_update(dismissed)
-    abandoned_allowed.update(allowed)
     visible = {v.id for v in videos if not v.excluded}
     favorite_tags = {tag.id for vid, status in statuses.items() if vid in visible and status.favorite
                      for tag in tags.get(vid, ())}
     ranked = {kind: [] for kind in ROW_TITLES}
     # 한 영상이 여러 기준에 맞으면 모든 후보 줄에 넣는다. 어느 줄에 나올지는 assign_rows가 정한다.
-    for vid in allowed | revisit_allowed | abandoned_allowed:
+    for vid in allowed | revisit_allowed | continue_allowed:
         video, status = playable[vid], statuses[vid]
         unwatched = not status.finished and not status.abandoned
-        if vid in abandoned_allowed and status.abandoned:
-            ranked["abandoned"].append(((-(status.last_viewed_at or video.registered_at).timestamp(), vid),
-                                        Recommendation(video, f"{status.stopped_percent:.0f}%에서 멈췄어요")))
+        if vid in continue_allowed:
+            ranked["continue_watching"].append(((-stopped_at[vid].timestamp(), vid),
+                                               Recommendation(video, f"{status.stopped_percent:.0f}%에서 멈췄어요")))
+        if vid in next_episode_times:
+            ranked["next_episode"].append(((-next_episode_times[vid].timestamp(), vid),
+                                          Recommendation(video, "시청 중인 시리즈의 다음 볼 화예요")))
         if vid in revisit_allowed:
             revisit = revisit_times[vid]
-            ranked["revisit"].append(((revisit.timestamp(), vid), Recommendation(
+            ranked["highlight_review"].append(((revisit.timestamp(), vid), Recommendation(
                 video, f"하이라이트를 {_elapsed_days(now, revisit)}일 동안 복습하지 않았어요")))
         shared = tuple(tag for tag in tags.get(vid, ()) if tag.id in favorite_tags)
         if vid in allowed and unwatched and shared:
             ranked["similar_tags"].append(((-len(shared), video.registered_at.timestamp(), vid), Recommendation(
                 video, "겹친 태그 · " + ", ".join(t.name for t in shared), shared)))
-        if vid in allowed and unwatched and now - video.registered_at >= timedelta(days=unwatched_days):
-            ranked["unwatched"].append(((video.registered_at.timestamp(), vid), Recommendation(
+        if vid in allowed and unwatched and now - video.registered_at > timedelta(days=unwatched_days):
+            ranked["forgotten"].append(((video.registered_at.timestamp(), vid), Recommendation(
                 video, f"등록하고 {_elapsed_days(now, video.registered_at)}일 동안 시청하지 않았어요")))
+        # 기한이 지난 시리즈의 보다 만 화에는 예외를 적용하지 않는다.
+        if vid in allowed and status.abandoned and now - stopped_at[vid] > continue_period:
+            ranked["forgotten"].append(((stopped_at[vid].timestamp(), vid), Recommendation(
+                video, f"{status.stopped_percent:.0f}%에서 멈춘 뒤 {_elapsed_days(now, stopped_at[vid])}일 지났어요")))
     return assign_rows(RecommendationRow(kind, ROW_TITLES[kind],
                                          tuple(item for _, item in sorted(items, key=lambda pair: pair[0])))
                        for kind, items in ranked.items())

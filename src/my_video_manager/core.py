@@ -553,7 +553,8 @@ class AppCore:
         return select_recommendations(
             snapshot.videos, snapshot.statuses, snapshot.tags, snapshot.series,
             self._recommendations.dismissed_ids(), self._recommendations.revisit_times(), now=self._clock(),
-            unwatched_days=self._recommendations.days("unwatched"), revisit_days=self._recommendations.days("revisit"))
+            unwatched_days=self._recommendations.days("unwatched"), revisit_days=self._recommendations.days("revisit"),
+            continue_watching_days=self._recommendations.days("continue_watching"))
 
     def dismiss_video(self, video_id: int) -> None:
         self._recommendations.set_dismissed(video_id, True)

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -104,16 +105,176 @@ def select_series(videos, statuses=None, *, order=(1, 2, 3), dismissed=(), revis
                                   set(dismissed), revisit_times or {}, now=NOW)
 
 
+def select_rows(videos, statuses=None, *, series=(), dismissed=(), revisit_times=None, **periods):
+    states = {video.id: ViewingStatus() for video in videos}
+    states.update(statuses or {})
+    return select_recommendations(videos, states, {}, series, set(dismissed), revisit_times or {},
+                                  now=NOW, **periods)
+
+
+@pytest.mark.parametrize("offset, kind", [(-1, "continue_watching"), (0, "continue_watching"), (1, "forgotten")])
+def test_continue_watching_boundary_transfers_to_forgotten(offset, kind):
+    stopped = NOW - timedelta(days=30, microseconds=offset)
+    rows = select_rows([series_video(1)], {1: replace(ABANDONED, last_viewed_at=stopped)})
+    assert placed(rows) == [(kind, [1])]
+    if kind == "continue_watching":
+        assert "40%" in rows[0].items[0].reason
+
+
+@pytest.mark.parametrize("offset, expected", [(-1, []), (0, []), (1, [("forgotten", [1])])])
+def test_forgotten_registration_boundary_ignores_glance(offset, expected):
+    video = replace(series_video(1), registered_at=NOW - timedelta(days=30, microseconds=offset))
+    assert placed(select_rows([video], {1: ViewingStatus(last_viewed_at=NOW)})) == expected
+
+
+def test_forgotten_sorts_unwatched_and_abandoned_by_their_own_dates():
+    videos = [replace(series_video(1), registered_at=NOW - timedelta(days=60)),
+              replace(series_video(2), registered_at=NOW - timedelta(days=100)),
+              replace(series_video(3), registered_at=NOW - timedelta(days=50)), series_video(4)]
+    rows = select_rows(videos, {2: abandoned(days_ago=40), 4: FINISHED})
+    assert placed(rows) == [("forgotten", [1, 3, 2])]
+    assert "40일" in rows[0].items[-1].reason
+
+
+def test_continue_watching_sorts_by_latest_stop_and_excludes_finished():
+    rows = select_rows([series_video(i) for i in range(1, 5)],
+                       {1: abandoned(days_ago=3), 2: abandoned(days_ago=1),
+                        3: abandoned(days_ago=1), 4: FINISHED})
+    assert placed(rows) == [("continue_watching", [2, 3, 1])]
+
+
+def test_next_episode_requires_viewing_and_sorts_by_series_latest_viewing():
+    videos = [replace(series_video(i), registered_at=NOW) for i in range(1, 14)]
+    groups = (Series(1, "가", (1, 2, 3)), Series(2, "나", (4, 5)), Series(3, "다", (6, 7)),
+              Series(4, "라", (8, 9)), Series(5, "마", (10, 11)), Series(6, "바", (12, 13)))
+    states = {1: replace(FINISHED, last_viewed_at=NOW - timedelta(days=1)),
+              2: replace(FINISHED, last_viewed_at=NOW - timedelta(days=5)),
+              4: replace(FINISHED, last_viewed_at=NOW - timedelta(days=2)),
+              6: ViewingStatus(last_viewed_at=NOW),  # 틀어보기만 한 시리즈는 들어오지 않는다.
+              8: replace(FINISHED, last_viewed_at=NOW - timedelta(days=2)),
+              11: replace(FINISHED, last_viewed_at=NOW)}  # 마지막 화까지 봤으면 없다.
+    assert placed(select_rows(videos, states, series=groups)) == [("next_episode", [3, 5, 9])]
+
+
+def test_next_episode_ignores_glance_only_episode_when_ranking_series():
+    videos = [replace(series_video(i), registered_at=NOW) for i in range(1, 6)]
+    states = {1: replace(FINISHED, last_viewed_at=NOW - timedelta(days=3)),
+              2: ViewingStatus(last_viewed_at=NOW),
+              4: replace(FINISHED, last_viewed_at=NOW - timedelta(days=1))}
+    rows = select_rows(videos, states, series=(Series(1, "가", (1, 2, 3)), Series(2, "나", (4, 5))))
+    assert placed(rows) == [("next_episode", [5, 2])]
+
+
+def test_expired_series_abandoned_is_not_an_exception_for_forgotten():
+    rows = select_series([series_video(i) for i in range(1, 4)], {2: abandoned(days_ago=31)})
+    # 오래된 보다 만 2화는 일반 후보가 아니다. 다음 볼 화인 안 본 3화만 남는다.
+    assert placed(rows) == [("forgotten", [3])]
+
+
+def test_expired_series_abandoned_can_still_be_the_highlight_review_exception():
+    rows = select_series([series_video(i) for i in range(1, 4)], {2: abandoned(days_ago=31)},
+                         revisit_times={2: OLD})
+    assert placed(rows) == [("forgotten", [3]), ("highlight_review", [2])]
+
+
+@pytest.mark.parametrize("state", ["missing", "excluded", "dismissed"])
+@pytest.mark.parametrize("kind", ["continue_watching", "next_episode", "highlight_review", "forgotten"])
+def test_each_new_row_excludes_unavailable_or_dismissed_videos(state, kind):
+    target = replace(series_video(2), registered_at=NOW if kind == "next_episode" else OLD)
+    statuses = {1: replace(FINISHED, last_viewed_at=NOW)}
+    if kind == "continue_watching":
+        statuses[2] = ABANDONED
+    elif kind == "highlight_review":
+        statuses[2] = FINISHED
+    groups = (Series(1, "시리즈", (1, 2, 3)),) if kind == "next_episode" else ()
+    revisits = {2: OLD} if kind == "highlight_review" else {}
+    third = replace(series_video(3), registered_at=NOW)
+    assert placed(select_rows([series_video(1), target, third], statuses,
+                              series=groups, revisit_times=revisits)) == [(kind, [2])]
+    target = replace(target, locations=() if state == "missing" else target.locations,
+                     excluded=state == "excluded")
+    assert select_rows([series_video(1), target, third], statuses, series=groups, revisit_times=revisits,
+                       dismissed={2} if state == "dismissed" else set()) == ()
+
+
+@pytest.mark.parametrize("offset, expected", [(-1, []), (0, [("highlight_review", [1])]),
+                                             (1, [("highlight_review", [1])])])
+def test_highlight_review_keeps_inclusive_boundary(offset, expected):
+    assert placed(select_rows([series_video(1)], {1: FINISHED},
+                              revisit_times={1: NOW - timedelta(days=30, microseconds=offset)})) == expected
+
+
+def test_highlight_review_sorts_oldest_first_with_stable_ties():
+    videos = [series_video(i) for i in range(1, 4)]
+    rows = select_rows(videos, {i: FINISHED for i in range(1, 4)},
+                       revisit_times={1: OLD, 2: NOW - timedelta(days=40), 3: OLD})
+    assert placed(rows) == [("highlight_review", [2, 1, 3])]
+
+
+def test_new_rows_priority_and_overflow_to_next_episode_then_highlight_review():
+    # 잊고 있던 영상 상위 20편이 배정되면 21번째 시리즈의 다음 볼 화는 아래 줄로 내려간다.
+    videos, states, groups, revisits = [], {}, [], {}
+    for index in range(21):
+        watched_id, next_id = 2 * index + 1, 2 * index + 2
+        videos.extend([series_video(watched_id), series_video(next_id)])
+        states[watched_id] = replace(FINISHED, last_viewed_at=NOW)
+        groups.append(Series(index + 1, str(index), (watched_id, next_id)))
+        revisits[next_id] = OLD
+    videos.extend([series_video(43), series_video(44)])
+    states.update({43: ABANDONED, 44: FINISHED})
+    revisits.update({43: OLD, 44: OLD})
+    rows = select_rows(videos, states, series=groups, revisit_times=revisits)
+    assert placed(rows) == [("forgotten", list(range(2, 41, 2))), ("continue_watching", [43]),
+                            ("next_episode", [42]), ("highlight_review", [44])]
+
+
+@pytest.mark.parametrize("days, expected", [(9.5, "continue_watching"), (10, "continue_watching"),
+                                            (10.5, "forgotten")])
+def test_abandoned_transition_uses_continue_period_independent_of_unwatched(days, expected):
+    rows = select_rows([series_video(1)], {1: abandoned(days_ago=days)},
+                       continue_watching_days=10, unwatched_days=100)
+    assert placed(rows) == [(expected, [1])]
+
+
+def test_short_unwatched_period_does_not_move_recent_abandoned_to_forgotten():
+    assert placed(select_rows([series_video(1)], {1: abandoned(days_ago=10)},
+                              continue_watching_days=20, unwatched_days=1)) == [("continue_watching", [1])]
+
+
+@pytest.mark.parametrize("period", [0, 0.5, 365000])
+def test_continue_period_supports_zero_fractional_and_maximum_days(period):
+    stopped = NOW - timedelta(days=period)
+    video = replace(series_video(1), registered_at=stopped)
+    status = replace(ABANDONED, last_viewed_at=stopped)
+    assert placed(select_rows([video], {1: status}, continue_watching_days=period)) == [("continue_watching", [1])]
+    status = replace(status, last_viewed_at=stopped - timedelta(microseconds=1))
+    assert placed(select_rows([video], {1: status}, continue_watching_days=period)) == [("forgotten", [1])]
+
+
+def test_next_episode_core_uses_latest_viewing_including_later_glance(library):
+    core, clock, add = library
+    a, b, c, d = (add(name) for name in ("가1", "가2", "나1", "나2"))
+    core.create_series("가", (a.id, b.id))
+    core.create_series("나", (c.id, d.id))
+    watch(core, a)
+    clock.days(1)
+    watch(core, c)
+    assert pairs(core) == [(d.id, "next_episode"), (b.id, "next_episode")]
+    clock.days(1)
+    watch(core, a, 4)
+    assert pairs(core) == [(b.id, "next_episode"), (d.id, "next_episode")]
+
+
 def test_series_candidates_are_only_the_next_episode():
     videos = [series_video(video_id) for video_id in range(1, 6)]
     rows = select_series(videos, {1: FINISHED, 2: FINISHED, 4: FINISHED}, order=(1, 2, 3, 4, 5))
     # 시청한 1·2·4화가 아니라, 가장 뒤 시청 화의 다음 화인 5화만 후보가 된다.
-    assert placed(rows) == [("unwatched", [5])]
+    assert placed(rows) == [("forgotten", [5])]
 
 
 def test_series_without_viewing_recommends_the_first_episode():
     videos = [series_video(video_id) for video_id in range(1, 4)]
-    assert placed(select_series(videos)) == [("unwatched", [1])]
+    assert placed(select_series(videos)) == [("forgotten", [1])]
 
 
 def test_series_with_every_episode_watched_has_no_general_candidate():
@@ -127,19 +288,19 @@ def test_series_does_not_skip_an_ineligible_next_episode(state):
               series_video(2), series_video(3)]
     dismissed = {1} if state == "dismissed" else set()
     assert select_series(videos, dismissed=dismissed) == ()
-    assert placed(select_series([series_video(1), *videos[1:]])) == [("unwatched", [1])]
+    assert placed(select_series([series_video(1), *videos[1:]])) == [("forgotten", [1])]
 
 
 def test_series_abandoned_episode_stays_only_in_the_abandoned_row():
     videos = [series_video(video_id) for video_id in range(1, 4)]
     # 2화가 보다 만 화이므로 다음 볼 화는 3화다. 2화는 보다 만 예외로만 남는다.
-    assert placed(select_series(videos, {2: ABANDONED})) == [("abandoned", [2]), ("unwatched", [3])]
+    assert placed(select_series(videos, {2: ABANDONED})) == [("forgotten", [3]), ("continue_watching", [2])]
 
 
 def test_series_abandoned_exception_does_not_restore_general_candidates():
     videos = [series_video(video_id) for video_id in range(1, 4)]
     # 다음 볼 화(3화)가 관심 없음이면 일반 후보는 없지만, 보다 만 2화는 예외로 남는다.
-    assert placed(select_series(videos, {2: ABANDONED}, dismissed={3})) == [("abandoned", [2])]
+    assert placed(select_series(videos, {2: ABANDONED}, dismissed={3})) == [("continue_watching", [2])]
 
 
 def test_series_abandoned_exception_keeps_one_most_recent_episode():
@@ -147,7 +308,7 @@ def test_series_abandoned_exception_keeps_one_most_recent_episode():
     rows = select_series(videos, {1: abandoned(days_ago=5), 3: abandoned(days_ago=2),
                                   5: abandoned(days_ago=1)}, order=(1, 2, 3, 4, 5, 6))
     # 1·3·5화가 모두 보다 만 화지만 가장 최근에 멈춘 5화 한 편만 남고, 다음 볼 화는 6화다.
-    assert placed(rows) == [("abandoned", [5]), ("unwatched", [6])]
+    assert placed(rows) == [("forgotten", [6]), ("continue_watching", [5])]
 
 
 def test_series_abandoned_exception_skips_dismissed_before_choosing():
@@ -156,14 +317,14 @@ def test_series_abandoned_exception_skips_dismissed_before_choosing():
                                   5: abandoned(days_ago=1)}, order=(1, 2, 3, 4, 5, 6),
                          dismissed={5})
     # 가장 최근에 멈춘 5화가 관심 없음이면 그다음으로 최근에 멈춘 3화가 남는다.
-    assert placed(rows) == [("abandoned", [3]), ("unwatched", [6])]
+    assert placed(rows) == [("forgotten", [6]), ("continue_watching", [3])]
 
 
 def test_series_abandoned_exception_prefers_earlier_episode_on_tie():
     videos = [series_video(video_id) for video_id in range(1, 5)]
     same_time = abandoned(days_ago=1)
     rows = select_series(videos, {1: same_time, 3: same_time}, order=(1, 2, 3, 4))
-    assert placed(rows) == [("abandoned", [1]), ("unwatched", [4])]
+    assert placed(rows) == [("forgotten", [4]), ("continue_watching", [1])]
 
 
 def test_series_abandoned_exception_is_per_series():
@@ -174,7 +335,7 @@ def test_series_abandoned_exception_is_per_series():
     rows = select_recommendations(videos, state, {}, (Series(1, "가", (1, 2)), Series(2, "나", (3, 4))),
                                   set(), {}, now=NOW)
     # 시리즈마다 한 편씩 남으므로 다른 시리즈의 보다 만 화가 서로를 막지 않는다.
-    assert placed(rows) == [("abandoned", [2, 4])]
+    assert placed(rows) == [("continue_watching", [2, 4])]
 
 
 def test_series_revisit_exception_keeps_one_oldest_episode_with_next_episode():
@@ -182,7 +343,7 @@ def test_series_revisit_exception_keeps_one_oldest_episode_with_next_episode():
     rows = select_series(videos, {1: FINISHED}, order=(1, 2, 3, 4),
                          revisit_times={3: NOW - timedelta(days=31), 4: NOW - timedelta(days=31)})
     # 다음 볼 화는 2화이고, 복습 예외는 가장 오래 밀린 3화 한 편만 남긴다.
-    assert placed(rows) == [("revisit", [3]), ("unwatched", [2])]
+    assert placed(rows) == [("forgotten", [2]), ("highlight_review", [3])]
 
 
 def test_rows_keep_priority_and_each_video_appears_only_in_its_highest_row():
@@ -205,7 +366,7 @@ def test_empty_rows_are_hidden_including_rows_emptied_by_upper_rows():
     assert placed(rows) == [("위", [1]), ("아래", [2])]
 
 
-@pytest.mark.parametrize("days, expected", [(29, False), (30, True), (31, True)])
+@pytest.mark.parametrize("days, expected", [(29, False), (30, False), (31, True)])
 @pytest.mark.parametrize("glance", [False, True])
 def test_unwatched_boundary_and_glance(library, days, expected, glance):
     core, clock, add = library
@@ -215,7 +376,7 @@ def test_unwatched_boundary_and_glance(library, days, expected, glance):
     clock.days(days)
     assert (ids(core) == [video.id]) == expected
     if expected:
-        assert [row.kind for row in core.recommendations()] == ["unwatched"]
+        assert [row.kind for row in core.recommendations()] == ["forgotten"]
 
 
 @pytest.mark.parametrize("days, expected", [(29, False), (30, True), (31, True)])
@@ -295,11 +456,12 @@ def test_priority_dedup_and_tag_order(library):
         core.add_video_tag(video.id, "과학")
     core.add_video_tag(both.id, "우주")
     clock.days(31)
-    assert pairs(core) == [(abandoned.id, "abandoned"), (revisit.id, "revisit"), (both.id, "similar_tags"),
-                           (tag_old.id, "similar_tags"), (tag_new.id, "similar_tags"), (old.id, "unwatched")]
+    assert pairs(core) == [(both.id, "similar_tags"), (revisit.id, "similar_tags"),
+                           (tag_old.id, "similar_tags"), (tag_new.id, "similar_tags"),
+                           (old.id, "forgotten"), (abandoned.id, "forgotten")]
     rows = core.recommendations()
-    assert [row.title for row in rows] == ["보다 만", "복습할 때가 됨", "태그가 비슷함", "오래 시청 없음"]
-    assert "과학" in rows[2].items[0].reason and "우주" in rows[2].items[0].reason
+    assert [row.kind for row in rows] == ["similar_tags", "forgotten"]
+    assert "과학" in rows[0].items[0].reason and "우주" in rows[0].items[0].reason
 
 
 def test_similar_tags_requires_favorite_video_tags_and_no_meaningful_viewing(library):
@@ -337,7 +499,7 @@ def test_series_uses_next_episode_and_dismissal_does_not_fall_back(library):
     core, clock, add = library
     a, b, c = add("첫 화"), add("둘째 화"), add("셋째 화")
     core.create_series("직접 정한 순서", (a.id, b.id, c.id))
-    clock.days(30)
+    clock.days(31)
     assert ids(core) == [a.id]  # 시청이 없으면 첫 화가 다음 볼 화
     core.dismiss_video(a.id)
     assert ids(core) == []  # 다음 볼 화가 관심 없음이면 뒤 화로 넘어가지 않는다
@@ -356,7 +518,7 @@ def test_series_does_not_fall_back_when_next_episode_is_missing_or_excluded(libr
     core.exclude_video(b.id)
     a.locations[0].path.unlink()
     core.scan()
-    clock.days(30)
+    clock.days(31)
     assert ids(core) == []  # 다음 볼 화(a)가 파일 없음이면 c로 건너뛰지 않는다
     core.restore_video(b.id)
     assert ids(core) == []
@@ -368,7 +530,7 @@ def test_series_does_not_fall_back_when_next_episode_is_missing_or_excluded(libr
 def test_dismissal_persists_is_independent_of_library_and_restores(library):
     core, clock, add = library
     video = add("관심 없음")
-    clock.days(30)
+    clock.days(31)
     core.dismiss_video(video.id)
     core.dismiss_video(video.id)
     assert ids(core) == []
@@ -414,9 +576,9 @@ def test_similar_tags_overflow_appears_in_unwatched_row(library):
         core.add_video_tag(tagged[-1].id, "주제")
         clock.days(1)
     plain = add("태그 없는 영상")
-    clock.days(30)
+    clock.days(31)
     rows = core.recommendations()
-    assert [(row.kind, len(row.items)) for row in rows] == [("similar_tags", 20), ("unwatched", 3)]
+    assert [(row.kind, len(row.items)) for row in rows] == [("similar_tags", 20), ("forgotten", 3)]
     assert [i.video.id for i in rows[0].items] == [v.id for v in tagged[:20]]
     # 태그 줄에서 밀려난 두 편은 오래 시청 없음 조건에도 맞아 그 줄에 나온다.
     assert [i.video.id for i in rows[1].items] == [tagged[20].id, tagged[21].id, plain.id]
@@ -429,22 +591,25 @@ def test_similar_tags_overflow_appears_in_unwatched_row(library):
 
 def test_settings_persist_and_use_injected_clock(library):
     core, clock, add = library
-    a, b = add("안 본 영상"), add("다 본 영상")
+    a, b, c = add("안 본 영상"), add("다 본 영상"), add("보다 만 영상")
     watch(core, b)
+    watch(core, c, 40)
     mark(core, b)
     core.settings.set("recommend.unwatched_days", 2)
     core.settings.set("recommend.revisit_days", 4)
+    core.settings.set("recommend.continue_watching_days", 2.5)
     core = AppCore(media=Media(), clock=clock, database=core.database)
-    clock.days(2)
-    assert ids(core) == [a.id]
-    clock.days(2)
-    assert ids(core) == [b.id, a.id]
+    clock.days(2.5)
+    assert pairs(core) == [(a.id, "forgotten"), (c.id, "continue_watching")]
+    clock.days(1.5)
+    assert pairs(core) == [(a.id, "forgotten"), (c.id, "forgotten"), (b.id, "highlight_review")]
 
 
 @pytest.mark.parametrize("value", [-1, True, "30", None, float("inf"), float("nan")])
-def test_invalid_period_rejected(library, value):
+@pytest.mark.parametrize("criterion", ["unwatched", "revisit", "continue_watching"])
+def test_invalid_period_rejected(library, value, criterion):
     core, _, _ = library
-    core.settings.set("recommend.revisit_days", value)
+    core.settings.set(f"recommend.{criterion}_days", value)
     with pytest.raises(ValueError):
         core.recommendations()
 
@@ -481,7 +646,7 @@ def test_finished_series_recommends_only_oldest_overdue_revisit(library):
     mark(core, a)
     mark(core, c)
     clock.days(30)
-    assert pairs(core) == [(b.id, "revisit")]
+    assert pairs(core) == [(b.id, "highlight_review")]
     core.start_reel(highlight_id=core.highlights(b.id)[0].id)
     core.playback.report(13)
     core.playback.end()
@@ -501,7 +666,7 @@ def test_series_normal_rows_only_apply_to_next_episode_with_revisit_exception(li
         core.add_video_tag(video.id, "주제")
     clock.days(30)
     # 다음 볼 화(둘째 화)만 일반 후보가 되고, 뒤 화는 태그가 겹쳐도 나오지 않는다.
-    assert pairs(core) == [(finished.id, "revisit"), (next_video.id, "similar_tags")]
+    assert pairs(core) == [(next_video.id, "similar_tags"), (finished.id, "highlight_review")]
 
 
 def test_oldest_revisit_already_shown_as_abandoned_is_not_duplicated(library):
@@ -514,8 +679,9 @@ def test_oldest_revisit_already_shown_as_abandoned_is_not_duplicated(library):
     watch(core, later)
     mark(core, later)
     clock.days(30)
+    watch(core, first, 40)  # 이어 보기 기한 안으로 되돌리고 복습 시각은 유지한다.
     # 가장 오래 밀린 복습이 보다 만 줄로 나오면 복습 자리를 다른 화로 채우지 않는다.
-    assert pairs(core) == [(first.id, "abandoned")]
+    assert pairs(core) == [(first.id, "continue_watching")]
 
 
 def test_series_later_abandoned_is_shown_in_the_abandoned_row_only(library):
@@ -527,7 +693,7 @@ def test_series_later_abandoned_is_shown_in_the_abandoned_row_only(library):
     core.settings.set("recommend.unwatched_days", 100)
     clock.days(30)
     # 마지막 화까지 시청해 일반 후보는 없지만, 보다 만 화 예외로 그 화만 나온다.
-    assert pairs(core) == [(later.id, "abandoned")]
+    assert pairs(core) == [(later.id, "continue_watching")]
     core.dismiss_video(first.id)  # 다른 화의 관심 없음은 보다 만 예외를 막지 않는다.
     assert ids(core) == [later.id]
 
@@ -563,7 +729,7 @@ def test_series_revisit_exceptions_fill_their_own_row(library):
         watch(core, first, 40)
     clock.days(30)
     assert len(ids(core)) == len(set(ids(core))) == 12
-    assert [(row.kind, len(row.items)) for row in core.recommendations()] == [("abandoned", 6), ("revisit", 6)]
+    assert [(row.kind, len(row.items)) for row in core.recommendations()] == [("continue_watching", 6), ("highlight_review", 6)]
 
 
 @pytest.mark.parametrize("state, expected", [("excluded", False), ("missing", True), ("dismissed", True)])
@@ -594,7 +760,7 @@ def test_library_snapshot_reuses_public_state_and_preserves_tag_filter_scope(lib
     core.create_series("시리즈", (excluded.id, a.id))
     core.exclude_video(excluded.id)
     core.add_video_tag(a.id, "주제")
-    clock.days(30)
+    clock.days(31)
     snapshot = core.library_snapshot()
     assert snapshot.videos == core.videos()
     assert snapshot.statuses == core.viewing_status_map()
@@ -643,7 +809,7 @@ def test_legacy_highlight_upgrade_baseline_is_preserved_on_reopen(tmp_path):
     core = AppCore(media=Media(), clock=clock, database=database)
     assert ids(core) == []
     clock.days(1)
-    assert pairs(core) == [(1, "revisit")]
+    assert pairs(core) == [(1, "highlight_review")]
     clock.days(1)
     core = AppCore(media=Media(), clock=clock, database=database)
     assert ids(core) == [1]
