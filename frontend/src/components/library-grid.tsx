@@ -20,10 +20,12 @@ const gridVariants = cva("scroll-stable h-full min-w-0 flex-1 overflow-y-auto ro
   variants: { cardSize: { small: "library-grid-small", medium: "library-grid-medium", large: "library-grid-large" } },
 })
 
-export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onSelect, onAction, layoutPaused }: {
+export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onSelect, onAction, layoutPaused, revealRequest = 0 }: {
   cardSize: string; videos: VideoData[]; selectedId: number | null; scanning: boolean; total: number;
   onSelect: (id: number) => void; onAction: (action: Action, id: number) => void;
   layoutPaused: RefObject<boolean>;
+  /** 값이 바뀔 때마다 선택한 카드의 행이 보이도록 스크롤한다. */
+  revealRequest?: number;
 }) {
   const scroll = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ columns: 2, rowHeight: 256 })
@@ -60,6 +62,13 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
       lastIds.current = ids
     }
   }, [videos])
+
+  const revealed = useRef(revealRequest)
+  useEffect(() => {
+    if (revealed.current === revealRequest) return
+    revealed.current = revealRequest
+    if (selectedIndex >= 0) virtual.scrollToIndex(Math.floor(selectedIndex / columns), { align: "auto" })
+  }, [revealRequest, selectedIndex, columns, virtual])
 
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest('[role="menu"]') || event.nativeEvent.isComposing) return

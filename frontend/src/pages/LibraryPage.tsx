@@ -8,6 +8,7 @@ import { NoticeStack } from "@/components/ui/notice"
 import { LibraryGrid } from "@/components/library-grid"
 import type { HighlightSnapshot } from "@/components/highlight-panel"
 import { DetailPanel } from "@/components/detail-panel"
+import { RandomPlayButton } from "@/components/random-play-button"
 import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
 import type { LibraryData, DetailsData, HighlightData, LibraryViewOptions } from "@/bridge-types"
 
@@ -19,6 +20,10 @@ export default function LibraryPage() {
   const [detailTab, setDetailTab] = useState("info")
   const detailVideo = useRef<number | null>(null)
   const highlightReturn = useRef(false)
+  const randomReturn = useRef(false)
+  const [revealRequest, setRevealRequest] = useState(0)
+  // 후보 없음 안내는 그때의 결과에 묶어, 결과가 바뀌면 함께 사라진다.
+  const [randomNotice, setRandomNotice] = useState<{ message: string; scope: string } | null>(null)
   const optionsRef = useRef<LibraryViewOptions | null>(null)
   const [error, setError] = useState("")
   const [detailRevision, setDetailRevision] = useState(0)
@@ -63,6 +68,8 @@ export default function LibraryPage() {
           }
           const destination = highlightReturn.current && detail ? detail : grid
           highlightReturn.current = false
+          // 무작위로 고른 영상은 화면 밖일 수 있어 복원한 스크롤에서 그 카드까지 보이게 한다.
+          if (randomReturn.current) { randomReturn.current = false; setRevealRequest(n => n + 1) }
           destination?.focus({ preventScroll: true })
         }))
       }
@@ -108,6 +115,7 @@ export default function LibraryPage() {
   const byId = useMemo(() => new Map(data?.videos.map(video => [video.id, video]) ?? []), [data?.videos])
   const visible = useMemo(() => data?.visibleIds.flatMap(id => byId.get(id) ?? []) ?? [], [data?.visibleIds, byId])
   const foldersOpen = data?.options.mode === 'folders'
+  const resultScope = useMemo(() => data?.visibleIds.join(",") ?? "", [data?.visibleIds])
 
   function filter(patch: Partial<LibraryViewOptions>) {
     if (!bridge || !optionsRef.current) return
@@ -127,20 +135,42 @@ export default function LibraryPage() {
     setData(previous => previous && { ...previous, selectedId: id })
     request(reply => bridge.select(id, reply)).catch(showError)
   }
-  function action(name: Action, id: number) {
-    if (name === 'play' || name === 'review') {
-      // mpv 전환 중 숨은 웹 뷰의 폭이 바뀌어도 열 수와 스크롤을 유지한다.
-      // 복귀 focus 신호에서 resize를 재측정하고 두 프레임 뒤 저장한 위치를 복원한다.
-      layoutPaused.current = true
-      savedScroll.current = {
-        grid: document.getElementById('library-grid')?.scrollTop ?? 0,
-        detail: document.getElementById('detail-scroll')?.scrollTop ?? 0,
-      }
+  // mpv 전환 중 숨은 웹 뷰의 폭이 바뀌어도 열 수와 스크롤을 유지한다.
+  // 복귀 focus 신호에서 resize를 재측정하고 두 프레임 뒤 저장한 위치를 복원한다.
+  function holdLayout() {
+    layoutPaused.current = true
+    savedScroll.current = {
+      grid: document.getElementById('library-grid')?.scrollTop ?? 0,
+      detail: document.getElementById('detail-scroll')?.scrollTop ?? 0,
     }
+  }
+  function releaseLayout() {
+    layoutPaused.current = false
+    savedScroll.current = null
+    window.dispatchEvent(new Event('resize'))
+  }
+  function action(name: Action, id: number) {
+    if (name === 'play' || name === 'review') holdLayout()
     if (bridge) request(reply => bridge.action(name, id, reply)).catch(error => {
-      layoutPaused.current = false
-      savedScroll.current = null
-      window.dispatchEvent(new Event('resize'))
+      releaseLayout()
+      showError(error)
+    })
+  }
+  function randomPlay() {
+    if (!bridge) return
+    const scope = resultScope
+    holdLayout()
+    request<{ videoId: number | null; message?: string }>(reply => bridge.randomPlay(reply)).then(({ videoId, message }) => {
+      if (videoId === null) {
+        releaseLayout()
+        setRandomNotice({ message: message ?? "", scope })
+        return
+      }
+      setRandomNotice(null)
+      randomReturn.current = true
+      setData(previous => previous && { ...previous, selectedId: videoId })
+    }).catch(error => {
+      releaseLayout()
       showError(error)
     })
   }
@@ -148,17 +178,11 @@ export default function LibraryPage() {
     if (!bridge) return
     if (!edit) {
       highlightReturn.current = true
-      layoutPaused.current = true
-      savedScroll.current = {
-        grid: document.getElementById('library-grid')?.scrollTop ?? 0,
-        detail: document.getElementById('detail-scroll')?.scrollTop ?? 0,
-      }
+      holdLayout()
     }
     request(reply => edit ? bridge.editHighlight(videoId, highlightId, reply) : bridge.playHighlight(videoId, highlightId, reply)).catch(error => {
       highlightReturn.current = false
-      layoutPaused.current = false
-      savedScroll.current = null
-      window.dispatchEvent(new Event('resize'))
+      releaseLayout()
       showError(error)
     })
   }
@@ -173,17 +197,22 @@ export default function LibraryPage() {
         <Button size="sm" variant="outline" aria-label="정렬 방향" onClick={() => filter({ descending: !data.options.descending })}>{data.options.descending ? "내림차순 ↓" : "오름차순 ↑"}</Button>
         <LibraryFilters options={data.options} tags={data.tags} onChange={filter} />
         <p aria-label="라이브러리 등록·표시 개수" className="shrink-0 text-xs text-muted-foreground">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
+        {/* #205가 '태그에서…' 범위를 이 목록에 더한다. */}
+        <RandomPlayButton scopes={[{ key: "results", label: "현재 결과에서", onSelect: randomPlay }]} />
       </div>
       <LibraryFilterChips options={data.options} chips={data.chips} onChange={filter} />
     </>}
-    <NoticeStack layout="yield" items={[error && { tone: "error", message: error, onDismiss: () => setError("") }]} />
+    <NoticeStack layout="yield" items={[
+      error && { tone: "error", message: error, onDismiss: () => setError("") },
+      randomNotice?.scope === resultScope && { tone: "info", message: randomNotice.message, onDismiss: () => setRandomNotice(null) },
+    ]} />
     {/* 안내가 길어도 카드 격자·상세 패널이 최소 높이를 지킨다. */}
     <div className="flex min-h-40 flex-1 gap-2">
       {/* 패널을 닫아도 고른 폴더(folder)는 옵션에 남아 다시 열 때 복원된다. */}
       {data && <Button size="icon-sm" variant={foldersOpen ? "secondary" : "outline"} aria-label="폴더 패널" aria-expanded={foldersOpen} aria-controls={foldersOpen ? "library-folder-panel" : undefined}
         title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>}
       {foldersOpen && <LibraryFolders collapsedIds={data.options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
-      <LibraryGrid cardSize={data?.options.card_size ?? 'medium'} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} />
+      <LibraryGrid cardSize={data?.options.card_size ?? 'medium'} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} />
       <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} />
     </div>
   </main>

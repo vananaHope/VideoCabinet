@@ -3,6 +3,9 @@
 import random
 from typing import Callable
 
+# 후보가 없을 때의 정보 안내. 라이브러리 버튼·단축키·트레이가 같은 문구를 쓴다.
+NO_CANDIDATE_MESSAGE = "재생할 영상이 없습니다."
+
 
 def choose_video_id(
     candidates: tuple[int, ...], *, previous_video_id: int | None = None,

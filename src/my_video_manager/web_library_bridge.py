@@ -6,6 +6,7 @@ import json
 from .web_library_data import details_data, highlights_data
 from .web_library_contract import MENU_ACTIONS, SCAN_LOCKED_ACTIONS, LIBRARY
 from .web_json import encode
+from .random_play import NO_CANDIDATE_MESSAGE
 
 
 class LibraryBridge(QObject):
@@ -70,6 +71,23 @@ class LibraryBridge(QObject):
         # WebChannel 응답을 먼저 돌려주고 Qt 대화상자의 중첩 이벤트 루프를 연다.
         QTimer.singleShot(0, lambda: self.perform(action, video_id))
         return encode({'ok': True})
+
+    @LIBRARY.slot('randomPlay')
+    def randomPlay(self):
+        # 범위는 페이지의 현재 결과다. 조건이 없으면 현재 결과가 곧 영상 전체다.
+        # 재생은 상태를 바꾸지 않는 작업이라 검사 중에도 막지 않는다.
+        if self.busy:
+            return encode({'error': '진행 중인 작업이 끝난 뒤 다시 시도하세요.'})
+        try:
+            video_id = self.page.core.pick_random_video(video_ids=self.page.visible_video_ids())
+        except (ValueError, OSError) as error:
+            return encode({'error': str(error)})
+        if video_id is None:
+            return encode({'videoId': None, 'message': NO_CANDIDATE_MESSAGE})
+        self.busy = True
+        self.page.selected_id = video_id
+        QTimer.singleShot(0, lambda: self.perform('play', video_id))
+        return encode({'videoId': video_id})
 
     @LIBRARY.slot('highlights')
     def highlights(self, video_id):

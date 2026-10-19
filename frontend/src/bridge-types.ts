@@ -204,6 +204,7 @@ export interface LibraryBridge {
   highlights: (videoId: number, reply: Reply) => void
   playHighlight: (videoId: number, highlightId: number, reply: Reply) => void
   editHighlight: (videoId: number, highlightId: number, reply: Reply) => void
+  randomPlay: (reply: Reply) => void
   thumbnailsChanged: Signal<string>
   libraryChanged: Signal<string>
   libraryDetailsChanged: Signal<number>
@@ -222,6 +223,7 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
     highlights: raw.highlights.bind(raw),
     playHighlight: raw.playHighlight.bind(raw),
     editHighlight: raw.editHighlight.bind(raw),
+    randomPlay: raw.randomPlay.bind(raw),
     thumbnailsChanged: Object.freeze({ connect: raw.thumbnailsChanged.connect.bind(raw.thumbnailsChanged), disconnect: raw.thumbnailsChanged.disconnect.bind(raw.thumbnailsChanged) }),
     libraryChanged: Object.freeze({ connect: raw.libraryChanged.connect.bind(raw.libraryChanged), disconnect: raw.libraryChanged.disconnect.bind(raw.libraryChanged) }),
     libraryDetailsChanged: Object.freeze({ connect: raw.libraryDetailsChanged.connect.bind(raw.libraryDetailsChanged), disconnect: raw.libraryDetailsChanged.disconnect.bind(raw.libraryDetailsChanged) }),
