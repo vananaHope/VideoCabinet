@@ -155,6 +155,47 @@ def test_scanning_rejects_library_mutation(bridge):
         assert 'error' in json.loads(bridge.action(action, page.selected_id))
 
 
+
+def test_random_play_picks_from_current_results_and_queues_existing_play(bridge):
+    bridge, page, app = bridge
+    json.loads(bridge.filter('python', 0))
+    results = set(page.visible_ids)
+    assert len(results) == 2
+    picked = []
+    for _ in range(4):
+        reply = json.loads(bridge.randomPlay())
+        assert set(reply) == {'videoId'} and reply['videoId'] in results
+        assert page.selected_id == reply['videoId']
+        assert 'error' in json.loads(bridge.randomPlay())
+        app.processEvents()
+        picked.append(reply['videoId'])
+    assert page.played == picked
+    # 후보가 둘이면 직전 영상을 다시 고르지 않는다.
+    assert all(a != b for a, b in zip(picked, picked[1:]))
+    assert not bridge.busy
+
+
+def test_random_play_without_candidates_is_info_not_error(bridge):
+    bridge, page, app = bridge
+    json.loads(bridge.filter('없는 제목', 0))
+    assert page.visible_ids == []
+    assert json.loads(bridge.randomPlay()) == {'videoId': None, 'message': '재생할 영상이 없습니다.'}
+    for video_id in page.video_ids:
+        page.core.exclude_video(video_id)
+    json.loads(bridge.filter('', 0))
+    assert json.loads(bridge.randomPlay())['videoId'] is None
+    app.processEvents()
+    assert page.played == [] and not bridge.busy
+
+
+def test_random_play_is_not_locked_during_scan(bridge):
+    bridge, page, app = bridge
+    page.worker = object()
+    video_id = json.loads(bridge.randomPlay())['videoId']
+    app.processEvents()
+    assert page.played == [video_id]
+
+
 def add_highlight(core, video_id):
     core.playback.start(video_id, 12.125)
     core.execute_highlight_command(core.command_for_key('Insert'))

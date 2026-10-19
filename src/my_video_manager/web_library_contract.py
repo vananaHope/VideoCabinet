@@ -22,6 +22,7 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
     'highlights': (Argument('videoId', int, 'number'),),
     'playHighlight': (Argument('videoId', int, 'number'), Argument('highlightId', int, 'number')),
     'editHighlight': (Argument('videoId', int, 'number'), Argument('highlightId', int, 'number')),
+    'randomPlay': (),
 }, signals={
     'thumbnailsChanged': str, 'libraryChanged': str, 'libraryDetailsChanged': int,
     'libraryFocusRequested': str, 'libraryError': str,
