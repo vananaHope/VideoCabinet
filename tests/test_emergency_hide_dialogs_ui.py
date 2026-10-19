@@ -10,7 +10,7 @@ if os.environ["QT_QPA_PLATFORM"] == "offscreen":
 import pytest
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
 from test_emergency_hide_ui import app, window, key, emergency_key, play_to_twenty_seconds
 from test_web_dialogs import state, within
@@ -277,9 +277,47 @@ def test_playback_dialog_moved_after_hiding_stays_hidden_until_return(window):
         window.tray.open()
         QApplication.processEvents()
         assert dialogs.container.isVisible() and window.web_host.view.parent() is dialogs.container
+        assert dialogs.container.focusWidget() is view(window)
         assert player.paused
 
     open_playback_dialog(window, check, before_container=press)
+
+
+def test_playback_dialog_without_tray_minimizes_with_the_dialog_left_to_the_os(window, monkeypatch):
+    """트레이가 없으면 최소화로 대신한다. 대화상자는 운영체제가 소유 창과 함께 내리므로 따로 감추지 않는다."""
+    _, player = play_to_twenty_seconds(window)
+    dialogs = window.web_host.dialogs
+    monkeypatch.setattr(QSystemTrayIcon, "isSystemTrayAvailable", lambda: False)
+
+    def check():
+        wait_for(lambda: dialogs.container is not None and dialogs.container.isVisible())
+        press_emergency(view(window))
+        assert window.isMinimized() and player.paused
+        # 작업표시줄에서 복원했을 때 보이지 않는 대화상자가 남지 않는다.
+        assert dialogs.container.isVisible() and dialogs.active
+        window.showNormal()
+        QApplication.processEvents()
+        assert dialogs.container.isVisible() and window.web_host.view.parent() is dialogs.container
+
+    open_playback_dialog(window, check)
+
+
+def test_common_warning_box_keeps_the_key_until_closed(window):
+    """공용 네이티브 경고(QMessageBox)가 떠 있으면 지금처럼 키를 넘긴다. 경고를 닫은 뒤에는 탈출한다."""
+    _, player = play_to_twenty_seconds(window)
+    seen = []
+
+    def check():
+        box = QApplication.activeModalWidget()
+        seen.append(box)
+        press_emergency(box)
+        seen.append((window.isVisible(), box.isVisible(), player.paused))
+        box.close()
+    QTimer.singleShot(100, check)
+    QMessageBox.warning(window, "재생 조작 실패", "확인용 경고")
+    assert isinstance(seen[0], QMessageBox) and seen[1] == (True, True, False)
+    emergency_key(window)
+    assert not window.isVisible() and player.paused
 
 
 @pytest.mark.parametrize("menu", ["settings", "playback"])

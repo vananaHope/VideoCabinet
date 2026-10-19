@@ -190,7 +190,6 @@ class MainWindow(QMainWindow):
                 # 숨기기가 먼저다. 실패는 복귀한 화면에 보인다.
                 self.playback_page.show_error(f"일시정지 실패: {error}")
         self.set_playback_fullscreen(False)
-        self.web_host.dialogs.hide_for_emergency()
         self.tray.hide_for_emergency(focus)
 
     def has_emergency_focus(self):

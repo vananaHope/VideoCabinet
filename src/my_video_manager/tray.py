@@ -68,10 +68,13 @@ class TrayControls(QObject):
         """
         if not QSystemTrayIcon.isSystemTrayAvailable():
             # 트레이가 없으면 숨긴 창을 다시 열 곳이 없으므로 작업표시줄로 내린다.
+            # 창 모달 대화상자는 운영체제가 소유 창과 함께 내리고 복원한다.
             self.window.showMinimized()
             return
         self._emergency_hidden = True
         self._emergency_focus = focus
+        # 재생 중 옮겨 띄운 대화상자는 별도 창이므로 함께 감추고, 열기에서 다시 보인다.
+        self.window.web_host.dialogs.hide_for_emergency()
         self.window.hide()
 
     def notify(self, message):
