@@ -157,6 +157,7 @@ def test_unchanged_files_are_not_read_again_but_mtime_or_size_change_is(library,
     sidecar = video.with_suffix(".srt")
     sidecar.write_text(srt("첫째"), encoding="utf-8")
     core.add_file(video)
+    core.scan()  # 최초 전체 검사에서 파서 세대를 기록한다.
     original = Path.read_bytes
     reads = []
 
@@ -523,10 +524,10 @@ def test_smi_sorts_syncs_stably_and_clamps_negative_start(library):
     assert core.search('복구줄').results[0].start == .5
 
 
-def test_smi_without_p_keeps_default_text_and_only_empty_sync_closes_all(library):
+def test_smi_without_p_replaces_all_language_classes(library):
     core, video = library
     video.with_suffix('.smi').write_bytes((
-        '<STYLE>숨김</STYLE><SYNC Start=1000><P Class=KRCC>한국어'
+        '<STYLE>숨김</STYLE><SYNC Start=1000><P Class=KRCC>한국어<P Class=ENCC>English'
         '<SYNC Start=2000>기본 <b>대사</b><br>둘째 줄'
         '<SYNC Start=3000> &nbsp; \n<SYNC Start=4000>마지막'
     ).encode('utf-8'))
@@ -536,7 +537,8 @@ def test_smi_without_p_keeps_default_text_and_only_empty_sync_closes_all(library
     tracks = {track.language_class: track.lines for track in file.subtitles}
     assert [(line.start, line.end, line.text) for line in tracks['']] == [
         (2, 3, '기본 대사\n둘째 줄'), (4, 120, '마지막')]
-    assert [(line.start, line.end) for line in tracks['krcc']] == [(1, 3)]
+    assert [(line.start, line.end) for line in tracks['krcc']] == [(1, 2)]
+    assert [(line.start, line.end) for line in tracks['encc']] == [(1, 2)]
     assert core.search('기본대사').results[0].start == 2
     assert not core.search('숨김').results
 
@@ -544,6 +546,7 @@ def test_smi_without_p_keeps_default_text_and_only_empty_sync_closes_all(library
 @pytest.mark.parametrize('encoding,bom', [
     ('cp949', b''), ('utf-8', b''), ('utf-8', b'\xef\xbb\xbf'),
     ('utf-16-le', b'\xff\xfe'), ('utf-16-be', b'\xfe\xff'),
+    ('utf-16-le', b''), ('utf-16-be', b''),
 ])
 def test_trailing_nul_does_not_break_encoding(library, encoding, bom):
     core, video = library
@@ -591,6 +594,32 @@ def test_ass_content_with_smi_extension_has_specific_warning(library):
     assert 'ASS' in file.warning
     assert 'SYNC' not in file.warning
     assert file.subtitles == ()
+
+
+@pytest.mark.parametrize('text', ['00:00:01,000 --> 00:00:02,000', '[Events]', '[Script Info]'])
+def test_smi_dialogue_does_not_change_detected_format(library, text):
+    core, video = library
+    video.with_suffix('.smi').write_bytes((
+        '<SYNC Start=1000><P Class=KRCC>첫 대사'
+        f'<SYNC Start=2000><P Class=KRCC>\n{text}\n'
+        '<SYNC Start=3000><P Class=KRCC>마지막 대사'
+    ).encode('utf-8'))
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning is None
+    assert [(line.start, line.end, line.text) for line in file.subtitles[0].lines] == [
+        (1, 2, '첫 대사'), (2, 3, text), (3, 120, '마지막 대사')]
+
+
+def test_smi_negative_times_are_sorted_before_clamping(library):
+    core, video = library
+    video.with_suffix('.smi').write_bytes(
+        b'<SYNC Start=-100><P>B<SYNC Start=-500><P>A<SYNC Start=1000><P>C')
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning is None
+    assert [(line.start, line.end, line.text) for line in file.subtitles[0].lines] == [
+        (0, 1, 'B'), (1, 120, 'C')]
 
 
 @pytest.mark.parametrize('partial', [False, True])
@@ -882,3 +911,135 @@ def test_windows_directory_device_failure_is_not_permission_failure(library, mon
     assert '자막 폴더를 읽지 못했습니다. 폴더와 저장 장치 상태를 확인해 주세요.' in issue.message
     assert detail in issue.message
     assert str(video.parent) not in issue.message
+
+
+@pytest.mark.parametrize('old_generation', [None, 1])
+def test_parser_generation_recovers_silent_loss_then_caches(library, monkeypatch, old_generation):
+    core, video = library
+    sidecar = video.with_suffix('.smi')
+    content = '<SYNC Start=1000><P>첫 대사<SYNC Start=2000>P 없는 대사<SYNC Start=3000>&nbsp;'
+    old = content.replace('P 없는 대사', ' ' * len('P 없는 대사'.encode('utf-8')))
+    sidecar.write_bytes(old.encode('utf-8'))
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning is None
+    assert not core.search('P없는대사').results
+    stamp = sidecar.stat()
+    sidecar.write_bytes(content.encode('utf-8'))
+    os.utime(sidecar, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert sidecar.stat().st_size == stamp.st_size
+    if old_generation is not None:
+        core.settings.set('external_subtitles.parser_generation', old_generation)
+    core = make_core(video.parent.parent)
+    original = Path.read_bytes
+    reads = []
+    def read(path):
+        if path == sidecar:
+            reads.append(path)
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    core.scan()
+    assert reads == [sidecar]
+    assert core.search('P없는대사').results[0].start == 2
+    assert core.settings.get('external_subtitles.parser_generation') == 2
+    core = make_core(video.parent.parent)
+    core.scan()
+    assert reads == [sidecar]
+
+
+def test_partial_scan_does_not_finish_parser_generation(library, monkeypatch):
+    core, video = library
+    sibling = video.parent / 'other'
+    sibling.mkdir()
+    other = sibling / 'other.mkv'
+    other.write_bytes(b'other video')
+    sidecars = [video.with_suffix('.srt'), other.with_suffix('.srt')]
+    for sidecar in sidecars:
+        sidecar.write_bytes(srt().encode('utf-8'))
+    core.add_watched_folder(video.parent)
+    core.add_file(video)
+    core.add_file(other)
+    assert core.settings.get('external_subtitles.parser_generation') is None
+    core.settings.set('external_subtitles.parser_generation', 1)
+    original = Path.read_bytes
+    reads = []
+    def read(path):
+        if path in sidecars:
+            reads.append(path)
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    core.scan(folders=[sibling])
+    assert reads == [sidecars[1]]
+    assert core.settings.get('external_subtitles.parser_generation') == 1
+    reads.clear()
+    core.scan()
+    assert set(reads) == set(sidecars) and len(reads) == 2
+    assert core.settings.get('external_subtitles.parser_generation') == 2
+    reads.clear()
+    core.scan()
+    assert reads == []
+
+
+@pytest.mark.parametrize('interruption', [CancelledError, AsyncCancelledError, KeyboardInterrupt])
+def test_interrupted_scan_does_not_finish_parser_generation(library, monkeypatch, interruption):
+    core, video = library
+    first, second = video.with_suffix('.a.srt'), video.with_suffix('.b.srt')
+    for sidecar in (first, second):
+        sidecar.write_bytes(srt().encode('utf-8'))
+    core.add_file(video)
+    core.settings.set('external_subtitles.parser_generation', 1)
+    original = Path.read_bytes
+    reads = []
+    def interrupt(path):
+        if path in (first, second):
+            reads.append(path)
+        if path == second:
+            raise interruption()
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', interrupt)
+    with pytest.raises(interruption):
+        core.scan()
+    assert reads == [first, second]
+    assert core.settings.get('external_subtitles.parser_generation') == 1
+    monkeypatch.setattr(Path, 'read_bytes', original)
+    core = make_core(video.parent.parent)
+    core.scan()
+    assert core.settings.get('external_subtitles.parser_generation') == 2
+    assert len(core.search('체중이동').results) == 2
+
+
+@pytest.mark.parametrize('blocked', ['file', 'folder', 'disconnected'])
+def test_inaccessible_scan_does_not_finish_parser_generation(library, monkeypatch, blocked):
+    core, video = library
+    sidecar = video.with_suffix('.srt')
+    sidecar.write_bytes(srt().encode('utf-8'))
+    core.add_watched_folder(video.parent)
+    core.add_file(video)
+    core.settings.set('external_subtitles.parser_generation', 1)
+    with monkeypatch.context() as patch:
+        if blocked == 'file':
+            original = Path.read_bytes
+            def read(path):
+                if path == sidecar:
+                    raise PermissionError(13, 'denied')
+                return original(path)
+            patch.setattr(Path, 'read_bytes', read)
+        elif blocked == 'folder':
+            original = os.scandir
+            def scan(path):
+                if Path(path) == video.parent:
+                    raise PermissionError(13, 'denied')
+                return original(path)
+            patch.setattr(os, 'scandir', scan)
+        else:
+            moved = video.parent.with_name('disconnected')
+            video.parent.rename(moved)
+        try:
+            assert core.scan().issues
+            assert core.settings.get('external_subtitles.parser_generation') == 1
+        finally:
+            if blocked == 'disconnected':
+                moved.rename(video.parent)
+    core.scan()
+    assert core.settings.get('external_subtitles.parser_generation') == 2
+    assert core.search('체중이동').results
