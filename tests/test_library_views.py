@@ -1,6 +1,7 @@
 """공개 AppCore 조건 조합, 폴더 복사본, 날짜·정렬과 설정 복원."""
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import os
 import sqlite3
 
 import pytest
@@ -135,7 +136,9 @@ def test_options_persist_and_invalid_options_preserve_saved_settings(library):
     reopened = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database)
     assert reopened.library_view_options() == options
     for invalid in ({'sort': 'unknown'}, {'descending': 1}, {'tags': [True]}, {'added_from': 'bad-date'},
-                    {'added_preset': 'custom', 'added_from': '2026-02-02', 'added_to': '2026-01-01'}):
+                    {'modified_to': 'bad-date'},
+                    {'added_preset': 'custom', 'added_from': '2026-02-02', 'added_to': '2026-01-01'},
+                    {'modified_preset': 'custom', 'modified_from': '2026-02-02', 'modified_to': '2026-01-01'}):
         with pytest.raises(ValueError):
             core.save_library_view_options({**options, **invalid})
         assert core.library_view_options() == options
@@ -156,3 +159,73 @@ def test_date_chips_and_reset_follow_python_defaults():
     chips = filter_chips(options, {1: 'one', 2: 'two'})
     assert chips[0]['reset']['external'] is False
     assert chips[1]['reset']['tags'] == [2]
+
+
+@pytest.fixture
+def dated_library(tmp_path):
+    now = [datetime(2026, 10, 15, 12, tzinfo=timezone.utc)]
+    core = AppCore(media=Media(), clock=lambda: now[0], database=tmp_path / 'data/library.sqlite3',
+                   transcriber=Transcriber(), translator=Translator())
+    today = now[0].astimezone().date()
+    offsets = {'오늘': 0, '닷새': 5, '스무아흐레': 29, '서른': 30, '없음': 3}
+    paths = {}
+    for title, offset in offsets.items():
+        path = tmp_path / f'{title}.mp4'
+        path.write_bytes(title.encode())
+        core.add_file(path)
+        day = today - timedelta(days=offset)
+        stamp = int(datetime(day.year, day.month, day.day, 12).timestamp()) * 1_000_000_000
+        os.utime(path, ns=(stamp, stamp))
+        paths[title] = path
+    paths['없음'].unlink()
+    core.scan()
+    return core, today
+
+
+def dated(core, **changes):
+    return set(ids(core, **changes))
+
+
+def test_modified_date_presets_custom_range_and_missing(dated_library):
+    core, today = dated_library
+    videos = {video.title: video.id for video in core.videos()}
+    day = lambda offset: (today - timedelta(days=offset)).isoformat()
+
+    assert dated(core, modified_preset='today') == {videos['오늘']}
+    assert dated(core, modified_preset='7') == {videos['오늘'], videos['닷새']}
+    # 30일 프리셋은 29일 전까지 포함하고 30일 전은 뺀다.
+    assert dated(core, modified_preset='30') == {
+        videos['오늘'], videos['닷새'], videos['스무아흐레']}
+    assert videos['없음'] not in dated(core, modified_preset='30')
+
+    assert dated(core, modified_preset='custom', modified_from=day(5), modified_to=day(5)) == {videos['닷새']}
+    assert dated(core, modified_preset='custom', modified_from=day(0), modified_to=day(0)) == {videos['오늘']}
+    assert dated(core, modified_preset='custom', modified_from=day(30)) == {
+        videos['오늘'], videos['닷새'], videos['스무아흐레'], videos['서른']}
+    assert dated(core, modified_preset='custom', modified_to=day(5)) == {
+        videos['닷새'], videos['스무아흐레'], videos['서른']}
+
+
+def test_modified_date_sort_keeps_missing_last_both_ways(dated_library):
+    core, _ = dated_library
+    videos = {video.title: video.id for video in core.videos()}
+    ascending = ids(core, sort='modified')
+    descending = ids(core, sort='modified', descending=True)
+    assert ascending == [videos['서른'], videos['스무아흐레'], videos['닷새'], videos['오늘'], videos['없음']]
+    assert descending == [videos['오늘'], videos['닷새'], videos['스무아흐레'], videos['서른'], videos['없음']]
+
+
+def test_modified_date_chip_resets_condition_and_is_in_filter_defaults(dated_library):
+    from my_video_manager.library_views import FILTER_DEFAULTS, filter_chips
+    core, _ = dated_library
+    options = {**default_options(), 'modified_preset': '7'}
+    chip, = filter_chips(options, {})
+    assert chip['key'] == 'modified_preset'
+    assert chip['label'] == '수정한 날짜: 최근 7일'
+    assert core.library_view_ids(chip['reset']) == core.library_view_ids(default_options())
+    assert FILTER_DEFAULTS['modified_preset'] == FILTER_DEFAULTS['modified_from'] == FILTER_DEFAULTS['modified_to'] == ''
+
+    custom = {**default_options(), 'modified_preset': 'custom', 'modified_from': '2026-10-01'}
+    chip, = filter_chips(custom, {})
+    assert chip['label'] == '수정한 날짜: 2026-10-01 ~ 끝 없음'
+    assert chip['reset']['modified_preset'] == chip['reset']['modified_from'] == ''
