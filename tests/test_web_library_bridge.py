@@ -18,7 +18,8 @@ class Page(QWidget):
     def __init__(self, core):
         super().__init__()
         self.core = core
-        self.cards = snapshot_data(core.library_snapshot())
+        self.snapshot = core.library_snapshot()
+        self.cards = snapshot_data(self.snapshot)
         self.video_ids = {v['id'] for v in self.cards}
         self.visible_ids = list(self.video_ids)
         self.selected_id = self.visible_ids[0]
@@ -194,6 +195,66 @@ def test_random_play_is_not_locked_during_scan(bridge):
     video_id = json.loads(bridge.randomPlay())['videoId']
     app.processEvents()
     assert page.played == [video_id]
+
+
+def test_tag_random_play_uses_or_scope_beyond_current_results(bridge):
+    bridge, page, app = bridge
+    a, b, c = sorted(page.video_ids)[:3]
+    red = page.core.add_video_tag(a, 'red')
+    blue = page.core.add_video_tag(b, 'blue')
+    page.core.add_video_tag(c, 'green')
+    page.snapshot = page.core.library_snapshot()
+    json.loads(bridge.filter('없는 제목', 0))
+    assert page.visible_ids == []
+    candidates = {tag['id']: set(tag['videoIds']) for tag in json.loads(bridge.randomTagCandidates())['tags']}
+    assert candidates[red.id] == {a} and candidates[blue.id] == {b}
+    picked = []
+    for _ in range(3):
+        reply = json.loads(bridge.randomPlayTags(json.dumps([red.id, blue.id])))
+        assert reply['videoId'] in {a, b} and page.selected_id == reply['videoId']
+        app.processEvents()
+        picked.append(reply['videoId'])
+    assert page.played == picked and all(x != y for x, y in zip(picked, picked[1:]))
+    assert not bridge.busy
+
+
+def test_tag_candidates_come_from_page_snapshot_without_rereading(bridge, monkeypatch):
+    bridge, page, app = bridge
+    video_id = sorted(page.video_ids)[0]
+    tag = page.core.add_video_tag(video_id, 'snap')
+    page.snapshot = page.core.library_snapshot()
+    monkeypatch.setattr(page.core, 'videos', lambda: pytest.fail('스냅숏이 있으면 영상을 다시 읽지 않는다'))
+    monkeypatch.setattr(page.core, 'video_tags_map', lambda: pytest.fail('스냅숏이 있으면 태그를 다시 읽지 않는다'))
+    tags = json.loads(bridge.randomTagCandidates())['tags']
+    assert {'id': tag.id, 'videoIds': [video_id]} in tags
+    page.snapshot = None
+    assert json.loads(bridge.randomTagCandidates()) == {'tags': []}
+
+
+@pytest.mark.parametrize('tag_ids', ['[]', '[999999]'])
+def test_tag_random_play_without_candidates_is_info(bridge, tag_ids):
+    bridge, page, app = bridge
+    assert json.loads(bridge.randomPlayTags(tag_ids)) == {'videoId': None, 'message': '재생할 영상이 없습니다.'}
+    app.processEvents()
+    assert page.played == [] and not bridge.busy
+
+
+@pytest.mark.parametrize('tag_ids', ['', '{"a": 1}', '[1, "2"]', '[true]', '[1.5]', 'null'])
+def test_tag_random_play_rejects_malformed_tag_lists(bridge, tag_ids):
+    bridge, page, app = bridge
+    assert 'error' in json.loads(bridge.randomPlayTags(tag_ids))
+    app.processEvents()
+    assert page.played == [] and not bridge.busy
+
+
+def test_tag_random_play_waits_for_busy_bridge(bridge):
+    bridge, page, app = bridge
+    tag = page.core.add_video_tag(sorted(page.video_ids)[0], 'busy')
+    bridge.busy = True
+    assert 'error' in json.loads(bridge.randomPlayTags(json.dumps([tag.id])))
+    bridge.busy = False
+    app.processEvents()
+    assert page.played == []
 
 
 def add_highlight(core, video_id):

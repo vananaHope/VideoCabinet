@@ -22,7 +22,7 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
     'highlights': (Argument('videoId', int, 'number'),),
     'playHighlight': (Argument('videoId', int, 'number'), Argument('highlightId', int, 'number')),
     'editHighlight': (Argument('videoId', int, 'number'), Argument('highlightId', int, 'number')),
-    'randomPlay': (),
+    'randomPlay': (), 'randomTagCandidates': (), 'randomPlayTags': (Argument('tagIds', str, 'string'),),
 }, signals={
     'thumbnailsChanged': str, 'libraryChanged': str, 'libraryDetailsChanged': int,
     'libraryFocusRequested': str, 'libraryError': str,
@@ -31,7 +31,7 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
     Constant('scanLockedActions', SCAN_LOCKED_ACTIONS, 'readonly Action[]'),
     Constant('libraryChoices', CHOICES),
     Constant('libraryFilterDefaults', FILTER_DEFAULTS),
-), data_types=(web_library_data.TagData, web_library_data.TagUsageData, web_library_data.VideoData,
+), data_types=(web_library_data.TagData, web_library_data.TagUsageData, web_library_data.TagCandidatesData, web_library_data.VideoData,
                LibraryViewOptions, LibraryFolder, LibraryChip,
                web_library_data.ExternalSubtitleTrackData, web_library_data.ExternalSubtitleFileData,
                web_library_data.DetailsData, web_library_data.HighlightData, web_library_data.LibraryData))

@@ -1,10 +1,28 @@
 """후보와 직전 선택을 받아 재생할 영상 ID를 고르는 계산."""
 
 import random
-from typing import Callable
+from typing import Callable, Iterable, Mapping
 
 # 후보가 없을 때의 정보 안내. 라이브러리 버튼·단축키·트레이가 같은 문구를 쓴다.
 NO_CANDIDATE_MESSAGE = "재생할 영상이 없습니다."
+
+
+def is_candidate(video) -> bool:
+    """파일 없음·제외 영상은 후보가 아니다. 다 본 영상은 후보다."""
+    return not video.missing and not video.excluded
+
+
+def tag_candidates(videos: Iterable, video_tags: Mapping[int, Iterable]) -> dict[int, frozenset[int]]:
+    """태그 ID별 후보 영상 ID. 영상에 붙은 태그만 보며 후보가 없는 태그는 싣지 않는다.
+
+    고른 태그들(OR)의 후보는 이 집합들의 합집합이다.
+    """
+    grouped: dict[int, set[int]] = {}
+    for video in videos:
+        if is_candidate(video):
+            for tag in video_tags.get(video.id, ()):
+                grouped.setdefault(tag.id, set()).add(video.id)
+    return {tag_id: frozenset(ids) for tag_id, ids in grouped.items()}
 
 
 def choose_video_id(
