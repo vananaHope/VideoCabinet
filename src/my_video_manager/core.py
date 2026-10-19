@@ -51,6 +51,7 @@ class CommandType(str, Enum):
     TOGGLE_REEL_REPEAT = "toggle_reel_repeat"
     TOGGLE_FULLSCREEN = "toggle_fullscreen"
     TOGGLE_HIGHLIGHT_LIST = "toggle_highlight_list"
+    EMERGENCY_HIDE = "emergency_hide"
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,7 @@ DEFAULT_KEY_BINDINGS = {
     "\\": Command(CommandType.TOGGLE_REEL_REPEAT),
     ";": Command(CommandType.TOGGLE_HIGHLIGHT_LIST),
     "'": Command(CommandType.TOGGLE_FULLSCREEN),
+    "Ctrl+Shift+H": Command(CommandType.EMERGENCY_HIDE),
 }
 
 MIN_PLAYBACK_SPEED = 0.25
