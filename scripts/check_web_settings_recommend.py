@@ -184,6 +184,52 @@ def saved(window, criterion):
     return read(window, f"document.getElementById('settings-recommend-{criterion}-range').textContent")
 
 
+def delay_responses(window, delay):
+    """WebChannel 응답(type 10)만 늦춰 저장 요청이 끝나기 전의 입력을 재현한다. 0이면 원래대로 돌린다."""
+    read(window, f"""(() => {{
+      const t = window.qt.webChannelTransport;
+      window.checkOriginal = window.checkOriginal || t.onmessage;
+      t.onmessage = {delay} ? function(e) {{
+        if (JSON.parse(e.data).type === 10) setTimeout(() => window.checkOriginal.call(t, e), {delay});
+        else window.checkOriginal.call(t, e);
+      }} : window.checkOriginal;
+      return true }})()""")
+
+
+def late_responses(window, core):
+    rows = lambda: {row['label']: row for row in layout(window)['rows']}
+    delay_responses(window, 1500)
+    try:
+        # 42를 Enter로 보내고 응답 전에 99를 입력한다. 늦은 응답이 새 초안을 지우면 안 된다.
+        read(window, "(() => { const e = document.getElementById('settings-recommend-rewatch'); e.scrollIntoView({block: 'nearest'}); e.focus(); return true })()")
+        key(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        type_text(window, '42')
+        QTest.keyClick(window.web_host.view.focusProxy(), Qt.Key.Key_Return)
+        key(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        type_text(window, '99')
+        before = rows()['다시 보기']
+        assert before['value'] == '99' and before['unsaved'], before
+        wait_until(lambda: core.recommendation_period_days()['rewatch'] == 42, '늦은 저장')
+        settle(2000)
+        after = rows()['다시 보기']
+        assert after['value'] == '99' and after['unsaved'] and '저장된 값 42일' in after['status'] and not after['error'], after
+        checks.append('응답 지연 1.5초: 42 Enter 저장 → 응답 전 99 입력 → 응답 뒤에도 99·저장 안 됨 유지, 저장값 42')
+
+        # 잘못된 값을 보내고 응답 전에 Esc로 버리면 늦게 온 오류를 띄우지 않는다.
+        key(window, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        type_text(window, 'abc')
+        QTest.keyClick(window.web_host.view.focusProxy(), Qt.Key.Key_Return)
+        key(window, Qt.Key.Key_Escape)
+        settle(2000)
+        after = rows()['다시 보기']
+        assert after['value'] == '42' and not after['unsaved'] and not after['error'], after
+        assert core.recommendation_period_days()['rewatch'] == 42
+        checks.append('응답 지연 1.5초: abc Enter → 응답 전 Esc → 늦은 오류 안내 없음, 저장값 42 표시')
+    finally:
+        delay_responses(window, 0)
+    core.reset_recommendation_period_days('rewatch')
+
+
 def recommend_kinds(window):
     window.navigate_web_tab('recommend')
     page = window.web_host.controllers['recommend']
@@ -254,6 +300,7 @@ def screenshots():
     wait_until(lambda: core.recommendation_period_days() == {'continue_watching': 30, 'revisit': 30, 'new_arrivals': 14, 'rewatch': 60, 'unwatched': 30}, '기본값 복원')
     wait_until(lambda: not any(row['error'] or row['unsaved'] for row in layout(window)['rows']), '초안 정리')
     checks.append('기본값 단추: 다섯 기간 기본값 복원, 초안·오류 안내 정리')
+    late_responses(window, core)
     assert recommend_kinds(window) == ['new_arrivals']
     checks.append('기본값 복원 → 추천 탭 새로 추가됨 다시 표시')
     close(window)
