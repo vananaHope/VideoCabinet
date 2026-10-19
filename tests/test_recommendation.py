@@ -9,8 +9,8 @@ import pytest
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.library import Location, Video
 from my_video_manager.recommendation import (
-    ROW_TITLES, Recommendation, RecommendationRow, assign_rows, because_watched_title,
-    select_recommendations)
+    RECOMMENDATION_PERIODS, ROW_TITLES, Recommendation, RecommendationRow, assign_rows,
+    because_watched_title, select_recommendations)
 from my_video_manager.series import Series
 from my_video_manager.tags import Tag
 from my_video_manager.viewing import ViewingRecord, ViewingSettings, ViewingStatus, summarize_viewings
@@ -220,6 +220,39 @@ def test_new_rows_allocate_dedicated_then_each_source_then_taste_then_forgotten(
     assert len({i.video.id for r in rows for i in r.items}) == 85
 
 
+def test_final_display_order_and_assignment_keep_dedicated_rows_first():
+    a, b, c = Tag(1, "공유 A"), Tag(2, "공유 B"), Tag(3, "공유 C")
+    registered_days_ago = {5: 2, 7: 40, 10: 1, 14: 2}
+    videos = [replace(series_video(video_id), registered_at=NOW - timedelta(days=registered_days_ago[video_id]))
+              if video_id in registered_days_ago else series_video(video_id) for video_id in range(1, 15)]
+    tags = {1: (a,), 2: (a,), 3: (b,), 4: (b,), 12: (c,), 13: (c,), 14: (c,)}
+    statuses = {video.id: ViewingStatus() for video in videos}
+    statuses.update({
+        1: ViewingStatus(finished=True, last_viewed_at=NOW - timedelta(days=2)),
+        3: ViewingStatus(finished=True, last_viewed_at=NOW - timedelta(days=3)),
+        6: ViewingStatus(finished=True, favorite=True, last_viewed_at=NOW - timedelta(days=61)),
+        8: ViewingStatus(abandoned=True, stopped_percent=40, last_viewed_at=NOW - timedelta(days=5)),
+        9: ViewingStatus(finished=True, last_viewed_at=NOW - timedelta(days=10)),
+        11: ViewingStatus(finished=True, favorite=True, last_viewed_at=NOW - timedelta(days=100)),
+        12: ViewingStatus(finished=True, last_viewed_at=NOW - timedelta(days=20)),
+    })
+    rows = select_recommendations(
+        videos, statuses, tags, (Series(1, "시리즈", (9, 10)),), set(),
+        {11: NOW - timedelta(days=31)}, now=NOW,
+        viewing_records=[record(1, 2), record(3, 3), record(12, 20)])
+    # 표시 순서는 정의 순서 그대로다. 전용 줄은 뒤에 표시되지만 배정은 먼저 받는다.
+    assert [row.kind for row in rows] == [
+        "because_watched", "because_watched", "taste", "new_arrivals", "rewatch", "forgotten",
+        "continue_watching", "next_episode", "highlight_review"]
+    assert placed(rows) == [
+        ("because_watched", [2]), ("because_watched", [4]), ("taste", [13, 14]),
+        ("new_arrivals", [5]), ("rewatch", [6]), ("forgotten", [7]),
+        ("continue_watching", [8]), ("next_episode", [10]), ("highlight_review", [11])]
+    # 취향 맞춤이 먼저 가져간 14는 새로 추가됨에서 빠지고, 다음 화가 가져간 10도 빠진다.
+    assert 14 not in {item.video.id for item in rows[3].items}
+    assert 11 not in {item.video.id for item in rows[4].items}
+
+
 @pytest.mark.parametrize("days, kind", [(1, "because_watched"), (31, "taste")])
 @pytest.mark.parametrize("state", ["missing", "excluded", "dismissed", "finished", "abandoned", "glance"])
 def test_new_rows_only_unwatched_available_candidates(days, kind, state):
@@ -240,6 +273,68 @@ def test_new_rows_obey_injected_viewing_classification():
     assert placed(rows) == [("forgotten", [1, 2])]
 
 
+@pytest.mark.parametrize("days, present", [(13, True), (14, True), (15, False)])
+def test_new_arrivals_boundary_includes_exact_period(days, present):
+    video = replace(series_video(1), registered_at=NOW - timedelta(days=days))
+    rows = select_rows([video])
+    assert placed(rows) == ([("new_arrivals", [1])] if present else [])
+    if present:
+        assert rows[0].items[0].reason == f"{days}일 전에 추가했어요"
+
+
+def test_new_arrivals_sort_newest_first_and_include_only_unwatched():
+    videos = [replace(series_video(video_id), registered_at=NOW - timedelta(days=days))
+              for video_id, days in ((1, 10), (2, 1), (3, 5), (4, 2))]
+    rows = select_rows(videos, {4: FINISHED})
+    assert placed(rows) == [("new_arrivals", [2, 3, 1])]
+    assert [item.reason for item in rows[0].items] == [
+        "1일 전에 추가했어요", "5일 전에 추가했어요", "10일 전에 추가했어요"]
+
+
+@pytest.mark.parametrize("status", [FINISHED, ABANDONED])
+def test_new_arrivals_excludes_watched_videos(status):
+    video = replace(series_video(1), registered_at=NOW)
+    rows = select_rows([video], {1: status})
+    assert all(row.kind != "new_arrivals" for row in rows)
+
+
+@pytest.mark.parametrize("days, present", [(59, False), (60, False), (61, True)])
+def test_rewatch_boundary_needs_more_than_period(days, present):
+    status = ViewingStatus(finished=True, favorite=True, last_viewed_at=NOW - timedelta(days=days))
+    rows = select_rows([series_video(1)], {1: status})
+    assert placed(rows) == ([("rewatch", [1])] if present else [])
+    if present:
+        assert rows[0].items[0].reason == f"{days}일 동안 다시 보지 않았어요"
+
+
+def test_rewatch_requires_favorite_and_sorts_oldest_last_view_first():
+    videos = [series_video(video_id) for video_id in (1, 2, 3, 4)]
+    statuses = {
+        1: ViewingStatus(finished=True, favorite=True, last_viewed_at=NOW - timedelta(days=61)),
+        2: ViewingStatus(finished=True, favorite=True, last_viewed_at=NOW - timedelta(days=120)),
+        3: ViewingStatus(finished=True, favorite=False, last_viewed_at=NOW - timedelta(days=200)),
+        4: ViewingStatus(finished=True, favorite=True, last_viewed_at=NOW - timedelta(days=80)),
+    }
+    rows = select_rows(videos, statuses)
+    assert placed(rows) == [("rewatch", [2, 4, 1])]
+    assert [item.reason for item in rows[0].items] == [
+        "120일 동안 다시 보지 않았어요", "80일 동안 다시 보지 않았어요", "61일 동안 다시 보지 않았어요"]
+
+
+@pytest.mark.parametrize("kind", ["new_arrivals", "rewatch"])
+@pytest.mark.parametrize("state", ["missing", "excluded", "dismissed"])
+def test_new_general_rows_exclude_unavailable_or_dismissed(kind, state):
+    video = series_video(1)
+    if kind == "new_arrivals":
+        video, status = replace(video, registered_at=NOW), ViewingStatus()
+    else:
+        status = ViewingStatus(finished=True, favorite=True, last_viewed_at=NOW - timedelta(days=61))
+    video = replace(video, locations=() if state == "missing" else video.locations,
+                    excluded=state == "excluded")
+    rows = select_rows([video], {1: status}, dismissed={1} if state == "dismissed" else ())
+    assert rows == ()
+
+
 def test_new_rows_start_time_not_update_time_and_string_records():
     videos = [series_video(i) for i in (1, 2)]
     tags = {i: (Tag(1, "공유"),) for i in (1, 2)}
@@ -256,7 +351,7 @@ def test_recommendation_snapshot_keeps_viewing_evidence_and_active_progress(libr
     core.playback.start(source.id, 0)
     core.playback.report(40)  # 종료하지 않은 시청도 근거가 된다.
     snapshot = core.library_snapshot()
-    assert core.recommendations(snapshot=before) == ()
+    assert placed(core.recommendations(snapshot=before)) == [("new_arrivals", [source.id, target.id])]
     assert placed(core.recommendations(snapshot=snapshot)) == [
         ("because_watched", [target.id]), ("continue_watching", [source.id])]
     core.playback.end()
@@ -265,7 +360,7 @@ def test_recommendation_snapshot_keeps_viewing_evidence_and_active_progress(libr
     assert target.id not in ids(core)
 
 
-def test_dedicated_rows_keep_old_series_next_episode_and_all_five_display_rows(library):
+def test_dedicated_rows_keep_old_series_next_episode_and_all_display_rows(library):
     core, clock, add = library
     favorite, tagged, forgotten, continuing, review, first, second = (
         add(name) for name in ("즐겨 보는 영상", "태그 후보", "잊고 있던 영상", "이어 보기 후보",
@@ -282,11 +377,14 @@ def test_dedicated_rows_keep_old_series_next_episode_and_all_five_display_rows(l
     watch(core, continuing, 40)
     clock.days(1)
     rows = core.recommendations()
-    assert placed(rows) == [("taste", [tagged.id]), ("forgotten", [forgotten.id]),
-                            ("continue_watching", [continuing.id]), ("next_episode", [second.id]),
-                            ("highlight_review", [review.id])]
-    assert [(row.kind, row.title) for row in rows] == list(ROW_TITLES.items())[1:]
-    assert list(ROW_TITLES) == ["because_watched", "taste", "forgotten", "continue_watching", "next_episode", "highlight_review"]
+    assert placed(rows) == [("taste", [tagged.id]), ("rewatch", [favorite.id]),
+                            ("forgotten", [forgotten.id]), ("continue_watching", [continuing.id]),
+                            ("next_episode", [second.id]), ("highlight_review", [review.id])]
+    assert [(row.kind, row.title) for row in rows] == [
+        ("taste", "취향 맞춤"), ("rewatch", "다시 보기"), ("forgotten", "잊고 있던 영상"),
+        ("continue_watching", "이어 보기"), ("next_episode", "다음 화"), ("highlight_review", "하이라이트 복습")]
+    assert list(ROW_TITLES) == ["because_watched", "taste", "new_arrivals", "rewatch", "forgotten",
+                                "continue_watching", "next_episode", "highlight_review"]
 
 
 @pytest.mark.parametrize("kind", ["next_episode", "highlight_review"])
@@ -357,7 +455,9 @@ def test_next_episode_requires_viewing_and_sorts_by_series_latest_viewing():
               6: ViewingStatus(last_viewed_at=NOW),  # 틀어보기만 한 시리즈는 들어오지 않는다.
               8: replace(FINISHED, last_viewed_at=NOW - timedelta(days=2)),
               11: replace(FINISHED, last_viewed_at=NOW)}  # 마지막 화까지 봤으면 없다.
-    assert placed(select_rows(videos, states, series=groups)) == [("next_episode", [3, 5, 9])]
+    # 아직 시청이 없는 시리즈의 첫 화(6·12)는 일반 줄 후보일 뿐 다음 화 줄에는 나오지 않는다.
+    assert placed(select_rows(videos, states, series=groups)) == [
+        ("new_arrivals", [6, 12]), ("next_episode", [3, 5, 9])]
 
 
 def test_next_episode_ignores_glance_only_episode_when_ranking_series():
@@ -392,7 +492,7 @@ def test_each_new_row_excludes_unavailable_or_dismissed_videos(state, kind):
         statuses[2] = FINISHED
     groups = (Series(1, "시리즈", (1, 2, 3)),) if kind == "next_episode" else ()
     revisits = {2: OLD} if kind == "highlight_review" else {}
-    third = replace(series_video(3), registered_at=NOW)
+    third = replace(series_video(3), registered_at=NOW - timedelta(days=20))
     assert placed(select_rows([series_video(1), target, third], statuses,
                               series=groups, revisit_times=revisits)) == [(kind, [2])]
     target = replace(target, locations=() if state == "missing" else target.locations,
@@ -669,10 +769,13 @@ def test_priority_dedup_and_tag_order(library):
 
 
 def test_recent_viewing_tags_need_no_favorite_and_glance_is_unwatched(library):
-    core, _, add = library
+    core, clock, add = library
     favorite, target = add("즐겨 보는 영상"), add("대상")
     core.add_video_tag(favorite.id, "공유")
     core.add_video_tag(target.id, "공유")
+    # 새로 추가됨 줄이 끼어들지 않게 0일로 두고 등록 다음 날부터 본다.
+    core.settings.set("recommend.new_arrivals_days", 0)
+    clock.days(1)
     watch(core, favorite, 4)
     assert ids(core) == []
     watch(core, favorite)
@@ -682,6 +785,7 @@ def test_recent_viewing_tags_need_no_favorite_and_glance_is_unwatched(library):
     watch(core, target, 90)
     assert ids(core) == []
     third = add("하이라이트만 겹침")
+    clock.days(1)
     core.add_highlight_tag(mark(core, third).id, "공유")
     assert ids(core) == []
 
@@ -801,6 +905,8 @@ def test_settings_persist_and_use_injected_clock(library):
     core.settings.set("recommend.unwatched_days", 2)
     core.settings.set("recommend.revisit_days", 4)
     core.settings.set("recommend.continue_watching_days", 2.5)
+    # 이 테스트는 기존 세 기간의 의미만 본다. 새 줄이 끼어들지 않게 기간을 0일로 둔다.
+    core.settings.set("recommend.new_arrivals_days", 0)
     core = AppCore(media=Media(), clock=clock, database=core.database)
     clock.days(2.5)
     assert pairs(core) == [(a.id, "forgotten"), (c.id, "continue_watching")]
@@ -809,12 +915,86 @@ def test_settings_persist_and_use_injected_clock(library):
 
 
 @pytest.mark.parametrize("value", [-1, True, "30", None, float("inf"), float("nan")])
-@pytest.mark.parametrize("criterion", ["unwatched", "revisit", "continue_watching"])
+@pytest.mark.parametrize("criterion", [period.criterion for period in RECOMMENDATION_PERIODS])
 def test_invalid_period_rejected(library, value, criterion):
     core, _, _ = library
     core.settings.set(f"recommend.{criterion}_days", value)
     with pytest.raises(ValueError):
         core.recommendations()
+
+
+def test_recommendation_period_definitions_and_defaults(library):
+    core, _, _ = library
+    assert [(period.criterion, period.label, period.default_days,
+             period.minimum_days, period.maximum_days)
+            for period in core.recommendation_period_definitions()] == [
+        ("continue_watching", "이어 보기", 30, 0, 365000),
+        ("revisit", "하이라이트 복습", 30, 0, 365000),
+        ("new_arrivals", "새로 추가됨", 14, 0, 365000),
+        ("rewatch", "다시 보기", 60, 0, 365000),
+        ("unwatched", "잊고 있던 영상", 30, 0, 365000),
+    ]
+    assert core.recommendation_period_days() == {
+        "continue_watching": 30, "revisit": 30, "new_arrivals": 14,
+        "rewatch": 60, "unwatched": 30}
+
+
+@pytest.mark.parametrize("value", [-1, True, "30", None, float("inf"), float("nan"), 365001])
+@pytest.mark.parametrize("criterion", [period.criterion for period in RECOMMENDATION_PERIODS])
+def test_invalid_recommendation_period_write_is_rejected_without_storing(library, criterion, value):
+    core, _, _ = library
+    before = core.recommendation_period_days()
+    with pytest.raises(ValueError):
+        core.set_recommendation_period_days(criterion, value)
+    assert core.recommendation_period_days() == before
+    assert core.settings.get(f"recommend.{criterion}_days") is None
+
+
+def test_unknown_recommendation_period_is_rejected(library):
+    core, _, _ = library
+    with pytest.raises(ValueError):
+        core.set_recommendation_period_days("unknown", 30)
+    with pytest.raises(ValueError):
+        core.reset_recommendation_period_days("unknown")
+
+
+def test_new_arrivals_period_write_applies_immediately_and_reset_restores_default(library):
+    core, clock, add = library
+    video = add("새 영상")
+    assert [row.kind for row in core.recommendations()] == ["new_arrivals"]
+    core.set_recommendation_period_days("new_arrivals", 0)
+    assert core.recommendation_period_days()["new_arrivals"] == 0
+    clock.days(1)
+    assert core.recommendations() == ()
+    core.set_recommendation_period_days("new_arrivals", 30)
+    core = AppCore(media=Media(), clock=clock, database=core.database)
+    assert core.recommendation_period_days()["new_arrivals"] == 30
+    assert [item.video.id for row in core.recommendations() for item in row.items] == [video.id]
+    core.reset_recommendation_period_days("new_arrivals")
+    assert core.settings.get("recommend.new_arrivals_days") is None
+    assert core.recommendation_period_days()["new_arrivals"] == 14
+    clock.days(13)  # 등록한 지 14일째는 포함한다.
+    assert [item.video.id for row in core.recommendations() for item in row.items] == [video.id]
+    clock.days(1)  # 15일째는 기본 기간 밖이다.
+    assert core.recommendations() == ()
+
+
+def test_rewatch_period_write_applies_immediately_and_reset_restores_default(library):
+    core, clock, add = library
+    video = add("즐겨 보는 영상")
+    for _ in range(3):
+        watch(core, video)
+    clock.days(60)
+    assert core.recommendations() == ()
+    core.set_recommendation_period_days("rewatch", 59)
+    assert [(row.kind, [item.video.id for item in row.items])
+            for row in core.recommendations()] == [("rewatch", [video.id])]
+    core.reset_recommendation_period_days("rewatch")
+    assert core.recommendation_period_days()["rewatch"] == 60
+    assert core.recommendations() == ()
+    clock.days(1)
+    assert [(row.kind, [item.video.id for item in row.items])
+            for row in core.recommendations()] == [("rewatch", [video.id])]
 
 
 def test_bulk_status_and_tags_match_single_reads_and_include_empty_and_excluded(library):
@@ -948,6 +1128,7 @@ def test_viewing_tag_evidence_excludes_only_excluded_videos(library, state, expe
     clock.days(days)
     # 안 본 후보가 잊고 있던 영상으로 나오지 않도록 두 태그 줄만 관찰한다.
     core.settings.set("recommend.unwatched_days", 100)
+    core.settings.set("recommend.new_arrivals_days", 0)
     if state == "excluded":
         core.exclude_video(favorite.id)
     elif state == "missing":

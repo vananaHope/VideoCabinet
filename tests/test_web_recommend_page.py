@@ -22,13 +22,22 @@ def abandon(core, *videos):
         core.playback.end()
 
 
+def finish(core, video):
+    core.playback.start(video.id, 0)
+    core.playback.report(95)
+    core.playback.end()
+
+
 def rows(page):
     return [(row['kind'], [item['video']['id'] for item in row['items']]) for row in json.loads(page.bridge.snapshot())['rows']]
 
 
 @pytest.fixture
 def recommend(window_factory, core):
-    abandon(core, *core.videos()[:2])
+    # 셋째 영상은 추천에 들지 않는 대조군이다. 새로 추가됨 줄이 끼어들지 않게 다 본다.
+    first, second, third = core.videos()
+    abandon(core, first, second)
+    finish(core, third)
     window = window_factory()
     window.player_factory = Player
     window.navigate_web_tab('recommend')

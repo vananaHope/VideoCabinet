@@ -1,4 +1,4 @@
-"""#196·#197·#203 추천 탭 1100×720 배치와 실제 Chromium 키 입력·mpv 왕복 검사.
+"""#196·#197·#203·#204 추천 탭 1100×720 배치와 실제 Chromium 키 입력·mpv 왕복 검사.
 
 스크린샷: python scripts/check_web_recommend.py --offscreen
 실창: desktop_lock.py run --owner issue-196 -- python scripts/check_web_recommend.py --verify --no-screenshots
@@ -213,10 +213,11 @@ def card_visible(window, card_id):
 
 
 def screenshots():
-    # 0개: 등록한 지 30일이 안 된 안 본 영상만 있다.
+    # 0개: 등록한 지 14일은 지났고 30일은 안 된 안 본 영상만 있다.
     core, clock, folder = library('empty')
     for title in titles(3):
         add(core, folder, title)
+    clock.now += timedelta(days=20)
     window = make_window(core)
     page = open_recommend(window)
     assert page.rows == []
@@ -227,7 +228,7 @@ def screenshots():
     close(window)
     checks.append('추천 0개: 빈 상태 안내·관심 없음 되돌리기 버튼')
 
-    # 적음: 이어 보기 줄 하나에 세 장.
+    # 적음: 새로 추가됨 두 장과 이어 보기 세 장이 표시 순서대로.
     core, clock, folder = library('few')
     videos = [add(core, folder, title) for title in titles(5)]
     for video in videos[:3]:
@@ -237,10 +238,27 @@ def screenshots():
     capture(window, 'recommend-few')
     layouts['few'] = layout(window)
     rows = layouts['few']['rows']
-    assert [(row['label'], row['cards']) for row in rows] == [('이어 보기 · 3개', 3)], rows
-    assert not rows[0]['stripOverflow'] and not layouts['few']['pageOverflow'], layouts['few']
+    assert [(row['label'], row['cards']) for row in rows] == [
+        ('새로 추가됨 · 2개', 2), ('이어 보기 · 3개', 3)], rows
+    assert all(not row['stripOverflow'] for row in rows) and not layouts['few']['pageOverflow'], layouts['few']
     close(window)
-    checks.append('추천 적음: 줄 하나·카드 세 장, 넘침 없음')
+    checks.append('추천 적음: 새로 추가됨·이어 보기 두 줄, 넘침 없음')
+
+    # 다시 보기: 즐겨 보는 영상을 61일 넘게 안 봤다.
+    core, clock, folder = library('rewatch')
+    video = add(core, folder, titles(1)[0])
+    for _ in range(3):
+        watch(core, video, 58)
+    clock.now += timedelta(days=61)
+    window = make_window(core)
+    page = open_recommend(window)
+    assert [(row['kind'], len(row['items'])) for row in page.rows] == [('rewatch', 1)], page.rows
+    assert page.rows[0]['items'][0]['reason'] == '61일 동안 다시 보지 않았어요'
+    capture(window, 'recommend-rewatch')
+    layouts['rewatch'] = layout(window)
+    assert layouts['rewatch']['rows'][0]['label'] == '다시 보기 · 1개', layouts['rewatch']
+    close(window)
+    checks.append('추천 다시 보기: 즐겨 보는 영상 61일·이유 표시')
 
     # 최대: 여덟 줄 모두 20개. 전용 줄이 먼저 배정받고 넘친 영상은 일반 줄의 후보로 남는다.
     core, clock, folder = library('full')
