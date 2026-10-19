@@ -56,7 +56,7 @@
 
 | 등급 | 구현 목록(앞부터) | 검토 목록(앞부터) |
 | --- | --- | --- |
-| `light` | opencode@high → codex@high | codex@medium → 관리자 |
+| `light` | opencode@high → codex@high | codex@medium → 관리자 → claude@high |
 | `standard` | opencode@high → codex@high | codex@high → claude@high |
 | `hard` | codex@high → claude@high | claude@high → codex@high |
 | `UI` | claude | codex@high → claude |
