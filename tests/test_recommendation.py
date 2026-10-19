@@ -9,7 +9,8 @@ import pytest
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.library import Location, Video
 from my_video_manager.recommendation import (
-    ROW_TITLES, Recommendation, RecommendationRow, assign_rows, select_recommendations)
+    ROW_TITLES, Recommendation, RecommendationRow, assign_rows, because_watched_title,
+    select_recommendations)
 from my_video_manager.series import Series
 from my_video_manager.tags import Tag
 from my_video_manager.viewing import ViewingRecord, ViewingSettings, ViewingStatus, summarize_viewings
@@ -125,6 +126,17 @@ def taste_rows(videos, tags, records=(), *, series=(), dismissed=(), revisits=No
                                   now=NOW, viewing_records=records, viewing_settings=settings)
 
 
+@pytest.mark.parametrize("title, expected", [
+    ("액션", "『액션』을 봤다면"),
+    ("1화", "『1화』를 봤다면"),
+    ("드라마", "『드라마』를 봤다면"),
+    ("Episode 2", "『Episode 2』을(를) 봤다면"),
+    ("ABC", "『ABC』을(를) 봤다면"),
+])
+def test_because_watched_title_agrees_with_final_syllable(title, expected):
+    assert because_watched_title(title) == expected
+
+
 @pytest.mark.parametrize("days, present", [(14 - 1 / 86400, True), (14, True), (14 + 1 / 86400, False)])
 def test_because_watched_exact_fourteen_day_boundary(days, present):
     videos = [series_video(i) for i in (1, 2)]
@@ -133,7 +145,7 @@ def test_because_watched_exact_fourteen_day_boundary(days, present):
     assert [r.kind for r in rows] == ["because_watched" if present else "taste"]
     assert placed(rows)[0][1] == [2]
     if present:
-        assert rows[0].title == "『1화』을 봤다면"
+        assert rows[0].title == "『1화』를 봤다면"
 
 
 def test_because_watched_three_distinct_recent_sources_skip_tagless_without_refill():
@@ -144,11 +156,11 @@ def test_because_watched_three_distinct_recent_sources_skip_tagless_without_refi
                record(4, 0.5, record_id=10), record(9, 0, 4)]
     rows = taste_rows(videos, tags, records)
     assert [(r.title, [i.video.id for i in r.items]) for r in rows[:3]] == [
-        ("『4화』을 봤다면", [8]), ("『3화』을 봤다면", [7]), ("『2화』을 봤다면", [6])]
+        ("『4화』를 봤다면", [8]), ("『3화』를 봤다면", [7]), ("『2화』를 봤다면", [6])]
     assert len({r.key for r in rows}) == len(rows)
     del tags[4]
     rows = taste_rows(videos, tags, records)
-    assert [r.title for r in rows if r.kind == "because_watched"] == ["『3화』을 봤다면", "『2화』을 봤다면"]
+    assert [r.title for r in rows if r.kind == "because_watched"] == ["『3화』를 봤다면", "『2화』를 봤다면"]
 
 
 def test_because_watched_shared_tag_count_and_same_series_exclusion():

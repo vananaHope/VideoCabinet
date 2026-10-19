@@ -73,6 +73,19 @@ def _elapsed_days(now, then):
     return max(0, (now - then).days)
 
 
+def because_watched_title(title):
+    """『제목』 뒤의 목적격 조사를 마지막 글자의 받침에 맞춘다.
+
+    마지막 글자가 한글이 아니면 숫자 읽기를 추정하지 않고 '을(를)'을 쓴다.
+    """
+    last = title[-1:] if title else ""
+    if "가" <= last <= "힣":
+        particle = "을" if (ord(last) - ord("가")) % 28 else "를"
+    else:
+        particle = "을(를)"
+    return f"『{title}』{particle} 봤다면"
+
+
 def select_recommendations(videos, statuses, tags, series, dismissed, revisit_times, *,
                            now, viewing_records=(), viewing_settings=ViewingSettings(),
                            unwatched_days=30, revisit_days=30,
@@ -175,7 +188,7 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
     for definition in ROW_DEFINITIONS:
         if definition.kind == "because_watched":
             for source_id, entries in because_ranked.items():
-                candidates.append(RecommendationRow(definition.kind, f"『{visible[source_id].title}』을 봤다면",
+                candidates.append(RecommendationRow(definition.kind, because_watched_title(visible[source_id].title),
                     tuple(item for _, item in sorted(entries, key=lambda pair: pair[0])), source_id))
         else:
             candidates.append(RecommendationRow(definition.kind, definition.title,
