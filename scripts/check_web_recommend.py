@@ -313,7 +313,17 @@ def screenshots():
     wait_until(lambda: read(window, "[...document.querySelectorAll('[role=menuitem]')].map(item => item.textContent)") == ['재생', '관심 없음'])
     capture(window, 'recommend-menu')
     key(window, Qt.Key.Key_Escape)
-    checks.append('우클릭 메뉴(재생·관심 없음)')
+    wait_until(lambda: read(window, "document.activeElement.id") == 'recommendations')
+    checks.append('우클릭 메뉴(재생·관심 없음), Esc로 닫으면 목록에 초점')
+    # 다른 탭에 다녀오면 지난 관심 없음 안내가 남지 않는다.
+    js(window, "document.getElementById('recommendations').focus()")
+    key(window, Qt.Key.Key_Backspace)
+    wait_until(lambda: read(window, "[...document.querySelectorAll('main[aria-label=\"추천\"] button')].some(b => b.textContent === '되돌리기')"))
+    window.navigate_web_tab('library')
+    window.navigate_web_tab('recommend')
+    wait_until(lambda: not read(window, "[...document.querySelectorAll('main[aria-label=\"추천\"] button')].some(b => b.textContent === '되돌리기')"))
+    core.restore_dismissed_video(int(first.removeprefix('recommendation-')))
+    checks.append('탭을 떠나면 관심 없음 안내 정리')
     # 라이브러리 탭에는 추천 영역이 없고 격자가 검색줄 바로 아래부터 시작한다.
     window.navigate_web_tab('library')
     wait_until(lambda: read(window, "!document.querySelector('main[aria-label=\"라이브러리\"]').parentElement.hidden"))

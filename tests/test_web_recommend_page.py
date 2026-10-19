@@ -51,7 +51,7 @@ def test_snapshot_lists_rows_with_video_cards_and_reasons(recommend, core):
     window, page = recommend
     first, second, third = core.videos()
     state = json.loads(page.bridge.snapshot())
-    assert state['loaded'] and state['error'] == ''
+    assert state['loaded'] and state['error'] == '' and state['rowLimit'] == 20
     assert [(row['kind'], row['title']) for row in state['rows']] == [('abandoned', '보다 만')]
     assert {item['video']['id'] for item in state['rows'][0]['items']} == {first.id, second.id}
     item = state['rows'][0]['items'][0]

@@ -240,6 +240,7 @@ export interface RecommendationRowData {
 
 export interface RecommendData {
   loaded: boolean
+  rowLimit: number
   rows: Array<RecommendationRowData>
   error: string
 }

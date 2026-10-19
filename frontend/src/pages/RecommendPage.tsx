@@ -64,13 +64,15 @@ export default function RecommendPage() {
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}
-    connectBridge().then(async ({ recommend: api }) => {
+    connectBridge().then(async ({ recommend: api, shell }) => {
       if (disposed) return
       const changed = (json: string) => setData(JSON.parse(json))
+      // 다른 탭으로 가면 한 번 생긴 안내(요청 실패·관심 없음 되돌리기)를 지운다. 돌아왔을 때 지난 일이 남지 않는다.
+      const shellChanged = (json: string) => { if (JSON.parse(json).tab !== "recommend") { setDismissed(null); setError("") } }
       // 재생에서 돌아오면 남아 있는 커서 자리의 카드에 초점을 둔다. 레이아웃이 다시 잡힌 뒤 보이게 한다.
       const focus = () => requestAnimationFrame(() => requestAnimationFrame(() => focusTarget.current()))
-      api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError)
-      disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError) }
+      api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError); shell.shellChanged.connect(shellChanged)
+      disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError); shell.shellChanged.disconnect(shellChanged) }
       const initial = await request<RecommendData>(reply => api.snapshot(reply))
       if (!disposed) { setData(initial); setBridge(api) }
     }).catch(showError)
@@ -131,7 +133,7 @@ export default function RecommendPage() {
 
   const count = rows.reduce((sum, row) => sum + row.items.length, 0)
   return <main aria-label="추천" className="flex h-full flex-col gap-3 p-4">
-    <PageHeader title="추천" description="시청·하이라이트·태그를 근거로 지금 볼 만한 영상을 이유별 줄로 보여 줍니다. 영상은 한 줄에만 나오고 줄마다 최대 20개입니다."
+    <PageHeader title="추천" description={`시청·하이라이트·태그를 근거로 지금 볼 만한 영상을 이유별 줄로 보여 줍니다. 영상은 한 줄에만 나오고 줄마다 최대 ${data?.rowLimit ?? ""}개입니다.`}
       actions={<Button id="recommend-dismissed" variant="outline" onClick={() => { if (bridge) request(reply => bridge.showDismissed(reply)).catch(showError) }}>관심 없음 되돌리기</Button>} />
     <NoticeStack layout="yield" items={[
       error && { tone: "error", message: error, onDismiss: () => setError("") },
@@ -147,7 +149,8 @@ export default function RecommendPage() {
         {rows.map((row, rowIndex) => <section key={row.kind} role="row" aria-label={`${row.title} · ${row.items.length}개`} className="flex flex-col gap-1">
           <div role="rowheader" className="flex items-baseline gap-2 px-1"><h2 className="text-sm font-semibold">{row.title}</h2><span className="text-xs text-muted-foreground">{row.items.length}개</span></div>
           <div className="recommendation-row rounded-lg p-1">
-            {row.items.map((item, column) => <RecommendationMenu key={item.video.id} onPlay={() => play(item.video.id)} onDismiss={() => dismiss(item.video.id, item.video.title)}>
+            {row.items.map((item, column) => <RecommendationMenu key={item.video.id} onPlay={() => play(item.video.id)} onDismiss={() => dismiss(item.video.id, item.video.title)}
+              onClose={() => document.getElementById("recommendations")?.focus({ preventScroll: true })}>
               <RecommendationCard id={cardId(item.video.id)} video={item.video} reason={item.reason} role="gridcell" aria-selected={activeId === item.video.id} tabIndex={-1}
                 variant={activeId === item.video.id ? "selected" : "default"}
                 onClick={() => { move({ row: rowIndex, column }); play(item.video.id) }} onContextMenu={() => move({ row: rowIndex, column })} />
