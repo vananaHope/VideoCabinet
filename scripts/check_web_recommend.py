@@ -1,4 +1,4 @@
-"""#196·#197 추천 탭 1100×720 배치와 실제 Chromium 키 입력·mpv 왕복 검사.
+"""#196·#197·#203 추천 탭 1100×720 배치와 실제 Chromium 키 입력·mpv 왕복 검사.
 
 스크린샷: python scripts/check_web_recommend.py --offscreen
 실창: desktop_lock.py run --owner issue-196 -- python scripts/check_web_recommend.py --verify --no-screenshots
@@ -242,9 +242,9 @@ def screenshots():
     close(window)
     checks.append('추천 적음: 줄 하나·카드 세 장, 넘침 없음')
 
-    # 최대: 다섯 줄 모두 20개. 전용 줄이 먼저 배정받고 넘친 영상은 일반 줄의 후보로 남는다.
+    # 최대: 여덟 줄 모두 20개. 전용 줄이 먼저 배정받고 넘친 영상은 일반 줄의 후보로 남는다.
     core, clock, folder = library('full')
-    names = iter(titles(150))
+    names = iter(titles(250))
     continuing = [add(core, folder, next(names)) for _ in range(22)]
     review = [add(core, folder, next(names)) for _ in range(22)]
     favorite = add(core, folder, next(names))
@@ -273,17 +273,27 @@ def screenshots():
     for first, second in episodes:
         watch(core, first, 58)
         core.add_video_tag(second.id, '자연')  # 오래된 다음 화도 전용 줄이 먼저 가져간다.
+    for index in range(3):
+        source = add(core, folder, next(names))
+        core.add_video_tag(source.id, f'최근 주제 {index}')
+        for _ in range(20):
+            target = add(core, folder, next(names))
+            core.add_video_tag(target.id, f'최근 주제 {index}')
+        clock.now += timedelta(hours=1)
+        watch(core, source, 58)
     window = make_window(core)
     page = open_recommend(window)
+    assert len({row['key'] for row in page.rows}) == len(page.rows)
     assert [(row['kind'], len(row['items'])) for row in page.rows] == [
-        ('similar_tags', 20), ('forgotten', 20), ('continue_watching', 20),
+        ('because_watched', 20), ('because_watched', 20), ('because_watched', 20),
+        ('taste', 20), ('forgotten', 20), ('continue_watching', 20),
         ('next_episode', 20), ('highlight_review', 20)], page.rows
     shown = {row['kind']: {item['video']['id'] for item in row['items']} for row in page.rows}
     assert shown['continue_watching'] == {video.id for video in continuing[:20]}
     assert shown['next_episode'] == {second.id for _, second in episodes[:20]}
     # 이어 보기 넘침 두 편이 복습 자리를 먼저 차지하고, 복습 줄 넘침은 태그 줄로 간다.
     assert shown['highlight_review'] == {video.id for video in continuing[20:] + review[:18]}
-    assert {video.id for video in review[18:]} <= shown['similar_tags']
+    assert {video.id for video in review[18:]} <= shown['taste']
     assert {video.id for video in tagged[16:]} <= shown['forgotten']
     all_shown = [item['video']['id'] for row in page.rows for item in row['items']]
     assert len(all_shown) == len(set(all_shown))
@@ -314,7 +324,57 @@ def screenshots():
     key(window, Qt.Key.Key_Home)
     wait_until(lambda: active(window) == first)
     assert card_visible(window, first) and read(window, "document.getElementById('recommendations').scrollTop") == 0
-    checks.append('다섯 줄 × 20개: 전용 줄 우선 배정·넘침·중복 없음, 가로·세로 스크롤과 줄 사이 왕복 키 이동')
+    for _ in range(3):
+        key(window, Qt.Key.Key_Down)
+    capture(window, 'recommend-taste')
+    for _ in range(3):
+        key(window, Qt.Key.Key_Up)
+    checks.append('여덟 줄 × 20개: 전용 줄 우선 배정·넘침·중복 없음, 가로·세로 스크롤과 줄 사이 왕복 키 이동')
+    # 같은 종류 세 줄도 각자의 마지막 선택을 기억한다.
+    key(window, Qt.Key.Key_Right)
+    source_first = active(window)
+    key(window, Qt.Key.Key_Down)
+    key(window, Qt.Key.Key_Right)
+    source_second = active(window)
+    key(window, Qt.Key.Key_Down)
+    key(window, Qt.Key.Key_End)
+    source_third = active(window)
+    key(window, Qt.Key.Key_Up)
+    assert active(window) == source_second
+    key(window, Qt.Key.Key_Up)
+    assert active(window) == source_first
+    key(window, Qt.Key.Key_Down)
+    key(window, Qt.Key.Key_Down)
+    assert active(window) == source_third
+    key(window, Qt.Key.Key_Home)
+    key(window, Qt.Key.Key_Backspace)
+    removed_third = page.rows[2]['items'][0]['video']['id']
+    wait_until(lambda: active(window) == f'recommendation-{removed_third}')
+    assert active(window) != f"recommendation-{page.rows[0]['items'][0]['video']['id']}"
+    # 재생하지 않고 페이지를 재진입해도 같은 종류의 다른 줄로 이동하지 않는다.
+    window.navigate_web_tab('library')
+    open_recommend(window)
+    assert active(window) == f'recommendation-{removed_third}'
+    def idle_player(surface):
+        player = FakePlayer(surface)
+        player.positions = []
+        return player
+    window.player_factory = idle_player
+    js(window, "document.getElementById('recommendations').focus()")
+    key(window, Qt.Key.Key_Return)
+    wait_until(lambda: window.pages.currentWidget() is window.playback_page)
+    assert core.playback.session.video_id == removed_third
+    window.back_to_list()
+    wait_until(lambda: read(window, "document.activeElement.id") == 'recommendations')
+    assert active(window) == f'recommendation-{removed_third}'
+    for video in core.dismissed_videos():
+        core.restore_dismissed_video(video.id)
+    page.refresh()
+    key(window, Qt.Key.Key_Up)
+    key(window, Qt.Key.Key_Up)
+    key(window, Qt.Key.Key_Home)
+    wait_until(lambda: active(window) == first)
+    checks.append('동일 종류 세 줄: 줄별 선택 기억·관심 없음 후 같은 줄 자리·재진입·가짜 재생 왕복 복귀')
     # Backspace는 모든 줄에서 빼고, 안내의 되돌리기로 같은 카드에 돌아온다.
     key(window, Qt.Key.Key_Backspace)
     removed = int(first.removeprefix('recommendation-'))
@@ -357,7 +417,7 @@ def screenshots():
 
     # 긴 텍스트: 공백 없는 긴 제목과 긴 태그 이름이 든 이유.
     core, clock, folder = library('long')
-    favorite = add(core, folder, '즐겨 보는 영상')
+    favorite = add(core, folder, '공백없는아주긴기준영상제목' * 6)
     watch(core, favorite, 58)
     watch(core, favorite, 58)
     watch(core, favorite, 58)
@@ -378,6 +438,10 @@ def screenshots():
       const [title, , reason] = card.querySelectorAll('div > span');
       return title.scrollWidth > title.clientWidth && reason.scrollHeight > reason.clientHeight; }})()"""), '긴 제목은 말줄임, 긴 이유는 두 줄로 잘린다'
     assert not layouts['long']['pageOverflow'], layouts['long']
+    assert read(window, """(() => {
+      const count = document.querySelector('#recommendations [role=rowheader] > span');
+      return count.getBoundingClientRect().height <= parseFloat(getComputedStyle(count).lineHeight) + 1;
+    })()"""), '긴 기준 영상 제목 옆 개수는 한 줄로 유지한다'
     close(window)
     checks.append('긴 제목·긴 이유: 카드 폭·높이 유지, 말줄임과 두 줄 자름')
 

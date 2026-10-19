@@ -7,8 +7,11 @@ from math import isfinite
 from .library import Video
 from .series import next_episode
 from .tags import Tag
+from .viewing import ViewingKind, ViewingSettings, classify_viewing
 
 ROW_LIMIT = 20
+RECENT_VIEWING_DAYS = 14
+TASTE_HALF_LIFE_DAYS = 30
 
 
 @dataclass(frozen=True)
@@ -21,7 +24,8 @@ class RecommendationRowDefinition:
 # 표시 순서가 원본이다. 전용 줄부터 배정하며, 각 그룹 안의 배정 순서는 표시 순서다.
 # 새 줄은 정의와 select_recommendations의 후보를 더한다. 일반 줄은 dedicated=False다.
 ROW_DEFINITIONS = (
-    RecommendationRowDefinition("similar_tags", "태그가 비슷함"),  # #203의 취향 맞춤이 대체한다.
+    RecommendationRowDefinition("because_watched", "『제목』을 봤다면"),
+    RecommendationRowDefinition("taste", "취향 맞춤"),
     RecommendationRowDefinition("forgotten", "잊고 있던 영상"),
     RecommendationRowDefinition("continue_watching", "이어 보기", dedicated=True),
     RecommendationRowDefinition("next_episode", "다음 화", dedicated=True),
@@ -39,10 +43,15 @@ class Recommendation:
 
 @dataclass(frozen=True)
 class RecommendationRow:
-    """같은 이유로 추천한 영상의 묶음. kind는 줄 종류, items는 줄 안 순서다."""
+    """kind는 줄 종류, key는 기준 영상까지 구별하는 안정적인 줄 식별자다."""
     kind: str
     title: str
     items: tuple[Recommendation, ...]
+    source_video_id: int | None = None
+
+    @property
+    def key(self) -> str:
+        return self.kind if self.source_video_id is None else f"{self.kind}:{self.source_video_id}"
 
 
 def assign_rows(candidates, limit=ROW_LIMIT) -> tuple[RecommendationRow, ...]:
@@ -65,7 +74,8 @@ def _elapsed_days(now, then):
 
 
 def select_recommendations(videos, statuses, tags, series, dismissed, revisit_times, *,
-                           now, unwatched_days=30, revisit_days=30,
+                           now, viewing_records=(), viewing_settings=ViewingSettings(),
+                           unwatched_days=30, revisit_days=30,
                            continue_watching_days=30) -> tuple[RecommendationRow, ...]:
     """기준마다 후보 줄을 만들고 줄 배정 규칙을 적용한다. 틀어보기만 있으면 시청 없음이다."""
     playable = {v.id: v for v in videos if not v.missing and not v.excluded}
@@ -78,7 +88,9 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
     next_episode_times = {}
     revisit_allowed = {vid for vid in playable if vid not in dismissed and vid in revisit_times
                        and now - revisit_times[vid] >= timedelta(days=revisit_days)}
+    series_ids = {}
     for group in series:
+        series_ids.update((vid, group.id) for vid in group.video_ids)
         allowed.difference_update(group.video_ids)
         candidate = next_episode(group.video_ids, statuses)
         if candidate in playable and candidate not in dismissed:
@@ -103,9 +115,24 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
             revisit_allowed.add(min(overdue, key=lambda vid: (revisit_times[vid], vid)))
     # 관심 없음은 다음 볼 화를 고른 뒤 적용한다. 뒤 화로 넘어가지 않는다.
     allowed.difference_update(dismissed)
-    visible = {v.id for v in videos if not v.excluded}
-    favorite_tags = {tag.id for vid, status in statuses.items() if vid in visible and status.favorite
-                     for tag in tags.get(vid, ())}
+    visible = {v.id: v for v in videos if not v.excluded}
+    latest_viewings, tag_scores = {}, {}
+    for record in viewing_records:
+        if record.video_id not in visible or classify_viewing(
+                record.played_seconds, record.duration, viewing_settings) == ViewingKind.GLANCE:
+            continue
+        started = (datetime.fromisoformat(record.started_at)
+                   if isinstance(record.started_at, str) else record.started_at)
+        if now - timedelta(days=RECENT_VIEWING_DAYS) <= started <= now:
+            latest_viewings[record.video_id] = max(started, latest_viewings.get(record.video_id, started))
+        elapsed = max(0, (now - started).total_seconds() / 86400)
+        score = record.played_seconds * 0.5 ** (elapsed / TASTE_HALF_LIFE_DAYS)
+        for tag in tags.get(record.video_id, ()):
+            tag_scores[tag.id] = tag_scores.get(tag.id, 0) + score
+    # 먼저 최근 영상 세 개를 고른 뒤 태그 없는 영상은 건너뛴다. 다음 영상으로 채우지 않는다.
+    source_ids = sorted(latest_viewings, key=lambda vid: (-latest_viewings[vid].timestamp(), vid))[:3]
+    source_tags = {vid: {tag.id for tag in tags.get(vid, ())} for vid in source_ids if tags.get(vid)}
+    because_ranked = {vid: [] for vid in source_tags}
     ranked = {kind: [] for kind in ROW_TITLES}
     # 한 영상이 여러 기준에 맞으면 모든 후보 줄에 넣는다. 어느 줄에 나올지는 assign_rows가 정한다.
     for vid in allowed | revisit_allowed | continue_allowed:
@@ -121,10 +148,22 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
             revisit = revisit_times[vid]
             ranked["highlight_review"].append(((revisit.timestamp(), vid), Recommendation(
                 video, f"하이라이트를 {_elapsed_days(now, revisit)}일 동안 복습하지 않았어요")))
-        shared = tuple(tag for tag in tags.get(vid, ()) if tag.id in favorite_tags)
-        if vid in allowed and unwatched and shared:
-            ranked["similar_tags"].append(((-len(shared), video.registered_at.timestamp(), vid), Recommendation(
-                video, "겹친 태그 · " + ", ".join(t.name for t in shared), shared)))
+        if vid in allowed and unwatched:
+            video_tags = tags.get(vid, ())
+            for source_id, tag_ids in source_tags.items():
+                if source_id in series_ids and series_ids[source_id] == series_ids.get(vid):
+                    continue
+                shared = tuple(tag for tag in video_tags if tag.id in tag_ids)
+                if shared:
+                    because_ranked[source_id].append(((-len(shared), video.registered_at.timestamp(), vid),
+                        Recommendation(video, "겹친 태그 · " + ", ".join(t.name for t in shared), shared)))
+            scored_tags = sorted((tag for tag in video_tags if tag_scores.get(tag.id, 0) > 0),
+                                 key=lambda tag: (-tag_scores[tag.id], tag.id))
+            score = sum(tag_scores[tag.id] for tag in scored_tags)
+            if score > 0:
+                top_tags = tuple(scored_tags[:2])
+                ranked["taste"].append(((-score, video.registered_at.timestamp(), vid), Recommendation(
+                    video, "자주 본 태그 · " + ", ".join(tag.name for tag in top_tags), top_tags)))
         if vid in allowed and unwatched and now - video.registered_at > timedelta(days=unwatched_days):
             ranked["forgotten"].append(((video.registered_at.timestamp(), vid), Recommendation(
                 video, f"등록하고 {_elapsed_days(now, video.registered_at)}일 동안 시청하지 않았어요")))
@@ -132,12 +171,19 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
         if vid in allowed and status.abandoned and now - stopped_at[vid] > continue_period:
             ranked["forgotten"].append(((stopped_at[vid].timestamp(), vid), Recommendation(
                 video, f"{status.stopped_percent:.0f}%에서 멈춘 뒤 {_elapsed_days(now, stopped_at[vid])}일 지났어요")))
-    allocation_order = sorted(ROW_DEFINITIONS, key=lambda row: not row.dedicated)
-    assigned = assign_rows(RecommendationRow(row.kind, row.title,
-                           tuple(item for _, item in sorted(ranked[row.kind], key=lambda pair: pair[0])))
-                           for row in allocation_order)
-    by_kind = {row.kind: row for row in assigned}
-    return tuple(by_kind[row.kind] for row in ROW_DEFINITIONS if row.kind in by_kind)
+    candidates = []
+    for definition in ROW_DEFINITIONS:
+        if definition.kind == "because_watched":
+            for source_id, entries in because_ranked.items():
+                candidates.append(RecommendationRow(definition.kind, f"『{visible[source_id].title}』을 봤다면",
+                    tuple(item for _, item in sorted(entries, key=lambda pair: pair[0])), source_id))
+        else:
+            candidates.append(RecommendationRow(definition.kind, definition.title,
+                tuple(item for _, item in sorted(ranked[definition.kind], key=lambda pair: pair[0]))))
+    dedicated = {row.kind for row in ROW_DEFINITIONS if row.dedicated}
+    assigned = assign_rows(sorted(candidates, key=lambda row: row.kind not in dedicated))
+    by_key = {row.key: row for row in assigned}
+    return tuple(by_key[row.key] for row in candidates if row.key in by_key)
 
 
 class RecommendationStore:

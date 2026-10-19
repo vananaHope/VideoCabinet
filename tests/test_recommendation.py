@@ -12,7 +12,7 @@ from my_video_manager.recommendation import (
     ROW_TITLES, Recommendation, RecommendationRow, assign_rows, select_recommendations)
 from my_video_manager.series import Series
 from my_video_manager.tags import Tag
-from my_video_manager.viewing import ViewingSettings, ViewingStatus
+from my_video_manager.viewing import ViewingRecord, ViewingSettings, ViewingStatus, summarize_viewings
 
 
 class Clock:
@@ -113,6 +113,146 @@ def select_rows(videos, statuses=None, *, series=(), dismissed=(), revisit_times
                                   now=NOW, **periods)
 
 
+def record(vid, days=0, seconds=90, *, record_id=None):
+    started = NOW - timedelta(days=days)
+    return ViewingRecord(record_id or vid, vid, 100, seconds, started, started, seconds)
+
+
+def taste_rows(videos, tags, records=(), *, series=(), dismissed=(), revisits=None,
+               settings=ViewingSettings()):
+    states = summarize_viewings(records, (v.id for v in videos), settings).statuses
+    return select_recommendations(videos, states, tags, series, set(dismissed), revisits or {},
+                                  now=NOW, viewing_records=records, viewing_settings=settings)
+
+
+@pytest.mark.parametrize("days, present", [(14 - 1 / 86400, True), (14, True), (14 + 1 / 86400, False)])
+def test_because_watched_exact_fourteen_day_boundary(days, present):
+    videos = [series_video(i) for i in (1, 2)]
+    tags = {i: (Tag(1, "공유"),) for i in (1, 2)}
+    rows = taste_rows(videos, tags, [record(1, days)])
+    assert [r.kind for r in rows] == ["because_watched" if present else "taste"]
+    assert placed(rows)[0][1] == [2]
+    if present:
+        assert rows[0].title == "『1화』을 봤다면"
+
+
+def test_because_watched_three_distinct_recent_sources_skip_tagless_without_refill():
+    videos = [series_video(i) for i in range(1, 10)]
+    tags = {i: (Tag(i, str(i)),) for i in range(1, 5)}
+    tags.update({i + 4: tags[i] for i in range(1, 5)})
+    records = [record(1, 3), record(2, 2), record(3, 1), record(4, 0),
+               record(4, 0.5, record_id=10), record(9, 0, 4)]
+    rows = taste_rows(videos, tags, records)
+    assert [(r.title, [i.video.id for i in r.items]) for r in rows[:3]] == [
+        ("『4화』을 봤다면", [8]), ("『3화』을 봤다면", [7]), ("『2화』을 봤다면", [6])]
+    assert len({r.key for r in rows}) == len(rows)
+    del tags[4]
+    rows = taste_rows(videos, tags, records)
+    assert [r.title for r in rows if r.kind == "because_watched"] == ["『3화』을 봤다면", "『2화』을 봤다면"]
+
+
+def test_because_watched_shared_tag_count_and_same_series_exclusion():
+    videos = [series_video(i) for i in range(1, 6)]
+    a, b = Tag(1, "과학"), Tag(2, "우주")
+    tags = {1: (a, b), 2: (a, b), 3: (a,), 4: (a, b), 5: (b,)}
+    # 다음 화 전용 줄의 상위 20편을 다른 시리즈로 채워, 같은 시리즈 제외를 독립 검증한다.
+    groups = [Series(1, "기준 시리즈", (1, 2))]
+    records = [record(1, 1)]
+    for first in range(6, 46, 2):
+        videos.extend([series_video(first), series_video(first + 1)])
+        groups.append(Series(first, str(first), (first, first + 1)))
+        # 오래전에 시작해 지금 멈춘 시청: 다음 화 정렬은 최근, 새 기준 선택은 14일 밖이다.
+        records.append(record(first, 31)._replace(updated_at=NOW))
+    rows = taste_rows(videos, tags, records, series=groups)
+    assert placed(rows) == [("because_watched", [4, 3, 5]), ("taste", [2]),
+                            ("next_episode", list(range(7, 46, 2)))]
+    assert rows[0].items[0].shared_tags == (a, b)
+
+
+def test_taste_decay_uses_each_viewing_actual_seconds_and_top_two_tags():
+    videos = [series_video(i) for i in range(1, 8)]
+    a, b, c = Tag(1, "과학"), Tag(2, "우주"), Tag(3, "역사")
+    tags = {1: (a,), 2: (b,), 3: (c,), 4: (a,), 5: (b,), 6: (a, b, c), 7: ()}
+    # a=80/4+20/2=30, b=70/2=35, c=10/2=5. 횟수·영상 길이·마지막 위치가 아니다.
+    records = [record(1, 60, 80), record(1, 30, 20, record_id=8), record(2, 30, 70), record(3, 30, 10),
+               record(1, 0, 4, record_id=9)]
+    rows = taste_rows(videos, tags, records)
+    taste = next(r for r in rows if r.kind == "taste")
+    assert [i.video.id for i in taste.items] == [6, 5, 4]
+    assert taste.items[0].reason == "자주 본 태그 · 우주, 과학"
+    assert taste.items[0].shared_tags == (b, a)
+    assert all(r.kind != "because_watched" for r in rows)  # 최근 틀어보기는 근거가 아니다.
+
+
+def test_taste_fractional_decay_and_zero_evidence():
+    videos = [series_video(i) for i in range(1, 5)]
+    tags = {1: (Tag(1, "가"),), 2: (Tag(2, "나"),), 3: (Tag(1, "가"),), 4: (Tag(2, "나"),)}
+    rows = taste_rows(videos, tags, [record(1, 30.5, 60), record(2, 30, 60)])
+    assert placed(rows)[0] == ("taste", [4, 3])
+    assert all(r.kind == "forgotten" for r in taste_rows(videos, tags))
+    assert all(r.kind == "forgotten" for r in taste_rows(videos, tags, [record(1, 0, 4)]))
+    assert all(r.kind == "forgotten" for r in taste_rows(videos, {}, [record(1)]))
+
+
+def test_new_rows_allocate_dedicated_then_each_source_then_taste_then_forgotten():
+    videos = [series_video(i) for i in range(1, 89)]
+    tags = {i: (Tag(1, "공유"),) for i in range(1, 89)}
+    records = [record(i, i) for i in (1, 2, 3)]
+    rows = taste_rows(videos, tags, records, revisits={4: OLD},
+                      series=(Series(1, "진행", (3, 5)),))
+    assert placed(rows) == [("because_watched", list(range(6, 26))),
+                            ("because_watched", list(range(26, 46))),
+                            ("because_watched", list(range(46, 66))),
+                            ("taste", list(range(66, 86))), ("forgotten", [86, 87, 88]),
+                            ("next_episode", [5]), ("highlight_review", [4])]
+    assert len({i.video.id for r in rows for i in r.items}) == 85
+
+
+@pytest.mark.parametrize("days, kind", [(1, "because_watched"), (31, "taste")])
+@pytest.mark.parametrize("state", ["missing", "excluded", "dismissed", "finished", "abandoned", "glance"])
+def test_new_rows_only_unwatched_available_candidates(days, kind, state):
+    source, target = series_video(1), series_video(2)
+    target = replace(target, excluded=state == "excluded", locations=() if state == "missing" else target.locations)
+    records = [record(1, days)]
+    if state in ("finished", "abandoned", "glance"):
+        records.append(record(2, 0, {"finished": 90, "abandoned": 40, "glance": 4}[state]))
+    rows = taste_rows([source, target], {i: (Tag(1, "공유"),) for i in (1, 2)}, records,
+                      dismissed={2} if state == "dismissed" else ())
+    assert [i.video.id for r in rows if r.kind == kind for i in r.items] == ([2] if state == "glance" else [])
+
+
+def test_new_rows_obey_injected_viewing_classification():
+    videos = [series_video(i) for i in (1, 2)]
+    tags = {i: (Tag(1, "공유"),) for i in (1, 2)}
+    rows = taste_rows(videos, tags, [record(1, 0, 10)], settings=ViewingSettings(abandoned_ratio=0.2))
+    assert placed(rows) == [("forgotten", [1, 2])]
+
+
+def test_new_rows_start_time_not_update_time_and_string_records():
+    videos = [series_video(i) for i in (1, 2)]
+    tags = {i: (Tag(1, "공유"),) for i in (1, 2)}
+    old = record(1, 30)._replace(started_at=(NOW - timedelta(days=30)).isoformat(), updated_at=NOW.isoformat())
+    assert placed(taste_rows(videos, tags, [old])) == [("taste", [2])]
+
+
+def test_recommendation_snapshot_keeps_viewing_evidence_and_active_progress(library):
+    core, clock, add = library
+    source, target = add("근거"), add("후보")
+    for video in (source, target):
+        core.add_video_tag(video.id, "주제")
+    before = core.library_snapshot()
+    core.playback.start(source.id, 0)
+    core.playback.report(40)  # 종료하지 않은 시청도 근거가 된다.
+    snapshot = core.library_snapshot()
+    assert core.recommendations(snapshot=before) == ()
+    assert placed(core.recommendations(snapshot=snapshot)) == [
+        ("because_watched", [target.id]), ("continue_watching", [source.id])]
+    core.playback.end()
+    watch(core, target)
+    assert placed(core.recommendations(snapshot=snapshot))[0] == ("because_watched", [target.id])
+    assert target.id not in ids(core)
+
+
 def test_dedicated_rows_keep_old_series_next_episode_and_all_five_display_rows(library):
     core, clock, add = library
     favorite, tagged, forgotten, continuing, review, first, second = (
@@ -130,11 +270,11 @@ def test_dedicated_rows_keep_old_series_next_episode_and_all_five_display_rows(l
     watch(core, continuing, 40)
     clock.days(1)
     rows = core.recommendations()
-    assert placed(rows) == [("similar_tags", [tagged.id]), ("forgotten", [forgotten.id]),
+    assert placed(rows) == [("taste", [tagged.id]), ("forgotten", [forgotten.id]),
                             ("continue_watching", [continuing.id]), ("next_episode", [second.id]),
                             ("highlight_review", [review.id])]
-    assert [(row.kind, row.title) for row in rows] == list(ROW_TITLES.items())
-    assert list(ROW_TITLES) == ["similar_tags", "forgotten", "continue_watching", "next_episode", "highlight_review"]
+    assert [(row.kind, row.title) for row in rows] == list(ROW_TITLES.items())[1:]
+    assert list(ROW_TITLES) == ["because_watched", "taste", "forgotten", "continue_watching", "next_episode", "highlight_review"]
 
 
 @pytest.mark.parametrize("kind", ["next_episode", "highlight_review"])
@@ -152,8 +292,9 @@ def test_dedicated_row_overflow_can_reach_general_rows(kind, tagged):
             revisits[first + 1] = OLD
     states[43] = replace(FINISHED, favorite=True)
     tags = {vid: (Tag(1, "공유"),) for vid in [43, *targets]} if tagged else {}
-    rows = select_recommendations(videos, states, tags, groups, set(), revisits, now=NOW)
-    assert placed(rows) == [("similar_tags" if tagged else "forgotten", [42]), (kind, targets[:20])]
+    rows = select_recommendations(videos, states, tags, groups, set(), revisits, now=NOW,
+                                  viewing_records=[record(43, 31)])
+    assert placed(rows) == [("taste" if tagged else "forgotten", [42]), (kind, targets[:20])]
 
 
 def test_continue_watching_overflow_can_reach_highlight_review():
@@ -507,26 +648,25 @@ def test_priority_dedup_and_tag_order(library):
         core.add_video_tag(video.id, "과학")
     core.add_video_tag(both.id, "우주")
     clock.days(31)
-    assert pairs(core) == [(both.id, "similar_tags"), (tag_old.id, "similar_tags"),
-                           (tag_new.id, "similar_tags"), (old.id, "forgotten"),
+    assert pairs(core) == [(both.id, "taste"), (tag_old.id, "taste"),
+                           (tag_new.id, "taste"), (old.id, "forgotten"),
                            (abandoned.id, "highlight_review"), (revisit.id, "highlight_review")]
     rows = core.recommendations()
-    assert [row.kind for row in rows] == ["similar_tags", "forgotten", "highlight_review"]
+    assert [row.kind for row in rows] == ["taste", "forgotten", "highlight_review"]
     assert "과학" in rows[0].items[0].reason and "우주" in rows[0].items[0].reason
 
 
-def test_similar_tags_requires_favorite_video_tags_and_no_meaningful_viewing(library):
+def test_recent_viewing_tags_need_no_favorite_and_glance_is_unwatched(library):
     core, _, add = library
     favorite, target = add("즐겨 보는 영상"), add("대상")
     core.add_video_tag(favorite.id, "공유")
     core.add_video_tag(target.id, "공유")
-    watch(core, favorite)
-    watch(core, favorite)
+    watch(core, favorite, 4)
     assert ids(core) == []
     watch(core, favorite)
     assert ids(core) == [target.id]
     watch(core, target, 4)
-    assert pairs(core) == [(target.id, "similar_tags")]
+    assert pairs(core) == [(target.id, "because_watched")]
     watch(core, target, 90)
     assert ids(core) == []
     third = add("하이라이트만 겹침")
@@ -614,7 +754,7 @@ def test_row_limit_oldest_first_and_nonseries_exclusions(library):
     assert ids(core) == [v.id for v in videos[3:23]]
 
 
-def test_similar_tags_overflow_appears_in_forgotten(library):
+def test_taste_overflow_appears_in_forgotten(library):
     core, clock, add = library
     favorite = add("즐겨 보는 영상")
     watch(core, favorite)
@@ -629,7 +769,7 @@ def test_similar_tags_overflow_appears_in_forgotten(library):
     plain = add("태그 없는 영상")
     clock.days(31)
     rows = core.recommendations()
-    assert [(row.kind, len(row.items)) for row in rows] == [("similar_tags", 20), ("forgotten", 3)]
+    assert [(row.kind, len(row.items)) for row in rows] == [("taste", 20), ("forgotten", 3)]
     assert [i.video.id for i in rows[0].items] == [v.id for v in tagged[:20]]
     # 태그 줄에서 밀려난 두 편은 잊고 있던 영상 조건에도 맞아 그 줄에 나온다.
     assert [i.video.id for i in rows[1].items] == [tagged[20].id, tagged[21].id, plain.id]
@@ -784,14 +924,18 @@ def test_series_highlight_review_exceptions_fill_their_own_row(library):
 
 
 @pytest.mark.parametrize("state, expected", [("excluded", False), ("missing", True), ("dismissed", True)])
-def test_favorite_tag_evidence_excludes_only_excluded_videos(library, state, expected):
-    core, _, add = library
+@pytest.mark.parametrize("days", [1, 31])
+def test_viewing_tag_evidence_excludes_only_excluded_videos(library, state, expected, days):
+    core, clock, add = library
     favorite, target = add("즐겨 보는 영상"), add("대상")
     watch(core, favorite)
     watch(core, favorite)
     watch(core, favorite)
     core.add_video_tag(favorite.id, "주제")
     core.add_video_tag(target.id, "주제")
+    clock.days(days)
+    # 안 본 후보가 잊고 있던 영상으로 나오지 않도록 두 태그 줄만 관찰한다.
+    core.settings.set("recommend.unwatched_days", 100)
     if state == "excluded":
         core.exclude_video(favorite.id)
     elif state == "missing":
