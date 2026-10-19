@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QApplication
 from my_video_manager.adapters import FFmpegMediaReader
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.ui import MainWindow
+from my_video_manager.web_contract import TABS
 
 
 class Media:
@@ -169,15 +170,16 @@ def main():
             else:
                 wait(media.started.is_set)
                 assert window.worker is not None
-                assert js(window, 'document.querySelectorAll("header nav button").length') == 7
+                assert js(window, 'document.querySelectorAll("header nav button").length') == len(TABS)
                 capture(window, 'scanning-library')
                 window.raise_()
                 window.activateWindow()
                 wait(window.isActiveWindow)
                 first_input = time.perf_counter()
-                QTest.keyClick(window, Qt.Key.Key_6, Qt.KeyboardModifier.ControlModifier)
+                folders_index = [name for name, _ in TABS].index('folders')
+                QTest.keyClick(window, Qt.Key.Key_1 + folders_index, Qt.KeyboardModifier.ControlModifier)
                 wait(lambda: window.web_host.active_tab == 'folders')
-                wait(lambda: js(window, 'document.querySelector("header nav [aria-current=page]") === document.querySelectorAll("header nav button")[5]'))
+                wait(lambda: js(window, f'document.querySelector("header nav [aria-current=page]") === document.querySelectorAll("header nav button")[{folders_index}]'))
                 metrics['tab_input_seconds'] = time.perf_counter() - first_input
                 bridge = window.web_host.controllers['folders'].bridge
                 assert 'error' in json.loads(bridge.action('scan', ''))

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox, QSystemTrayIcon
 from my_video_manager.core import AppCore, ScanResult
 from my_video_manager.library import MediaInfo
 from my_video_manager.ui import MainWindow
+from my_video_manager.web_contract import TABS
 from qt_wait import wait_for
 from test_library_return_ui import Player
 
@@ -153,16 +154,17 @@ def test_visible_window_waits_for_frontend_and_defers_first_input(startup):
 
 def test_slow_scan_keeps_web_navigation_playback_and_manual_guard_responsive(startup, monkeypatch):
     core, folder, media, calls, create = startup
+    folders_index = [name for name, _ in TABS].index('folders')
     media.slow_path = folder / 'new.mkv'
     media.slow_path.write_bytes(b'slow new video')
     window = create()
     wait_for(media.started.is_set)
     worker = window.worker
     assert worker is not None and worker.isRunning()
-    assert javascript(window, 'document.querySelectorAll("header nav button").length') == 7
+    assert javascript(window, 'document.querySelectorAll("header nav button").length') == len(TABS)
     started = time.monotonic()
     window.activateWindow()
-    QTest.keyClick(window, Qt.Key.Key_6, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClick(window, Qt.Key.Key_1 + folders_index, Qt.KeyboardModifier.ControlModifier)
     assert window.web_host.active_tab == 'folders'
     bridge = window.web_host.controllers['folders'].bridge
     assert json.loads(bridge.snapshot())['scanning']
@@ -174,7 +176,7 @@ def test_slow_scan_keeps_web_navigation_playback_and_manual_guard_responsive(sta
     window.back_to_list()
     assert window.web_host.active_tab == 'folders'
     wait_for(lambda: javascript(window,
-        'document.querySelector("header nav [aria-current=page]") === document.querySelectorAll("header nav button")[5]'))
+        f'document.querySelector("header nav [aria-current=page]") === document.querySelectorAll("header nav button")[{folders_index}]'))
     assert time.monotonic() - started < 5
     assert worker.isRunning()
 
