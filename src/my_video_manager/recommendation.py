@@ -62,8 +62,12 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
         if candidate in playable and candidate not in dismissed:
             allowed.add(candidate)
         # 보다 만 화는 다음 볼 화가 아니어도 '보다 만' 줄에만 후보로 남을 수 있다.
-        abandoned_allowed.update(vid for vid in group.video_ids
-                                 if vid in playable and vid not in dismissed and statuses[vid].abandoned)
+        # 시리즈마다 가장 최근에 멈춘 한 편만 남기고, 같으면 앞 화가 먼저다.
+        abandoned = [vid for vid in group.video_ids
+                     if vid in playable and vid not in dismissed and statuses[vid].abandoned]
+        if abandoned:
+            abandoned_allowed.add(max(abandoned, key=lambda vid: (
+                statuses[vid].last_viewed_at or playable[vid].registered_at).timestamp()))
         overdue = revisit_allowed.intersection(group.video_ids)
         if overdue:
             # 복습은 다음 볼 화 규칙의 예외지만 시리즈마다 가장 오래 밀린 한 편만 남긴다.

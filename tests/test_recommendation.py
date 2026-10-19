@@ -87,6 +87,11 @@ FINISHED = ViewingStatus(finished=True)
 ABANDONED = ViewingStatus(abandoned=True, stopped_percent=40, last_viewed_at=NOW - timedelta(days=1))
 
 
+def abandoned(*, days_ago=1):
+    return ViewingStatus(abandoned=True, stopped_percent=40,
+                         last_viewed_at=NOW - timedelta(days=days_ago))
+
+
 def series_video(video_id, *, missing=False, excluded=False):
     return Video(video_id, f"{video_id}화", f"지문{video_id}", 100, "matroska", Path(f"{video_id}.png"),
                  OLD, () if missing else (Location(Path(f"{video_id}.mkv")),), excluded)
@@ -135,6 +140,41 @@ def test_series_abandoned_exception_does_not_restore_general_candidates():
     videos = [series_video(video_id) for video_id in range(1, 4)]
     # 다음 볼 화(3화)가 관심 없음이면 일반 후보는 없지만, 보다 만 2화는 예외로 남는다.
     assert placed(select_series(videos, {2: ABANDONED}, dismissed={3})) == [("abandoned", [2])]
+
+
+def test_series_abandoned_exception_keeps_one_most_recent_episode():
+    videos = [series_video(video_id) for video_id in range(1, 7)]
+    rows = select_series(videos, {1: abandoned(days_ago=5), 3: abandoned(days_ago=2),
+                                  5: abandoned(days_ago=1)}, order=(1, 2, 3, 4, 5, 6))
+    # 1·3·5화가 모두 보다 만 화지만 가장 최근에 멈춘 5화 한 편만 남고, 다음 볼 화는 6화다.
+    assert placed(rows) == [("abandoned", [5]), ("unwatched", [6])]
+
+
+def test_series_abandoned_exception_skips_dismissed_before_choosing():
+    videos = [series_video(video_id) for video_id in range(1, 7)]
+    rows = select_series(videos, {1: abandoned(days_ago=5), 3: abandoned(days_ago=2),
+                                  5: abandoned(days_ago=1)}, order=(1, 2, 3, 4, 5, 6),
+                         dismissed={5})
+    # 가장 최근에 멈춘 5화가 관심 없음이면 그다음으로 최근에 멈춘 3화가 남는다.
+    assert placed(rows) == [("abandoned", [3]), ("unwatched", [6])]
+
+
+def test_series_abandoned_exception_prefers_earlier_episode_on_tie():
+    videos = [series_video(video_id) for video_id in range(1, 5)]
+    same_time = abandoned(days_ago=1)
+    rows = select_series(videos, {1: same_time, 3: same_time}, order=(1, 2, 3, 4))
+    assert placed(rows) == [("abandoned", [1]), ("unwatched", [4])]
+
+
+def test_series_abandoned_exception_is_per_series():
+    videos = [series_video(video_id) for video_id in range(1, 5)]
+    state = {video.id: ViewingStatus() for video in videos}
+    state.update({1: abandoned(days_ago=5), 2: abandoned(days_ago=1),
+                  3: abandoned(days_ago=5), 4: abandoned(days_ago=1)})
+    rows = select_recommendations(videos, state, {}, (Series(1, "가", (1, 2)), Series(2, "나", (3, 4))),
+                                  set(), {}, now=NOW)
+    # 시리즈마다 한 편씩 남으므로 다른 시리즈의 보다 만 화가 서로를 막지 않는다.
+    assert placed(rows) == [("abandoned", [2, 4])]
 
 
 def test_series_revisit_exception_keeps_one_oldest_episode_with_next_episode():
