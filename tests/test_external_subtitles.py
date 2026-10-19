@@ -481,15 +481,18 @@ def test_malformed_srt_block_preserves_good_cues_and_warning(library, bad, monke
     assert any("1개 블록" in issue.message for issue in result.issues)
     assert len(core.search("정상줄").results) == 2
     original = Path.read_bytes
-    def no_reread(path):
-        assert path != sidecar, "서명이 같은 부분 성공 파일을 다시 읽으면 안 됩니다."
+    reads = []
+    def reread(path):
+        if path == sidecar:
+            reads.append(path)
         return original(path)
-    monkeypatch.setattr(Path, "read_bytes", no_reread)
+    monkeypatch.setattr(Path, "read_bytes", reread)
     core.scan()
+    assert reads == [sidecar]
     assert core.external_subtitles(file.video_id)[0].warning == file.warning
 
 
-@pytest.mark.parametrize("bad", ["<SYNC Start=500>", "<SYNC Start=1000ms>", "<SYNC>"])
+@pytest.mark.parametrize("bad", ["<SYNC Start=1000ms>", "<SYNC>"])
 def test_malformed_smi_block_preserves_good_syncs(library, bad):
     core, video = library
     video.with_suffix(".smi").write_text(
@@ -501,6 +504,117 @@ def test_malformed_smi_block_preserves_good_syncs(library, bad):
     assert [(line.start, line.end) for line in file.subtitles[0].lines] == [(1, 3), (4, 120)]
     assert not core.search("버릴줄").results
     assert len(core.search("정상줄").results) == 2
+
+
+def test_smi_sorts_syncs_stably_and_clamps_negative_start(library):
+    core, video = library
+    video.with_suffix('.smi').write_bytes((
+        '<SYNC Start=1000><P Class=KRCC>정상 줄'
+        '<SYNC Start=500><P Class=KRCC>복구 줄'
+        '<SYNC Start=-500><P Class=KRCC>첫 줄'
+        '<SYNC Start=3000><P Class=KRCC>&nbsp;'
+        '<SYNC Start=1000><P Class=KRCC>같은 시각 마지막 줄'
+    ).encode('utf-8'))
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning is None
+    assert [(line.start, line.end, line.text) for line in file.subtitles[0].lines] == [
+        (0, .5, '첫 줄'), (.5, 1, '복구 줄'), (1, 3, '같은 시각 마지막 줄')]
+    assert core.search('복구줄').results[0].start == .5
+
+
+def test_smi_without_p_keeps_default_text_and_only_empty_sync_closes_all(library):
+    core, video = library
+    video.with_suffix('.smi').write_bytes((
+        '<STYLE>숨김</STYLE><SYNC Start=1000><P Class=KRCC>한국어'
+        '<SYNC Start=2000>기본 <b>대사</b><br>둘째 줄'
+        '<SYNC Start=3000> &nbsp; \n<SYNC Start=4000>마지막'
+    ).encode('utf-8'))
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning is None
+    tracks = {track.language_class: track.lines for track in file.subtitles}
+    assert [(line.start, line.end, line.text) for line in tracks['']] == [
+        (2, 3, '기본 대사\n둘째 줄'), (4, 120, '마지막')]
+    assert [(line.start, line.end) for line in tracks['krcc']] == [(1, 3)]
+    assert core.search('기본대사').results[0].start == 2
+    assert not core.search('숨김').results
+
+
+@pytest.mark.parametrize('encoding,bom', [
+    ('cp949', b''), ('utf-8', b''), ('utf-8', b'\xef\xbb\xbf'),
+    ('utf-16-le', b'\xff\xfe'), ('utf-16-be', b'\xfe\xff'),
+])
+def test_trailing_nul_does_not_break_encoding(library, encoding, bom):
+    core, video = library
+    video.with_suffix('.smi').write_bytes(
+        bom + '<SYNC Start=1000><P>한글 뷁'.encode(encoding) + b'\x00')
+    result = core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert not result.issues
+    assert file.warning is None
+    assert file.encoding == ('utf-8-sig' if bom == b'\xef\xbb\xbf' else encoding)
+    assert file.subtitles[0].lines[0].text == '한글 뷁'
+    assert core.search('뷁').results
+
+
+@pytest.mark.parametrize('content', [
+    b'<SYNC Start=1000><P>broken\x81',
+    b'\xff\xfe' + '<SYNC Start=1000><P>broken'.encode('utf-16-le') + b'X',
+    b'<SYNC Start=1000><P>broken\x00inside',
+])
+def test_damaged_encoding_still_warns(library, content):
+    core, video = library
+    video.with_suffix('.smi').write_bytes(content)
+    result = core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning and file.subtitles == ()
+    assert result.issues
+
+
+def test_srt_content_with_smi_extension(library):
+    core, video = library
+    video.with_suffix('.smi').write_bytes(srt('내용 판별').encode('cp949'))
+    result = core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert not result.issues
+    assert file.warning is None
+    assert core.search('내용판별').results[0].start == 12.25
+
+
+def test_ass_content_with_smi_extension_has_specific_warning(library):
+    core, video = library
+    video.with_suffix('.smi').write_bytes(
+        b'[Script Info]\r\nScriptType: v4.00+\r\n[Events]\r\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello')
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert 'ASS' in file.warning
+    assert 'SYNC' not in file.warning
+    assert file.subtitles == ()
+
+
+@pytest.mark.parametrize('partial', [False, True])
+def test_warning_file_reparsed_with_same_signature_and_search_replaced(library, partial):
+    core, video = library
+    sidecar = video.with_suffix('.srt')
+    good = srt('복구된 대사').encode('utf-8')
+    bad = (srt('이전 대사').encode('utf-8') + b'\ninvalid') if partial else b'invalid'
+    size = max(len(good), len(bad))
+    sidecar.write_bytes(bad.ljust(size, b' '))
+    core.add_file(video)
+    file, = core.external_subtitles(core.videos()[0].id)
+    assert file.warning
+    assert bool(file.subtitles) == partial
+    before = sidecar.stat()
+    sidecar.write_bytes(good.ljust(size, b' '))
+    os.utime(sidecar, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert (sidecar.stat().st_size, sidecar.stat().st_mtime_ns) == (before.st_size, before.st_mtime_ns)
+    core = make_core(video.parent.parent)
+    core.scan()
+    updated, = core.external_subtitles(file.video_id)
+    assert updated.warning is None
+    assert core.search('복구된대사').results
+    assert not core.search('이전대사').results
 
 
 def test_vtt_without_blank_line_after_header(library):
