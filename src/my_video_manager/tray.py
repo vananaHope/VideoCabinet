@@ -42,12 +42,18 @@ class TrayControls(QObject):
             self.window._return_to_gems = False
         self.window.raise_()
         self.window.activateWindow()
+        if emergency:
+            # 창과 함께 감춘 대화상자를 입력 내용 그대로 다시 보인다.
+            self.window.web_host.dialogs.show_container()
         focus, self._emergency_focus = self._emergency_focus, None
         if emergency and focus is not None:
             from shiboken6 import isValid
             # 전체 화면 풀기와 숨기기로 옮겨 간 초점을 숨기기 전 위젯으로 되돌린다.
-            if isValid(focus) and focus.isVisible() and self.window.isAncestorOf(focus):
+            if isValid(focus) and focus.isVisible() and focus.window() in (self.window, self.window.web_host.dialogs.container):
                 focus.setFocus()
+        if emergency:
+            # 설정 메뉴처럼 창과 함께 닫힌 Qt 메뉴를 같은 자리에 다시 연다.
+            self.window.reopen_emergency_popups()
 
     def activated(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
@@ -65,10 +71,13 @@ class TrayControls(QObject):
         """
         if not QSystemTrayIcon.isSystemTrayAvailable():
             # 트레이가 없으면 숨긴 창을 다시 열 곳이 없으므로 작업표시줄로 내린다.
+            # 창 모달 대화상자는 운영체제가 소유 창과 함께 내리고 복원한다.
             self.window.showMinimized()
             return
         self._emergency_hidden = True
         self._emergency_focus = focus
+        # 재생 중 옮겨 띄운 대화상자는 별도 창이므로 함께 감추고, 열기에서 다시 보인다.
+        self.window.web_host.dialogs.hide_for_emergency()
         self.window.hide()
 
     def notify(self, message):
@@ -147,6 +156,7 @@ class TrayControls(QObject):
             window.thumbnails.shutdown()
             self.timer.stop()
             QApplication.instance().removeEventFilter(window)
+            window.native_dialogs.uninstall()
             event.accept()
             QApplication.instance().quit()
         else:

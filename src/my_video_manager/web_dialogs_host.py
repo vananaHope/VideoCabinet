@@ -176,14 +176,25 @@ class WebDialogs(QObject):
         self.resize_container(*self.content_size)
         self.host.layout().removeWidget(self.host.view)
         self.container.layout().addWidget(self.host.view)
-        self.container.show()
         self.host.view.show()
-        self.container.raise_()
-        self.container.activateWindow()
+        # 긴급 탈출로 창이 숨은 뒤 늦게 온 응답이면 감춘 채 만들고 복귀 때 보인다.
+        self.show_container()
         self.host.view.setFocus()
         self.metrics.append({'detach_ms': (perf_counter() - started) * 1000,
                              'scroll_capture_callback_ms': (detached - started) * 1000,
                              'native_reparent_layout_ms': (perf_counter() - detached) * 1000})
+
+    def show_container(self):
+        """옮겨 띄운 대화상자를 창 위에 보인다. 창이 숨어 있으면 감춘 채 둔다."""
+        if self.container and self.window.isVisible():
+            self.container.show()
+            self.container.raise_()
+            self.container.activateWindow()
+
+    def hide_for_emergency(self):
+        """긴급 탈출: 옮겨 띄운 대화상자를 창과 함께 감춘다. 대화상자 작업과 입력 내용은 그대로 둔다."""
+        if self.container:
+            self.container.hide()
 
     def resize_container(self, width, height):
         self.content_size = (width, height)

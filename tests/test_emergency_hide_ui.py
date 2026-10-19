@@ -110,7 +110,7 @@ def window(tmp_path, app, monkeypatch):
     yield from open_window(tmp_path, app, monkeypatch)
 
 
-def open_window(tmp_path, app, monkeypatch, *, transcriber=None):
+def open_window(tmp_path, app, monkeypatch, *, transcriber=None, **options):
     monkeypatch.setattr(QSystemTrayIcon, "isSystemTrayAvailable", lambda: True)
     core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc),
                    database=tmp_path / "data/library.sqlite3", transcriber=transcriber)
@@ -118,7 +118,10 @@ def open_window(tmp_path, app, monkeypatch, *, transcriber=None):
         path = tmp_path / f"강의 {index:02}강.mkv"
         path.write_bytes(bytes([index]))
         core.add_file(path)
-    window = MainWindow(core, player_factory=Player)
+    window = MainWindow(core, player_factory=Player, **options)
+    # 웹 셸 첫 로드 완료(공개 신호). 이벤트를 처리하기 전에 연결하므로 놓치지 않는다.
+    window.loaded = []
+    window.web_host.frontend_loaded.connect(lambda: window.loaded.append(True))
     window.balloons = []
     monkeypatch.setattr(window.tray.icon, "showMessage", lambda *args: window.balloons.append(args))
     window.show()

@@ -242,6 +242,24 @@ class WebShellHost(QWidget):
             from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self.focus_content)
 
+    def settings_menu_point(self, rect=None):
+        """설정 메뉴를 열 전역 좌표. rect는 웹 설정 탭의 CSS 좌표이고 없으면 창 우측 위를 쓴다."""
+        window, menu = self.window, self.window.settings_menu
+        if self.isVisible() and rect:
+            zoom = self.view.zoomFactor()
+            return self.view.mapToGlobal(QPoint(round(rect[0] * zoom) - menu.sizeHint().width(), round(rect[1] * zoom)))
+        return window.mapToGlobal(QPoint(window.width() - menu.sizeHint().width() - 16, 12))
+
+    def close_popups(self):
+        """긴급 탈출: 웹 선택 목록·우클릭 메뉴·자동 완성 목록을 숨기기 전에 닫는다.
+
+        창이 초점을 잃을 때와 같은 blur를 보낸다. 목록은 고르던 항목을 확정하지 않고 닫히며
+        웹 대화상자와 입력 내용은 그대로다. 실창의 blur가 늦게 와도 결과가 같다.
+        """
+        self.engine_page.runJavaScript(
+            "document.activeElement?.dispatchEvent(new FocusEvent('focusout', {bubbles: true}));"
+            " window.dispatchEvent(new Event('blur'))")
+
     def popup_settings_menu(self):
         """웹 설정 탭의 실제 CSS 좌표를 Qt 전역 좌표로 바꾼다. 숨은 웹은 창 우측 위를 쓴다."""
         window = self.window
@@ -251,14 +269,7 @@ class WebShellHost(QWidget):
             from shiboken6 import isValid
             if not isValid(self) or not isValid(window) or not window.isActiveWindow():
                 return
-            rect = json.loads(rect) if rect else None
-            if self.isVisible() and rect:
-                zoom = self.view.zoomFactor()
-                point = self.view.mapToGlobal(QPoint(round(rect[0] * zoom) - menu.sizeHint().width(),
-                                                    round(rect[1] * zoom)))
-            else:
-                point = window.mapToGlobal(QPoint(window.width() - menu.sizeHint().width() - 16, 12))
-            menu.popup(point)
+            menu.popup(self.settings_menu_point(json.loads(rect) if rect else None))
 
         if self.isVisible() and self._frontend_ready:
             self.engine_page.runJavaScript("""JSON.stringify((() => {
