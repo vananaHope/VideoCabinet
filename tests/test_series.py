@@ -4,7 +4,8 @@ import shutil
 import pytest
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
-from my_video_manager.series import normalize_series_title, series_filename
+from my_video_manager.series import next_episode, normalize_series_title, series_filename
+from my_video_manager.viewing import ViewingStatus
 
 
 class Media:
@@ -60,6 +61,49 @@ def test_filename_number_and_template(filename, expected):
 @pytest.mark.parametrize("title", ["Drama_A [1080p] (H.264)", "DRAMA-a_HEVC", "drama   a 4K AV1"])
 def test_normalize_title_case_separators_and_technical_labels(title):
     assert normalize_series_title(title) == "drama a"
+
+
+@pytest.mark.parametrize("watched, expected", [
+    (set(), 1),                 # 시청한 화가 없으면 첫 화
+    ({1}, 2),
+    ({3}, 4),
+    ({1, 2, 4}, 5),             # 건너뛴 3화는 다음 볼 화가 아니다
+    ({5}, None),                # 마지막 화까지 시청
+    ({1, 2, 3, 4, 5}, None),
+    ({99}, 1),                  # 시리즈 밖 영상의 시청은 세지 않는다
+])
+def test_next_episode_follows_latest_watched_episode(watched, expected):
+    assert next_episode((1, 2, 3, 4, 5), watched) == expected
+
+
+def test_next_episode_of_empty_or_single_episode_series():
+    assert next_episode((), set()) is None
+    assert next_episode((7,), set()) == 7
+    assert next_episode((7,), {7}) is None
+
+
+def test_next_episode_reads_watching_state_and_skips_glance_only_episodes():
+    order = (1, 2, 3)
+    # 보다 만 시청도 시청으로 센다.
+    assert next_episode(order, {1: ViewingStatus(abandoned=True)}) == 2
+    # 틀어보기만 있는 화는 시청이 없는 것으로 본다.
+    assert next_episode(order, {1: ViewingStatus(finished=True), 2: ViewingStatus()}) == 2
+
+
+def test_next_episode_uses_public_viewing_status(core, tmp_path):
+    ids = add(core, tmp_path / "shows", "S E01.mkv", "S E02.mkv", "S E03.mkv")
+    order = core.series()[0].video_ids
+    assert order == tuple(ids[name] for name in ("S E01", "S E02", "S E03"))
+    core.playback.start(order[1], 0)
+    core.playback.report(4)  # 틀어보기
+    core.playback.end()
+    statuses = {vid: core.viewing_status(vid) for vid in order}
+    assert next_episode(order, statuses) == order[0]
+    core.playback.start(order[0], 0)
+    core.playback.report(95)
+    core.playback.end()
+    statuses = {vid: core.viewing_status(vid) for vid in order}
+    assert next_episode(order, statuses) == order[1]
 
 
 def test_same_folder_distinct_templates_numeric_order_and_singletons(core, tmp_path):
