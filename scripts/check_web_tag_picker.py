@@ -342,7 +342,6 @@ def windows_ime():
     assert page.options['tags'] == []
     metrics['checks'].append('실창 키보드만: 필터 Enter → Tab 검색 → SF ↓ Enter 고르기 → Shift+Tab 칩 Enter 빼기')
 
-    js(f"document.querySelector('{SEARCH}').focus()")
     user32 = ctypes.windll.user32
     user32.GetKeyboardLayout.restype = ctypes.c_void_p
     user32.LoadKeyboardLayoutW.restype = ctypes.c_void_p
@@ -352,30 +351,59 @@ def windows_ime():
 
     def press(code):
         user32.keybd_event(code, 0, 0, 0)
+        settle(30)
         user32.keybd_event(code, 0, 2, 0)
-        settle(70)
+        settle(120)
     try:
         window.raise_()
         window.activateWindow()
         assert QTest.qWaitForWindowActive(window, 5000)
-        js(f"window.imeEvents = []; for (const n of ['compositionstart','compositionend']) document.querySelector('{SEARCH}').addEventListener(n, e => window.imeEvents.push(n))")
-        for _ in range(2):
-            for letter in 'GKS':  # 두벌식: 한
-                press(ord(letter))
-            value = js(f"document.querySelector('{SEARCH}').value")
-            if value == '한':
-                break
-            search('')
-            js(f"document.querySelector('{SEARCH}').focus()")
-            press(0x15)  # VK_HANGUL
+        # 다른 프로세스가 전경이면 Windows가 전경 전환을 막으므로 그 입력 큐에 잠시 붙는다.
+        hwnd = int(window.winId())
+        if user32.GetForegroundWindow() != hwnd:
+            other = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
+            mine = ctypes.windll.kernel32.GetCurrentThreadId()
+            user32.AttachThreadInput(other, mine, True)
+            try:
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+            finally:
+                user32.AttachThreadInput(other, mine, False)
+        wait(lambda: user32.GetForegroundWindow() == hwnd, 5)
+        host.view.setFocus()
+        search('')
+        metrics['ime_focus'] = {'foreground': user32.GetForegroundWindow() == int(window.winId()),
+                                'active': js("document.activeElement?.getAttribute('aria-label')")}
+        js(f"""window.imeEvents = []; for (const n of ['compositionstart','compositionupdate','compositionend','keydown','keyup','beforeinput','input']) document
+          .addEventListener(n, e => window.imeEvents.push(`${{n}}:${{e.key ?? e.data ?? ''}}:${{e.keyCode ?? ''}}:${{e.isComposing}}:${{e.target?.getAttribute?.('aria-label')}}`), true)""")
+        imm32 = ctypes.windll.imm32
+        imm32.ImmGetContext.restype = ctypes.c_void_p
+        imm32.ImmGetContext.argtypes = [ctypes.c_void_p]
+        imm32.ImmSetConversionStatus.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
+        imm32.ImmReleaseContext.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        focused = user32.GetFocus() if hasattr(user32, 'GetFocus') else hwnd
+        for target in {hwnd, focused}:
+            context = imm32.ImmGetContext(target)
+            if context:
+                imm32.ImmSetConversionStatus(context, 1, 0)  # IME_CMODE_HANGUL: 이전 실행의 한/영 상태와 무관하게
+                imm32.ImmReleaseContext(target, context)
+        settle()
+        for letter in 'GKS':  # 두벌식: 한
+            press(ord(letter))
+        value = js(f"document.querySelector('{SEARCH}').value")
         metrics['ime'] = {'layout': hex(korean or 0), 'value': value, 'events': json.loads(js('JSON.stringify(window.imeEvents)'))}
-        assert value == '한' and 'compositionstart' in metrics['ime']['events'], metrics['ime']
+        assert value == '한' and any(e.startswith('compositionstart') for e in metrics['ime']['events']), metrics['ime']
         press(0x0D)
         settle()
         assert page.options['tags'] == [], '조합 중 Enter가 태그를 고름'
         assert js(f"!!document.querySelector('{PANEL}')")
         press(0x0D)
-        wait(lambda: page.options['tags'] == [by_name['한']])
+        try:
+            wait(lambda: page.options['tags'] == [by_name['한']], 5)
+        finally:
+            metrics['ime']['after'] = {'events': json.loads(js('JSON.stringify(window.imeEvents)')), 'tags': page.options['tags'],
+                                       'value': js(f"document.querySelector('{SEARCH}').value"),
+                                       'options': option_names()}
         metrics['checks'].append('실제 Windows 한국어 IME: 조합 확정 Enter는 무시, 둘째 Enter로 같은 이름 태그 고름')
     finally:
         user32.ActivateKeyboardLayout(previous, 0)

@@ -61,7 +61,9 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
       aria-activedescendant={active >= 0 ? optionId(choices[active]) : undefined} data-keeps-escape={active >= 0 || !!query || showAll}
       placeholder="태그 이름 일부로 찾기" value={query}
       onChange={event => { setQuery(event.target.value); setActiveId(null) }}
-      onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }}
+      onCompositionStart={() => { composing.current = true }}
+      // Windows IME는 조합을 확정한 Enter의 keydown을 compositionend 뒤에 보낼 수 있다. 한 틱 뒤에 푼다.
+      onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
       onBlur={() => setActiveId(null)}
       onKeyDown={event => {
         if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return
