@@ -4,7 +4,7 @@ import { Notice } from "@/components/ui/notice"
 import { EmptyState, Tabs } from "@/components/page-parts"
 import { HighlightPanel, type HighlightSnapshot } from "@/components/highlight-panel"
 import { ExternalSubtitleList } from "@/components/external-subtitle-list"
-import { Thumbnail, duration, viewing } from "@/components/video-card"
+import { Thumbnail, calendarDate, duration, viewing } from "@/components/video-card"
 import { TagMenuChips } from "@/components/video-tags"
 import type { VideoData, DetailsData } from "@/bridge-types"
 import { actions, lockedDuringScan, type Action } from "@/bridge"
@@ -51,6 +51,7 @@ export function DetailPanel({ video, details, highlights, revision, tab, onTabCh
         <Thumbnail video={video} variant="detail" />
         <p>{duration(video.duration)} · {viewing(video)}</p>
         {video.missing ? <Notice tone="warning" size="compact" role="note">파일 없음 · 다시 검사하거나 파일을 연결하세요.</Notice> : <p>위치 {video.locationCount}개</p>}
+        <p>수정한 날짜: {video.modifiedAt ? calendarDate(video.modifiedAt) : video.missing ? "파일 없음" : "알 수 없음"}</p>
         {video.resumePoint !== null && <p>이어볼 위치 {duration(video.resumePoint)} ({Math.round(video.stoppedPercent ?? 0)}%)</p>}
         <TagMenuChips tags={video.tags} onRandomPlay={onRandomTag} />
         <p>시리즈: {video.series || "없음"}</p>

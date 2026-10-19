@@ -107,6 +107,7 @@ export interface VideoData {
   viewingCount: number
   watchedSeconds: number
   lastViewedAt: string | null
+  modifiedAt: string | null
   hasSubtitles: boolean
 }
 

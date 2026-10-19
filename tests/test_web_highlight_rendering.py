@@ -15,9 +15,9 @@ def check_rendering(scenario):
       const assert = require('assert'), React = require('react');
       const {renderToStaticMarkup} = require('react-dom/server');
       const cache = new Map();
-      function load(name) {
-        if (!name.startsWith('@/')) return require(name);
-        const base = path.resolve('src', name.slice(2));
+      function load(name, from = 'src') {
+        if (!name.startsWith('@/') && !name.startsWith('.')) return require(name);
+        const base = name.startsWith('@/') ? path.resolve('src', name.slice(2)) : path.resolve(from, name);
         const file = ['.tsx', '.ts'].map(ext => base + ext).find(fs.existsSync);
         if (cache.has(file)) return cache.get(file).exports;
         const module = {exports: {}}; cache.set(file, module);
@@ -25,7 +25,7 @@ def check_rendering(scenario):
           module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX,
           esModuleInterop: true, target: ts.ScriptTarget.ES2022,
         }}).outputText;
-        new Function('require', 'module', 'exports', code)(load, module, module.exports);
+        new Function('require', 'module', 'exports', code)(next => load(next, path.dirname(file)), module, module.exports);
         return module.exports;
       }
     """
@@ -84,4 +84,24 @@ def test_card_distinguishes_glance_only_from_viewing_and_no_history():
       const empty = render({});
       assert(empty.includes('마지막 시청') && empty.includes('기록 없음'));
       assert(!empty.includes('마지막 틀어보기'));
+    """)
+
+
+def test_detail_info_shows_modified_date_or_why_it_is_missing():
+    check_rendering(r"""
+      const {DetailPanel} = load('@/components/detail-panel');
+      const base = {id: 1, title: '영상', duration: 100, thumbnail: null, missing: false, locationCount: 1,
+                    finished: false, abandoned: false, favorite: false, resumePoint: null, stoppedPercent: null,
+                    tags: [], series: '', viewingCount: 0, watchedSeconds: 0, lastViewedAt: null,
+                    modifiedAt: null, hasSubtitles: false};
+      const render = values => renderToStaticMarkup(React.createElement(DetailPanel, {
+        video: {...base, ...values}, details: null, highlights: null, revision: 0, tab: 'info',
+        onTabChange() {}, scanning: false, onAction() {}, onHighlight() {}, onRandomTag() {},
+      }));
+      const moment = '2026-09-01T12:00:00+00:00';
+      const expected = new Intl.DateTimeFormat('ko-KR', {year: 'numeric', month: '2-digit', day: '2-digit'})
+        .format(new Date(moment));
+      assert(render({modifiedAt: moment}).includes(`수정한 날짜: ${expected}`));
+      assert(render({missing: true, locationCount: 0}).includes('수정한 날짜: 파일 없음'));
+      assert(render({}).includes('수정한 날짜: 알 수 없음'));
     """)
