@@ -153,6 +153,7 @@ class TrayControls(QObject):
             window.thumbnails.shutdown()
             self.timer.stop()
             QApplication.instance().removeEventFilter(window)
+            window.native_dialogs.uninstall()
             event.accept()
             QApplication.instance().quit()
         else:

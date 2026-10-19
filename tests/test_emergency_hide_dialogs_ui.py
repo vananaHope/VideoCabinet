@@ -10,7 +10,7 @@ if os.environ["QT_QPA_PLATFORM"] == "offscreen":
 import pytest
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QSystemTrayIcon
 
 from test_emergency_hide_ui import app, window, key, emergency_key, play_to_twenty_seconds
 from test_web_dialogs import state, within
@@ -325,22 +325,121 @@ def test_playback_dialog_without_tray_minimizes_with_the_dialog_left_to_the_os(w
     open_playback_dialog(window, check)
 
 
-def test_common_warning_box_keeps_the_key_until_closed(window):
-    """공용 네이티브 경고(QMessageBox)가 떠 있으면 지금처럼 키를 넘긴다. 경고를 닫은 뒤에는 탈출한다."""
-    _, player = play_to_twenty_seconds(window)
-    seen = []
+def press_in_modal(window, kind):
+    """exec 중인 Qt 대화상자가 뜨면 그 안에서 실제 키로 긴급 탈출을 누르고, exec가 반환되기 전 상태를 기록한다."""
+    seen = {}
 
-    def check():
-        box = QApplication.activeModalWidget()
-        seen.append(box)
-        press_emergency(box)
-        seen.append((window.isVisible(), box.isVisible(), player.paused))
-        box.close()
-    QTimer.singleShot(100, check)
-    QMessageBox.warning(window, "재생 조작 실패", "확인용 경고")
-    assert isinstance(seen[0], QMessageBox) and seen[1] == (True, True, False)
-    emergency_key(window)
+    def press():
+        modal = QApplication.activeModalWidget()
+        if not isinstance(modal, kind):
+            QTimer.singleShot(20, press)
+            return
+        seen["title"] = modal.windowTitle()
+        press_emergency(modal)
+        # 아직 호출부의 exec 안이다. 창은 이미 숨었고 대화상자는 닫혔다.
+        seen["inside_exec"] = (window.isVisible(), modal.isVisible())
+    QTimer.singleShot(50, press)
+    return seen
+
+
+def assert_no_modal_after_return(window):
+    window.tray.open()
+    QApplication.processEvents()
+    assert window.isVisible()
+    assert QApplication.activeModalWidget() is None
+    assert not any(isinstance(w, (QMessageBox, QFileDialog)) and w.isVisible() for w in QApplication.topLevelWidgets())
+
+
+def test_playback_warning_closes_and_caller_does_not_resume_playback(window, monkeypatch):
+    """재생 중 '재생 조작 실패' 경고에서 탈출: 경고는 닫히고, exec 뒤 호출부가 이어져도 창·재생이 다시 켜지지 않는다."""
+    _, player = play_to_twenty_seconds(window)
+
+    def fail(command):
+        raise RuntimeError("mpv 명령 실패")
+    monkeypatch.setattr(player, "execute", fail)
+    seen = press_in_modal(window, QMessageBox)
+    key(window, Qt.Key.Key_Return)  # 재생 토글 → 실패 경고 exec → 그 안에서 긴급 탈출
+    assert seen == {"title": "재생 조작 실패", "inside_exec": (False, False)}
+    QTest.qWait(200)
     assert not window.isVisible() and player.paused
+    assert window.balloons == []
+    assert window.core.playback.session is not None
+    assert_no_modal_after_return(window)
+    assert window.pages.currentWidget() is window.playback_page and player.paused
+
+
+def test_close_cancel_warning_closes_and_quit_stays_cancelled(window):
+    """완전 종료가 막혀 '창 닫기 취소' 경고가 뜬 채 탈출: 경고를 닫고 숨기며, 종료는 취소된 채 작업이 이어진다."""
+    play_to_twenty_seconds(window)
+    window.tray.quit_blocker = lambda: "백업 작업이 끝난 뒤 완전 종료해 주세요."
+    try:
+        seen = press_in_modal(window, QMessageBox)
+        window.tray.quit()
+        assert seen == {"title": "창 닫기 취소", "inside_exec": (False, False)}
+        assert not window.isVisible() and not window.tray.quitting
+        assert window.player.paused and window.balloons == []
+        assert window.subtitles.timer.isActive()
+    finally:
+        del window.tray.quit_blocker
+    assert_no_modal_after_return(window)
+
+
+def test_question_warning_closes_as_cancel(window):
+    """질문형 경고('받아쓰기 중 종료')는 닫기가 '취소'로 처리돼 종료하지 않는다."""
+    class Busy:
+        def isRunning(self):
+            return True
+
+        def wait(self):
+            pass
+    window.subtitles.worker = Busy()
+    try:
+        seen = press_in_modal(window, QMessageBox)
+        window.tray.quit()
+        assert seen == {"title": "받아쓰기 중 종료", "inside_exec": (False, False)}
+        assert not window.isVisible() and not window.tray.quitting
+        assert not window.subtitles.stopping and window.subtitles.timer.isActive()
+        assert window.balloons == []
+    finally:
+        window.subtitles.worker = None
+    assert_no_modal_after_return(window)
+
+
+def test_file_dialog_closes_as_cancel_without_adding(window):
+    """파일 선택 창(offscreen은 Qt 파일 창)에서 탈출하면 취소로 끝나 아무것도 추가하지 않는다.
+
+    Windows 기본 파일 창은 Qt 이벤트 필터를 거치지 않아 별도 어댑터가 받으며 실창에서 확인한다.
+    """
+    _, player = play_to_twenty_seconds(window)
+    videos = window.core.videos()
+    seen = press_in_modal(window, QFileDialog)
+    window.library_page.library_controls.add_file()
+    assert seen["inside_exec"] == (False, False)
+    assert not window.isVisible() and player.paused and window.balloons == []
+    QTest.qWait(200)
+    assert window.worker is None and window.core.videos() == videos
+    assert_no_modal_after_return(window)
+
+
+@pytest.mark.parametrize("vk,character,modifiers,expected", [
+    (0x48, "H", dict(ctrl=True, shift=True), "Ctrl+Shift+H"),
+    (0x42, "B", dict(ctrl=True, alt=True), "Ctrl+Alt+B"),
+    (0x37, "7", dict(alt=True), "Alt+7"),
+    (0x63, "", dict(ctrl=True, alt=True), "Ctrl+Alt+3"),
+    (0x78, "", dict(ctrl=True), "Ctrl+F9"),
+    (0x25, "", dict(meta=True), "Meta+Left"),
+    (0xBA, ";", dict(ctrl=True), "Ctrl+;"),
+    (0x11, "", dict(ctrl=True), None),
+    (0xE5, "", dict(ctrl=True), None),
+])
+def test_windows_virtual_key_names_match_key_binding_names(vk, character, modifiers, expected):
+    from my_video_manager.key_bindings import normalize_key
+    from my_video_manager.native_dialogs import virtual_key_name
+    flags = dict(ctrl=False, alt=False, shift=False, meta=False) | modifiers
+    name = virtual_key_name(vk, character, **flags)
+    assert name == expected
+    if name is not None:
+        assert normalize_key(name) == name
 
 
 @pytest.mark.parametrize("menu", ["settings", "playback"])

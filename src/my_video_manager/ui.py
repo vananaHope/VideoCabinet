@@ -92,6 +92,9 @@ class MainWindow(QMainWindow):
         self.pages.currentChanged.connect(self.page_changed)
 
         QApplication.instance().installEventFilter(self)
+        from .native_dialogs import NativeDialogEscape
+        # Windows 기본 파일 창은 Qt 이벤트 필터를 거치지 않으므로 따로 받는다.
+        self.native_dialogs = NativeDialogEscape(self, self.is_emergency_key, self.emergency_hide)
         self.refresh()
         from .resolution_controls import ResolutionControls
         self.resolutions = ResolutionControls(self)
@@ -172,10 +175,18 @@ class MainWindow(QMainWindow):
 
         재생 세션과 현재 화면은 그대로 두므로 트레이 열기로 같은 장면의 일시정지 상태로 돌아온다.
         """
-        focus = QApplication.focusWidget()
         # 조합 중인 글자는 초점이 옮겨 가기 전에 지금 입력란에 확정한다.
         QGuiApplication.inputMethod().reset()
-        # 메뉴·드롭다운 팝업은 닫는다. 대화상자는 창과 함께 감췄다가 복귀 때 그대로 보인다.
+        # 공용 경고처럼 exec 중인 Qt 대화상자는 닫기(취소·Esc와 같은 결과)로 끝내고 복귀 때 다시 띄우지 않는다.
+        # 호출부는 이 처리가 끝나 창이 숨은 뒤 exec가 반환되면 이어서 실행된다.
+        container = self.web_host.dialogs.container
+        while (modal := QApplication.activeModalWidget()) not in (None, container):
+            if not modal.close():
+                modal.reject()  # 닫기 버튼이 없는 QMessageBox는 close를 거부한다.
+            if QApplication.activeModalWidget() is modal:
+                break
+        focus = QApplication.focusWidget()
+        # 메뉴·드롭다운 팝업은 닫는다. 옮겨 띄운 대화상자는 창과 함께 감췄다가 복귀 때 그대로 보인다.
         while (popup := QApplication.activePopupWidget()) is not None:
             if not popup.close():
                 break
@@ -192,10 +203,15 @@ class MainWindow(QMainWindow):
         self.set_playback_fullscreen(False)
         self.tray.hide_for_emergency(focus)
 
+    def is_emergency_key(self, name):
+        return self.core.command_for_key(name or "") == Command(CommandType.EMERGENCY_HIDE)
+
     def has_emergency_focus(self):
-        """앱 창이나 재생 중 옮겨 띄운 대화상자가 활성 창이다. 메뉴·드롭다운 팝업은 활성 창을 바꾸지 않는다."""
+        """앱 창이나 이 창이 띄운 대화상자·경고가 활성 창이다. 메뉴·드롭다운 팝업은 활성 창을 바꾸지 않는다."""
         active = QApplication.activeWindow()
-        return active is not None and active in (self, self.web_host.dialogs.container)
+        while active is not None and active is not self:
+            active = active.parentWidget()
+        return active is self
 
     @property
     def worker(self):
@@ -398,7 +414,7 @@ class MainWindow(QMainWindow):
             if settings is not None and settings.capture_event(event):
                 return True
         if (event.type() == QEvent.Type.KeyPress and self.has_emergency_focus()
-                and self.core.command_for_key(key_name(event) or "") == Command(CommandType.EMERGENCY_HIDE)):
+                and self.is_emergency_key(key_name(event))):
             # 재생 화면, 웹 셸의 모든 탭, 열린 대화상자·메뉴·팝업, 입력·IME 조합 중에도 이 필터 한 곳에서 받는다.
             # 키 배치 화면의 키 캡처는 위에서 먼저 소비한다.
             if not event.isAutoRepeat():
