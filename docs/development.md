@@ -120,10 +120,15 @@ TanStack Virtual은 행 단위 가상화·overscan·scrollToIndex를 제공하�
 입력한 질의의 key는 `lib/tag-name-key.ts`가 동기로 만듭니다. 이 함수는 `generate_web_types.py`가 코어 `tags.tag_name_key_tables()`에서
 생성한 `lib/tag-name-key-data.ts`(Python Unicode 버전의 할당 범위·제거 문자·공백·casefold 표)만 적용하며,
 검사 스크립트가 전체 코드 포인트와 문맥에서 코어 `tag_name_key`와 같은지 비교합니다. 규칙을 바꿀 때는 `tags.py`를 고치고 다시 생성합니다.
-즉시 실행·뺄 태그는 아직 쓰는 화면이 없어 `frontend/checks/tag-picker-fixture.tsx` 검사 번들로 확인합니다.
+즉시 실행·뺄 태그는 태그 편집 대화상자가 씁니다. 대화상자 데이터(`DialogData.tags`)에 같은 `tag_usage()` 목록을 싣고
+붙은 태그(`rows`)를 뺄 태그로 넘기며, `listAll`로 전체 목록을 늘 펼치고 `onCreate`로 없는 이름을 새 태그로 붙입니다.
+대화상자의 Esc는 `tagPickerKeepsEscape`로 조각이 먼저 처리할 Esc를 넘겨받지 않습니다. 조각 단독 동작은 `frontend/checks/tag-picker-fixture.tsx` 검사 번들로도 확인합니다.
 `scripts/check_web_tag_picker.py --offscreen`은 `.local/screens-195/`에 태그 0개·몇 개·300개·검색·모두 보기·
 고른 태그 40개 화면과 패널 배치 측정을 남기고, `--verify`는 데스크톱 잠금 안의 실창에서
 키보드만으로 검색 → 고르기 → 칩 빼기와 실제 한국어 IME 조합 중 Enter 무시를 확인합니다.
+`scripts/check_web_tag_dialog.py --offscreen`은 `.local/screens-191/`에 태그 편집 대화상자의 등록 태그 0개·모두 붙음·몇 개·300개·긴 이름
+화면과 배치 측정, 붙이기·새 태그·조합 중 Enter·Esc 순서를 확인하고, `--verify`는 데스크톱 잠금 안의 실창에서 키보드만으로
+고르기·새 태그 만들기·Esc 순서와 실제 한국어 IME 조합 중 Enter 무시를 확인합니다.
 썸네일 크기 버전은 `.640.jpg` 파일명, 실패 진행 커서는 공용 Settings의 `thumbnail.cursor`에 저장합니다.
 기존 `videos.thumbnail` 열과 Settings 형식은 그대로이며 대기 대상 부분 인덱스만 추가하므로 DB 버전은 v4를 유지합니다.
 
