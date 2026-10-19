@@ -10,6 +10,8 @@ class TrayControls(QObject):
         self.window, self.core = window, window.core
         self.quitting = False
         self._confirmed = False
+        self._emergency_hidden = False
+        self._emergency_focus = None
         self.icon = QSystemTrayIcon(window.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay), self)
         self.icon.setToolTip("영상 라이브러리 · 자막 대기열")
         menu = QMenu(window)
@@ -27,13 +29,25 @@ class TrayControls(QObject):
 
     def open(self):
         was_hidden = not self.window.isVisible()
-        self.window.showNormal()
-        if was_hidden and self.window.web_host.active_tab == 'library':
+        emergency = was_hidden and self._emergency_hidden
+        self._emergency_hidden = False
+        if emergency:
+            # 긴급 탈출 전 화면을 그대로 보인다. 최대화 상태를 지키고 목록도 새로 고치지 않는다.
+            self.window.show()
+        else:
+            self.window.showNormal()
+        if was_hidden and not emergency and self.window.web_host.active_tab == 'library':
             # 닫을 때 저장한 시청 상태를 복귀 시점에만 목록과 추천에 반영한다.
             self.window.refresh(focus_gems=True if self.window._return_to_gems else None)
             self.window._return_to_gems = False
         self.window.raise_()
         self.window.activateWindow()
+        focus, self._emergency_focus = self._emergency_focus, None
+        if emergency and focus is not None:
+            from shiboken6 import isValid
+            # 전체 화면 풀기와 숨기기로 옮겨 간 초점을 숨기기 전 위젯으로 되돌린다.
+            if isValid(focus) and focus.isVisible() and self.window.isAncestorOf(focus):
+                focus.setFocus()
 
     def activated(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
@@ -43,6 +57,19 @@ class TrayControls(QObject):
         self.window.navigate_web_tab('queue')
         self.open()
         self.window.web_host.controllers['queue'].refresh()
+
+    def hide_for_emergency(self, focus=None):
+        """긴급 탈출. 창 X와 달리 재생 세션과 화면을 그대로 두고 첫 트레이 안내도 쓰지 않는다.
+
+        focus는 복귀 때 되돌릴 숨기기 전 초점 위젯이다.
+        """
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            # 트레이가 없으면 숨긴 창을 다시 열 곳이 없으므로 작업표시줄로 내린다.
+            self.window.showMinimized()
+            return
+        self._emergency_hidden = True
+        self._emergency_focus = focus
+        self.window.hide()
 
     def notify(self, message):
         """창이 숨었을 때 알릴 일. 트레이 풍선으로 보인다."""
@@ -123,6 +150,7 @@ class TrayControls(QObject):
             event.accept()
             QApplication.instance().quit()
         else:
+            self._emergency_hidden = False
             was_playing = window.pages.currentWidget() is window.playback_page
             # 숨긴 뒤 page_changed가 showNormal()로 창을 다시 띄우지 않게 한다.
             window.set_playback_fullscreen(False)

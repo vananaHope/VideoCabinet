@@ -224,6 +224,10 @@ class MpvPlayer:
         elif command.kind == CommandType.TOGGLE_SUBTITLES:
             self._player.cycle("sub-visibility")
 
+    def pause(self) -> None:
+        """토글과 달리 이미 멈춘 재생은 그대로 둔다."""
+        self._player.pause = True
+
     def take_eof(self) -> bool:
         reached = False
         while True:

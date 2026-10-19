@@ -5,7 +5,7 @@ from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
 
 from .adapters import MpvPlayer
-from .core import AppCore, CommandType
+from .core import AppCore, Command, CommandType
 from .subtitle_controls import SubtitleControls
 from .translation_controls import TranslationControls
 from .web_dialogs_entries import HighlightList
@@ -13,6 +13,7 @@ from .key_display import display_keys
 from .tray import TrayControls
 from .web_dialogs_entries import ReviewDialog
 from .playback_page import PlaybackPage
+from .qt_keys import key_name
 from .theme import apply_theme
 
 
@@ -148,6 +149,22 @@ class MainWindow(QMainWindow):
 
     def navigate_web_tab(self, tab):
         self.web_host.navigate(tab)
+
+    def emergency_hide(self):
+        """긴급 탈출: 확인 없이 일시정지하고 전체 화면을 푼 뒤 창을 트레이로 숨긴다.
+
+        재생 세션과 현재 화면은 그대로 두므로 트레이 열기로 같은 장면의 일시정지 상태로 돌아온다.
+        """
+        focus = QApplication.focusWidget()
+        if self.player:
+            try:
+                self.player.pause()
+                self.sync_position()
+            except Exception as error:
+                # 숨기기가 먼저다. 실패는 복귀한 화면에 보인다.
+                self.playback_page.show_error(f"일시정지 실패: {error}")
+        self.set_playback_fullscreen(False)
+        self.tray.hide_for_emergency(focus)
 
     @property
     def worker(self):
@@ -331,6 +348,13 @@ class MainWindow(QMainWindow):
                 return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
                 self.show_fullscreen_settings_menu()
+            return True
+        if self.core.command_for_key(key_name(event) or "") == Command(CommandType.EMERGENCY_HIDE):
+            # 재생 화면과 웹 셸의 모든 탭이 이 필터 한 곳에서 받는다.
+            if self.web_host.dialogs.blocks_shell_actions:
+                return super().eventFilter(watched, event)
+            if not event.isAutoRepeat():
+                self.emergency_hide()
             return True
         handle_key = getattr(self.pages.currentWidget(), "handle_key", None)
         return handle_key(event) if callable(handle_key) else False

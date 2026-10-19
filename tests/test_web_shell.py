@@ -143,7 +143,20 @@ def test_tray_restore_activates_only_destination(window_factory, core, monkeypat
     assert events == [(expected, 'activated')]
 
 
-def test_tray_restore_preserves_library_filter_and_selection(window_factory, monkeypatch):
+def hide_to_tray(window, how):
+    """창 X 또는 긴급 탈출 키로 트레이에 숨긴다."""
+    if how == 'close':
+        window.close()
+    else:
+        window.activateWindow()
+        wait_for(window.isActiveWindow)
+        QTest.keyClick(window.focusWidget() or window, Qt.Key.Key_H,
+                       Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    assert not window.isVisible()
+
+
+@pytest.mark.parametrize('how', ['close', 'emergency'])
+def test_tray_restore_preserves_library_filter_and_selection(window_factory, monkeypatch, how):
     from PySide6.QtWidgets import QSystemTrayIcon
 
     monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
@@ -155,7 +168,7 @@ def test_tray_restore_preserves_library_filter_and_selection(window_factory, mon
     library.bridge.select(selected)
     focus_requests = []
     library.bridge.libraryFocusRequested.connect(focus_requests.append)
-    window.close()
+    hide_to_tray(window, how)
     window.tray.open()
     assert library.query == 'Python'
     assert library.selected_video_id() == selected
@@ -163,7 +176,8 @@ def test_tray_restore_preserves_library_filter_and_selection(window_factory, mon
     assert window.web_host._pending_focus is None
 
 
-def test_tray_restore_preserves_rendered_settings_category_and_scroll(window_factory, monkeypatch):
+@pytest.mark.parametrize('how', ['close', 'emergency'])
+def test_tray_restore_preserves_rendered_settings_category_and_scroll(window_factory, monkeypatch, how):
     from PySide6.QtCore import QEventLoop, QTimer
     from PySide6.QtWidgets import QSystemTrayIcon
 
@@ -200,7 +214,7 @@ def test_tray_restore_preserves_rendered_settings_category_and_scroll(window_fac
           window.trayScroll.scrollTop = 180""")
     before = js('window.trayScroll.scrollTop')
     assert before > 0
-    window.close()
+    hide_to_tray(window, how)
     window.tray.open()
     assert host.active_tab == 'settings'
     assert js('document.querySelector("[data-category=keys]").getAttribute("aria-current")') == 'true'
