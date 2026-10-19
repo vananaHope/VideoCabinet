@@ -15,6 +15,6 @@ const picks: number[] = []
 function show(tags: TagUsageData[] | null, exclude: number[] = []) {
   if (!tags) root.render(null)
   else root.render(<TagPicker tags={tags} label="붙일 태그" mode="immediate" exclude={exclude} emptyText="붙일 태그가 없습니다."
-    onPick={tag => { picks.push(tag.id); show(tags, [...exclude, tag.id]) }} />)
+    onPick={async tag => { picks.push(tag.id); show(tags, [...exclude, tag.id]); return true }} />)
 }
 Object.assign(window, { tagPickerProbe: show, tagPickerPicks: picks, tagChoicesProbe: tagChoices, tagNameKeyProbe: tagNameKey })

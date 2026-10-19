@@ -5,6 +5,7 @@ from math import isfinite
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 from .review import ReviewConfirmationRequired
 from .web_dialogs_data import row, values
+from .web_library_data import tag_usage_data
 
 
 TITLES = {
@@ -29,6 +30,8 @@ class DialogModel:
         self.keep_pending = None
         self.message = ''
         self.information = ''
+        # 대화상자 갱신 타이머가 0.5초마다 snapshot을 만든다. 태그 사용 수는 대화상자 작업 뒤에만 다시 센다.
+        self.tag_usage = None
         if kind == 'highlight':
             h, duration = context['highlight'], context['duration']
             self.values = values(start=initial_time_input(h.start, duration),
@@ -66,20 +69,25 @@ class DialogModel:
             self.confirm(f"'{video.title}'을 제외할까요?\n실제 파일과 기록은 남으며 제외 목록에서 되돌릴 수 있습니다.",
                          exclude, title='영상 제외', destructive=True)
 
+    def usage(self):
+        if self.tag_usage is None:
+            self.tag_usage = tag_usage_data(self.core.tag_usage())
+        return self.tag_usage
+
     def snapshot(self):
         c, ctx, kind = self.core, self.context, self.kind
         task = c.subtitle_task(ctx['video_id']) if 'video_id' in ctx else None
         data = dict(task_kind=task.kind if task else '', task_label=task.label if task else '',
                     subtitle_label=task.subtitle_label if task else '', short_label=task.short_label if task else '',
-                    keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], available=[],
+                    keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], tags=[], available=[],
                     choices=[], values=self.values.copy(), maximum=0.0, locked=False, warning='',
                     confirmation=self.confirmation, confirm_title=self.confirm_title, confirm_destructive=self.confirm_destructive, translation=None, network_busy=False, information=self.information)
         if kind == 'tags':
             highlight = ctx.get('highlight_id')
             tags = c.highlight_tags(highlight) if highlight is not None else c.video_tags(ctx['video_id'])
             data.update(title='하이라이트 태그' if highlight is not None else TITLES[kind],
-                        description='Enter로 추가 · ↓/↑로 후보 선택 · Tab으로 버튼 이동 · 변경은 즉시 저장됩니다.',
-                        rows=[row(t.id, t.name) for t in tags])
+                        description='목록에서 골라 붙이기 · 없는 이름은 입력 후 Enter로 새 태그 · 변경은 즉시 저장됩니다.',
+                        rows=[row(t.id, t.name) for t in tags], tags=self.usage())
         elif kind == 'tag-manager':
             data.update(description='이름 변경과 삭제는 모든 영상·하이라이트에 적용됩니다.',
                         rows=[row(t.id, t.name) for t in c.tags()])

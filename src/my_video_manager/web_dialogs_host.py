@@ -272,7 +272,12 @@ class WebDialogs(QObject):
             raise ValueError('파일 저장 대화상자를 먼저 닫으세요.')
         if not self.stack or self.stack[-1].identifier != identifier:
             raise ValueError('대화상자가 바뀌었습니다. 현재 내용을 확인하세요.')
-        self.stack[-1].act(action, data)
+        try:
+            self.stack[-1].act(action, data)
+        finally:
+            # 중첩 대화상자(모든 태그 관리)의 변경도 아래 태그 편집이 다시 세게 한다.
+            for frame in self.stack:
+                frame.tag_usage = None
         self.publish()
 
     def save_export(self, export):

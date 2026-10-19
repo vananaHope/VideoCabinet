@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NoticeStack } from '@/components/ui/notice'
 import { ConfirmDialog } from '@/components/page-parts'
+import { TagPicker } from '@/components/tag-picker'
 import { Choice, DialogFrame, DialogList, TextArea } from './dialog-parts'
-import { TagEntry } from './TagEntry'
 import { TranslationForm } from './TranslationForm'
 
 type FormValues = Omit<DialogValues, 'start' | 'end'> & { start: number | string; end: number | string }
@@ -91,8 +91,10 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
           && event.key === 'Enter' && !composing.current && !event.nativeEvent.isComposing && event.keyCode !== 229
           && !data.locked && !data.confirmation) { event.preventDefault(); void act('save') }
       }}>
-      {kind === 'tags' && <TagEntry bridge={bridge} composing={composing} add={name => act('add', { name })} />}
-      {['tags', 'tag-manager', 'highlights', 'review'].includes(kind) && <DialogList label={kind === 'review' ? `원어 · ${data.subtitle_label}` : '목록'} rows={data.rows} selected={currentSelected} onSelect={setSelected}
+      {kind === 'tags' && <TagPicker mode="immediate" label="태그" tags={data.tags} exclude={data.rows.map(row => Number(row.id))} listAll
+        emptyText={data.tags.length ? '등록한 태그가 모두 붙어 있습니다. 새 이름을 입력해 붙이세요.' : '등록한 태그가 없습니다. 이름을 입력하고 Enter로 새 태그를 만드세요.'}
+        onPick={tag => act('add', { name: tag.name })} onCreate={name => act('add', { name })} />}
+      {['tags', 'tag-manager', 'highlights', 'review'].includes(kind) && <DialogList label={kind === 'review' ? `원어 · ${data.subtitle_label}` : kind === 'tags' ? '붙은 태그' : '목록'} rows={data.rows} selected={currentSelected} onSelect={setSelected}
         review={kind === 'review'} highlights={kind === 'highlights'} clickActivates={kind === 'review'}
         onActivate={kind === 'review' || kind === 'highlights' ? id => void act(kind === 'review' ? 'jump' : 'edit', { selected: id }) : undefined} />}
       {kind === 'series' && <>

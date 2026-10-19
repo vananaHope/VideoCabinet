@@ -272,14 +272,14 @@ def windows_ime():
         window.raise_(); window.activateWindow()
         assert QTest.qWaitForWindowActive(window, 5000)
         window.web_host.view.setFocus()
-        input_value('태그 이름', '')
-        js("window.imeEvents = []; for (const name of ['compositionstart','compositionend']) document.querySelector('[aria-label=\"태그 이름\"]').addEventListener(name, e => window.imeEvents.push([name,e.data]))")
+        input_value('태그 검색', '')
+        js("window.imeEvents = []; for (const name of ['compositionstart','compositionend']) document.querySelector('[aria-label=\"태그 검색\"]').addEventListener(name, e => window.imeEvents.push([name,e.data]))")
         for attempt in range(2):
             for key in 'GKS': press(ord(key))  # 두벌식: 한
-            value = js("document.querySelector('[aria-label=\"태그 이름\"]').value")
+            value = js("document.querySelector('[aria-label=\"태그 검색\"]').value")
             if value == '한':
                 break
-            input_value('태그 이름', '')
+            input_value('태그 검색', '')
             press(0x15)  # VK_HANGUL. 레이아웃의 영문 상태라면 한글로 전환한다.
         events = js('JSON.stringify(window.imeEvents)')
         metrics['ime'] = {'layout': hex(korean or 0), 'value': value, 'events': json.loads(events)}
@@ -335,43 +335,38 @@ try:
 
     def tag_keys():
         original = len(core.video_tags(video.id))
-        input_value('태그 이름', '조합 중')
-        js("""(() => { const e = document.querySelector('[aria-label="태그 이름"]');
+        input_value('태그 검색', '조합 중')
+        js("""(() => { const e = document.querySelector('[aria-label="태그 검색"]');
           e.dispatchEvent(new CompositionEvent('compositionstart', {bubbles:true, data:'조합'}));
           e.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, isComposing:true})); })()""")
         settle()
         assert len(core.video_tags(video.id)) == original
-        js("document.querySelector('[aria-label=\"태그 이름\"]').dispatchEvent(new CompositionEvent('compositionend', {bubbles:true, data:'조합 중'}))")
+        js("document.querySelector('[aria-label=\"태그 검색\"]').dispatchEvent(new CompositionEvent('compositionend', {bubbles:true, data:'조합 중'}))")
         settle()
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
         wait(lambda: len(core.video_tags(video.id)) == original + 1)
-        input_value('태그 이름', '00')
-        wait(lambda: js("!!document.getElementById('tag-candidates')"))
+        # 붙은 태그만 걸리는 검색어는 목록이 비고, Esc는 대화상자보다 검색어를 먼저 지운다.
+        input_value('태그 검색', '00')
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Escape)
         settle()
-        assert current()['kind'] == 'tags' and not js("!!document.getElementById('tag-candidates')")
-        input_value('태그 이름', '00')
+        assert current()['kind'] == 'tags' and js("document.querySelector('[aria-label=\"태그 검색\"]').value") == ''
+        input_value('태그 검색', '00')
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
         wait(lambda: any(tag.name == '00' for tag in core.video_tags(video.id)))
-        input_value('태그 이름', '01')
-        QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Down)
-        QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
-        settle()
-        assert not any(tag.name == '01' for tag in core.video_tags(video.id))
         for key in (Qt.Key.Key_2, Qt.Key.Key_8): QTest.keyClick(host.view.focusProxy(), key, Qt.KeyboardModifier.ControlModifier)
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
         assert host.active_tab == 'library' and not window.settings_menu.isVisible()
-        js("document.querySelector('[role=dialog] [role=listbox]').focus()")
+        js("document.querySelector('[aria-label=\"붙은 태그\"]').focus()")
         for _ in range(3): QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Down)
-        selected_tag = js("document.querySelector('[role=dialog] [role=option][aria-selected=true]').id")
+        selected_tag = js("document.querySelector('[aria-label=\"붙은 태그\"] [role=option][aria-selected=true]').id")
         click('모든 태그 관리')
         click('이름 변경')
         input_value('새 이름', '이름 변경 검증')
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
         wait(lambda: any(tag.name == '이름 변경 검증' for tag in core.tags()))
         click('닫기')
-        assert js("document.querySelector('[role=dialog] [role=option][aria-selected=true]').id") == selected_tag
-        metrics['checks'].append('태그 IME composition·명시 후보·Enter·셸 단축키')
+        assert js("document.querySelector('[aria-label=\"붙은 태그\"] [role=option][aria-selected=true]').id") == selected_tag
+        metrics['checks'].append('태그 IME composition·Esc 검색어 먼저·없는 이름 Enter 새 태그·셸 단축키')
         metrics['checks'].append('이름 변경 Enter 저장·중첩 대화상자 선택 복원')
     web_modal('tags', {'video_id': video.id}, tag_keys, lambda: TagEditor(core, video_id=video.id, parent=window).exec())
 

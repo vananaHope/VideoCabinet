@@ -4,7 +4,6 @@ import json
 from PySide6.QtCore import QObject
 
 from .web_dialogs_contract import DIALOGS
-from .web_dialogs_data import row
 from .web_json import encode
 
 
@@ -30,13 +29,6 @@ class DialogsBridge(QObject):
         if self.dialogs.active and self.dialogs.stack[-1].identifier == identifier and width > 0 and height > 0:
             self.dialogs.resize_container(width, height)
         return encode({'ok': True})
-
-    @DIALOGS.slot('candidates')
-    def candidates(self, prefix):
-        try:
-            return encode({'rows': [row(tag.id, tag.name) for tag in self.dialogs.core.tags(prefix)]})
-        except Exception as error:
-            return encode({'error': str(error)})
 
     @DIALOGS.slot('act')
     def act(self, identifier, action, payload):
