@@ -257,6 +257,7 @@ def screenshots():
         mark(core, video)
     watch(core, favorite, 58)
     watch(core, favorite, 58)
+    watch(core, favorite, 58)
     core.add_video_tag(favorite.id, '자연')
     for video in tagged:
         core.add_video_tag(video.id, '자연')
@@ -328,6 +329,7 @@ def screenshots():
     # 긴 텍스트: 공백 없는 긴 제목과 긴 태그 이름이 든 이유.
     core, clock, folder = library('long')
     favorite = add(core, folder, '즐겨 보는 영상')
+    watch(core, favorite, 58)
     watch(core, favorite, 58)
     watch(core, favorite, 58)
     target = add(core, folder, '공백없는아주긴추천영상제목' * 6)

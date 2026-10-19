@@ -300,6 +300,7 @@ def test_similar_tags_overflow_appears_in_unwatched_row(library):
     favorite = add("즐겨 보는 영상")
     watch(core, favorite)
     watch(core, favorite)
+    watch(core, favorite)
     core.add_video_tag(favorite.id, "주제")
     tagged = []
     for i in range(22):
