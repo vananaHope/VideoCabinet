@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 import random
+import threading
 
 import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
-from my_video_manager.random_pick import choose_video_id
+from my_video_manager.random_play import choose_video_id
 
 
 class FakeMedia:
@@ -13,6 +14,21 @@ class FakeMedia:
 
     def capture(self, path, destination, seconds):
         destination.write_bytes(b"thumbnail")
+
+
+class SlowMedia(FakeMedia):
+    """blocking을 켜면 미디어 읽기에서 검사를 붙잡아 두는 어댑터."""
+
+    def __init__(self):
+        self.blocking = False
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def read(self, path):
+        if self.blocking:
+            self.entered.set()
+            self.release.wait()
+        return super().read(path)
 
 
 def make_core(database):
@@ -115,6 +131,21 @@ def test_single_candidate_can_repeat(core):
         assert core.random_video_count(video_ids=[video_id]) == 1
 
 
+@pytest.mark.parametrize("change", ["excluded", "missing"])
+def test_previous_selection_that_left_candidates_is_not_considered(core, change):
+    a, b, c = core.videos()[:3]
+    assert core.pick_random_video(video_ids=[a.id], choice=FixedChoice([a.id], a.id)) == a.id
+    if change == "excluded":
+        core.exclude_video(a.id)
+    else:
+        a.locations[0].path.unlink()
+        core.scan()
+        assert core.video(a.id).missing
+    assert core.random_video_count(video_ids=[a.id, b.id, c.id]) == 2
+    assert core.pick_random_video(video_ids=[a.id, b.id, c.id],
+                                  choice=FixedChoice([b.id, c.id], c.id)) == c.id
+
+
 @pytest.mark.parametrize("scope", [{"video_ids": []}, {"tag_ids": []},
                                   {"video_ids": [999999]}, {"tag_ids": [999999]}])
 def test_empty_scope_returns_none_without_resetting_previous(core, scope):
@@ -129,6 +160,41 @@ def test_empty_library(tmp_path):
     core = make_core(tmp_path / "library.sqlite3")
     assert core.random_video_count() == 0
     assert core.pick_random_video() is None
+
+
+def test_count_and_pick_return_while_scan_is_still_running(tmp_path):
+    """검사가 코어 잠금을 쥐고 있어도 후보 수·선택은 검사 종료를 기다리지 않는다."""
+    media = SlowMedia()
+    core = AppCore(media=media, clock=lambda: datetime(2026, 10, 20, tzinfo=timezone.utc),
+                   database=tmp_path / "data/library.sqlite3")
+    folder = tmp_path / "videos"
+    folder.mkdir()
+    for name in ("a", "b", "c"):
+        (folder / f"{name}.mkv").write_bytes(name.encode())
+    core.add_watched_folder(folder)
+    assert core.scan().added == 3
+    for name in ("d", "e", "f"):
+        (folder / f"{name}.mkv").write_bytes(name.encode())
+
+    media.blocking = True
+    scan = threading.Thread(target=core.scan, name="slow-scan")
+    scan.start()
+    assert media.entered.wait(5)
+    # 잠금을 다시 코어 잠금으로 되돌리면 호출이 풀리지 않아 테스트가 멈추지 않게 하는 안전장치다.
+    watchdog = threading.Timer(10, media.release.set)
+    watchdog.start()
+    try:
+        ids = [video.id for video in core.videos()]
+        assert core.random_video_count() == 3
+        assert core.pick_random_video(choice=FixedChoice(ids, ids[0])) == ids[0]
+        # 두 호출이 검사 종료를 기다리지 않았다는 뜻: 검사는 아직 미디어 읽기에 붙잡혀 있다.
+        assert scan.is_alive() and not media.release.is_set()
+    finally:
+        watchdog.cancel()
+        media.release.set()
+        scan.join(10)
+    assert not scan.is_alive()
+    assert core.random_video_count() == 6
 
 
 def test_unused_and_highlight_only_tags_have_no_candidates(core):

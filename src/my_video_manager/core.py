@@ -7,7 +7,7 @@ import math
 import logging
 from pathlib import Path
 import sqlite3
-from threading import RLock
+from threading import Lock, RLock
 from typing import Callable, Iterable, Mapping
 
 from .library import Library, Location, MediaInfo, MediaReader, ScanIssue, ScanResult, Video, WatchedFolder
@@ -103,7 +103,14 @@ class LibrarySnapshot:
     video_statistics: dict[int, VideoViewingStatistics] = field(default_factory=dict)
 
 
+# 무작위 재생의 직전 선택만 감싸는 잠금. 검사(scan)가 쥐는 AppCore._lock과 공유하지 않는다.
+_RANDOM_HISTORY_LOCK = Lock()
+
+
 class AppCore:
+    # 직전에 무작위로 고른 영상 ID. 앱을 다시 켜면 잊는다.
+    _last_random_video_id: int | None = None
+
     def __init__(
         self,
         *,
@@ -944,9 +951,9 @@ class AppCore:
 
         인자를 생략하면 전체, 빈 ID 목록이면 빈 범위다. 두 범위의 동시 지정은 거절한다.
         태그는 영상에 붙은 것만 OR로 센다. 없는 ID와 중복 ID는 무시한다.
+        상태를 바꾸지 않으므로 검사(scan)가 쥔 잠금을 잡지 않는다.
         """
-        with self._lock:
-            return len(self._random_video_candidates(video_ids=video_ids, tag_ids=tag_ids))
+        return len(self._random_video_candidates(video_ids=video_ids, tag_ids=tag_ids))
 
     def pick_random_video(
         self, *, video_ids: Iterable[int] | None = None, tag_ids: Iterable[int] | None = None,
@@ -957,13 +964,14 @@ class AppCore:
         choice는 후보 ID 튜플에서 하나를 반환하는 난수 어댑터(random.Random.choice 등)다.
         기본은 random.choice이며 직전 선택은 이 AppCore에서 범위와 관계없이 기억한다.
         빈 범위는 None을 반환하고 직전 선택을 유지한다. 후보 하나는 반복할 수 있다.
+        후보 계산은 검사(scan)가 쥔 잠금 밖에서 하고, 직전 선택만 별도 잠금으로 감싼다.
         """
-        from .random_pick import choose_video_id
+        from .random_play import choose_video_id
 
-        with self._lock:
-            candidates = self._random_video_candidates(video_ids=video_ids, tag_ids=tag_ids)
+        candidates = self._random_video_candidates(video_ids=video_ids, tag_ids=tag_ids)
+        with _RANDOM_HISTORY_LOCK:
             selected = choose_video_id(
-                candidates, previous_video_id=getattr(self, "_last_random_video_id", None), choice=choice,
+                candidates, previous_video_id=self._last_random_video_id, choice=choice,
             )
             if selected is not None:
                 self._last_random_video_id = selected
