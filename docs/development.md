@@ -117,6 +117,8 @@ TanStack Virtual은 행 단위 가상화·overscan·scrollToIndex를 제공하�
 영상 상세를 읽지 않으며 목록 갱신에서 만든 인덱스를 재사용합니다.
 검색 조건의 태그 영역은 공용 `components/tag-picker.tsx`(여러 개 고름·즉시 실행, 뺄 태그 ID)이며
 태그 목록은 `AppCore.tag_usage()`가 붙은 영상 수 순서와 검색용 정규화 이름(`key`)을 함께 보냅니다.
+입력한 질의의 key도 셸 브리지 `tagSearchKey`(코어 `tag_name_key`)가 만들며 TypeScript에는 정규화 규칙을 두지 않습니다.
+즉시 실행·뺄 태그는 아직 쓰는 화면이 없어 `frontend/checks/tag-picker-fixture.tsx` 검사 번들로 확인합니다.
 `scripts/check_web_tag_picker.py --offscreen`은 `.local/screens-195/`에 태그 0개·몇 개·300개·검색·모두 보기·
 고른 태그 40개 화면과 패널 배치 측정을 남기고, `--verify`는 데스크톱 잠금 안의 실창에서
 키보드만으로 검색 → 고르기 → 칩 빼기와 실제 한국어 IME 조합 중 Enter 무시를 확인합니다.

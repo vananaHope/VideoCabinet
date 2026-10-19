@@ -36,5 +36,8 @@ export function request<T>(invoke: (reply: Reply) => void): Promise<T> {
 }
 export const getSnapshot = (bridge: LibraryBridge) => request<LibraryData>(reply => bridge.snapshot(reply))
 export const getDetails = (bridge: LibraryBridge, id: number) => request<DetailsData>(reply => bridge.details(id, reply))
+// 태그 검색 질의의 key. 정규화 규칙은 코어 tag_name_key 한 곳에만 둔다.
+export const getTagSearchKey = (query: string) =>
+  connectBridge().then(({ shell }) => request<{ key: string }>(reply => shell.tagSearchKey(query, reply))).then(result => result.key)
 
 export const lockedDuringScan = (name: Action) => scanLockedActions.includes(name)
