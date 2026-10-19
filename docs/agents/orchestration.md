@@ -56,7 +56,7 @@
 
 | 등급 | 구현 목록(앞부터) |
 | --- | --- |
-| `light` | opencode@low → codex@medium |
+| `light` | opencode@high → codex@medium |
 | `standard` | opencode@high → codex@medium |
 | `hard` | claude@high → codex@high |
 
