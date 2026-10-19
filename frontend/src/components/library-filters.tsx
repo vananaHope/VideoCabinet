@@ -49,7 +49,7 @@ export function LibraryFilters({ options, tags, onChange }: { options: LibraryVi
 export function LibraryFilterChips({ chips, options, onChange }: { chips: LibraryChip[]; options: LibraryViewOptions; onChange: Change }) {
   if (!chips.length) return null
   return <div aria-label="적용한 검색 조건" className="flex shrink-0 items-center gap-2 overflow-x-auto pb-1">
-    {chips.map(chip => <Button key={chip.key} variant="secondary" size="xs" title={chip.label} aria-label={`${chip.label} 지우기`} onClick={() => onChange(chip.reset)}><span className="max-w-48 truncate">{chip.label}</span><X /></Button>)}
+    {chips.map(chip => <Button key={chip.key} variant="secondary" size="xs" title={chip.label} aria-label={`${chip.label} 지우기`} onClick={() => onChange(chip.reset)}><span className="max-w-60 truncate">{chip.label}</span><X /></Button>)}
     <Button variant="ghost" size="xs" onClick={() => onChange(clearLibraryFilters(options))}>모두 지우기</Button>
   </div>
 }
