@@ -108,8 +108,9 @@ def test_changed_period_applies_when_returning_to_recommend_tab(settings, clock)
     assert kinds() == ['new_arrivals']
 
 
-def test_broken_stored_period_keeps_settings_open_and_reset_repairs_it(window_factory, core):
-    core.settings.set('recommend.rewatch_days', -5)
+@pytest.mark.parametrize('stored', [-5, 10**400])
+def test_broken_stored_period_keeps_settings_open_and_reset_repairs_it(window_factory, core, stored):
+    core.settings.set('recommend.rewatch_days', stored)
     window = window_factory()
     window.navigate_web_tab('settings')
     bridge = window.web_host.controllers['settings'].bridge

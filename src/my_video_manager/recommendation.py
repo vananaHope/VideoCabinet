@@ -77,9 +77,12 @@ def recommendation_period_definition(criterion: str) -> RecommendationPeriodDefi
 
 
 def validate_period_days(definition: RecommendationPeriodDefinition, days) -> float:
-    """유한한 수이며 정의된 범위 안인지 확인한다. 불리언과 문자열은 수가 아니다."""
-    if (isinstance(days, bool) or not isinstance(days, (int, float)) or not isfinite(days)
-            or not definition.minimum_days <= days <= definition.maximum_days):
+    """유한한 수이며 정의된 범위 안인지 확인한다. 불리언과 문자열은 수가 아니다.
+
+    범위를 먼저 본다. float로 바꿀 수 없을 만큼 큰 정수에 isfinite를 부르면 OverflowError가 난다.
+    """
+    if (isinstance(days, bool) or not isinstance(days, (int, float))
+            or not definition.minimum_days <= days <= definition.maximum_days or not isfinite(days)):
         raise ValueError("추천 기간은 0 이상 365000 이하의 유한한 일수여야 합니다.")
     return days
 
