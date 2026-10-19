@@ -20,7 +20,7 @@ from .reel import HighlightReel, ReelEntry, ReelPlayback, ReelSettings
 from .revisit import Revisits
 from .series import Series, SeriesStore, adjacent_video
 from .search import Search, SearchResponse
-from .tags import Tag, Tags
+from .tags import Tag, TagUsage, Tags
 from .viewing import Viewing, ViewingRecord, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 from .translation import (Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection,
@@ -701,6 +701,10 @@ class AppCore:
     def tags(self, prefix: str = "") -> tuple[Tag, ...]:
         """정규화된 이름의 접두어로 자동 완성한다. 빈 접두어는 모든 태그다."""
         return self._tags.list(prefix)
+
+    def tag_usage(self) -> tuple[TagUsage, ...]:
+        """태그 고르기용 목록. 붙은 영상 수가 많은 순이며 제외 영상과 하이라이트는 세지 않는다."""
+        return self._tags.usage()
 
     def create_tag(self, name: str) -> Tag:
         return self._tags.create(name)

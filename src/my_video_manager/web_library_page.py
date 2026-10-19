@@ -3,7 +3,7 @@
 from PySide6.QtCore import Signal
 from .library_operations import LibraryOperations
 from .library_controls import LibraryControls
-from .web_library_data import snapshot_data
+from .web_library_data import snapshot_data, tag_usage_data
 from .library_views import filter_chips
 from .web_library_bridge import LibraryBridge
 from .web_json import encode
@@ -71,7 +71,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.index = self.core.library_view_index(self.snapshot)
         self.cards = snapshot_data(self.snapshot, self.index.original)
         self.video_ids = {v['id'] for v in self.cards}
-        self.tags = [dict(id=t.id, name=t.name) for t in self.core.tags()]
+        self.tags = tag_usage_data(self.core.tag_usage())
         self.options['tags'] = [tid for tid in self.options['tags'] if tid in {t['id'] for t in self.tags}]
         if self.options['folder'] not in self.index.members:
             self.options['folder'] = ''

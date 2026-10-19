@@ -3,7 +3,9 @@ import { SlidersHorizontal, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { libraryChoices, libraryFilterDefaults, type LibraryViewOptions, type TagData, type LibraryChip } from "@/bridge-types"
+import { TagPicker } from "@/components/tag-picker"
+import { tagPickerKeepsEscape } from "@/lib/tag-search"
+import { libraryChoices, libraryFilterDefaults, type LibraryViewOptions, type TagUsageData, type LibraryChip } from "@/bridge-types"
 
 type Change = (value: Partial<LibraryViewOptions>) => void
 export function LibraryChoice({ name, label, options, onChange }: { name: keyof typeof libraryChoices; label: string; options: LibraryViewOptions; onChange: Change }) {
@@ -16,9 +18,10 @@ export function clearLibraryFilters(options: LibraryViewOptions): LibraryViewOpt
   return { ...options, ...libraryFilterDefaults, tags: [...libraryFilterDefaults.tags] }
 }
 
-export function LibraryFilters({ options, tags, onChange }: { options: LibraryViewOptions; tags: TagData[]; onChange: Change }) {
+export function LibraryFilters({ options, tags, onChange }: { options: LibraryViewOptions; tags: TagUsageData[]; onChange: Change }) {
   return <Popover.Root><Popover.Trigger asChild><Button variant="outline" size="sm"><SlidersHorizontal />필터</Button></Popover.Trigger>
-    <Popover.Portal><Popover.Content aria-label="라이브러리 필터 패널" align="end" sideOffset={8} className="z-50 max-h-112 w-128 overflow-y-auto rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg">
+    <Popover.Portal><Popover.Content aria-label="라이브러리 필터 패널" align="end" sideOffset={8} onEscapeKeyDown={event => { if (tagPickerKeepsEscape(event)) event.preventDefault() }}
+      className="z-50 max-h-112 w-128 overflow-y-auto rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg">
       <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">검색 조건</h2><Popover.Close asChild><Button size="icon-xs" variant="ghost" aria-label="필터 닫기"><X /></Button></Popover.Close></div>
       <div className="grid grid-cols-2 gap-3">
         <LibraryChoice name="viewing" label="시청 상태" options={options} onChange={onChange} />
@@ -33,10 +36,8 @@ export function LibraryFilters({ options, tags, onChange }: { options: LibraryVi
             <span>~</span><Input type="date" aria-label={`${prefix === "added" ? "추가일" : "마지막 시청"} 끝`} value={options[`${prefix}_to`]} onChange={e => onChange({ [`${prefix}_to`]: e.target.value })} />
           </div>}
         </div>)}
-        <fieldset className="col-span-2 space-y-2"><legend className="text-xs text-muted-foreground">태그 · 모두 포함(AND)</legend>
-          <div className="flex flex-wrap gap-2">{tags.map(tag => <Button key={tag.id} size="sm" variant={options.tags.includes(tag.id) ? "default" : "outline"} aria-pressed={options.tags.includes(tag.id)} title={tag.name}
-            onClick={() => onChange({ tags: options.tags.includes(tag.id) ? options.tags.filter(id => id !== tag.id) : [...options.tags, tag.id] })}><span className="max-w-40 truncate">{tag.name}</span></Button>)}
-            {!tags.length && <span className="text-xs text-muted-foreground">등록한 태그가 없습니다.</span>}</div>
+        <fieldset className="col-span-2 min-w-0 space-y-2"><legend className="text-xs text-muted-foreground">태그 · 모두 포함(AND)</legend>
+          <TagPicker tags={tags} label="태그" mode="multiple" chips selected={options.tags} onChange={ids => onChange({ tags: ids })} />
         </fieldset>
       </div>
       <div className="mt-3 flex justify-end"><Button variant="ghost" size="sm" onClick={() => onChange(clearLibraryFilters(options))}>조건 모두 지우기</Button></div>

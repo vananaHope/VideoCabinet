@@ -80,6 +80,30 @@ def test_tag_filter_keeps_video_and_highlight_targets_separate(core):
     assert core.videos() == (first, second, third)
 
 
+def test_tag_usage_counts_library_videos_most_used_first(core):
+    first, second, third = core.videos()
+    highlight = core.highlights(first.id)[0]
+    for video in (first, second, third):
+        core.add_video_tag(video.id, "흔함")
+    for video in (first, second):
+        core.add_video_tag(video.id, "나")
+        core.add_video_tag(video.id, "Ｇａ")
+    core.add_video_tag(third.id, "제외됨")
+    core.add_highlight_tag(highlight.id, "하이라이트만")
+    core.add_highlight_tag(highlight.id, "흔함")
+    core.exclude_video(third.id)
+    usage = core.tag_usage()
+    # 같은 수는 정규화한 이름순(ga < 나)이고, 제외 영상·하이라이트 연결은 세지 않는다.
+    assert [(u.tag.name, u.video_count) for u in usage] == [
+        ("Ｇａ", 2), ("나", 2), ("흔함", 2), ("제외됨", 0), ("하이라이트만", 0)]
+    assert {u.tag for u in usage} == set(core.tags())
+    assert usage[0].key == "ga"
+
+
+def test_tag_usage_is_empty_without_tags(core):
+    assert core.tag_usage() == ()
+
+
 def test_rename_and_delete_update_every_target_and_survive_restart(core):
     videos = core.videos()
     for video in videos:

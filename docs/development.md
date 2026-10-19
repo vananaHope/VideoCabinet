@@ -115,6 +115,15 @@ TanStack Virtual은 행 단위 가상화·overscan·scrollToIndex를 제공하�
 조건은 `library_views.py`에서 `LibrarySnapshot`의 공용 시청 결과와 자막 존재 인덱스를 사용합니다.
 웹은 생성 계약의 보기 조건을 보내고 결과 ID·칩·폴더 트리를 표시합니다. 조건 변경은 자막 본문이나
 영상 상세를 읽지 않으며 목록 갱신에서 만든 인덱스를 재사용합니다.
+검색 조건의 태그 영역은 공용 `components/tag-picker.tsx`(여러 개 고름·즉시 실행, 뺄 태그 ID)이며
+태그 목록은 `AppCore.tag_usage()`가 붙은 영상 수 순서와 검색용 정규화 이름(`key`)을 함께 보냅니다.
+입력한 질의의 key는 `lib/tag-name-key.ts`가 동기로 만듭니다. 이 함수는 `generate_web_types.py`가 코어 `tags.tag_name_key_tables()`에서
+생성한 `lib/tag-name-key-data.ts`(Python Unicode 버전의 할당 범위·제거 문자·공백·casefold 표)만 적용하며,
+검사 스크립트가 전체 코드 포인트와 문맥에서 코어 `tag_name_key`와 같은지 비교합니다. 규칙을 바꿀 때는 `tags.py`를 고치고 다시 생성합니다.
+즉시 실행·뺄 태그는 아직 쓰는 화면이 없어 `frontend/checks/tag-picker-fixture.tsx` 검사 번들로 확인합니다.
+`scripts/check_web_tag_picker.py --offscreen`은 `.local/screens-195/`에 태그 0개·몇 개·300개·검색·모두 보기·
+고른 태그 40개 화면과 패널 배치 측정을 남기고, `--verify`는 데스크톱 잠금 안의 실창에서
+키보드만으로 검색 → 고르기 → 칩 빼기와 실제 한국어 IME 조합 중 Enter 무시를 확인합니다.
 썸네일 크기 버전은 `.640.jpg` 파일명, 실패 진행 커서는 공용 Settings의 `thumbnail.cursor`에 저장합니다.
 기존 `videos.thumbnail` 열과 Settings 형식은 그대로이며 대기 대상 부분 인덱스만 추가하므로 DB 버전은 v4를 유지합니다.
 

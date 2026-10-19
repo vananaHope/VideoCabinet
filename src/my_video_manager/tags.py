@@ -11,14 +11,49 @@ class Tag:
     name: str
 
 
+@dataclass(frozen=True)
+class TagUsage:
+    """태그와 그 태그가 붙은 영상 수. key는 검색용 정규화 이름이다."""
+    tag: Tag
+    key: str
+    video_count: int
+
+
+REMOVED_CATEGORIES = frozenset({"Cc", "Cf"})
+
+
 def normalize_tag_name(name: str) -> str:
     """표시 이름은 NFC로 보존하고 제어·서식 문자를 제거한 뒤 공백을 정리한다."""
-    name = "".join(char for char in name if unicodedata.category(char) not in {"Cc", "Cf"})
+    name = "".join(char for char in name if unicodedata.category(char) not in REMOVED_CATEGORIES)
     return " ".join(unicodedata.normalize("NFC", name).split())
 
 
 def tag_name_key(name: str) -> str:
     return unicodedata.normalize("NFKC", normalize_tag_name(name)).casefold()
+
+
+def tag_name_key_tables() -> dict:
+    """웹 태그 검색이 tag_name_key와 같은 key를 동기로 만들 표. 이 Python의 Unicode 데이터에서 만든다.
+
+    assigned: 이 Unicode 버전이 아는 코드 포인트 범위. 웹은 이 범위만 NFC·NFKC 정규화하고 나머지는 그대로 둔다.
+    removed: 지우는 범위(REMOVED_CATEGORIES). spaces: str.split()의 공백. casefold: casefold()가 바꾸는 글자.
+    """
+    def ranges(predicate):
+        found, start = [], None
+        for code in range(0x110000 + 1):
+            if code <= 0x10FFFF and predicate(chr(code)):
+                start = code if start is None else start
+            elif start is not None:
+                found.extend((start, code - 1))
+                start = None
+        return found
+    return dict(
+        unicodeVersion=unicodedata.unidata_version,
+        assigned=ranges(lambda char: unicodedata.category(char) != "Cn"),
+        removed=ranges(lambda char: unicodedata.category(char) in REMOVED_CATEGORIES),
+        spaces=[code for code in range(0x110000) if chr(code).isspace()],
+        casefold=[(code, chr(code).casefold()) for code in range(0x110000) if chr(code).casefold() != chr(code)],
+    )
 
 
 class Tags:
@@ -68,6 +103,15 @@ class Tags:
             # LIKE의 %, _를 검색 문법으로 해석하지 않고 Unicode casefold를 일관되게 쓴다.
             return tuple(Tag(row["id"], row["name"]) for row in db.execute(
                 "SELECT * FROM tags ORDER BY name_key, id") if row["name_key"].startswith(key))
+
+    def usage(self) -> tuple[TagUsage, ...]:
+        """붙은 영상 수가 많은 순, 같으면 이름순. 제외 영상과 하이라이트 연결은 세지 않는다."""
+        with self._connect() as db:
+            return tuple(TagUsage(Tag(row["id"], row["name"]), row["name_key"], row["video_count"]) for row in db.execute(
+                """SELECT t.id, t.name, t.name_key, COUNT(v.id) AS video_count FROM tags t
+                   LEFT JOIN video_tags a ON a.tag_id = t.id
+                   LEFT JOIN videos v ON v.id = a.video_id AND v.excluded = 0
+                   GROUP BY t.id ORDER BY video_count DESC, t.name_key, t.id"""))
 
     def _create(self, db, name) -> Tag:
         name, key = self._name(name)

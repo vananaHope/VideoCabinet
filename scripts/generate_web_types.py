@@ -1,9 +1,10 @@
-"""웹 브리지 TypedDict/dataclass에서 TypeScript 계약 생성. --check는 드리프트를 실패로 처리한다."""
+"""웹 브리지 TypedDict/dataclass에서 TypeScript 계약, CSS 토큰, 태그 검색 key 표 생성. --check는 드리프트를 실패로 처리한다."""
 import argparse
 from pathlib import Path
 import types
 from typing import get_args, get_origin, get_type_hints
 
+from my_video_manager.tags import tag_name_key_tables
 from my_video_manager.web_contract import CONTRACTS
 from my_video_manager.web_tokens import web_tokens
 import json
@@ -76,12 +77,28 @@ def render_tokens():
             + ''.join(f'  --{key}: {value};\n' for key, value in tokens['typography'].items()) + '}\n')
 
 
+def render_tag_name_key():
+    tables = tag_name_key_tables()
+
+    def rows(values, per_line):
+        return '[\n' + ''.join('  ' + ', '.join(json.dumps(value) for value in values[i:i + per_line]) + ',\n'
+                               for i in range(0, len(values), per_line)) + ']'
+    return ('// scripts/generate_web_types.py로 생성. 규칙은 src/my_video_manager/tags.py의 tag_name_key·tag_name_key_tables를 수정하세요.\n'
+            f'// Python unicodedata {tables["unicodeVersion"]} 기준. 범위 배열은 [시작, 끝]을 이어 붙인 코드 포인트다.\n'
+            f'export const tagKeyUnicodeVersion = {json.dumps(tables["unicodeVersion"])}\n'
+            f'export const tagKeyAssigned: readonly number[] = {rows(tables["assigned"], 16)}\n'
+            f'export const tagKeyRemoved: readonly number[] = {rows(tables["removed"], 16)}\n'
+            f'export const tagKeySpaces: readonly number[] = {rows(tables["spaces"], 16)}\n'
+            f'export const tagKeyCasefold: ReadonlyArray<readonly [number, string]> = {rows([list(pair) for pair in tables["casefold"]], 8)}\n')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1] / 'frontend/src'
-    for filename, text in [('bridge-types.ts', render_types()), ('tokens.css', render_tokens())]:
+    for filename, text in [('bridge-types.ts', render_types()), ('tokens.css', render_tokens()),
+                           ('lib/tag-name-key-data.ts', render_tag_name_key())]:
         path = root / filename
         if args.check:
             if not path.exists() or path.read_text(encoding='utf-8') != text:
