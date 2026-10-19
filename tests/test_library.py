@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 import hashlib
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ import pytest
 
 from my_video_manager import scan_prefetch
 from my_video_manager.core import AppCore, MediaInfo
-from my_video_manager.library import ScanIssue, ScanResult
+from my_video_manager.library import Location, ScanIssue, ScanResult
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.translation import TranslatedLine
 
@@ -994,6 +995,31 @@ def test_modified_date_uses_earliest_location_mtime_and_ignores_unknown(core, tm
     core.scan()
     assert core.video(video.id).missing
     assert core.video(video.id).modified_at is None
+
+
+def test_modified_date_skips_mtime_outside_local_date_range(core, tmp_path):
+    content = b"same video"
+    known = video_file(tmp_path / "known", "video.mkv", content)
+    ancient = video_file(tmp_path / "ancient", "ancient.mkv", content)
+    moment = datetime(2026, 3, 1, 12, tzinfo=timezone.utc)
+    set_modified(known, moment)
+    os.utime(ancient, ns=(-86400 * 10**9, -86400 * 10**9))
+    for path in (known, ancient):
+        core.add_file(path)
+    video, = core.videos()
+    # 로컬 날짜로 바꿀 수 없는 값은 기록되지 않은 값처럼 빠지고 남는 값이 쓰인다.
+    assert video.modified_at == moment
+
+    # SQLite INTEGER 범위를 넘어 DB에 저장할 수 없는 3001년 이후 값도 모름으로 본다.
+    far = int((datetime(3005, 1, 1, tzinfo=timezone.utc) - datetime(1970, 1, 1, tzinfo=timezone.utc))
+              .total_seconds()) * 10**9
+    assert replace(video, locations=(Location(video.locations[0].path, far),)).modified_at is None
+
+    known.unlink()
+    core.scan()
+    current = core.video(video.id)
+    assert not current.missing
+    assert current.modified_at is None
 
 
 def test_rescan_updates_modified_date_after_replacing_file(core, tmp_path):

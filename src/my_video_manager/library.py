@@ -1,7 +1,7 @@
 """내용 지문으로 영상을 식별하고 위치와 제외 상태를 보존한다."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import math
@@ -39,6 +39,16 @@ class WatchedFolder:
     path: Path
 
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+# 파일 수정 시각을 로컬 날짜로 바꿀 수 있는 범위. Windows의 로컬 시각 변환은
+# 1970년 이전과 3000년 이후에서 OSError를 내고, NTFS는 1601년부터의 시각을
+# 허용하므로 실제로 범위 밖 값이 생길 수 있다. 그 밖의 값은 수정 시각을
+# 모르는 것으로 본다(mtime을 기록하지 않은 위치 행과 같다). 아래쪽은 서쪽
+# 시간대에서도 1970년으로 남도록 하루를 둔다.
+_MODIFIED_MIN_NS = 86_400 * 1_000_000_000
+_MODIFIED_MAX_NS = int((datetime(3000, 1, 1, tzinfo=timezone.utc) - _EPOCH).total_seconds()) * 1_000_000_000
+
+
 @dataclass(frozen=True)
 class Video:
     id: int
@@ -59,12 +69,16 @@ class Video:
 
     @property
     def modified_at(self) -> datetime | None:
-        """위치들의 파일 수정 시각 가운데 가장 이른 값. 파일 없음이거나 수정 시각을 모르면 없다."""
-        known = [location.mtime_ns for location in self.locations if location.mtime_ns is not None]
+        """위치들의 파일 수정 시각 가운데 가장 이른 값. 파일 없음이거나 수정 시각을 모르면 없다.
+
+        로컬 날짜로 바꿀 수 없는 범위의 값은 기록되지 않은 값(NULL)처럼 계산에서 뺀다.
+        """
+        known = [location.mtime_ns for location in self.locations
+                 if location.mtime_ns is not None and _MODIFIED_MIN_NS <= location.mtime_ns <= _MODIFIED_MAX_NS]
         if not known:
             return None
         seconds, nanoseconds = divmod(min(known), 1_000_000_000)
-        return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(microsecond=nanoseconds // 1000)
+        return _EPOCH + timedelta(seconds=seconds, microseconds=nanoseconds // 1000)
 
 
 @dataclass(frozen=True)

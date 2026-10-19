@@ -147,6 +147,16 @@ def date_range(preset, start, end, today):
     return None, None
 
 
+def local_date(value):
+    """시각을 로컬 날짜로 바꾼다. 플랫폼이 변환하지 못하는 값은 모름(None)으로 본다."""
+    if value is None:
+        return None
+    try:
+        return value.astimezone().date()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
 @dataclass
 class LibraryViewIndex:
     snapshot: object
@@ -169,6 +179,11 @@ class LibraryViewIndex:
         for prefix in ('added', 'modified', 'viewed'):
             ranges[prefix] = date_range(options[prefix + '_preset'], options[prefix + '_from'],
                                         options[prefix + '_to'], today)
+        active = {prefix: bounds for prefix, bounds in ranges.items()
+                  if bounds[0] is not None or bounds[1] is not None}
+        # 수정한 날짜는 조건이나 정렬이 있을 때만, 영상마다 한 번만 계산해 재사용한다.
+        modified = ({video.id: video.modified_at for video in self.snapshot.videos}
+                    if 'modified' in active or options['sort'] == 'modified' else {})
 
         def matches(video):
             vid = video.id
@@ -187,15 +202,12 @@ class LibraryViewIndex:
                 return False
             if options['missing'] and not video.missing:
                 return False
-            for prefix, value in (('added', video.registered_at), ('modified', video.modified_at),
-                                  ('viewed', status.last_viewed_at)):
-                start, end = ranges[prefix]
-                if start is not None or end is not None:
-                    if value is None:
-                        return False
-                    day = value.astimezone().date()
-                    if (start and day < start) or (end and day > end):
-                        return False
+            for prefix, (start, end) in active.items():
+                value = (modified[vid] if prefix == 'modified'
+                         else video.registered_at if prefix == 'added' else status.last_viewed_at)
+                day = local_date(value)
+                if day is None or (start and day < start) or (end and day > end):
+                    return False
             return True
 
         def sort_key(video):
@@ -204,7 +216,8 @@ class LibraryViewIndex:
             if options['sort'] == 'added':
                 return video.registered_at.timestamp()
             if options['sort'] == 'modified':
-                return video.modified_at.timestamp() if video.modified_at else 0
+                value = modified[video.id]
+                return value.timestamp() if value else 0
             if options['sort'] == 'viewed':
                 value = self.snapshot.statuses[video.id].last_viewed_at
                 return value.timestamp() if value else 0
@@ -218,7 +231,7 @@ class LibraryViewIndex:
         if options['sort'] == 'viewed':
             videos.sort(key=lambda v: self.snapshot.statuses[v.id].last_viewed_at is None)
         elif options['sort'] == 'modified':
-            videos.sort(key=lambda v: v.modified_at is None)
+            videos.sort(key=lambda v: modified[v.id] is None)
         return [v.id for v in videos]
 
 
