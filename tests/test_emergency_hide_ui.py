@@ -32,10 +32,13 @@ class Player:
         self.position = 0
         self.positions = []
         self.played = 0
+        self.eof = False
+        self.options = (1, True)
 
     def play(self, path, start, *, subtitle):
         self.played += 1
         self.paused = False
+        self.position = start
 
     def advance(self, position):
         self.position = position if not self.paused else self.position
@@ -44,13 +47,27 @@ class Player:
     def pause(self):
         self.paused = True
 
+    def reach_end(self, duration):
+        """mpv의 EOF처럼 길이 위치와 끝 신호를 함께 보고한다."""
+        self.advance(duration)
+        self.eof = True
+
     def execute(self, command):
         if command.kind == CommandType.TOGGLE_PAUSE:
             self.paused = not self.paused
+        elif command.kind == CommandType.SEEK:
+            self.seek_to(self.position + command.amount)
 
     def seek_to(self, position, *, resume=False):
         self.position = position
         self.paused = self.paused and not resume
+        self.positions.append((position, True))
+
+    def playback_options(self):
+        return self.options
+
+    def apply_playback_options(self, options):
+        self.options = options
 
     def close(self):
         pass
@@ -60,7 +77,8 @@ class Player:
         return positions
 
     def take_eof(self):
-        return False
+        eof, self.eof = self.eof, False
+        return eof
 
 
 @pytest.fixture(scope="module")
@@ -241,3 +259,120 @@ def test_maximized_window_returns_maximized_after_fullscreen_emergency_hide(wind
     window.tray.open()
     QApplication.processEvents()
     assert window.isVisible() and window.isMaximized() and not window.isFullScreen()
+
+
+def late_end_report(player):
+    """일시정지 직전에 엔진이 이미 보낸 구간 끝 보고."""
+    player.position = 20
+    player.positions.append((20, False))
+
+
+def hide_and_return_at_reel_boundary(window, report_end):
+    """구간 끝 직전에 숨기고, 엔진의 늦은 끝 보고를 처리한 뒤 트레이로 돌아온다."""
+    player = window.player
+    player.advance(window.core.reel_playback.start + 5)
+    window.sync_position()
+    emergency_key(window)
+    assert not window.isVisible() and player.paused
+    report_end(player)  # 숨긴 뒤에 엔진이 늦게 보낸 구간 끝·EOF 보고
+    QTest.qWait(400)
+    assert not window.isVisible()
+    assert window.player is player and player.paused
+    window.tray.open()
+    QTest.qWait(400)
+    assert window.isVisible() and window.pages.currentWidget() is window.playback_page
+    assert window.player is player and player.paused
+    return player
+
+
+def resume(window):
+    key(window, Qt.Key.Key_Return)
+    QTest.qWait(400)
+
+
+def test_reel_next_item_in_same_video_waits_until_user_resumes(window):
+    from test_reel import mark
+    core = window.core
+    video = core.videos()[0]
+    first = mark(core, video, 10, 20)
+    mark(core, video, 40, 50)
+    window.reel.start(first.id)
+    player = hide_and_return_at_reel_boundary(window, late_end_report)
+    # 같은 장면: 첫 항목의 끝에서 멈춰 있고 복습 보고는 반영됐다.
+    assert core.reel_playback.entry.highlight.id == first.id
+    assert core.playback.position == 20
+    assert core.last_highlight_revisited_at(first.id) is not None
+    resume(window)
+    assert core.reel_playback.start == 40
+    assert window.player is player and not player.paused and player.position == 40
+
+
+def test_reel_next_item_in_other_video_waits_until_user_resumes(window):
+    from test_reel import mark
+    core = window.core
+    one, two = core.videos()
+    first = mark(core, one, 10, 20)
+    mark(core, two, 30, 40)
+    window.reel.start(first.id)
+    player = hide_and_return_at_reel_boundary(window, late_end_report)
+    assert core.reel_playback.video_id == one.id
+    assert core.playback.session.video_id == one.id
+    resume(window)
+    assert core.reel_playback.video_id == two.id
+    assert window.player is not player and not window.player.paused and window.player.position == 30
+
+
+def test_reel_repeat_waits_until_user_resumes(window):
+    from test_reel import mark
+    core = window.core
+    video = core.videos()[0]
+    first = mark(core, video, 10, 20)
+    mark(core, video, 40, 50)
+    window.reel.start(first.id)
+    key(window, Qt.Key.Key_Backslash)
+    assert core.reel_repeat
+    player = hide_and_return_at_reel_boundary(window, late_end_report)
+    assert player.position == 20 and core.reel_playback.entry.highlight.id == first.id
+    resume(window)
+    assert core.reel_playback.entry.highlight.id == first.id
+    assert not player.paused and player.position == 10
+
+
+def test_reel_last_item_eof_waits_until_user_resumes(window):
+    from test_reel import mark
+    core = window.core
+    video = core.videos()[0]
+    last = mark(core, video, 100, 120)
+    window.reel.start(last.id)
+    hide_and_return_at_reel_boundary(window, lambda player: player.reach_end(120))
+    assert core.reel_playback.entry.highlight.id == last.id
+    assert window.web_host.active_tab != 'reel' or window.pages.currentWidget() is window.playback_page
+    resume(window)
+    # 사용자가 재개하면 미룬 EOF로 모아보기를 마치고 목록으로 간다.
+    assert core.reel_playback is None
+    assert window.pages.currentWidget() is window.web_host and window.web_host.active_tab == 'reel'
+
+
+def test_seeking_back_before_resume_cancels_held_reel_transition(window):
+    from test_reel import mark
+    core = window.core
+    video = core.videos()[0]
+    first = mark(core, video, 10, 20)
+    mark(core, video, 40, 50)
+    window.reel.start(first.id)
+    player = hide_and_return_at_reel_boundary(window, late_end_report)
+    key(window, Qt.Key.Key_Left)
+    assert player.paused and player.position == 15
+    resume(window)
+    assert core.reel_playback.entry.highlight.id == first.id
+    assert not player.paused and player.position == 15
+
+
+def test_repeated_emergency_hide_keeps_engine_paused(window):
+    _, player = play_to_twenty_seconds(window)
+    for _ in range(2):
+        emergency_key(window)
+        assert not window.isVisible() and player.paused
+        window.tray.open()
+        QTest.qWait(200)
+        assert window.isVisible() and player.paused

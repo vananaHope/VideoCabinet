@@ -228,6 +228,10 @@ class MpvPlayer:
         """토글과 달리 이미 멈춘 재생은 그대로 둔다."""
         self._player.pause = True
 
+    @property
+    def paused(self) -> bool:
+        return bool(self._player.pause)
+
     def take_eof(self) -> bool:
         reached = False
         while True:

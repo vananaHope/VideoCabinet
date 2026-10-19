@@ -199,6 +199,9 @@ class HighlightReel:
             self._recorded = True
         if position >= current.end:
             self._due = True
+        elif seeked:
+            # 전환을 미룬 동안 끝 앞으로 탐색하면 끝 도달을 취소한다.
+            self._due = False
 
     def playback_ended(self, session, position):
         if not self._changing:
