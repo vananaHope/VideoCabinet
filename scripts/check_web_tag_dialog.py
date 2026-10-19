@@ -336,6 +336,54 @@ def offscreen():
     tag_dialog(detach)
     metrics['checks'].append('붙은 태그 떼기: 떼면 고를 목록에 다시 나타남')
 
+    # 저장이 실패하면 검색어·좁힌 후보·붙은 목록이 그대로이고, 다시 시도하면 붙는다.
+    add_tags(['재시도 태그', '느린 저장 태그'], [2, 1])
+    add_video_tag = core.add_video_tag
+    failing = []
+
+    def flaky_add(video_id, name):
+        if failing:
+            raise sqlite3.OperationalError('저장 실패 주입')
+        return add_video_tag(video_id, name)
+    core.add_video_tag = flaky_add
+
+    def save_failure():
+        failing.append(True)
+        search('재시도')
+        key(Qt.Key.Key_Down)
+        key(Qt.Key.Key_Return)
+        wait(lambda: js("document.body.innerText.includes('저장 실패 주입')"))
+        settle()
+        assert query() == '재시도' and option_names() == ['재시도 태그'] and '재시도 태그' not in attached(), (query(), option_names())
+        js(f"[...document.querySelectorAll('{PICKER} [role=option]')].find(o => o.title === '재시도 태그').click()")
+        settle(400)
+        assert query() == '재시도' and option_names() == ['재시도 태그'] and '재시도 태그' not in attached()
+        search('실패할 새 태그')
+        key(Qt.Key.Key_Return)
+        settle(400)
+        assert query() == '실패할 새 태그' and '실패할 새 태그' not in [t.name for t in core.tags()]
+        capture('dialog-tags-save-failure')
+        failing.clear()
+        search('재시도')
+        key(Qt.Key.Key_Down)
+        key(Qt.Key.Key_Return)
+        wait(lambda: '재시도 태그' in attached())
+        wait(lambda: query() == '')
+        # 저장 응답을 기다리는 동안 더 입력한 검색어는 성공 응답이 지우지 않는다.
+        search('느린')
+        js(f"""(() => {{ [...document.querySelectorAll('{PICKER} [role=option]')].find(o => o.title === '느린 저장 태그').click()
+          const e = document.querySelector('{SEARCH}')
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, '저장 중 입력')
+          e.dispatchEvent(new Event('input', {{bubbles:true}})) }})()""")
+        wait(lambda: '느린 저장 태그' in attached())
+        settle(400)
+        assert query() == '저장 중 입력', query()
+    try:
+        tag_dialog(save_failure)
+    finally:
+        core.add_video_tag = add_video_tag
+    metrics['checks'].append('저장 실패: 기존 태그 Enter·클릭과 새 태그 Enter 모두 검색어·후보·붙은 목록 유지, 재시도 성공, 저장 중 입력한 검색어는 성공 응답이 지우지 않음')
+
 
 def windows_ime():
     """실창에서 키보드만으로 고르기·새 태그 만들기, Esc 순서, 실제 한국어 IME 조합을 확정한 Enter 무시를 확인한다."""

@@ -8,10 +8,11 @@ import { tagChoices } from "@/lib/tag-search"
 import type { TagUsageData } from "@/bridge-types"
 
 // 여러 개 고름: 고른 태그를 다시 고르면 뺀다. 즉시 실행: 고를 때마다 onPick을 부른다.
-// onCreate가 있으면 이름이 같은 태그가 없는 입력을 Enter나 '새 태그로 붙이기'로 넘기고, 성공하면 검색어를 지운다.
+// onCreate가 있으면 이름이 같은 태그가 없는 입력을 Enter나 '새 태그로 붙이기'로 넘긴다.
+// 즉시 실행의 두 콜백은 저장 성공 여부를 돌려준다. 성공했고 그사이 검색어가 그대로일 때만 검색어를 지운다.
 type Choice =
   | { mode: "multiple"; selected: readonly number[]; onChange: (ids: number[]) => void; chips?: boolean }
-  | { mode: "immediate"; onPick: (tag: TagUsageData) => void; onCreate?: (name: string) => Promise<boolean> }
+  | { mode: "immediate"; onPick: (tag: TagUsageData) => Promise<boolean>; onCreate?: (name: string) => Promise<boolean> }
 
 const option = cva("flex min-w-0 cursor-default items-center gap-2 text-sm data-active:ring-2 data-active:ring-ring data-active:ring-inset", {
   variants: {
@@ -35,6 +36,8 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
   const [activeId, setActiveId] = useState<number | null>(null)
   const composing = useRef(false)
   const input = useRef<HTMLInputElement>(null)
+  // 저장 응답을 기다리는 동안 바뀐 검색어를 지우지 않으려고 최신 값을 둔다.
+  const latestQuery = useRef(query)
   const multiple = choice.mode === "multiple"
   const selected = multiple ? choice.selected : []
   // 고른 직후 다시 그리기 전에 다음 고르기가 와도 방금 바꾼 선택에 더한다. 그린 뒤에는 쓰는 쪽의 값을 따른다.
@@ -52,25 +55,31 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
   const chipId = (tag: TagUsageData) => `${id}-chip-${tag.id}`
 
   function changeQuery(value: string) {
+    latestQuery.current = value
     setQuery(value)
     setActiveId(null)
   }
+  async function submit(saved: Promise<boolean>) {
+    const submitted = latestQuery.current
+    if (await saved && latestQuery.current === submitted) {
+      if (submitted) changeQuery("")
+      input.current?.focus()
+    }
+  }
   function toggle(tag: TagUsageData) {
-    if (choice.mode === "immediate") return choice.onPick(tag)
+    if (choice.mode !== "multiple") return
     const current = latestSelected.current
     latestSelected.current = current.includes(tag.id) ? current.filter(other => other !== tag.id) : [...current, tag.id]
     choice.onChange([...latestSelected.current])
   }
-  // 목록에서 고르면 검색어를 지운다. 칩 ×는 검색어를 두고 포커스를 다음 칩(없으면 검색 입력)으로 옮긴다.
+  // 목록에서 고르면 검색어를 지운다(즉시 실행은 저장에 성공한 뒤). 칩 ×는 검색어를 두고 포커스를 다음 칩(없으면 검색 입력)으로 옮긴다.
   function pick(tag: TagUsageData) {
+    if (choice.mode === "immediate") return void submit(choice.onPick(tag))
     toggle(tag)
     if (query) changeQuery("")
   }
-  async function create() {
-    if (onCreate && creatable && await onCreate(query.trim())) {
-      changeQuery("")
-      input.current?.focus()
-    }
+  function create() {
+    if (onCreate && creatable) void submit(onCreate(query.trim()))
   }
   function unchip(index: number) {
     const next = chips[index + 1]
@@ -116,10 +125,10 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
             // 활성 후보가 없으면 이름의 key가 질의 key와 같은 태그만 고른다. 그런 태그가 아예 없으면 새로 만든다.
             const target = active >= 0 ? choices[active] : key ? choices.find(tag => tag.key === key) : undefined
             if (target) pick(target)
-            else void create()
+            else create()
           }
         }} />
-      {onCreate && <Button variant="outline" className="shrink-0" disabled={!creatable} onClick={() => void create()}>새 태그로 붙이기</Button>}
+      {onCreate && <Button variant="outline" className="shrink-0" disabled={!creatable} onClick={() => create()}>새 태그로 붙이기</Button>}
     </div>
     {available <= 0 ? <p id={statusId} className="text-xs text-muted-foreground">{emptyText}</p>
       : !choices.length ? <p id={statusId} className="text-xs wrap-anywhere text-muted-foreground">‘{query.trim()}’이(가) 들어간 태그가 없습니다.</p>
