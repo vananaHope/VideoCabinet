@@ -1,8 +1,9 @@
 /** 태그 고르기 검사 전용 번들. 제품 진입점에는 포함하지 않는다.
- * 즉시 실행·뺄 태그를 쓰는 화면(#191·#205)이 아직 없어 여기서 띄운다. 검색어는 넣지 않는다(제품 번들과 별개의 브리지 연결이 생긴다). */
+ * 즉시 실행·뺄 태그를 쓰는 화면(#191·#205)이 아직 없어 여기서 띄운다. 검색 key 함수도 코어와 비교하도록 내보낸다. */
 import { createRoot } from 'react-dom/client'
 import { TagPicker } from '../src/components/tag-picker'
 import { tagChoices } from '../src/lib/tag-search'
+import { tagNameKey } from '../src/lib/tag-name-key'
 import type { TagUsageData } from '../src/bridge-types'
 
 const element = document.createElement('div')
@@ -16,4 +17,4 @@ function show(tags: TagUsageData[] | null, exclude: number[] = []) {
   else root.render(<TagPicker tags={tags} label="붙일 태그" mode="immediate" exclude={exclude} emptyText="붙일 태그가 없습니다."
     onPick={tag => { picks.push(tag.id); show(tags, [...exclude, tag.id]) }} />)
 }
-Object.assign(window, { tagPickerProbe: show, tagPickerPicks: picks, tagChoicesProbe: tagChoices })
+Object.assign(window, { tagPickerProbe: show, tagPickerPicks: picks, tagChoicesProbe: tagChoices, tagNameKeyProbe: tagNameKey })

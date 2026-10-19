@@ -1,10 +1,9 @@
-"""셸 공통 탐색·상태·포커스·새 버전 알림 계약과 페이지 공용 규칙. 페이지 데이터에는 접근하지 않는다."""
+"""셸 공통 탐색·상태·포커스·새 버전 알림 계약. 페이지 데이터에는 접근하지 않는다."""
 
 import sqlite3
 
 from PySide6.QtCore import QObject, QTimer
 
-from .tags import tag_name_key
 from .web_shell_contract import SHELL
 from .web_json import encode
 from .web_update_data import shell_update_data
@@ -52,11 +51,6 @@ class ShellBridge(QObject):
             return encode(shell_update_data(self.host.window.updates))
         except (ValueError, RuntimeError, OSError, sqlite3.Error) as error:
             return encode({'error': str(error)})
-
-    @SHELL.slot('tagSearchKey')
-    def tagSearchKey(self, query):
-        # 태그 고르기의 질의도 태그 이름과 같은 코어 정규화로 비교한다.
-        return encode({'key': tag_name_key(query)})
 
     @SHELL.slot('navigate')
     def navigate(self, tab):

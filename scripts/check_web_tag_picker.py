@@ -2,6 +2,8 @@
 
 --offscreen은 태그 0·몇 개·300개, 긴 이름·검색어, 칩이 많을 때의 1100×720 배치와 키보드·조합 이벤트,
 combobox 속성, Unicode 이름의 자기 이름 검색, 검사 번들로 띄운 즉시 실행·뺄 태그를 본다.
+또 화면의 검색 key(tagNameKey, 생성 표)가 코어 tag_name_key와 모든 코드 포인트와 몇 가지 문맥에서 같은지,
+고른 직후·검색어를 바꾼 직후·칩을 뺀 직후의 입력이 이전 결과를 고르거나 뺀 칩을 되살리지 않는지 본다.
 --verify는 데스크톱 잠금 안의 실창에서 키보드만으로 검색 → 고르기 → 칩 빼기와 실제 한국어 IME를 확인한다.
 DB는 임시 폴더에만 만든다.
 """
@@ -14,6 +16,7 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from time import perf_counter
 
@@ -416,7 +419,9 @@ def offscreen():
     close_panel()
     capture('tags-300-applied-chips')
     immediate_and_exclude()
+    key_equivalence()
     unicode_names()
+    no_stale_picks()
 
 
 def option_names_in(scope):
@@ -491,6 +496,86 @@ def unicode_names():
     metrics['unicode'] = results
     close_panel()
     metrics['checks'].append('Unicode 이름(전각·합자·독일어 에스체트·그리스어 시그마·터키어 i·체로키·공백·서식 문자): 코어 key로 자기 이름 검색·Enter')
+
+
+# 문맥: 단독, 앞 글자, 뒤 결합 문자(정규화 재배열·조합), 그리스어 단어 끝, 한글 음절 뒤, 공백 사이
+KEY_CONTEXTS = [('', ''), ('A', ''), ('', '\u0301'), ('ΑΣ', ''), ('Σ', ' '), ('가', ''), (' ', ' x')]
+
+
+def key_equivalence():
+    """검사 번들의 tagNameKey와 코어 tag_name_key를 전체 코드 포인트(서로게이트 포함)와 문맥에서 비교한다."""
+    started = perf_counter()
+    samples = [text for pair in UNICODE_QUERIES for text in pair] + [name for name in UNICODE_NAMES]
+    mismatches, count = [], 0
+
+    def compare(texts):
+        nonlocal count
+        got = json.loads(js(f"JSON.stringify({json.dumps(texts)}.map(window.tagNameKeyProbe))"))
+        count += len(texts)
+        mismatches.extend({'input': text, 'core': tag_name_key(text), 'web': web}
+                          for text, web in zip(texts, got) if web != tag_name_key(text))
+    compare(samples)
+    for prefix, suffix in KEY_CONTEXTS:
+        for start in range(0, 0x110000, 0x8000):
+            # 코드 포인트는 번들 안에서 만들고 key만 돌려받는다. JSON.stringify는 홀로 선 서로게이트도 이스케이프한다.
+            got = json.loads(js(f"""JSON.stringify(Array.from({{length: {min(0x8000, 0x110000 - start)}}},
+              (_, i) => window.tagNameKeyProbe({json.dumps(prefix)} + String.fromCodePoint({start} + i) + {json.dumps(suffix)})))"""))
+            for offset, web in enumerate(got):
+                text = prefix + chr(start + offset) + suffix
+                if web != tag_name_key(text):
+                    mismatches.append({'input': text, 'core': tag_name_key(text), 'web': web})
+            count += len(got)
+    metrics['key_equivalence'] = {'strings': count, 'contexts': KEY_CONTEXTS, 'mismatches': mismatches[:50],
+                                  'mismatch_count': len(mismatches), 'seconds': round(perf_counter() - started, 1)}
+    assert not mismatches, mismatches[:10]
+    metrics['checks'].append(f'검색 key 동등성: 코어 tag_name_key와 화면 tagNameKey가 {count}개 문자열(전체 코드 포인트 × 문맥 {len(KEY_CONTEXTS)}가지와 검토 입력)에서 같음')
+
+
+def no_stale_picks():
+    """고른 직후·검색어를 바꾼 직후·칩을 뺀 직후의 입력이 지금 화면의 결과에만 적용되는지 본다."""
+    tags = {t['name']: t['id'] for t in page.tags}
+    open_panel()
+
+    def now(code):
+        js(f"(() => {{ const e = document.querySelector('{SEARCH}'); {code} }})()")
+
+    def typed(text):
+        return f"""e.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, {json.dumps(text)});
+          e.dispatchEvent(new Event('input', {{bubbles:true}}));"""
+    enter = "e.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));"
+
+    def expect(changed, label):
+        settle()
+        assert set(page.options['tags']) == changed, (label, page.options['tags'], sorted(changed))
+        return changed
+
+    chosen = set(page.options['tags'])
+    search('')
+    # 첫 글자 직후 기다리지 않고 ↓·Enter: 그 글자의 검색 결과 첫 후보를 고른다.
+    now(typed('ı'))
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Down)
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
+    chosen = expect(chosen ^ {tags['ışık']}, '첫 글자 직후 ↓ Enter')
+    # 첫 글자 입력과 같은 작업에서 첫 후보 클릭.
+    now(typed('İ') + f" document.querySelector('{PANEL} [role=option]').click();")
+    chosen = expect(chosen ^ {tags['İ']}, '첫 글자 직후 클릭')
+    # 다른 검색어로 바꾼 같은 작업의 Enter는 새 검색어와 같은 이름만 고른다.
+    search('Straße')
+    now(typed('ΟΣ') + enter)
+    chosen = expect(chosen ^ {tags['ΟΣ']}, '검색어를 바꾼 직후 Enter')
+    # 칩을 뺀 같은 작업의 Enter가 뺀 칩을 되살리지 않는다.
+    search('IŞIK')
+    removed = next(name for name in ('Straße', 'A-Ｂ!', '한글') if tags[name] in chosen)
+    now(f"document.querySelector('{PANEL} [aria-label={json.dumps(removed + ' 빼기')}]').click(); " + enter)
+    chosen = expect(chosen ^ {tags[removed], tags['IŞIK']}, '칩을 뺀 직후 Enter')
+    # 칩을 뺀 같은 작업에서 패널을 닫아도 그 뒤에 선택이 바뀌지 않는다.
+    removed = next(name for name in ('A-Ｂ!', '한글', 'Straße') if tags[name] in chosen)
+    now(f"document.querySelector('{PANEL} [aria-label={json.dumps(removed + ' 빼기')}]').click(); "
+        f"document.querySelector('{PANEL} [aria-label=\"필터 닫기\"]').click();")
+    wait(lambda: not js(f"!!document.querySelector('{PANEL}')"))
+    settle(400)
+    expect(chosen ^ {tags[removed]}, '칩을 뺀 직후 패널 닫기')
+    metrics['checks'].append('직후 입력: 첫 글자 ↓·Enter·클릭, 검색어 바꾼 직후 Enter, 칩 뺀 직후 Enter·패널 닫기에서 이전 결과·뺀 칩이 되살아나지 않음')
 
 
 def windows_ime():
@@ -604,6 +689,7 @@ except Exception as error:
 finally:
     (args.output / ('metrics-verify.json' if args.verify else 'metrics.json')).write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
+    sys.stdout.reconfigure(errors='backslashreplace')
     print(json.dumps({k: v for k, v in metrics.items() if k not in ('panels', 'unicode')}, ensure_ascii=False, indent=2))
     # 시작 검사가 돌고 있으면 완전 종료가 경고 창으로 막힌다.
     wait(lambda: not (window.worker and window.worker.isRunning()), 60)

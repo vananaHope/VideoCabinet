@@ -295,20 +295,6 @@ def test_actual_qt_public_slots_and_signals_match_generator_contract(window_fact
         assert [bytes(t).decode() for t in methods[name].parameterTypes()] == [names[kind]]
 
 
-# 웹 정규화가 코어와 달랐던 이름과 일반 공백·호환 문자. (태그 이름, 사용자가 칠 질의)
-@pytest.mark.parametrize('name, query', [
-    ('ＳＦＡｃｔｉｏｎ', 'SFAction'), ('ﬃ', 'ffi'), ('Straße', 'STRAẞE'), ('Straße', 'STRASSE'),
-    ('ΟΣ', 'ΟΣ'), ('ΟΣ', 'ος'), ('ΟΣ', 'οσ'), ('ışık', 'ışık'), ('IŞIK', 'IŞIK'), ('İ', 'İ'), ('Ꭰ', 'Ꭰ'), ('Ꭰ', 'ꭰ'),
-    ('A　B', '  a	 b '), ('A-Ｂ!', 'a-b!'), ('한​글', '한글'),
-])
-def test_tag_search_key_finds_own_tag_with_core_normalization(core, name, query):
-    from my_video_manager.web_shell_bridge import ShellBridge
-    tag = core.create_tag(name)
-    key = json.loads(ShellBridge(None).tagSearchKey(query))['key']
-    assert [usage.tag for usage in core.tag_usage() if key in usage.key] == [tag]
-    assert next(usage.key for usage in core.tag_usage() if usage.tag == tag) == key
-
-
 def test_navigation_rejects_unknown_names_without_transition(window_factory):
     window = window_factory()
     assert 'error' in json.loads(window.web_host.bridge.navigate('deleteLater'))

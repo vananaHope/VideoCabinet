@@ -1,9 +1,9 @@
-import { useId, useRef, useState } from "react"
+import { useId, useLayoutEffect, useRef, useState } from "react"
 import { cva } from "class-variance-authority"
 import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { getTagSearchKey } from "@/bridge"
+import { tagNameKey } from "@/lib/tag-name-key"
 import { tagChoices } from "@/lib/tag-search"
 import type { TagUsageData } from "@/bridge-types"
 
@@ -11,8 +11,6 @@ import type { TagUsageData } from "@/bridge-types"
 type Choice =
   | { mode: "multiple"; selected: readonly number[]; onChange: (ids: number[]) => void; chips?: boolean }
   | { mode: "immediate"; onPick: (tag: TagUsageData) => void }
-type Searched = { query: string; key: string }
-const NOT_SEARCHED: Searched = { query: "", key: "" }
 
 const option = cva("flex min-w-0 cursor-default items-center gap-2 text-sm data-active:ring-2 data-active:ring-ring data-active:ring-inset", {
   variants: {
@@ -31,16 +29,16 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
 }) {
   const id = useId()
   const [query, setQuery] = useState("")
-  // 질의 key는 코어가 만든다. 지금 질의보다 늦게 온 옛 응답은 버린다.
-  const [searched, setSearched] = useState(NOT_SEARCHED)
-  const latest = useRef("")
   const [showAll, setShowAll] = useState(false)
   const [activeId, setActiveId] = useState<number | null>(null)
   const composing = useRef(false)
   const input = useRef<HTMLInputElement>(null)
   const multiple = choice.mode === "multiple"
   const selected = multiple ? choice.selected : []
-  const key = query ? searched.key : ""
+  // 고른 직후 다시 그리기 전에 다음 고르기가 와도 방금 바꾼 선택에 더한다. 그린 뒤에는 쓰는 쪽의 값을 따른다.
+  const latestSelected = useRef(selected)
+  useLayoutEffect(() => { latestSelected.current = selected })
+  const key = tagNameKey(query)
   const choices = tagChoices(tags, key, showAll, exclude)
   const active = choices.findIndex(tag => tag.id === activeId)
   const available = exclude.length ? tags.filter(tag => !exclude.includes(tag.id)).length : tags.length
@@ -50,15 +48,14 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
   const chipId = (tag: TagUsageData) => `${id}-chip-${tag.id}`
 
   function changeQuery(value: string) {
-    latest.current = value
     setQuery(value)
     setActiveId(null)
-    if (!value) setSearched(NOT_SEARCHED)
-    else getTagSearchKey(value).then(key => { if (latest.current === value) setSearched({ query: value, key }) }).catch(console.error)
   }
   function toggle(tag: TagUsageData) {
-    if (choice.mode === "multiple") choice.onChange(choice.selected.includes(tag.id) ? choice.selected.filter(other => other !== tag.id) : [...choice.selected, tag.id])
-    else choice.onPick(tag)
+    if (choice.mode === "immediate") return choice.onPick(tag)
+    const current = latestSelected.current
+    latestSelected.current = current.includes(tag.id) ? current.filter(other => other !== tag.id) : [...current, tag.id]
+    choice.onChange([...latestSelected.current])
   }
   // 목록에서 고르면 검색어를 지운다. 칩 ×는 검색어를 두고 포커스를 다음 칩(없으면 검색 입력)으로 옮긴다.
   function pick(tag: TagUsageData) {
@@ -70,17 +67,6 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
     toggle(chips[index])
     const target = next ? document.getElementById(chipId(next)) : input.current
     target?.focus()
-  }
-  // 활성 후보가 없는 Enter는 이름의 key가 질의 key와 같은 태그만 고른다.
-  function pickExact(text: string) {
-    const exact = (key: string) => tags.find(tag => tag.key === key && !exclude.includes(tag.id))
-    if (searched.query === text) {
-      const target = exact(searched.key)
-      if (target) pick(target)
-    } else getTagSearchKey(text).then(key => {
-      const target = exact(key)
-      if (target && latest.current === text) pick(target)
-    }).catch(console.error)
   }
   function move(step: number) {
     if (!choices.length) return
@@ -115,8 +101,9 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
         if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); move(event.key === "ArrowDown" ? 1 : -1) }
         else if (event.key === "Enter") {
           event.preventDefault()
-          if (active >= 0) pick(choices[active])
-          else pickExact(query)
+          // 활성 후보가 없으면 이름의 key가 질의 key와 같은 태그만 고른다.
+          const target = active >= 0 ? choices[active] : key ? choices.find(tag => tag.key === key) : undefined
+          if (target) pick(target)
         }
       }} />
     {available <= 0 ? <p id={statusId} className="text-xs text-muted-foreground">{emptyText}</p>

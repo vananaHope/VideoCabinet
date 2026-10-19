@@ -51,7 +51,6 @@ export interface ShellBridge {
   updateSnapshot: (reply: Reply) => void
   updateChoice: (name: UpdateChoice, version: string, reply: Reply) => void
   updateAction: (name: UpdateAction, reply: Reply) => void
-  tagSearchKey: (query: string, reply: Reply) => void
   shellChanged: Signal<string>
   shellStatusChanged: Signal<string>
   shellFocusRequested: Signal<string>
@@ -66,7 +65,6 @@ export function publicShellBridge(raw: ShellBridge): ShellBridge {
     updateSnapshot: raw.updateSnapshot.bind(raw),
     updateChoice: raw.updateChoice.bind(raw),
     updateAction: raw.updateAction.bind(raw),
-    tagSearchKey: raw.tagSearchKey.bind(raw),
     shellChanged: Object.freeze({ connect: raw.shellChanged.connect.bind(raw.shellChanged), disconnect: raw.shellChanged.disconnect.bind(raw.shellChanged) }),
     shellStatusChanged: Object.freeze({ connect: raw.shellStatusChanged.connect.bind(raw.shellStatusChanged), disconnect: raw.shellStatusChanged.disconnect.bind(raw.shellStatusChanged) }),
     shellFocusRequested: Object.freeze({ connect: raw.shellFocusRequested.connect.bind(raw.shellFocusRequested), disconnect: raw.shellFocusRequested.disconnect.bind(raw.shellFocusRequested) }),

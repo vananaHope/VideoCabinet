@@ -19,14 +19,41 @@ class TagUsage:
     video_count: int
 
 
+REMOVED_CATEGORIES = frozenset({"Cc", "Cf"})
+
+
 def normalize_tag_name(name: str) -> str:
     """표시 이름은 NFC로 보존하고 제어·서식 문자를 제거한 뒤 공백을 정리한다."""
-    name = "".join(char for char in name if unicodedata.category(char) not in {"Cc", "Cf"})
+    name = "".join(char for char in name if unicodedata.category(char) not in REMOVED_CATEGORIES)
     return " ".join(unicodedata.normalize("NFC", name).split())
 
 
 def tag_name_key(name: str) -> str:
     return unicodedata.normalize("NFKC", normalize_tag_name(name)).casefold()
+
+
+def tag_name_key_tables() -> dict:
+    """웹 태그 검색이 tag_name_key와 같은 key를 동기로 만들 표. 이 Python의 Unicode 데이터에서 만든다.
+
+    assigned: 이 Unicode 버전이 아는 코드 포인트 범위. 웹은 이 범위만 NFC·NFKC 정규화하고 나머지는 그대로 둔다.
+    removed: 지우는 범위(REMOVED_CATEGORIES). spaces: str.split()의 공백. casefold: casefold()가 바꾸는 글자.
+    """
+    def ranges(predicate):
+        found, start = [], None
+        for code in range(0x110000 + 1):
+            if code <= 0x10FFFF and predicate(chr(code)):
+                start = code if start is None else start
+            elif start is not None:
+                found.extend((start, code - 1))
+                start = None
+        return found
+    return dict(
+        unicodeVersion=unicodedata.unidata_version,
+        assigned=ranges(lambda char: unicodedata.category(char) != "Cn"),
+        removed=ranges(lambda char: unicodedata.category(char) in REMOVED_CATEGORIES),
+        spaces=[code for code in range(0x110000) if chr(code).isspace()],
+        casefold=[(code, chr(code).casefold()) for code in range(0x110000) if chr(code).casefold() != chr(code)],
+    )
 
 
 class Tags:
