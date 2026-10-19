@@ -2,7 +2,7 @@
 
 python scripts/check_web_library.py --prepare --count 24 --source <읽기 전용 폴더>
 python scripts/check_web_library.py --count 24 --verify --stay
-python scripts/check_web_library.py --verify-gems
+python scripts/check_web_library.py --verify-contrast --offscreen
 python scripts/check_web_library.py --prepare --count 5000
 """
 import time
@@ -15,7 +15,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tempfile
 from statistics import median
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,20 +30,16 @@ parser.add_argument('--verify-library', action='store_true', help='카드 통계
 parser.add_argument('--profile-refresh', action='store_true', help='갱신의 Python·JSON 파싱·후속 웹 프레임 비용 측정')
 parser.add_argument('--long-content', action='store_true')
 parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-46')
-parser.add_argument('--verify-gems', action='store_true', help='보석 0·1·4·5·10개의 배치와 가로 키 이동 검증')
+parser.add_argument('--verify-contrast', action='store_true', help='제외 버튼·메뉴 글자 대비 검증')
 parser.add_argument('--stay', action='store_true')
 args = parser.parse_args()
-if args.verify_gems:
-    if args.prepare or args.verify:
-        parser.error('--verify-gems는 단독으로 사용하세요')
-    args.count = 10
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 if args.offscreen:
     # 표시 표면 없는 Windows offscreen 캡처는 GPU 컨텍스트 대신 소프트웨어로 그린다.
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '') + ' --disable-gpu'
 
 from PySide6.QtCore import Qt, QEventLoop, QTimer, QPoint, QPointF, QObject, QEvent
-from PySide6.QtGui import QColor, QImage, QPainter, QWheelEvent
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from my_video_manager.web_thumbnail import register_thumbnail_scheme
@@ -55,8 +50,6 @@ from my_video_manager.ui import MainWindow
 app = QApplication([])
 directory = ROOT / '.local' / 'issue46' / f'demo-{args.count}'
 directory.mkdir(parents=True, exist_ok=True)
-if args.verify_gems:
-    directory = Path(tempfile.mkdtemp(prefix='gems-', dir=directory.parent))
 media_dir = directory / 'videos'
 media_dir.mkdir(exist_ok=True)
 
@@ -81,14 +74,6 @@ class DemoMedia:
 
 
 core = AppCore(media=DemoMedia(), clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc), database=directory / 'library.sqlite3')
-if args.verify_gems:
-    # 기존 데모 DB나 실제 영상을 바꾸지 않고 공개 API로 추천 경계 데이터를 만든다.
-    titles = ('바다', '숲', '음악', '도시', '과학', '역사', '여행', '요리', '그림', '언어')
-    for index, title in enumerate(titles):
-        # 같은 접두사 + 회차 번호는 시리즈로 묶여 첫 미완료 영상만 추천된다.
-        path = media_dir / f'{title}.mkv'
-        path.write_bytes(f'gem scenario {index}'.encode())
-        core.add_file(path)
 if args.prepare:
     if args.source:
         for path in args.source.rglob('*'):
@@ -268,35 +253,26 @@ if args.verify_shell:
     window.navigate_web_tab('library')
     settle()
     assert window.pages.count() == 2
-    metrics['checks'].append('일곱 탭 클릭·Ctrl+1~7·Alt+S')
+    metrics['checks'].append('여덟 탭 클릭·Ctrl+1~8·Alt+S')
 
 
-def gem_layout():
+def library_layout():
     return js_json("""(() => {
       const panel = document.querySelector('aside').getBoundingClientRect();
       const buttons = [...document.querySelectorAll('[aria-label="영상 작업"] button')];
-      const row = document.getElementById('hidden-gems');
-      const bounds = row?.getBoundingClientRect();
-      const cards = [...document.querySelectorAll('#hidden-gems [role=option]')];
-      const visible = el => { const r = el.getBoundingClientRect();
-        return r.left >= bounds.left && r.right <= bounds.right && r.top >= bounds.top && r.bottom <= bounds.bottom;
-      };
       return {headerHeight: document.querySelector('header').getBoundingClientRect().height,
       buttons: buttons.length, visibleButtons: buttons.filter(el => {
         const r = el.getBoundingClientRect(); return r.top >= panel.top && r.bottom <= panel.bottom;
-      }).length, gems: cards.length, visibleGems: cards.filter(visible).length,
-      rowHeight: bounds?.height ?? 0, gridHeight: document.getElementById('library-grid').clientHeight,
+      }).length, recommendationArea: !!document.querySelector('[data-page="library"] [aria-label="숨겨진 보석"], [data-page="library"] [role=listbox][aria-label*="추천"]'),
+      gridTop: document.getElementById('library-grid').getBoundingClientRect().top,
+      gridHeight: document.getElementById('library-grid').clientHeight,
       visibleGridRows: (document.getElementById('library-grid').clientHeight - 8) /
-        document.querySelector('#library-grid [role=row]').getBoundingClientRect().height,
-      scrollbarColor: row ? getComputedStyle(row).scrollbarColor : null,
-      cardWidth: cards[0]?.getBoundingClientRect().width ?? 0,
-      rows: new Set(cards.map(el => el.getBoundingClientRect().top)).size,
-      horizontalOverflow: row ? row.scrollWidth > row.clientWidth : false};
+        document.querySelector('#library-grid [role=row]').getBoundingClientRect().height};
     })()""")
 
 
 if core.videos():
-    metrics['layout'] = gem_layout()
+    metrics['layout'] = library_layout()
 
 
 def verify_detail_access():
@@ -337,61 +313,7 @@ def contrast(selector):
     })()""".replace('SELECTOR', json.dumps(selector)))
 
 
-if args.verify_gems:
-    layouts = []
-    previous_count = 0
-    videos = core.videos()
-    for count in (0, 1, 4, 5, 10):
-        for video in videos[previous_count:count]:
-            core.playback.start(video.id, 0)
-            core.playback.report(35)
-            core.playback.end()
-        previous_count = count
-        assert len(core.hidden_gems()) == count
-        page.refresh()
-        wait_until(lambda: js("document.querySelectorAll('#hidden-gems [role=option]').length") == count)
-        run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
-        layout = gem_layout()
-        layouts.append(layout)
-        capture_window(f'web-gems-{count}.png')
-        print(json.dumps(layout, ensure_ascii=False), flush=True)
-        (screens / 'web-gems-check.json').write_text(json.dumps(layouts, ensure_ascii=False, indent=2), encoding='utf-8')
-        assert layout['buttons'] == 8, layout
-        layout['keyboardAccessibleActions'] = verify_detail_access()
-        assert layout['rows'] == (1 if count else 0), layout
-        assert layout['visibleGems'] == min(count, 4), layout
-        if count:
-            assert layout['rowHeight'] == layouts[1]['rowHeight'], layouts
-            assert layout['gridHeight'] == layouts[1]['gridHeight'], layouts
-            assert layout['cardWidth'] == layouts[1]['cardWidth'], layouts
-        if count > 4:
-            js("document.getElementById('hidden-gems').focus()")
-            for index in range(1, count):
-                QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Right)
-                wait_until(lambda: js("document.getElementById('hidden-gems').getAttribute('aria-activedescendant')") == f'gem-{page.gem_ids[index]}')
-            run_web_frames('requestAnimationFrame(() => requestAnimationFrame(done));')
-            end_position = js_json("""(() => {const row = document.getElementById('hidden-gems');
-              const card = document.getElementById(row.getAttribute('aria-activedescendant')).getBoundingClientRect();
-              const r = row.getBoundingClientRect(); return {scrollLeft: row.scrollLeft, maxScroll:row.scrollWidth-row.clientWidth, width:row.clientWidth, left:card.left, right:card.right, rowLeft:r.left, rowRight:r.right};})()""")
-            assert end_position['scrollLeft'] > 0 and end_position['left'] >= end_position['rowLeft'] and end_position['right'] <= end_position['rowRight'], end_position
-            for index in range(count - 2, -1, -1):
-                QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Left)
-                wait_until(lambda: js("document.getElementById('hidden-gems').getAttribute('aria-activedescendant')") == f'gem-{page.gem_ids[index]}')
-            assert js("""(() => {const row = document.getElementById('hidden-gems');
-              const card = document.getElementById(row.getAttribute('aria-activedescendant')).getBoundingClientRect();
-              const r = row.getBoundingClientRect(); return card.left >= r.left && card.right <= r.right;})()"""), '왼쪽 첫 추천 카드가 보여야 한다'
-            layout['keyboardScrolledToEndAndBack'] = True
-            js("document.getElementById('hidden-gems').scrollLeft = 0")
-            point = js_json("(() => {const r = document.getElementById('hidden-gems').getBoundingClientRect(); return [r.x+r.width/2, r.y+r.height/2]})()")
-            local = QPoint(*map(int, point))
-            wheel = QWheelEvent(QPointF(local), QPointF(host.view.mapToGlobal(local)), QPoint(), QPoint(0, -120),
-                                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
-                                Qt.ScrollPhase.NoScrollPhase, False)
-            QApplication.sendEvent(host.view.focusProxy(), wheel)
-            wait_until(lambda: js("document.getElementById('hidden-gems').scrollLeft") > 0)
-            layout['verticalWheelScrolledHorizontally'] = True
-            js("document.getElementById('hidden-gems').scrollLeft = 0")
-    (screens / 'web-gems-check.json').write_text(json.dumps(layouts, ensure_ascii=False, indent=2), encoding='utf-8')
+if args.verify_contrast:
     button_selector = 'aside button[data-variant="destructive-outline"]'
     contrasts = {'button': contrast(button_selector)}
     point = js_json(f"(() => {{const r = document.querySelector({json.dumps(button_selector)}).getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2];}})()")
@@ -421,13 +343,12 @@ if args.verify:
     assert js("document.querySelector('img')?.naturalWidth") > 0, '썸네일 스킴'
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
     metrics['checks'].append('시작 직후 격자 포커스 (명시적 focus_content 호출 없음)')
-    layout = gem_layout()
+    layout = library_layout()
     assert layout['buttons'] == layout['visibleButtons'] == 8, layout
     layout['keyboardAccessibleActions'] = verify_detail_access()
-    assert layout['gems'] == len(page.gem_ids) and layout['rows'] <= 1, layout
-    assert layout['visibleGems'] == min(4, len(page.gem_ids)), layout
+    assert not layout['recommendationArea'], layout
     metrics['layout'] = layout
-    metrics['checks'].append('1100×720 작업 버튼 8개 동시 노출·Tab 접근, 보석 한 줄과 첫 4개 노출')
+    metrics['checks'].append('1100×720 작업 버튼 8개 동시 노출·Tab 접근, 추천 영역 없음')
     js("document.getElementById('library-grid').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, isComposing:true}))")
     settle(100)
     assert core.playback.session is None
@@ -543,10 +464,8 @@ if args.verify:
     wait_until(lambda: not js(panel_open) and js('document.activeElement.textContent') == '필터')
     metrics['checks'].append('필터 패널 Select Esc는 목록만 닫음·방향키·글자 입력 이동·Enter 변경·Home 복원·닫힌 트리거 Esc로 패널 닫음')
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
-    wait_until(lambda: js('document.activeElement.id') == 'hidden-gems')
-    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab)
     wait_until(lambda: js('document.activeElement.id') == 'library-grid')
-    metrics['checks'].append('Tab 검색 → 필터 → 숨겨진 보석 → 격자')
+    metrics['checks'].append('Tab 검색 → 필터 → 격자')
     from my_video_manager.web_contract import TABS
     for index, (tab, _) in enumerate(TABS):
         window.raise_()
@@ -570,7 +489,7 @@ if args.verify:
     window.navigate_web_tab('library')
     settle()
     page.focus_content()
-    metrics['checks'].append('웹 포커스 Ctrl+1~7, Alt+S 설정 탭')
+    metrics['checks'].append('웹 포커스 Ctrl+1~8, Alt+S 설정 탭')
     # 실제 mpv로 열 수 있는 복사본만 골라 Enter 재생·Esc 복귀를 확인한다.
     playable = next((v for v in reversed(core.videos()) if any(loc.path.stat().st_size > 1000 for loc in v.locations)), None)
     if playable:
@@ -638,21 +557,10 @@ if args.verify:
         closer.stop()
         assert expected in observed, (expected, observed)
     metrics['checks'].append('태그·자막·검수·시리즈·제목 변경 웹 대화상자 연결')
-    if page.gem_ids:
-        dismissed = page.gem_ids[0]
-        previous_selection = page.selected_id
-        page.bridge.action('dismiss', dismissed)
-        wait_until(lambda: dismissed not in page.gem_ids)
-        assert dismissed in {v.id for v in core.videos()}
-        assert page.selected_id == previous_selection
-        core.restore_dismissed_video(dismissed)
-        page.refresh()
-        metrics['checks'].append('관심 없음·되돌리기, 라이브러리 선택 보존')
 
 if args.verify_library:
-    layout = gem_layout()
+    layout = library_layout()
     assert layout['buttons'] == layout['visibleButtons'] == 8, layout
-    assert layout['visibleGems'] == min(4, len(page.gem_ids)), layout
     metrics['layout'] = layout
     stats = core.video_viewing_statistics()[page.selected_id]
     card = js(f"document.getElementById('video-{page.selected_id}').textContent")
@@ -662,7 +570,7 @@ if args.verify_library:
     if args.long_content:
         assert '+3' in card or '+2' in card, card
         assert js("""[...document.querySelectorAll('[role=gridcell] [aria-label="태그"] span')].some(el => getComputedStyle(el).textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth)"""), '긴 태그 말줄임'
-    metrics['checks'].append('통계 카드·긴 태그 말줄임과 +N·작업 8개·보석 4개')
+    metrics['checks'].append('통계 카드·긴 태그 말줄임과 +N·작업 8개')
     first = page.selected_id
     for highlight in core.highlights(first):
         core.delete_highlight(highlight.id)

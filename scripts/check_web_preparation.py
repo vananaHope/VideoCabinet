@@ -226,7 +226,7 @@ try:
                            Qt.KeyboardModifier.ControlModifier)
             wait(lambda: host.active_tab == tab)
             QTest.qWait(100)
-        metrics['checks'].append('실창 Ctrl+1~7 탭 이동')
+        metrics['checks'].append('실창 Ctrl+1~8 탭 이동')
         window.navigate_web_tab('queue')
         core.add_file(args.source)
         playable = next(video for video in core.videos()

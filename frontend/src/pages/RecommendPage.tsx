@@ -41,8 +41,9 @@ function reveal(videoId: number) {
   strip.scrollLeft += left < 0 ? left : right > 0 ? right : 0
   const outer = list.getBoundingClientRect()
   const row = section.getBoundingClientRect()
-  const top = row.top - outer.top
-  const bottom = row.bottom - outer.bottom
+  const inset = parseFloat(getComputedStyle(list).paddingBlockStart)
+  const top = row.top - outer.top - inset
+  const bottom = row.bottom - outer.bottom + inset
   list.scrollTop += top < 0 ? top : bottom > 0 ? Math.min(bottom, top) : 0
 }
 

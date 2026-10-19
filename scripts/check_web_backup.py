@@ -283,7 +283,7 @@ try:
         wait(lambda: host.dialogs.blocks_shell_actions)
         assert js('document.activeElement.textContent') == '취소'
         capture('backup-confirm')
-        reserved = [(Qt.Key(Qt.Key.Key_1 + index), Qt.KeyboardModifier.ControlModifier) for index in range(7)]
+        reserved = [(Qt.Key(Qt.Key.Key_1 + index), Qt.KeyboardModifier.ControlModifier) for index in range(8)]
         reserved += [(Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier), (Qt.Key.Key_F1, Qt.KeyboardModifier.NoModifier)]
         for code, modifier in reserved:
             key(code, modifier)

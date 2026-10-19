@@ -266,15 +266,15 @@ try:
     key(Qt.Key.Key_Escape)
     wait(lambda: not js('!!document.querySelector("[role=dialog]")'))
     begin()
-    js('document.dispatchEvent(new KeyboardEvent("keydown", {key:"7", ctrlKey:true, bubbles:true, cancelable:true}))')
+    js('document.dispatchEvent(new KeyboardEvent("keydown", {key:"8", ctrlKey:true, bubbles:true, cancelable:true}))')
     wait(lambda: not js('!!document.querySelector("[role=dialog]")'))
     assert host.active_tab == 'settings'
-    assert 'Ctrl+7' in content('[aria-label="키 배치 편집"] [role="alert"]')
+    assert 'Ctrl+8' in content('[aria-label="키 배치 편집"] [role="alert"]')
     begin()
     js('document.dispatchEvent(new KeyboardEvent("keydown", {key:"s", altKey:true, bubbles:true, cancelable:true}))')
     wait(lambda: not js('!!document.querySelector("[role=dialog]")'))
     assert 'Alt+S' in content('[aria-label="키 배치 편집"] [role="alert"]')
-    for code, modifiers in (*((Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier) for index in range(7)),
+    for code, modifiers in (*((Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier) for index in range(8)),
                              (Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier),
                              (Qt.Key.Key_F1, Qt.KeyboardModifier.NoModifier)):
         begin()
@@ -282,7 +282,7 @@ try:
         assert host.active_tab == 'settings' and not window.settings_menu.isVisible()
         assert '예약 키' in content('[aria-label="키 배치 편집"]')
         wait(lambda: not js('!!document.querySelector("[role=dialog]")'))
-    checks.append('실제 포커스 키 캡처: Ctrl+1~7, Alt+S, F1, Esc 및 조합 중 무시')
+    checks.append('실제 포커스 키 캡처: Ctrl+1~8, Alt+S, F1, Esc 및 조합 중 무시')
     begin()
     key(Qt.Key.Key_MediaPlay)
     assert '지원하는 키를 누르세요' in content('[role="dialog"]')
@@ -385,7 +385,7 @@ try:
     window.library_page.library_controls.show_excluded()
     settle()
     assert '제외 목록' in content('[aria-label="폴더 관리 구역"] [aria-current="page"]')
-    window.library_page.hidden_gems.show_dismissed()
+    window.web_host.controllers['recommend'].show_dismissed()
     settle()
     assert '관심 없음' in content('[aria-label="폴더 관리 구역"] [aria-current="page"]')
     checks.append('라이브러리 되돌리기 진입점: 폴더 관리의 제외·관심 없음 구역 선택')

@@ -358,7 +358,7 @@ try:
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
         settle()
         assert not any(tag.name == '01' for tag in core.video_tags(video.id))
-        for key in (Qt.Key.Key_2, Qt.Key.Key_7): QTest.keyClick(host.view.focusProxy(), key, Qt.KeyboardModifier.ControlModifier)
+        for key in (Qt.Key.Key_2, Qt.Key.Key_8): QTest.keyClick(host.view.focusProxy(), key, Qt.KeyboardModifier.ControlModifier)
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
         assert host.active_tab == 'library' and not window.settings_menu.isVisible()
         js("document.querySelector('[role=dialog] [role=listbox]').focus()")
