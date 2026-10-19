@@ -28,7 +28,8 @@ export default function SettingsPage() {
       const changed = (json: string) => setData(JSON.parse(json))
       const focus = (target: string) => {
         if (target === 'settings-keys') setCategory('keys')
-        requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('#settings-category [aria-current="true"]')?.focus())
+        // 탭 전환 렌더가 끝나 설정 페이지가 보인 뒤에 초점을 둔다. 한 프레임만 기다리면 숨은 단추에 초점을 주지 못할 때가 있다.
+        requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('#settings-category [aria-current="true"]')?.focus()))
       }
       api.settingsChanged.connect(changed)
       api.settingsError.connect(setError)
