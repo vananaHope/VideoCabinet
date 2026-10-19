@@ -188,7 +188,7 @@ def test_dialog_blocks_reserved_navigation_keys(window_factory, core):
     dialogs = window.web_host.dialogs
     def check():
         window.activateWindow()
-        for key in (Qt.Key.Key_2, Qt.Key.Key_7):
+        for key in (Qt.Key.Key_2, Qt.Key.Key_8):
             QTest.keyClick(window.web_host.view, key, Qt.KeyboardModifier.ControlModifier)
         QTest.keyClick(window.web_host.view, Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
         assert window.web_host.active_tab == 'library'

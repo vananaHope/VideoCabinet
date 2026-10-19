@@ -165,11 +165,16 @@ class WebShellHost(QWidget):
     def remember_playback_tab(self):
         self._playback_return_tab = self.active_tab
 
-    def return_from_playback(self, *, focus_gems=False):
+    def return_from_playback(self):
         self.window.end_playback()
         self.set_tab(self._playback_return_tab)
         self.window.pages.setCurrentWidget(self)
-        self.controllers[self.active_tab].return_from_playback(focus_gems=focus_gems)
+        self.controllers[self.active_tab].return_from_playback()
+
+    def close_return_tab(self):
+        """재생 중 창을 닫아 트레이로 숨길 때 둘 탭. 출발한 페이지가 원하면 그 탭, 아니면 라이브러리."""
+        tab = self._playback_return_tab
+        return tab if self.controllers[tab].keeps_tab_after_close else 'library'
 
     def navigate(self, tab):
         route = self.routes[tab]

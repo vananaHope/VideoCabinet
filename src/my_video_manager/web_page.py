@@ -6,6 +6,8 @@ from PySide6.QtWidgets import QWidget
 class WebPageController(QWidget):
     # QWidget은 부모 소유권과 이벤트 수명주기를 위한 것이다. 화면은 호스트 하나에만 있다.
     default_focus = 'shell'
+    # 재생 중 창을 닫았다가 트레이로 열 때 라이브러리 대신 이 탭으로 돌아온다.
+    keeps_tab_after_close = False
     bridge = None
     focus_requested = None
 
@@ -24,7 +26,7 @@ class WebPageController(QWidget):
     def deactivated(self):
         pass
 
-    def return_from_playback(self, *, focus_gems=False):
+    def return_from_playback(self):
         self.refresh()
         self.focus_content()
 

@@ -47,7 +47,7 @@ export default function SettingsPage() {
   const translationProvider = data.translation.providers.find(p => p.id === data.translation.provider)!
   const translationSelection = data.translation.selections.find(s => s.provider === data.translation.provider)!
   return <main className="flex h-full min-h-0 flex-col gap-3 p-4" aria-label="설정">
-    <PageHeader title="설정" description="키 배치와 라이브러리 설정을 한곳에서 관리합니다. Alt+S 또는 Ctrl+7로 엽니다." />
+    <PageHeader title="설정" description="키 배치와 라이브러리 설정을 한곳에서 관리합니다. Alt+S 또는 Ctrl+8로 엽니다." />
     <NoticeStack items={[error && { tone: 'error', message: error, onDismiss: () => setError('') }]} />
     <div className="flex min-h-0 flex-1 gap-6">
       <nav id="settings-category" aria-label="설정 분류" className="flex w-40 shrink-0 flex-col gap-2">{categories.map(([id, label]) => <Button key={id} variant={category === id ? 'secondary' : 'ghost'} aria-current={category === id ? 'true' : undefined} data-category={id} onClick={() => setCategory(id)}>{label}</Button>)}</nav>

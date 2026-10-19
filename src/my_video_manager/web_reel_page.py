@@ -32,7 +32,6 @@ class WebReelControls(ReelControls):
 
     def open(self):
         self.window.navigate_web_tab('reel')
-        self.window._return_to_gems = False
 
     def refresh_guidance(self):
         self.window.web_host.controllers['reel'].refresh_guidance()

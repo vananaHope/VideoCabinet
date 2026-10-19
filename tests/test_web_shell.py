@@ -18,17 +18,12 @@ def wait_frontend_ready(host, tab):
 
 
 @pytest.mark.parametrize('tab', ['library', 'search', 'settings'])
-@pytest.mark.parametrize('from_gems', [False, True])
-def test_tray_playback_restore_requests_library_focus(window_factory, core, monkeypatch, tab, from_gems):
+def test_tray_playback_restore_requests_library_focus(window_factory, core, monkeypatch, tab):
     from PySide6.QtWidgets import QSystemTrayIcon
     from test_library_return_ui import Player
 
     monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
     video = core.videos()[0]
-    if from_gems:
-        core.playback.start(video.id, 0)
-        core.playback.report(40)
-        core.playback.end()
     window = window_factory()
     window.player_factory = Player
     host = window.web_host
@@ -38,14 +33,40 @@ def test_tray_playback_restore_requests_library_focus(window_factory, core, monk
     requests = []
     window.library_page.bridge.libraryFocusRequested.connect(
         lambda target: requests.append((host.active_tab, target)))
-    window.play_video(video.id, start=0, from_gems=from_gems)
-    if from_gems:
-        window.player.positions.append((40, False))
+    window.play_video(video.id, start=0)
     window.close()
     assert host._pending_focus == 'grid'
     assert requests == []
     window.tray.open()
-    assert requests == [('library', 'grid')] + ([('library', 'gems')] if from_gems else [])
+    assert requests == [('library', 'grid')]
+    assert host._pending_focus is None
+
+
+def test_tray_restore_after_recommendation_playback_requests_recommend_focus(window_factory, core, monkeypatch):
+    from PySide6.QtWidgets import QSystemTrayIcon
+    from test_library_return_ui import Player
+
+    monkeypatch.setattr(QSystemTrayIcon, 'isSystemTrayAvailable', lambda: True)
+    video = core.videos()[0]
+    core.playback.start(video.id, 0)
+    core.playback.report(40)
+    core.playback.end()
+    window = window_factory()
+    window.player_factory = Player
+    host = window.web_host
+    page = host.controllers['recommend']
+    wait_frontend_ready(host, 'library')
+    window.navigate_web_tab('recommend')
+    wait_frontend_ready(host, 'recommend')
+    requests = []
+    for name in ('library', 'recommend'):
+        host.controllers[name].focus_requested.connect(lambda target, name=name: requests.append((name, host.active_tab, target)))
+    page.bridge.perform_play(video.id)
+    window.player.positions.append((40, False))
+    window.close()
+    assert host._pending_focus == 'recommendations'
+    window.tray.open()
+    assert requests == [('recommend', 'recommend', 'recommendations')]
     assert host._pending_focus is None
 
 
@@ -131,7 +152,9 @@ def test_tray_restore_activates_only_destination(window_factory, core, monkeypat
         window.tray.show_queue()
     else:
         window.tray.open()
-    expected = {'restore': tab, 'queue': 'queue', 'playback': 'library', 'fullscreen': 'library'}[destination]
+    # 재생 중 창을 닫으면 라이브러리로 돌아온다. 추천 탭처럼 출발한 탭을 지키는 페이지는 예외다.
+    returned = tab if host.controllers[tab].keeps_tab_after_close else 'library'
+    expected = {'restore': tab, 'queue': 'queue', 'playback': returned, 'fullscreen': returned}[destination]
     assert window.isVisible()
     assert window.pages.currentWidget() is host
     assert host.active_tab == expected

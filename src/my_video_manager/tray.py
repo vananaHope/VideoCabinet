@@ -36,10 +36,10 @@ class TrayControls(QObject):
             self.window.show()
         else:
             self.window.showNormal()
-        if was_hidden and not emergency and self.window.web_host.active_tab == 'library':
+        host = self.window.web_host
+        if was_hidden and not emergency and host.active_tab in ('library', 'recommend'):
             # 닫을 때 저장한 시청 상태를 복귀 시점에만 목록과 추천에 반영한다.
-            self.window.refresh(focus_gems=True if self.window._return_to_gems else None)
-            self.window._return_to_gems = False
+            host.controllers[host.active_tab].refresh()
         self.window.raise_()
         self.window.activateWindow()
         if emergency:
@@ -136,7 +136,7 @@ class TrayControls(QObject):
                     return
                 window.translations.shutdown()
             elif not QSystemTrayIcon.isSystemTrayAvailable():
-                raise RuntimeError("시스템 트레이를 사용할 수 없습니다. 설정(Ctrl+7)의 완전 종료를 이용하세요.")
+                raise RuntimeError("시스템 트레이를 사용할 수 없습니다. 설정(Ctrl+8)의 완전 종료를 이용하세요.")
             window.end_playback()
         except Exception as error:
             self.quitting = False
@@ -166,7 +166,7 @@ class TrayControls(QObject):
             window.set_playback_fullscreen(False)
             window.hide()
             if was_playing:
-                window.web_host.set_tab('library')
+                window.web_host.set_tab(window.web_host.close_return_tab())
                 window.web_host.focus_content()
             window.pages.setCurrentIndex(0)
             event.ignore()

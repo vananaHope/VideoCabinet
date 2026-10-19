@@ -4,7 +4,7 @@ from PySide6.QtCore import QObject, QTimer
 import json
 
 from .web_library_data import details_data, highlights_data
-from .web_library_contract import MENU_ACTIONS, GEM_ACTIONS, SCAN_LOCKED_ACTIONS, LIBRARY
+from .web_library_contract import MENU_ACTIONS, SCAN_LOCKED_ACTIONS, LIBRARY
 from .web_json import encode
 
 
@@ -62,10 +62,8 @@ class LibraryBridge(QObject):
 
     @LIBRARY.slot('action')
     def action(self, action, video_id):
-        if (action not in MENU_ACTIONS and action not in GEM_ACTIONS) or video_id not in self.page.video_ids:
+        if action not in MENU_ACTIONS or video_id not in self.page.video_ids:
             return encode({'error': '지원하지 않는 작업 또는 영상입니다.'})
-        if action in GEM_ACTIONS and video_id not in self.page.gem_ids:
-            return encode({'error': '현재 추천에 없는 영상입니다.'})
         if self.busy or (self.page.worker is not None and action in SCAN_LOCKED_ACTIONS):
             return encode({'error': '진행 중인 작업이 끝난 뒤 다시 시도하세요.'})
         self.busy = True
@@ -131,16 +129,9 @@ class LibraryBridge(QObject):
     def perform(self, action, video_id):
         page = self.page
         try:
-            if action not in GEM_ACTIONS:
-                page.selected_id = video_id
+            page.selected_id = video_id
             if action == 'play':
                 page.window.play(video_id)
-            elif action == 'playGem':
-                page.window.playback_list = tuple(page.gem_ids)
-                page.window.play_video(video_id, from_gems=True)
-            elif action == 'dismiss':
-                page.core.dismiss_video(video_id)
-                page.refresh(focus_gems=True)
             else:
                 callbacks = {
                     'tags': page.edit_video_tags, 'subtitles': page.request_subtitles,
@@ -155,5 +146,5 @@ class LibraryBridge(QObject):
             self.libraryError.emit(str(error))
         finally:
             self.busy = False
-            if page.is_active() and action != 'dismiss':
+            if page.is_active():
                 page.focus_content()

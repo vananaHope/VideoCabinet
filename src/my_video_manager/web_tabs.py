@@ -2,6 +2,7 @@
 
 TABS = (
     ('library', '라이브러리'),
+    ('recommend', '추천'),
     ('reel', '모아보기'),
     ('search', '검색'),
     ('queue', '자막 대기열'),

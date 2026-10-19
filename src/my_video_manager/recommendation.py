@@ -1,24 +1,55 @@
-"""숨겨진 보석 선정과 관심 없음의 영구 저장. 시간과 입력 상태는 코어가 공급한다."""
+"""추천 선정과 관심 없음의 영구 저장. 시간과 입력 상태는 코어가 공급한다."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from math import isfinite
 
 from .library import Video
 from .tags import Tag
 
+ROW_LIMIT = 20
+# 줄 우선순위 순서. 새 줄은 여기와 select_recommendations의 후보에 함께 더한다.
+ROW_TITLES = {"abandoned": "보다 만", "revisit": "복습할 때가 됨",
+              "similar_tags": "태그가 비슷함", "unwatched": "오래 시청 없음"}
+
 
 @dataclass(frozen=True)
-class HiddenGem:
+class Recommendation:
     video: Video
-    criterion: str
     reason: str
     shared_tags: tuple[Tag, ...] = ()
 
 
-def select_hidden_gems(videos, statuses, tags, series, dismissed, revisit_times, *,
-                       now, unwatched_days=30, revisit_days=30) -> tuple[HiddenGem, ...]:
-    """기준 순서와 기준별 정렬을 적용한다. 틀어보기만 있으면 시청 없음이다."""
+@dataclass(frozen=True)
+class RecommendationRow:
+    """같은 이유로 추천한 영상의 묶음. kind는 줄 종류, items는 줄 안 순서다."""
+    kind: str
+    title: str
+    items: tuple[Recommendation, ...]
+
+
+def assign_rows(candidates, limit=ROW_LIMIT) -> tuple[RecommendationRow, ...]:
+    """우선순위 순 후보 줄에서 영상마다 자신이 상위 limit 안에 드는 가장 위 줄 하나에만 배정한다.
+
+    위 줄에 배정한 영상을 아래 줄 후보에서 먼저 뺀 뒤 자르므로, 위 줄에서 밀려난 영상은
+    아래 줄 조건에 맞으면 그 줄에 나올 수 있다. 빈 줄은 결과에서 뺀다.
+    """
+    placed, rows = set(), []
+    for row in candidates:
+        items = tuple(item for item in row.items if item.video.id not in placed)[:limit]
+        placed.update(item.video.id for item in items)
+        if items:
+            rows.append(replace(row, items=items))
+    return tuple(rows)
+
+
+def _elapsed_days(now, then):
+    return max(0, (now - then).days)
+
+
+def select_recommendations(videos, statuses, tags, series, dismissed, revisit_times, *,
+                           now, unwatched_days=30, revisit_days=30) -> tuple[RecommendationRow, ...]:
+    """기준마다 후보 줄을 만들고 줄 배정 규칙을 적용한다. 틀어보기만 있으면 시청 없음이다."""
     playable = {v.id: v for v in videos if not v.missing and not v.excluded}
     allowed = set(playable)
     revisit_allowed = {vid for vid in playable if vid not in dismissed and vid in revisit_times
@@ -39,31 +70,31 @@ def select_hidden_gems(videos, statuses, tags, series, dismissed, revisit_times,
     visible = {v.id for v in videos if not v.excluded}
     favorite_tags = {tag.id for vid, status in statuses.items() if vid in visible and status.favorite
                      for tag in tags.get(vid, ())}
-    ranked = []
+    ranked = {kind: [] for kind in ROW_TITLES}
+    # 한 영상이 여러 기준에 맞으면 모든 후보 줄에 넣는다. 어느 줄에 나올지는 assign_rows가 정한다.
     for vid in allowed | revisit_allowed:
         video, status = playable[vid], statuses[vid]
         unwatched = not status.finished and not status.abandoned
-        shared = tuple(tag for tag in tags.get(vid, ()) if tag.id in favorite_tags)
-        revisit = revisit_times.get(vid)
         if vid in allowed and status.abandoned:
-            gem = HiddenGem(video, "abandoned", f"보다 만 · {status.stopped_percent:.0f}%에서 멈췄어요")
-            order = (0, -(status.last_viewed_at or video.registered_at).timestamp(), vid)
-        elif vid in revisit_allowed:
-            gem = HiddenGem(video, "revisit", "복습할 때가 됨 · 하이라이트를 다시 볼 시간이에요")
-            order = (1, revisit.timestamp(), vid)
-        elif vid in allowed and unwatched and shared:
-            gem = HiddenGem(video, "similar_tags", "태그가 비슷함 · " + ", ".join(t.name for t in shared), shared)
-            order = (2, -len(shared), video.registered_at.timestamp(), vid)
-        elif vid in allowed and unwatched and now - video.registered_at >= timedelta(days=unwatched_days):
-            gem = HiddenGem(video, "unwatched", "오래 시청 없음 · 등록한 뒤 아직 시청하지 않았어요")
-            order = (3, video.registered_at.timestamp(), vid)
-        else:
-            continue
-        ranked.append((order, gem))
-    return tuple(gem for _, gem in sorted(ranked, key=lambda pair: pair[0])[:10])
+            ranked["abandoned"].append(((-(status.last_viewed_at or video.registered_at).timestamp(), vid),
+                                        Recommendation(video, f"{status.stopped_percent:.0f}%에서 멈췄어요")))
+        if vid in revisit_allowed:
+            revisit = revisit_times[vid]
+            ranked["revisit"].append(((revisit.timestamp(), vid), Recommendation(
+                video, f"하이라이트를 {_elapsed_days(now, revisit)}일 동안 복습하지 않았어요")))
+        shared = tuple(tag for tag in tags.get(vid, ()) if tag.id in favorite_tags)
+        if vid in allowed and unwatched and shared:
+            ranked["similar_tags"].append(((-len(shared), video.registered_at.timestamp(), vid), Recommendation(
+                video, "겹친 태그 · " + ", ".join(t.name for t in shared), shared)))
+        if vid in allowed and unwatched and now - video.registered_at >= timedelta(days=unwatched_days):
+            ranked["unwatched"].append(((video.registered_at.timestamp(), vid), Recommendation(
+                video, f"등록하고 {_elapsed_days(now, video.registered_at)}일 동안 시청하지 않았어요")))
+    return assign_rows(RecommendationRow(kind, ROW_TITLES[kind],
+                                         tuple(item for _, item in sorted(items, key=lambda pair: pair[0])))
+                       for kind, items in ranked.items())
 
 
-class HiddenGems:
+class RecommendationStore:
     def __init__(self, connect, clock, settings):
         self._connect, self._clock, self._settings = connect, clock, settings
         with connect() as db:

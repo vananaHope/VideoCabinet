@@ -21,7 +21,6 @@ class Page(QWidget):
         self.cards = snapshot_data(core.library_snapshot())
         self.video_ids = {v['id'] for v in self.cards}
         self.visible_ids = list(self.video_ids)
-        self.gem_ids = []
         self.selected_id = self.visible_ids[0]
         self.query, self.tag_id = '', None
         self.worker = None
@@ -131,6 +130,7 @@ def test_duplicate_file_names_and_same_language_tracks_are_distinguishable(bridg
 def test_action_rejects_arbitrary_methods_and_missing_ids(bridge):
     bridge, page, app = bridge
     video_id = page.selected_id
+    # 추천 재생·관심 없음은 추천 탭의 작업이다. 라이브러리 작업 이름으로는 받지 않는다.
     for name, target in [('delete_file', video_id), ('play', 999999), ('playGem', video_id), ('dismiss', video_id)]:
         assert 'error' in json.loads(bridge.action(name, target))
     assert page.played == []

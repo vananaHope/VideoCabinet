@@ -352,7 +352,7 @@ try:
             wait(lambda: window.web_host.active_tab == tab)
         key(Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
         wait(lambda: window.web_host.active_tab == 'library')
-        checks.append('실창 일곱 탭 클릭·Ctrl+1~7·Alt+S')
+        checks.append('실창 여덟 탭 클릭·Ctrl+1~8·Alt+S')
 
         observed = []
         closer = QTimer()

@@ -1,6 +1,7 @@
 """앱의 웹 페이지 조립 지점. 호스트는 구체적인 페이지 모듈을 알지 못한다."""
 
 from .web_library_page import WebLibraryPage
+from .web_recommend_page import WebRecommendPage
 from .web_queue_page import WebQueuePage
 from .web_statistics_page import WebStatisticsPage
 from .web_reel_page import WebReelPage
@@ -12,6 +13,7 @@ from .web_settings_page import WebSettingsPage
 
 WEB_PAGES = (
     WebLibraryPage,
+    WebRecommendPage,
     WebQueuePage,
     WebStatisticsPage,
     WebReelPage,

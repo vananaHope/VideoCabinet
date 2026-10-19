@@ -16,7 +16,7 @@ def generator():
 
 
 @pytest.mark.parametrize('menu_action', [True, False])
-def test_appending_action_keeps_explicit_menu_and_gem_membership(menu_action):
+def test_appending_action_keeps_explicit_menu_membership(menu_action):
     action = next(alias for alias in LIBRARY.aliases if alias.name == 'Action')
     action = replace(action, values=(*action.values, 'newAction'))
     menu = next(constant for constant in LIBRARY.constants if constant.name == 'actions')

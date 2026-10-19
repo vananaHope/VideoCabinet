@@ -14,7 +14,7 @@ from .library import Library, Location, MediaInfo, MediaReader, ScanIssue, ScanR
 from .settings import Settings
 from .highlights import Highlight, Highlights
 from .key_bindings import KeyBinding, KeyBindings
-from .hidden_gems import HiddenGem, HiddenGems, select_hidden_gems
+from .recommendation import RecommendationRow, RecommendationStore, select_recommendations
 from .playback import PlaybackHub
 from .reel import HighlightReel, ReelEntry, ReelPlayback, ReelSettings
 from .revisit import Revisits
@@ -149,8 +149,8 @@ class AppCore:
         self.playback = PlaybackHub()
         self._series = SeriesStore(self._connect)
         self._highlights = Highlights(self._connect, on_created=lambda db, hid:
-                                      self._hidden_gems.record_highlight_created(db, hid))
-        self._hidden_gems = HiddenGems(self._connect, clock, self.settings)
+                                      self._recommendations.record_highlight_created(db, hid))
+        self._recommendations = RecommendationStore(self._connect, clock, self.settings)
         self._tags = Tags(self._connect)
         self.playback.subscribe(self._highlights)
         self._highlight_commands = {
@@ -547,21 +547,22 @@ class AppCore:
     def highlight_tags_map(self, video_id: int) -> dict[int, tuple[Tag, ...]]:
         return self._tags.highlight_tags_map(video_id)
 
-    def hidden_gems(self, *, snapshot: LibrarySnapshot | None = None) -> tuple[HiddenGem, ...]:
+    def recommendations(self, *, snapshot: LibrarySnapshot | None = None) -> tuple[RecommendationRow, ...]:
+        """추천 줄 목록. 빈 줄은 없고 영상 하나는 한 줄에만 나온다."""
         snapshot = self.library_snapshot() if snapshot is None else snapshot
-        return select_hidden_gems(
+        return select_recommendations(
             snapshot.videos, snapshot.statuses, snapshot.tags, snapshot.series,
-            self._hidden_gems.dismissed_ids(), self._hidden_gems.revisit_times(), now=self._clock(),
-            unwatched_days=self._hidden_gems.days("unwatched"), revisit_days=self._hidden_gems.days("revisit"))
+            self._recommendations.dismissed_ids(), self._recommendations.revisit_times(), now=self._clock(),
+            unwatched_days=self._recommendations.days("unwatched"), revisit_days=self._recommendations.days("revisit"))
 
     def dismiss_video(self, video_id: int) -> None:
-        self._hidden_gems.set_dismissed(video_id, True)
+        self._recommendations.set_dismissed(video_id, True)
 
     def restore_dismissed_video(self, video_id: int) -> None:
-        self._hidden_gems.set_dismissed(video_id, False)
+        self._recommendations.set_dismissed(video_id, False)
 
     def dismissed_videos(self) -> tuple[Video, ...]:
-        ids = self._hidden_gems.dismissed_ids()
+        ids = self._recommendations.dismissed_ids()
         return tuple(v for v in self.videos() + self.excluded_videos() if v.id in ids)
 
     def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:

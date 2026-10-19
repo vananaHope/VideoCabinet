@@ -42,11 +42,6 @@ class HighlightData(TypedDict):
     tags: list[TagData]
 
 
-class GemData(TypedDict):
-    videoId: int
-    reason: str
-
-
 class ExternalSubtitleTrackData(TypedDict):
     language: str | None
     languageLabel: str
@@ -80,8 +75,6 @@ class DetailsData(TypedDict):
 class LibraryData(TypedDict):
     videos: list[VideoData]
     tags: list[TagData]
-    gems: list[GemData]
-    gemError: str
     visibleIds: list[int]
     selectedId: int | None
     scanning: bool

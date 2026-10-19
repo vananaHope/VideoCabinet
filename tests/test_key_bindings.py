@@ -280,7 +280,7 @@ def test_settings_menu_key_is_reserved_without_changing_saved_bindings(tmp_path,
         row.command: row.default_keys for row in core.key_bindings()}
 
 
-@pytest.mark.parametrize("number", range(1, 8))
+@pytest.mark.parametrize("number", range(1, 9))
 def test_sidebar_keys_reject_both_save_apis_and_preserve_custom_keys(tmp_path, number):
     core = open_core(tmp_path)
     pause = Command(CommandType.TOGGLE_PAUSE)
@@ -299,7 +299,7 @@ def test_sidebar_keys_reject_both_save_apis_and_preserve_custom_keys(tmp_path, n
         assert app.command_for_key("Space") == pause
 
 
-@pytest.mark.parametrize("number", range(1, 8))
+@pytest.mark.parametrize("number", range(1, 9))
 def test_old_saved_sidebar_keys_use_existing_invalid_settings_fallback(tmp_path, number):
     core = open_core(tmp_path)
     core.settings.set("keys.bindings", {"toggle_pause:0": [f"Ctrl+{number}"]})

@@ -472,7 +472,19 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
 재검사 갱신과 검색 키보드 재생·복귀를 확인합니다. 실제 mpv 검사는 데스크톱 잠금 아래
 `--verify`로 실행하며 실창 스크린샷은 찍지 않습니다.
 
-모아보기(`Ctrl+2`)와 검색(`Ctrl+3`)도 웹 페이지입니다.
+추천(`Ctrl+2`)은 `web_recommend_page.py`의 웹 페이지이며 `AppCore.recommendations()`의 줄 목록을 보여 줍니다.
+
+```powershell
+.venv/Scripts/python.exe scripts/check_web_recommend.py --offscreen
+python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-196 -- .venv/Scripts/python.exe scripts/check_web_recommend.py --verify --no-screenshots
+```
+
+첫 명령은 `.local/screens-196/`에 1100×720 화면(추천 0개·줄 하나·네 줄 × 20개 위/아래·관심 없음 안내·우클릭 메뉴·
+긴 제목/이유·추천 영역을 뺀 라이브러리)과 배치 측정을 남기고, 키 이동·관심 없음·되돌리기를 확인합니다.
+두 번째 명령은 짧은 검증 영상을 만들어 실창에서 `Ctrl+2`, 실제 mpv 재생 왕복, 긴급 탈출 뒤 트레이 열기,
+재생 중 창 닫기 뒤 트레이 열기가 같은 탭·같은 카드로 돌아오는지 확인합니다.
+
+모아보기(`Ctrl+3`)와 검색(`Ctrl+4`)도 웹 페이지입니다.
 모아보기는 기존 `ReelControls`의 재생·반복·복습 흐름을 쓰며, 검색은 장면 재생 후
 `Esc`로 돌아왔을 때 검색어·결과·선택을 보존합니다. 검색 입력의 `↓`/`Enter`는
 결과로 이동하고, 목록의 `Enter`는 선택한 장면을 재생합니다.
@@ -526,7 +538,9 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
    재생에서 복귀할 때는 시청 종료 후 `activated()`가 호출되므로 통계 등을 다시 계산할 수 있습니다.
    활성 상태는 `is_active()`로 확인합니다. QWidget의 `isVisible()`은 자체 화면 표시 여부입니다.
    복귀 시 기본 `return_from_playback()`은 `refresh()`와 포커스 복원을 수행하며,
-   라이브러리는 이를 재정의해 기존 `refresh(focus_gems=...)` 경로를 유지합니다.
+   라이브러리는 이를 재정의해 `refresh(focus=True)`로 격자 초점을 요청합니다.
+   재생 중 창을 닫았다가 트레이로 열 때 라이브러리 대신 출발한 탭으로 돌아와야 하면
+   컨트롤러에 `keeps_tab_after_close = True`를 둡니다(추천 탭).
    자체 포커스가 필요하면 `default_focus`와
    `focus_requested` 신호를 지정하고, 웹 첫 렌더 후 호출하는 `ready` 슬롯에서
    `self.page.frontend_ready()`를 호출합니다. 포커스 요청은 호스트가 준비될 때까지 보존합니다.
@@ -543,7 +557,7 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
    스크린샷은 `--offscreen`으로 찍고, 실창 입력 검사는 `--no-screenshots`로 캡처 없이 실행할 수 있습니다.
 
 호스트·생성기·`App.tsx`·`bridge.ts`·`ui.py`는 새 페이지 때문에 고칠 필요가 없습니다.
-채널 이름은 `TABS`의 `library`, `reel`, `search`, `queue`, `statistics`, `folders`, `settings`와 같고,
+채널 이름은 `TABS`의 `library`, `recommend`, `reel`, `search`, `queue`, `statistics`, `folders`, `settings`와 같고,
 공통 객체만 `shell`입니다. 통계 페이지도 같은 등록부를 사용합니다.
 `tests/test_web_generator.py`는 예시 계약을 앞·중간·뒤에 추가해도 기존 페이지 출력이 그대로인지,
 `tests/test_web_pages.py`는 새 컨트롤러의 브리지·갱신·포커스 연결과 양쪽 등록부 일치를 확인합니다.
@@ -588,7 +602,7 @@ React가 보고한 콘텐츠 크기로 컨테이너를 맞추고 메인 창 크�
 추가 `QWebEngineView`, 프로필, 페이지를 만들지 않습니다.
 
 `ShellModals`는 페이지 구현을 수정하지 않고 열린 `dialog`·`alertdialog`를 감지해
-`dialogs.modalState()`로 알립니다. 실제 모달만 `Ctrl+1~7`·`Alt+S`의 셸 동작을 막고 키 이벤트는 입력·키 캡처로 전달하며,
+`dialogs.modalState()`로 알립니다. 실제 모달만 `Ctrl+1~8`·`Alt+S`의 셸 동작을 막고 키 이벤트는 입력·키 캡처로 전달하며,
 Esc·Tab·Enter는 해당 모달이 처리합니다. 탐색·재생 진입·웹 재로드는 이전 모달 상태를 비웁니다.
 `highlight-range`는 웹 구간 표시와 Qt 재생 진행 막대가 함께 쓰는 의미 색 토큰입니다.
 
@@ -639,7 +653,7 @@ OS가 자동화 키를 전달하지 않는 환경에서는 이 검사가 실패�
 - `highlight_ui.py`: 재생 진행 막대와 읽기 전용 하이라이트 패널·현재 위치 따라가기.
 - `reel.py`: 모아보기 자연 정렬·순서·반복·영상 단위 이동, 재생 지시와 복습 판정.
 - `revisit.py`: 하이라이트별 마지막 복습 저장과 영상별 조회.
-- `hidden_gems.py`: 숨겨진 보석 선정·순위·시리즈별 후보와 관심 없음 상태.
+- `recommendation.py`: 추천 후보 줄 만들기, 줄 배정 순수 함수 `assign_rows`(영상은 상위 20위 안에 드는 가장 위 줄 하나에만), 시리즈별 후보와 관심 없음 상태.
 - `tags.py`: 태그 이름 정규화, 공유 태그·연결 저장, 자동 완성과 태그별 조회.
 - `tag_editing.py`: 직접 입력한 이름과 명시적으로 고른 자동 완성 후보의 확정 규칙.
 - `subtitles.py`: 영속 자막 대기열, 원어·원어 자막 저장, 받아쓰기 Protocol과 SRT 변환.
@@ -671,7 +685,8 @@ OS가 자동화 키를 전달하지 않는 환경에서는 이 검사가 실패�
 - `tests/test_viewing.py`: 순수 구간 계산과 코어 공개 동작으로 분류·탐색·배속·이어보기·복구를 검증.
 - `tests/test_highlights.py`: 키 명령, 종료·전환·되감기, 탐색 경계, 메모·시각 편집과 저장 보존을 공개 코어 API로 검증.
 - `tests/test_reel.py`: 공개 코어 API로 자동 전환·키 의미·복습 시계·시청 비간섭·저장 보존을 검증.
-- `tests/test_hidden_gems.py`: 숨겨진 보석 선정·정렬·시리즈 예외와 관심 없음·재실행 보존 검증.
+- `tests/test_recommendation.py`: 줄 배정·넘침 순수 함수와 추천 줄 선정·정렬·시리즈 예외, 관심 없음·재실행 보존 검증.
+- `tests/test_web_recommend_page.py`: 추천 탭 브리지·Ctrl+2·재생 왕복·관심 없음과 되돌리기 검증.
 - `tests/test_tags.py`: 공개 코어 API로 태그 추가·떼기·정규화·자동 완성·이름 변경·삭제·필터·재실행 보존을 검증.
 - `tests/test_subtitles.py`: 가짜 받아쓰기와 실제 임시 DB로 요청·FIFO·언어·재생성·재시작·실패 복구를 검증.
 - `tests/test_subtitle_queue.py`: 자동 규칙·직접 요청 우선순위·앞당기기·취소·완료 알림 검증.

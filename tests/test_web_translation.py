@@ -165,7 +165,7 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
         QTest.keyClick(view, Qt.Key.Key_Tab)
         wait_for(lambda: js(window, 'document.activeElement.getAttribute("aria-label")') == '모델 직접 입력')
         assert js(window, 'document.activeElement.getAttribute("aria-label")') == '모델 직접 입력'
-        for keycode in range(Qt.Key.Key_1, Qt.Key.Key_7 + 1):
+        for keycode in range(Qt.Key.Key_1, Qt.Key.Key_8 + 1):
             QTest.keyClick(view, Qt.Key(keycode), Qt.KeyboardModifier.ControlModifier)
         QTest.keyClick(view, Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier)
         QTest.keyClick(view, Qt.Key.Key_F1)
