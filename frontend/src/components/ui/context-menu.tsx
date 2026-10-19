@@ -2,36 +2,18 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 import { ContextMenu as ContextMenuPrimitive } from "radix-ui"
-import { useRestorablePopup } from "@/lib/popup-restore"
-
-// 메뉴를 연 위치. 긴급 탈출로 창 blur에 닫힌 메뉴를 복귀 때 같은 위치에서 다시 연다.
-const OpenedAt = React.createContext<React.RefObject<{ target: Element; x: number; y: number } | null> | null>(null)
 
 function ContextMenu({
-  onOpenChange,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Root>) {
-  const [open, setOpen] = React.useState(false)
-  const openedAt = React.useRef<{ target: Element; x: number; y: number } | null>(null)
-  useRestorablePopup(open, () => {
-    const at = openedAt.current
-    if (at?.target.isConnected) at.target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y }))
-  })
-  return <OpenedAt.Provider value={openedAt}>
-    <ContextMenuPrimitive.Root data-slot="context-menu" onOpenChange={next => { setOpen(next); onOpenChange?.(next) }} {...props} />
-  </OpenedAt.Provider>
+  return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />
 }
 
 function ContextMenuTrigger({
-  onContextMenuCapture,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Trigger>) {
-  const openedAt = React.useContext(OpenedAt)
   return (
-    <ContextMenuPrimitive.Trigger data-slot="context-menu-trigger" onContextMenuCapture={event => {
-      onContextMenuCapture?.(event)
-      if (openedAt) openedAt.current = { target: event.currentTarget, x: event.clientX, y: event.clientY }
-    }} {...props} />
+    <ContextMenuPrimitive.Trigger data-slot="context-menu-trigger" {...props} />
   )
 }
 

@@ -1,18 +1,22 @@
 """Qt Windows 키 매퍼(qt_keys.key_name)와 Win32Dialogs.key_name을 같은 가상 키·수정자로 대조한다.
 
-test_native_dialogs.py가 windows 플랫폼 하위 프로세스로 실행한다. 창은 화면 밖 투명 창이라 보이지 않고 초점도 옮기지 않는다.
-이 스레드의 키보드 상태(SetKeyboardState)로 수정자를 정하고 키 메시지를 숨은 Qt 창에 보낸다.
+실제 Windows 창을 띄우므로 데스크톱 잠금 안에서만 실행한다. test_native_dialogs.py의 실창 검사가
+windows 플랫폼 하위 프로세스로 실행하고, `--record 경로`로 실행하면 기본 pytest가 실창 없이 대조할 기대값을 기록한다.
+창은 화면 밖 투명 창이고 초점을 옮기지 않는다. 이 스레드의 키보드 상태(SetKeyboardState)로 수정자를 정하고
+키 메시지를 그 Qt 창에 보낸다.
 """
 import ctypes
 from ctypes import wintypes
 import json
 import os
+import sys
 
 os.environ["QT_QPA_PLATFORM"] = "windows"
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
+from my_video_manager import native_dialogs
 from my_video_manager.native_dialogs import Win32Dialogs
 from my_video_manager.qt_keys import key_name
 
@@ -48,6 +52,23 @@ def set_modifiers(modifiers):
     user32.SetKeyboardState(state)
 
 
+# 네이티브 이름을 만들 때 현재 키보드 배열이 돌려준 글자를 함께 기록한다.
+inputs = []
+windows_key_name = native_dialogs.windows_key_name
+
+
+def recording_key_name(vk, translate, base, **modifiers):
+    texts = {}
+
+    def recorded(shift, ctrl, alt):
+        texts[f"{int(shift)}{int(ctrl)}{int(alt)}"] = text = translate(shift, ctrl, alt)
+        return text
+    name = windows_key_name(vk, recorded, base, **modifiers)
+    inputs.append({"translate": texts, "base": base, **modifiers})
+    return name
+
+
+native_dialogs.windows_key_name = recording_key_name
 app = QApplication([])
 # Qt는 보이지 않는 창에 키 이벤트를 넘기지 않는다. 화면 밖에 투명하고 활성화되지 않는 도구 창으로 띄운다.
 widget = QWidget(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowDoesNotAcceptFocus)
@@ -77,10 +98,16 @@ for modifiers in MODIFIERS:
                 break
         set_modifiers(modifiers)  # 메시지 처리 뒤의 상태를 다시 맞춘다(훅이 볼 때와 같은 상태).
         rows.append({"vk": vk, "modifiers": list(modifiers), "qt": capture.names[0] if capture.names else None,
-                     "native": native.key_name(vk)})
+                     "native": native.key_name(vk), **inputs.pop()})
         set_modifiers(())
         user32.PostMessageW(hwnd, 0x0105 if alt else 0x0101, vk, flags | (3 << 30))  # 뗌
         for _ in range(5):
             app.processEvents()
 set_modifiers(())
+if sys.argv[1:2] == ["--record"]:
+    layout = f"{user32.GetKeyboardLayout(0) & 0xFFFFFFFF:08x}"
+    with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as file:
+        json.dump({"layout": layout, "rows": [{key: row[key] for key in row if key != "native"} for row in rows]},
+                  file, ensure_ascii=False, indent=1)
+        file.write("\n")
 print(json.dumps(rows, ensure_ascii=False))

@@ -1,0 +1,3676 @@
+{
+ "layout": "04120412",
+ "rows": [
+  {
+   "vk": 72,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+H",
+   "translate": {
+    "010": "\b"
+   },
+   "base": "H",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 65,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+A",
+   "translate": {
+    "010": "\u0001"
+   },
+   "base": "A",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 90,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+Z",
+   "translate": {
+    "010": "\u001a"
+   },
+   "base": "Z",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 49,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+1",
+   "translate": {
+    "010": "",
+    "000": "1"
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 48,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+0",
+   "translate": {
+    "010": "",
+    "000": "0"
+   },
+   "base": "0",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 50,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+2",
+   "translate": {
+    "010": "",
+    "000": "2"
+   },
+   "base": "2",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 54,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+6",
+   "translate": {
+    "010": "",
+    "000": "6"
+   },
+   "base": "6",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 186,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+;",
+   "translate": {
+    "010": "",
+    "000": ";"
+   },
+   "base": ";",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 187,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+=",
+   "translate": {
+    "010": "",
+    "000": "="
+   },
+   "base": "=",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 188,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+,",
+   "translate": {
+    "010": "",
+    "000": ","
+   },
+   "base": ",",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 189,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+-",
+   "translate": {
+    "010": "",
+    "000": "-"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 190,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+.",
+   "translate": {
+    "010": "",
+    "000": "."
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 191,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+/",
+   "translate": {
+    "010": "",
+    "000": "/"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 192,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+`",
+   "translate": {
+    "010": "",
+    "000": "`"
+   },
+   "base": "`",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 219,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+[",
+   "translate": {
+    "010": "\u001b"
+   },
+   "base": "[",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 220,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+\\",
+   "translate": {
+    "010": "\u001c"
+   },
+   "base": "\\",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 221,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+]",
+   "translate": {
+    "010": "\u001d"
+   },
+   "base": "]",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 222,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+'",
+   "translate": {
+    "010": "",
+    "000": "'"
+   },
+   "base": "'",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 97,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+1",
+   "translate": {
+    "010": "",
+    "000": "1"
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 105,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+9",
+   "translate": {
+    "010": "",
+    "000": "9"
+   },
+   "base": "9",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 106,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+*",
+   "translate": {
+    "010": "",
+    "000": "*"
+   },
+   "base": "*",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 107,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl++",
+   "translate": {
+    "010": "",
+    "000": "+"
+   },
+   "base": "+",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 109,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+-",
+   "translate": {
+    "010": "",
+    "000": "-"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 110,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+.",
+   "translate": {
+    "010": "",
+    "000": "."
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 111,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+/",
+   "translate": {
+    "010": "",
+    "000": "/"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 116,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+F5",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 37,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+Left",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 32,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+Space",
+   "translate": {},
+   "base": " ",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 46,
+   "modifiers": [
+    "Ctrl"
+   ],
+   "qt": "Ctrl+Delete",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 72,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+H",
+   "translate": {
+    "110": "\b"
+   },
+   "base": "H",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 65,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+A",
+   "translate": {
+    "110": "\u0001"
+   },
+   "base": "A",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 90,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+Z",
+   "translate": {
+    "110": "\u001a"
+   },
+   "base": "Z",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 49,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+!",
+   "translate": {
+    "110": "",
+    "100": "!"
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 48,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+)",
+   "translate": {
+    "110": "",
+    "100": ")"
+   },
+   "base": "0",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 50,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+@",
+   "translate": {
+    "110": "",
+    "100": "@"
+   },
+   "base": "2",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 54,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+^",
+   "translate": {
+    "110": "\u001e"
+   },
+   "base": "6",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 186,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+:",
+   "translate": {
+    "110": "",
+    "100": ":"
+   },
+   "base": ";",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 187,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift++",
+   "translate": {
+    "110": "",
+    "100": "+"
+   },
+   "base": "=",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 188,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+<",
+   "translate": {
+    "110": "",
+    "100": "<"
+   },
+   "base": ",",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 189,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+_",
+   "translate": {
+    "110": "\u001f"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 190,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+>",
+   "translate": {
+    "110": "",
+    "100": ">"
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 191,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+?",
+   "translate": {
+    "110": "",
+    "100": "?"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 192,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+~",
+   "translate": {
+    "110": "",
+    "100": "~"
+   },
+   "base": "`",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 219,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+{",
+   "translate": {
+    "110": "",
+    "100": "{"
+   },
+   "base": "[",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 220,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+|",
+   "translate": {
+    "110": "",
+    "100": "|"
+   },
+   "base": "\\",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 221,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+}",
+   "translate": {
+    "110": "",
+    "100": "}"
+   },
+   "base": "]",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 222,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+\"",
+   "translate": {
+    "110": "",
+    "100": "\""
+   },
+   "base": "'",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 97,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+1",
+   "translate": {
+    "110": "",
+    "100": ""
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 105,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+9",
+   "translate": {
+    "110": "",
+    "100": ""
+   },
+   "base": "9",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 106,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+*",
+   "translate": {
+    "110": "",
+    "100": "*"
+   },
+   "base": "*",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 107,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift++",
+   "translate": {
+    "110": "",
+    "100": "+"
+   },
+   "base": "+",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 109,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+-",
+   "translate": {
+    "110": "",
+    "100": "-"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 110,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+.",
+   "translate": {
+    "110": "",
+    "100": "."
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 111,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+/",
+   "translate": {
+    "110": "",
+    "100": "/"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 116,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+F5",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 37,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+Left",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 32,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+Space",
+   "translate": {},
+   "base": " ",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 46,
+   "modifiers": [
+    "Ctrl",
+    "Shift"
+   ],
+   "qt": "Ctrl+Shift+Delete",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": false,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 72,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+H",
+   "translate": {
+    "001": "h"
+   },
+   "base": "H",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 65,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+A",
+   "translate": {
+    "001": "a"
+   },
+   "base": "A",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 90,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+Z",
+   "translate": {
+    "001": "z"
+   },
+   "base": "Z",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 49,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+1",
+   "translate": {
+    "001": "1"
+   },
+   "base": "1",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 48,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+0",
+   "translate": {
+    "001": "0"
+   },
+   "base": "0",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 50,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+2",
+   "translate": {
+    "001": "2"
+   },
+   "base": "2",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 54,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+6",
+   "translate": {
+    "001": "6"
+   },
+   "base": "6",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 186,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+;",
+   "translate": {
+    "001": ";"
+   },
+   "base": ";",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 187,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+=",
+   "translate": {
+    "001": "="
+   },
+   "base": "=",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 188,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+,",
+   "translate": {
+    "001": ","
+   },
+   "base": ",",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 189,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+-",
+   "translate": {
+    "001": "-"
+   },
+   "base": "-",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 190,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+.",
+   "translate": {
+    "001": "."
+   },
+   "base": ".",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 191,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+/",
+   "translate": {
+    "001": "/"
+   },
+   "base": "/",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 192,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+`",
+   "translate": {
+    "001": "`"
+   },
+   "base": "`",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 219,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+[",
+   "translate": {
+    "001": "["
+   },
+   "base": "[",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 220,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+\\",
+   "translate": {
+    "001": "\\"
+   },
+   "base": "\\",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 221,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+]",
+   "translate": {
+    "001": "]"
+   },
+   "base": "]",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 222,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+'",
+   "translate": {
+    "001": "'"
+   },
+   "base": "'",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 97,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+1",
+   "translate": {
+    "001": ""
+   },
+   "base": "1",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 105,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+9",
+   "translate": {
+    "001": ""
+   },
+   "base": "9",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 106,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+*",
+   "translate": {
+    "001": "*"
+   },
+   "base": "*",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 107,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt++",
+   "translate": {
+    "001": "+"
+   },
+   "base": "+",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 109,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+-",
+   "translate": {
+    "001": "-"
+   },
+   "base": "-",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 110,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+.",
+   "translate": {
+    "001": "."
+   },
+   "base": ".",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 111,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+/",
+   "translate": {
+    "001": "/"
+   },
+   "base": "/",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 116,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+F5",
+   "translate": {},
+   "base": "",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 37,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+Left",
+   "translate": {},
+   "base": "",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 46,
+   "modifiers": [
+    "Alt"
+   ],
+   "qt": "Alt+Delete",
+   "translate": {},
+   "base": "",
+   "ctrl": false,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 72,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+H",
+   "translate": {
+    "101": "H"
+   },
+   "base": "H",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 65,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+A",
+   "translate": {
+    "101": "A"
+   },
+   "base": "A",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 90,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+Z",
+   "translate": {
+    "101": "Z"
+   },
+   "base": "Z",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 49,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+!",
+   "translate": {
+    "101": "!"
+   },
+   "base": "1",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 48,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+)",
+   "translate": {
+    "101": ")"
+   },
+   "base": "0",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 50,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+@",
+   "translate": {
+    "101": "@"
+   },
+   "base": "2",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 54,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+^",
+   "translate": {
+    "101": "^"
+   },
+   "base": "6",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 186,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+:",
+   "translate": {
+    "101": ":"
+   },
+   "base": ";",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 187,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift++",
+   "translate": {
+    "101": "+"
+   },
+   "base": "=",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 188,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+<",
+   "translate": {
+    "101": "<"
+   },
+   "base": ",",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 189,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+_",
+   "translate": {
+    "101": "_"
+   },
+   "base": "-",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 190,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+>",
+   "translate": {
+    "101": ">"
+   },
+   "base": ".",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 191,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+?",
+   "translate": {
+    "101": "?"
+   },
+   "base": "/",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 192,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+~",
+   "translate": {
+    "101": "~"
+   },
+   "base": "`",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 219,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+{",
+   "translate": {
+    "101": "{"
+   },
+   "base": "[",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 220,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+|",
+   "translate": {
+    "101": "|"
+   },
+   "base": "\\",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 221,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+}",
+   "translate": {
+    "101": "}"
+   },
+   "base": "]",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 222,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+\"",
+   "translate": {
+    "101": "\""
+   },
+   "base": "'",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 97,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+1",
+   "translate": {
+    "101": ""
+   },
+   "base": "1",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 105,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+9",
+   "translate": {
+    "101": ""
+   },
+   "base": "9",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 106,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+*",
+   "translate": {
+    "101": "*"
+   },
+   "base": "*",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 107,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift++",
+   "translate": {
+    "101": "+"
+   },
+   "base": "+",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 109,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+-",
+   "translate": {
+    "101": "-"
+   },
+   "base": "-",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 110,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+.",
+   "translate": {
+    "101": "."
+   },
+   "base": ".",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 111,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+/",
+   "translate": {
+    "101": "/"
+   },
+   "base": "/",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 116,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+F5",
+   "translate": {},
+   "base": "",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 37,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+Left",
+   "translate": {},
+   "base": "",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 46,
+   "modifiers": [
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Alt+Shift+Delete",
+   "translate": {},
+   "base": "",
+   "ctrl": false,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 72,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+H",
+   "translate": {
+    "011": "",
+    "001": "h"
+   },
+   "base": "H",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 65,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+A",
+   "translate": {
+    "011": "",
+    "001": "a"
+   },
+   "base": "A",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 90,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+Z",
+   "translate": {
+    "011": "",
+    "001": "z"
+   },
+   "base": "Z",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 49,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+1",
+   "translate": {
+    "011": "",
+    "001": "1"
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 48,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+0",
+   "translate": {
+    "011": "",
+    "001": "0"
+   },
+   "base": "0",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 50,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+2",
+   "translate": {
+    "011": "",
+    "001": "2"
+   },
+   "base": "2",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 54,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+6",
+   "translate": {
+    "011": "",
+    "001": "6"
+   },
+   "base": "6",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 186,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+;",
+   "translate": {
+    "011": "",
+    "001": ";"
+   },
+   "base": ";",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 187,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+=",
+   "translate": {
+    "011": "",
+    "001": "="
+   },
+   "base": "=",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 188,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+,",
+   "translate": {
+    "011": "",
+    "001": ","
+   },
+   "base": ",",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 189,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+-",
+   "translate": {
+    "011": "",
+    "001": "-"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 190,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+.",
+   "translate": {
+    "011": "",
+    "001": "."
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 191,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+/",
+   "translate": {
+    "011": "",
+    "001": "/"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 192,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+`",
+   "translate": {
+    "011": "",
+    "001": "`"
+   },
+   "base": "`",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 219,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+[",
+   "translate": {
+    "011": "",
+    "001": "["
+   },
+   "base": "[",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 220,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+\\",
+   "translate": {
+    "011": "",
+    "001": "\\"
+   },
+   "base": "\\",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 221,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+]",
+   "translate": {
+    "011": "",
+    "001": "]"
+   },
+   "base": "]",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 222,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+'",
+   "translate": {
+    "011": "",
+    "001": "'"
+   },
+   "base": "'",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 97,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+1",
+   "translate": {
+    "011": "",
+    "001": ""
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 105,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+9",
+   "translate": {
+    "011": "",
+    "001": ""
+   },
+   "base": "9",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 106,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+*",
+   "translate": {
+    "011": "",
+    "001": "*"
+   },
+   "base": "*",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 107,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt++",
+   "translate": {
+    "011": "",
+    "001": "+"
+   },
+   "base": "+",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 109,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+-",
+   "translate": {
+    "011": "",
+    "001": "-"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 110,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+.",
+   "translate": {
+    "011": "",
+    "001": "."
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 111,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+/",
+   "translate": {
+    "011": "",
+    "001": "/"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 116,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+F5",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 37,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+Left",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 46,
+   "modifiers": [
+    "Ctrl",
+    "Alt"
+   ],
+   "qt": "Ctrl+Alt+Delete",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": true,
+   "shift": false,
+   "meta": false
+  },
+  {
+   "vk": 72,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+H",
+   "translate": {
+    "010": "\b"
+   },
+   "base": "H",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 65,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+A",
+   "translate": {
+    "010": "\u0001"
+   },
+   "base": "A",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 90,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+Z",
+   "translate": {
+    "010": "\u001a"
+   },
+   "base": "Z",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 49,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+1",
+   "translate": {
+    "010": "",
+    "000": "1"
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 48,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+0",
+   "translate": {
+    "010": "",
+    "000": "0"
+   },
+   "base": "0",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 50,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+2",
+   "translate": {
+    "010": "",
+    "000": "2"
+   },
+   "base": "2",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 54,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+6",
+   "translate": {
+    "010": "",
+    "000": "6"
+   },
+   "base": "6",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 186,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+;",
+   "translate": {
+    "010": "",
+    "000": ";"
+   },
+   "base": ";",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 187,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+=",
+   "translate": {
+    "010": "",
+    "000": "="
+   },
+   "base": "=",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 188,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+,",
+   "translate": {
+    "010": "",
+    "000": ","
+   },
+   "base": ",",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 189,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+-",
+   "translate": {
+    "010": "",
+    "000": "-"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 190,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+.",
+   "translate": {
+    "010": "",
+    "000": "."
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 191,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+/",
+   "translate": {
+    "010": "",
+    "000": "/"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 192,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+`",
+   "translate": {
+    "010": "",
+    "000": "`"
+   },
+   "base": "`",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 219,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+[",
+   "translate": {
+    "010": "\u001b"
+   },
+   "base": "[",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 220,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+\\",
+   "translate": {
+    "010": "\u001c"
+   },
+   "base": "\\",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 221,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+]",
+   "translate": {
+    "010": "\u001d"
+   },
+   "base": "]",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 222,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+'",
+   "translate": {
+    "010": "",
+    "000": "'"
+   },
+   "base": "'",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 97,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+1",
+   "translate": {
+    "010": "",
+    "000": "1"
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 105,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+9",
+   "translate": {
+    "010": "",
+    "000": "9"
+   },
+   "base": "9",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 106,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+*",
+   "translate": {
+    "010": "",
+    "000": "*"
+   },
+   "base": "*",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 107,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta++",
+   "translate": {
+    "010": "",
+    "000": "+"
+   },
+   "base": "+",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 109,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+-",
+   "translate": {
+    "010": "",
+    "000": "-"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 110,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+.",
+   "translate": {
+    "010": "",
+    "000": "."
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 111,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+/",
+   "translate": {
+    "010": "",
+    "000": "/"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 116,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+F5",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 37,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+Left",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 32,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+Space",
+   "translate": {},
+   "base": " ",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 46,
+   "modifiers": [
+    "Ctrl",
+    "Meta"
+   ],
+   "qt": "Ctrl+Meta+Delete",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": false,
+   "shift": false,
+   "meta": true
+  },
+  {
+   "vk": 72,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+H",
+   "translate": {
+    "100": "H"
+   },
+   "base": "H",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 65,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+A",
+   "translate": {
+    "100": "A"
+   },
+   "base": "A",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 90,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+Z",
+   "translate": {
+    "100": "Z"
+   },
+   "base": "Z",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 49,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+!",
+   "translate": {
+    "100": "!"
+   },
+   "base": "1",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 48,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+)",
+   "translate": {
+    "100": ")"
+   },
+   "base": "0",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 50,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+@",
+   "translate": {
+    "100": "@"
+   },
+   "base": "2",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 54,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+^",
+   "translate": {
+    "100": "^"
+   },
+   "base": "6",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 186,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+:",
+   "translate": {
+    "100": ":"
+   },
+   "base": ";",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 187,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta++",
+   "translate": {
+    "100": "+"
+   },
+   "base": "=",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 188,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+<",
+   "translate": {
+    "100": "<"
+   },
+   "base": ",",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 189,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+_",
+   "translate": {
+    "100": "_"
+   },
+   "base": "-",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 190,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+>",
+   "translate": {
+    "100": ">"
+   },
+   "base": ".",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 191,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+?",
+   "translate": {
+    "100": "?"
+   },
+   "base": "/",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 192,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+~",
+   "translate": {
+    "100": "~"
+   },
+   "base": "`",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 219,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+{",
+   "translate": {
+    "100": "{"
+   },
+   "base": "[",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 220,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+|",
+   "translate": {
+    "100": "|"
+   },
+   "base": "\\",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 221,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+}",
+   "translate": {
+    "100": "}"
+   },
+   "base": "]",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 222,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+\"",
+   "translate": {
+    "100": "\""
+   },
+   "base": "'",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 97,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+1",
+   "translate": {
+    "100": ""
+   },
+   "base": "1",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 105,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+9",
+   "translate": {
+    "100": ""
+   },
+   "base": "9",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 106,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+*",
+   "translate": {
+    "100": "*"
+   },
+   "base": "*",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 107,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta++",
+   "translate": {
+    "100": "+"
+   },
+   "base": "+",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 109,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+-",
+   "translate": {
+    "100": "-"
+   },
+   "base": "-",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 110,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+.",
+   "translate": {
+    "100": "."
+   },
+   "base": ".",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 111,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+/",
+   "translate": {
+    "100": "/"
+   },
+   "base": "/",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 116,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+F5",
+   "translate": {},
+   "base": "",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 37,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+Left",
+   "translate": {},
+   "base": "",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 32,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+Space",
+   "translate": {},
+   "base": " ",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 46,
+   "modifiers": [
+    "Shift",
+    "Meta"
+   ],
+   "qt": "Shift+Meta+Delete",
+   "translate": {},
+   "base": "",
+   "ctrl": false,
+   "alt": false,
+   "shift": true,
+   "meta": true
+  },
+  {
+   "vk": 72,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+H",
+   "translate": {
+    "111": "",
+    "101": "H"
+   },
+   "base": "H",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 65,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+A",
+   "translate": {
+    "111": "",
+    "101": "A"
+   },
+   "base": "A",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 90,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+Z",
+   "translate": {
+    "111": "",
+    "101": "Z"
+   },
+   "base": "Z",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 49,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+!",
+   "translate": {
+    "111": "",
+    "101": "!"
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 48,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+)",
+   "translate": {
+    "111": "",
+    "101": ")"
+   },
+   "base": "0",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 50,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+@",
+   "translate": {
+    "111": "",
+    "101": "@"
+   },
+   "base": "2",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 54,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+^",
+   "translate": {
+    "111": "",
+    "101": "^"
+   },
+   "base": "6",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 186,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+:",
+   "translate": {
+    "111": "",
+    "101": ":"
+   },
+   "base": ";",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 187,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift++",
+   "translate": {
+    "111": "",
+    "101": "+"
+   },
+   "base": "=",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 188,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+<",
+   "translate": {
+    "111": "",
+    "101": "<"
+   },
+   "base": ",",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 189,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+_",
+   "translate": {
+    "111": "",
+    "101": "_"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 190,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+>",
+   "translate": {
+    "111": "",
+    "101": ">"
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 191,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+?",
+   "translate": {
+    "111": "",
+    "101": "?"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 192,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+~",
+   "translate": {
+    "111": "",
+    "101": "~"
+   },
+   "base": "`",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 219,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+{",
+   "translate": {
+    "111": "",
+    "101": "{"
+   },
+   "base": "[",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 220,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+|",
+   "translate": {
+    "111": "",
+    "101": "|"
+   },
+   "base": "\\",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 221,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+}",
+   "translate": {
+    "111": "",
+    "101": "}"
+   },
+   "base": "]",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 222,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+\"",
+   "translate": {
+    "111": "",
+    "101": "\""
+   },
+   "base": "'",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 97,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+1",
+   "translate": {
+    "111": "",
+    "101": ""
+   },
+   "base": "1",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 105,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+9",
+   "translate": {
+    "111": "",
+    "101": ""
+   },
+   "base": "9",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 106,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+*",
+   "translate": {
+    "111": "",
+    "101": "*"
+   },
+   "base": "*",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 107,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift++",
+   "translate": {
+    "111": "",
+    "101": "+"
+   },
+   "base": "+",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 109,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+-",
+   "translate": {
+    "111": "",
+    "101": "-"
+   },
+   "base": "-",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 110,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+.",
+   "translate": {
+    "111": "",
+    "101": "."
+   },
+   "base": ".",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 111,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+/",
+   "translate": {
+    "111": "",
+    "101": "/"
+   },
+   "base": "/",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 116,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+F5",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 37,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+Left",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  },
+  {
+   "vk": 46,
+   "modifiers": [
+    "Ctrl",
+    "Alt",
+    "Shift"
+   ],
+   "qt": "Ctrl+Alt+Shift+Delete",
+   "translate": {},
+   "base": "",
+   "ctrl": true,
+   "alt": true,
+   "shift": true,
+   "meta": false
+  }
+ ]
+}

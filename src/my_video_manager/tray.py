@@ -52,7 +52,7 @@ class TrayControls(QObject):
             if isValid(focus) and focus.isVisible() and focus.window() in (self.window, self.window.web_host.dialogs.container):
                 focus.setFocus()
         if emergency:
-            # 설정 메뉴·드롭다운 목록처럼 창과 함께 닫힌 팝업을 같은 자리에 다시 연다.
+            # 설정 메뉴처럼 창과 함께 닫힌 Qt 메뉴를 같은 자리에 다시 연다.
             self.window.reopen_emergency_popups()
 
     def activated(self, reason):

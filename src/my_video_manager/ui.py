@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         # 긴급 탈출로 닫은 메뉴와 그때의 화면. 복귀 때 같은 화면이면 메뉴를 다시 연다.
         self._emergency_popups = []
         self._emergency_view = None
+        self._reopen_when_active = False
         self.position_timer = QTimer(self)
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
@@ -161,6 +162,10 @@ class MainWindow(QMainWindow):
             self.fullscreen_settings_shortcut.setEnabled(self.isFullScreen())
             self.web_host.dialogs.sync_shortcut()
             self.playback_page.set_fullscreen(self.isFullScreen())
+        if (event.type() == QEvent.Type.ActivationChange and getattr(self, "_reopen_when_active", False)
+                and self.isActiveWindow()):
+            # 활성화 처리가 끝난 뒤 메뉴를 연다.
+            QTimer.singleShot(0, self.reopen_emergency_popups)
 
     def show_fullscreen_settings_menu(self):
         if self.web_host.dialogs.blocks_shell_actions:
@@ -190,9 +195,11 @@ class MainWindow(QMainWindow):
             if QApplication.activeModalWidget() is modal:
                 break
         focus = QApplication.focusWidget()
-        # 메뉴 팝업은 창과 함께 닫고 복귀 때 같은 자리에 다시 연다. 웹 목록은 웹 대화상자 층이 기억한다.
+        # Qt 메뉴 팝업은 창과 함께 닫고 복귀 때 같은 자리에 다시 연다. 웹 목록·메뉴는 닫힌 채 둔다.
+        self.web_host.close_popups()
         self._emergency_view = self._view()
         self._emergency_popups = []
+        self._reopen_when_active = False
         while (popup := QApplication.activePopupWidget()) is not None:
             if isinstance(popup, QMenu):
                 self._emergency_popups.append((popup, self.mapFromGlobal(popup.pos()), popup.activeAction()))
@@ -215,14 +222,18 @@ class MainWindow(QMainWindow):
         return self.pages.currentWidget(), self.web_host.active_tab, self.core.playback.session
 
     def reopen_emergency_popups(self):
-        """긴급 탈출 전에 열려 있던 메뉴·목록을 다시 연다.
+        """긴급 탈출 전에 열려 있던 Qt 메뉴(설정·재생 메뉴)를 다시 연다.
 
-        그사이 화면이 바뀌었으면(트레이 대기열 보기 등) 열지 않는다.
+        창이 활성화된 뒤에 연다. 먼저 열면 메뉴가 전경 창이 되어 앱 창이 활성 창이 아니게 되고
+        다시 연 메뉴 위에서 긴급 탈출 키를 받지 못한다. 그사이 화면이 바뀌었으면(트레이 대기열 보기 등) 열지 않는다.
         """
+        if not self.isActiveWindow():
+            self._reopen_when_active = bool(self._emergency_popups)
+            return
+        self._reopen_when_active = False
         popups, self._emergency_popups = self._emergency_popups, []
         if self._emergency_view != self._view():
             return
-        self.web_host.dialogs.reopen_popup()
         for menu, offset, action in reversed(popups):
             if menu is self.settings_menu:
                 point = self.web_host.settings_menu_point()

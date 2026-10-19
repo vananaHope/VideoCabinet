@@ -2,6 +2,7 @@
 
 import json
 import os
+import warnings
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 if os.environ["QT_QPA_PLATFORM"] == "offscreen":
@@ -437,6 +438,20 @@ def open_playback_menu(window, menu):
     return popup
 
 
+def activated(window):
+    """OS가 복귀한 창을 활성화한다. offscreen은 다시 보인 창의 활성화를 앱에 알리지 않으므로 같은 알림을 준다."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        QApplication.setActiveWindow(window)
+    QApplication.processEvents()
+    QApplication.processEvents()
+
+
+def press_emergency_on(popup):
+    QTest.keyClick(popup, Qt.Key.Key_H, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    QApplication.processEvents()
+
+
 @pytest.mark.parametrize("menu", ["settings", "playback"])
 def test_playback_popup_menu_hides_with_window_and_reopens_as_it_was(window, menu):
     _, player = play_to_twenty_seconds(window)
@@ -447,19 +462,19 @@ def test_playback_popup_menu_hides_with_window_and_reopens_as_it_was(window, men
     QTest.keyClick(popup, Qt.Key.Key_Down)
     highlighted = popup.activeAction()
     assert highlighted is not None
-    QTest.keyClick(popup, Qt.Key.Key_H, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
-    QApplication.processEvents()
+    press_emergency_on(popup)
     assert not window.isVisible() and not window.isFullScreen()
     assert QApplication.activePopupWidget() is None and not popup.isVisible()
     assert player.paused and window.balloons == []
     QTest.qWait(100)
     window.tray.open()
-    QApplication.processEvents()
+    activated(window)
     # 메뉴는 같은 기준 위치(전체 화면을 푼 창 기준)에 다시 열리고 고르던 항목도 그대로다.
-    assert window.isVisible() and window.pages.currentWidget() is window.playback_page
+    assert window.pages.currentWidget() is window.playback_page
     assert QApplication.activePopupWidget() is popup and popup.isVisible()
     assert popup.activeAction() is highlighted
     assert window.frameGeometry().contains(popup.pos())
+    assert window.isActiveWindow() and window.has_emergency_focus()
     assert player.paused
     # 다시 연 메뉴의 기존 키: Esc로 닫으면 영상 화면 초점으로 돌아간다.
     QTest.keyClick(popup, Qt.Key.Key_Escape)
@@ -470,10 +485,54 @@ def test_playback_popup_menu_hides_with_window_and_reopens_as_it_was(window, men
 def test_popup_menu_is_not_reopened_when_returning_to_another_screen(window):
     play_to_twenty_seconds(window)
     popup = open_playback_menu(window, "playback")
-    QTest.keyClick(popup, Qt.Key.Key_H, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    press_emergency_on(popup)
     assert not window.isVisible()
     window.tray.show_queue()
-    QApplication.processEvents()
+    activated(window)
+    assert window.web_host.active_tab == "queue" and QApplication.activePopupWidget() is None
+    # 대기열에서 다시 숨겼다 돌아와도 예전 메뉴가 열리지 않는다.
+    emergency_key(window)
+    assert not window.isVisible()
+    window.tray.open()
+    activated(window)
+    assert window.isVisible() and QApplication.activePopupWidget() is None
+
+
+def test_popup_menu_hidden_again_from_the_reopened_menu_follows_the_latest_screen(window):
+    """다시 연 메뉴 위에서 곧바로 긴급 탈출 키를 누르면 메뉴와 함께 숨고, 그 뒤 돌아온 화면 기준으로만 다시 열린다."""
+    play_to_twenty_seconds(window)
+    popup = open_playback_menu(window, "settings")
+    QTest.keyClick(popup, Qt.Key.Key_Down)
+    highlighted = popup.activeAction()
+    press_emergency_on(popup)
+    window.tray.open()
+    activated(window)
+    assert QApplication.activePopupWidget() is popup
+    press_emergency_on(popup)
+    assert not window.isVisible() and not popup.isVisible() and QApplication.activePopupWidget() is None
+    window.tray.open()
+    activated(window)
+    assert QApplication.activePopupWidget() is popup and popup.activeAction() is highlighted
+    press_emergency_on(popup)
+    assert not window.isVisible()
+    window.tray.show_queue()
+    activated(window)
+    assert window.web_host.active_tab == "queue" and QApplication.activePopupWidget() is None
+    assert not popup.isVisible()
+
+
+def test_popup_menu_waiting_for_activation_is_dropped_when_hidden_again(window):
+    """복귀했지만 창이 활성화되기 전에 다시 숨기고 다른 화면으로 돌아오면 예전 메뉴가 늦게 열리지 않는다."""
+    play_to_twenty_seconds(window)
+    popup = open_playback_menu(window, "settings")
+    press_emergency_on(popup)
+    window.tray.open()
+    # 창 활성화 알림이 오기 전에는 열지 않는다. 먼저 열면 메뉴가 전경 창이 되어 앱 창이 활성 창이 아니게 된다.
+    assert not window.isActiveWindow() and QApplication.activePopupWidget() is None
+    window.emergency_hide()  # 활성화되기 전이라 키 대신 같은 동작을 부른다.
+    window.tray.show_queue()
+    activated(window)
+    QTest.qWait(50)
     assert window.web_host.active_tab == "queue" and QApplication.activePopupWidget() is None
 
 
@@ -493,67 +552,121 @@ def test_key_help_hides_with_window_and_returns(window):
     assert not help_panel.isVisible() and window.pages.currentWidget() is window.playback_page
 
 
-def blur_while_hidden(window):
-    """실제 Chromium은 창이 숨으면 초점 요소와 창에 blur를 보낸다(offscreen은 보내지 않는다). 같은 이벤트를 보낸다.
-
-    숨은 페이지는 애니메이션 프레임을 돌리지 않으므로 타이머로 React 갱신을 기다린다.
-    """
-    js(window, "document.activeElement && document.activeElement.dispatchEvent(new FocusEvent('focusout', {bubbles: true}));"
-               " window.dispatchEvent(new Event('blur')); window.blurred = false; setTimeout(() => setTimeout(() => { window.blurred = true }, 20)); true")
+def settle_hidden(window):
+    """숨은 페이지는 애니메이션 프레임을 돌리지 않으므로 타이머로 React 갱신을 기다린다."""
+    js(window, "window.blurred = false; setTimeout(() => setTimeout(() => { window.blurred = true }, 20)); true")
     wait_for(lambda: js(window, "window.blurred"))
 
 
-def option_texts(window):
-    return js(window, "JSON.stringify(Array.from(document.querySelectorAll('[role=option]')).map(e => e.textContent))")
+def busy_page(window, ms=400):
+    """웹 쪽이 잠시 바빠 숨기기 전에 보낸 닫기 신호가 복귀·화면 전환 뒤에 처리되게 한다."""
+    window.web_host.engine_page.runJavaScript(
+        f"(() => {{ const end = performance.now() + {ms}; while (performance.now() < end); }})()")
 
 
-def test_dropdown_closed_by_hiding_reopens_on_return(window):
+def no_popup(window, selector):
+    """어느 탭에도(숨은 탭의 Portal 포함) 열린 목록·메뉴가 없다."""
+    return js(window, f"document.querySelectorAll({json.dumps(selector)}).length") == 0
+
+
+def assert_stays_closed(window, selector):
+    wait_for(lambda: no_popup(window, selector))
+    QTest.qWait(1100)
+    assert no_popup(window, selector)
+
+
+def open_sort_list_on_another_item(window):
+    """라이브러리 정렬 목록을 펼치고 커서를 다른 항목으로 옮긴다(아직 확정하지 않음)."""
     window.navigate_web_tab("library")
     focus_field(window, "정렬")
+    value = js(window, f"{labeled('정렬')}.textContent")
     QTest.keyClick(view(window), Qt.Key.Key_Down)
     wait_shown(window, "[role=option]")
-    options = option_texts(window)
+    QTest.keyClick(view(window), Qt.Key.Key_Down)
+    settle(window)
+    cursor = js(window, "document.activeElement.textContent")
+    assert cursor != value
+    return value
+
+
+def test_dropdown_closes_on_hiding_and_returns_closed_without_committing_the_cursor(window):
+    value = open_sort_list_on_another_item(window)
     press_emergency(view(window))
     assert not window.isVisible() and window.balloons == []
-    blur_while_hidden(window)
-    assert not js(window, f"!!{shown('[role=option]')}")
+    # 숨긴 동안 닫힌다(offscreen은 실제 창 blur를 보내지 않으므로 셸이 보낸 닫기 신호로 닫힌다).
+    settle_hidden(window)
+    assert no_popup(window, "[role=option]")
     restore(window)
     assert window.isVisible() and window.web_host.active_tab == "library"
-    wait_shown(window, "[role=option]")
-    QTest.qWait(500)
-    assert option_texts(window) == options
-    assert js(window, f"{labeled('정렬')}.getAttribute('aria-expanded')") == "true"
-    # 다시 연 목록의 기존 키: Esc는 목록만 닫는다.
-    QTest.keyClick(view(window), Qt.Key.Key_Escape)
-    wait_for(lambda: not js(window, f"!!{shown('[role=option]')}"))
+    assert_stays_closed(window, "[role=option]")
+    assert js(window, f"{labeled('정렬')}.getAttribute('aria-expanded')") == "false"
+    assert js(window, f"{labeled('정렬')}.textContent") == value
+    assert_focus_returned(window, window, "정렬")
 
 
-def test_dropdown_in_playback_dialog_reopens_with_the_dialog(window):
-    """재생 중 옮겨 띄운 대화상자(번역 설정) 안의 선택 목록도 대화상자와 함께 복귀한다."""
+def test_dropdown_closed_late_after_quick_return_stays_closed(window):
+    """닫기 신호가 복귀보다 늦게 처리돼도 목록은 닫히고 다시 열리지 않는다."""
+    value = open_sort_list_on_another_item(window)
+    busy_page(window)
+    QTest.keyClick(view(window), Qt.Key.Key_H, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    assert not window.isVisible()
+    window.tray.open()
+    assert window.isVisible()
+    assert_stays_closed(window, "[role=option]")
+    assert js(window, f"{labeled('정렬')}.textContent") == value
+
+
+def test_dropdown_closed_late_does_not_stay_over_the_queue_view(window):
+    """대기열 보기로 바로 돌아와도 이전 탭(라이브러리)의 목록이 대기열 위에 남지 않는다."""
+    value = open_sort_list_on_another_item(window)
+    busy_page(window)
+    QTest.keyClick(view(window), Qt.Key.Key_H, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    window.tray.show_queue()
+    assert window.isVisible() and window.web_host.active_tab == "queue"
+    assert_stays_closed(window, "[role=option]")
+    window.navigate_web_tab("library")
+    wait_shown(window, '[aria-label="정렬"]')
+    assert js(window, f"{labeled('정렬')}.textContent") == value
+    assert no_popup(window, "[role=option]")
+
+
+def test_dropdown_stays_closed_after_hiding_again_right_after_return(window):
+    """복귀 직후 다시 숨기고 대기열 보기로 돌아와도 목록이 열리지 않는다."""
+    open_sort_list_on_another_item(window)
+    press_emergency(view(window))
+    restore(window)
+    QTest.qWait(150)
+    window.emergency_hide()  # offscreen은 다시 보인 창을 활성으로 되돌리지 않으므로 키 대신 같은 동작을 부른다.
+    assert not window.isVisible()
+    window.tray.show_queue()
+    assert window.web_host.active_tab == "queue"
+    assert_stays_closed(window, "[role=option]")
+
+
+def test_dropdown_in_playback_dialog_closes_and_the_dialog_returns(window):
+    """재생 중 옮겨 띄운 대화상자(번역 설정) 안의 선택 목록은 닫히고 대화상자는 그대로 복귀한다."""
     play_to_twenty_seconds(window)
     dialogs = window.web_host.dialogs
 
     def check():
         wait_for(lambda: dialogs.container is not None and dialogs.container.isVisible())
         focus_field(window, "번역 방식")
+        value = js(window, f"{labeled('번역 방식')}.textContent")
         QTest.keyClick(view(window), Qt.Key.Key_Down)
         wait_shown(window, "[role=option]")
-        options = option_texts(window)
+        QTest.keyClick(view(window), Qt.Key.Key_Down)
         press_emergency(view(window))
         assert not window.isVisible() and not dialogs.container.isVisible()
-        blur_while_hidden(window)
         window.tray.open()
         QApplication.processEvents()
-        assert dialogs.container.isVisible()
-        wait_shown(window, "[role=option]")
-        # 대화상자 창 활성화가 뒤따라도 다시 연 목록이 닫히지 않는다.
-        QTest.qWait(500)
-        assert option_texts(window) == options
+        assert dialogs.container.isVisible() and dialogs.active
+        assert_stays_closed(window, "[role=option]")
+        assert js(window, f"{labeled('번역 방식')}.textContent") == value
 
     open_playback_dialog(window, check, entry=window.translations.settings)
 
 
-def test_tag_candidates_closed_by_hiding_reopen_on_return(window):
+def test_tag_candidates_close_on_hiding_and_the_typed_text_returns(window):
     from my_video_manager.web_dialogs_entries import TagEditor
     core = window.core
     first, second = core.videos()
@@ -564,33 +677,38 @@ def test_tag_candidates_closed_by_hiding_reopen_on_return(window):
         focus_field(window, "태그 이름")
         type_text(window, "le")
         wait_shown(window, '[aria-label="태그 자동 완성"]')
+        QTest.keyClick(view(window), Qt.Key.Key_Down)
+        settle(window)
+        assert js(window, "!!document.querySelector('[role=option][aria-selected=true]')")
         press_emergency(view(window))
         assert not window.isVisible() and dialogs.active
-        blur_while_hidden(window)
-        assert not js(window, f"!!{labeled('태그 자동 완성')}")
+        settle_hidden(window)
+        assert no_popup(window, '[aria-label="태그 자동 완성"]')
         restore(window)
-        wait_shown(window, '[aria-label="태그 자동 완성"]')
+        assert_stays_closed(window, '[aria-label="태그 자동 완성"]')
+        # 고르던 후보는 추가되지 않고 입력한 글자와 초점이 그대로다.
         assert field_value(window, "태그 이름") == "le"
+        assert [tag.name for tag in core.video_tags(first.id)] == []
         assert_focus_returned(window, window, "태그 이름")
 
     within(lambda: TagEditor(core, video_id=first.id, parent=window).exec(), dialogs, check)
 
 
-def menu_items(window):
-    return js(window, "JSON.stringify(Array.from(document.querySelectorAll('[role=menuitem]')).map(e => e.textContent))")
-
-
-def test_context_menu_closed_by_hiding_reopens_on_return(window):
+def test_context_menu_closes_on_hiding_and_returns_closed(window):
     window.navigate_web_tab("library")
     wait_shown(window, "#library-grid [id^=video-]")
     js(window, f"""(() => {{ const card = {shown('#library-grid [id^=video-]')}; const r = card.getBoundingClientRect();
         card.dispatchEvent(new MouseEvent('contextmenu', {{bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 20}})) }})()""")
     wait_shown(window, "[role=menu]")
-    items = menu_items(window)
+    # 포인터를 항목 위에 올려 고르는 중인 상태로 둔다(실행하지 않음).
+    js(window, f"{shown('[role=menuitem]')}.dispatchEvent(new PointerEvent('pointermove', {{bubbles: true, pointerType: 'mouse'}}))")
+    # offscreen 페이지는 초점 이벤트를 보내지 않으므로 강조 대신 항목 초점으로 확인한다.
+    wait_for(lambda: js(window, "document.activeElement.getAttribute('role')") == "menuitem")
     press_emergency(view(window))
     assert not window.isVisible()
-    blur_while_hidden(window)
-    assert not js(window, f"!!{shown('[role=menu]')}")
+    settle_hidden(window)
+    assert no_popup(window, "[role=menu]")
     restore(window)
-    wait_shown(window, "[role=menu]")
-    assert menu_items(window) == items
+    assert_stays_closed(window, "[role=menu]")
+    # 고르던 메뉴 항목은 실행되지 않았다.
+    assert not window.web_host.dialogs.active and not window.web_host.dialogs.web_modal

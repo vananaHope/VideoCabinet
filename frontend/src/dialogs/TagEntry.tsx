@@ -3,7 +3,6 @@ import type { DialogRow, DialogsBridge } from '@/bridge-types'
 import { request } from '@/bridge'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { useRestorablePopup } from '@/lib/popup-restore'
 
 export function TagEntry({ bridge, add, composing }: { bridge: DialogsBridge; add: (name: string) => Promise<boolean>; composing: { current: boolean } }) {
   const [text, setText] = useState('')
@@ -11,8 +10,6 @@ export function TagEntry({ bridge, add, composing }: { bridge: DialogsBridge; ad
   const [candidate, setCandidate] = useState<number | null>(null)
   const [open, setOpen] = useState(false)
   const input = useRef<HTMLInputElement>(null)
-  // 긴급 탈출로 입력란 blur에 닫힌 후보 목록은 복귀 때 다시 연다.
-  useRestorablePopup(open && rows.length > 0, () => setOpen(true))
   useEffect(() => {
     let live = true
     request<{ rows: DialogRow[] }>(reply => bridge.candidates(text, reply)).then(result => { if (live) setRows(result.rows) }).catch(() => { if (live) setRows([]) })
