@@ -139,6 +139,54 @@ def key(value):
     settle()
 
 
+TOGGLE = "document.querySelector('button[aria-label=\"폴더 패널\"]')"
+
+
+def layout(name):
+    """#194: 검색줄·격자·폴더 패널이 1100px 창 폭을 넘지 않는지 잰다."""
+    value = json.loads(js("""JSON.stringify((() => {
+      const row = document.querySelector('[aria-label="영상 제목 빠른 검색"]').parentElement.parentElement, bounds = row.getBoundingClientRect()
+      const grid = document.getElementById('library-grid'), panel = document.getElementById('library-folder-panel')
+      return {rowOverflow: row.scrollWidth - row.clientWidth, outside: [...row.children].filter(c => c.getBoundingClientRect().right > bounds.right + 0.5).length,
+        searchWidth: document.querySelector('[aria-label="영상 제목 빠른 검색"]').clientWidth,
+        pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        gridWidth: grid.clientWidth, columns: Number(grid.getAttribute('aria-colcount')), panelWidth: panel ? panel.offsetWidth : 0,
+        panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : 0,
+        truncatedFolders: panel ? [...panel.querySelectorAll('[role=treeitem] .truncate')].filter(e => e.scrollWidth > e.clientWidth).length : 0}
+    })())"""))
+    assert value['rowOverflow'] <= 0 and value['outside'] == 0 and value['pageOverflow'] <= 0, (name, value)
+    assert value['panelOverflow'] <= 0 and value['gridWidth'] > 0 and value['columns'] >= 1, (name, value)
+    metrics.setdefault('layout', {})[name] = value
+
+
+def check_folder_toggle():
+    """#194: 아이콘 버튼은 Tab으로 닿고 Enter·Space로 패널을 여닫는다. 닫아도 고른 폴더를 저장해 둔다."""
+    view(mode='folders', folder=page.options['folder'], collapsed_folders=page.options['collapsed_folders'])
+    js("document.getElementById('library-folders').focus()")
+    QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+    settle()
+    assert js('document.activeElement.getAttribute("aria-label")') == '폴더 패널'
+    assert js(TOGGLE + '.getAttribute("aria-expanded")') == 'true' and js(TOGGLE + '.title') == '폴더 패널 닫기'
+    folder, members = page.options['folder'], list(page.visible_ids)
+    layout(f'{args.count}-panel-open')
+    key(Qt.Key.Key_Return)
+    wait(lambda: page.options['mode'] == 'all')
+    assert page.options['folder'] == folder and core.library_view_options()['folder'] == folder
+    assert len(page.visible_ids) == args.count
+    assert js(TOGGLE + '.getAttribute("aria-expanded")') == 'false' and js(TOGGLE + '.title') == '폴더 패널 열기'
+    assert not js("!!document.getElementById('library-folder-panel')")
+    assert js('document.activeElement.getAttribute("aria-label")') == '폴더 패널'
+    capture(f'{args.count}-panel-closed')
+    layout(f'{args.count}-panel-closed')
+    key(Qt.Key.Key_Space)
+    wait(lambda: page.options['mode'] == 'folders')
+    assert page.options['folder'] == folder and page.visible_ids == members
+    assert js(TOGGLE + '.getAttribute("aria-expanded")') == 'true'
+    reopened = AppCore(media=media, clock=lambda: datetime.now(timezone.utc), database=core.database)
+    assert reopened.library_view_options()['mode'] == 'folders' and reopened.library_view_options()['folder'] == folder
+    metrics['checks'].append('#194 폴더 패널 아이콘 Shift+Tab 도달·Enter 닫기(폴더 거르기 해제, 선택 보존)·Space 열기(폴더 복원)·설정 저장')
+
+
 try:
     wait(lambda: js("!!document.getElementById('library-grid')"))
     settle()
@@ -172,7 +220,8 @@ try:
                 settle()
         view(mode='folders')
         capture(f'{args.count}-folders-deep-long')
-        if args.count:
+        # 적은 합성 위치는 시작 검사가 먼저 끝나 파일 없음 한 폴더만 남을 수 있다. 하위 폴더가 있을 때만 트리 키를 검사한다.
+        if any(node['parent'] for node in page.index.folders):
             js("document.getElementById('library-folders').focus()")
             key(Qt.Key.Key_Down)
             root_id = page.options['folder']
@@ -191,6 +240,8 @@ try:
             key(Qt.Key.Key_Tab)
             assert js('document.activeElement.id') == 'library-grid'
             metrics['checks'].append('트리 Tab 격자 이동')
+        check_folder_toggle()
+        if args.count:
             view(viewing='unwatched', tags=[t.id for t in core.tags()])
             capture(f'{args.count}-filter-chips')
             js("[...document.querySelectorAll('button')].find(b=>b.textContent==='필터').click()")

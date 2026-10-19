@@ -102,6 +102,20 @@ def test_folder_counts_descendants_copies_direct_and_missing_without_disk_io(lib
     assert ids(core, mode='folders', folder='missing') == [c.id]
 
 
+def test_closed_folder_panel_ignores_but_keeps_selected_folder_across_restart(library):
+    core = library
+    a, b, c = core.videos()
+    c.locations[0].path.unlink()
+    core.scan()
+    core.save_library_view_options({**default_options(), 'mode': 'folders', 'folder': 'missing'})
+    closed = core.save_library_view_options({**core.library_view_options(), 'mode': 'all'})
+    assert closed['folder'] == 'missing'
+    assert core.library_view_ids(closed) == [a.id, b.id, c.id]
+    reopened = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database)
+    assert reopened.library_view_options() == closed
+    assert reopened.library_view_ids({**reopened.library_view_options(), 'mode': 'folders'}) == [c.id]
+
+
 def test_date_presets_inclusive_custom_and_order(library):
     core = library
     a, b, c = core.videos()
