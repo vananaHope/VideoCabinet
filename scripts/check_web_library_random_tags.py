@@ -306,6 +306,15 @@ try:
         assert status() == ('태그를 하나 이상 고르세요.' if tags else '') and play_disabled(), status()
         capture('dialog-open')
         dialog_layout('dialog-open')
+        # 창은 실제 모달이다. 열린 동안 예약 키(Ctrl+2)가 탭을 바꾸지 않는다.
+        key(Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
+        settle(300)
+        assert host.active_tab == 'library' and dialog_open(), host.active_tab
+        # 모달은 키를 입력으로 넘긴다. QTest가 Ctrl+2에 실은 글자 '2'가 검색어로 들어가면 Esc로 지운다(창은 남음).
+        if js("document.querySelector('[role=dialog] [role=combobox]').value"):
+            key(Qt.Key.Key_Escape)
+        assert dialog_open() and not js("document.querySelector('[role=dialog] [role=combobox]').value")
+        metrics['checks'].append('창이 열린 동안 Ctrl+2는 탭을 바꾸지 않음(셸 모달 차단)')
         metrics['checks'].append('▾ Enter → ↓↓ → 태그에서… Enter로 창 열기, 시작 초점은 태그 검색, 태그 없으면 재생 막힘')
         if not tags:
             assert js("document.querySelector('[role=dialog]').textContent.includes('등록한 태그가 없습니다.')")
