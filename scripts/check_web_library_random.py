@@ -84,6 +84,11 @@ played = []
 if not args.verify:
     # offscreen에서는 mpv 대신 재생 요청만 기록한다. 실제 재생 경로는 --verify가 확인한다.
     window.play = played.append
+else:
+    # 기존 재생 경로가 정한 시작 위치(이어볼 위치)를 기록한다.
+    switch_to = core.switch_to
+    starts = []
+    core.switch_to = lambda video_id, **kw: starts.append(switch_to(video_id, **kw)) or starts[-1]
 
 
 def wait(predicate, seconds=30):
@@ -208,7 +213,7 @@ def check_keyboard():
     key(Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
     assert js(ACTIVE) == '무작위 재생'
     metrics['checks'].append('Tab 버튼→▾, ▾ Enter 메뉴(현재 결과에서)·Esc 닫기 후 ▾ 초점 복원, Shift+Tab 버튼')
-    if args.count:
+    if args.count and not args.verify:
         js(TRIGGER + '.focus()')
         key(Qt.Key.Key_Return)
         wait(lambda: js("!!document.querySelector('[role=menu]')"))
@@ -279,8 +284,11 @@ try:
         QTest.qWait(1500)
         session = core.playback.session
         assert session.video_id == playable.id, session
-        metrics['playback_start'] = window.player._initial_start if window.player else None
-        assert abs(metrics['playback_start'] - metrics['resume_point']) < 0.01, metrics
+        metrics['playback_start'] = starts
+        mpv = getattr(window.player, '_player', None)
+        metrics['mpv_time_pos'] = getattr(mpv, 'time_pos', None)
+        assert len(starts) == 1 and abs(starts[0] - metrics['resume_point']) < 0.01, metrics
+        assert metrics['mpv_time_pos'] is not None and metrics['mpv_time_pos'] >= metrics['resume_point'] - 1, metrics
         window.playback_page.focus_content()
         QTest.keyClick(window.surface, Qt.Key.Key_Escape)
         wait(lambda: window.pages.currentWidget() is host)
