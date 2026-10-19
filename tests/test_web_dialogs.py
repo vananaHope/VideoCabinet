@@ -139,6 +139,11 @@ def test_tag_entry_lists_registered_tags_by_video_count(window_factory, core):
         assert [row['title'] for row in data['rows']] == ['SF액션']
         assert [(t['name'], t['videoCount']) for t in data['tags']] == [('SF액션', 2), ('자주', 2), ('새 태그', 0)]
         assert len(core.tags()) == 3
+        act(dialogs, 'manage')
+        act(dialogs, 'rename', selected=str(data['tags'][2]['id']))
+        act(dialogs, 'save', name='바꾼 태그')
+        data = act(dialogs, 'close')
+        assert data['kind'] == 'tags' and [t['name'] for t in data['tags']] == ['SF액션', '자주', '바꾼 태그']
     within(lambda: TagEditor(core, video_id=video.id, parent=window).exec(), dialogs, check)
 
 
