@@ -1,10 +1,13 @@
 """시리즈 번호·제목 틀의 순수 계산과 자동 묶기, 사용자 편집 저장."""
 
 from collections import Counter, defaultdict
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 import re
 import unicodedata
+
+from .viewing import ViewingStatus
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,23 @@ def adjacent_video(video_id: int, video_ids: tuple[int, ...], *, forward: bool) 
     except ValueError:
         return None
     return video_ids[index] if 0 <= index < len(video_ids) else None
+
+
+def next_episode(video_ids: tuple[int, ...],
+                 watched: Mapping[int, ViewingStatus] | Collection[int]) -> int | None:
+    """시청(틀어보기 제외)이 있는 가장 뒤 화의 바로 다음 화. 없거나 마지막 화면 None.
+
+    `watched`는 영상별 `ViewingStatus`이거나, 틀어보기가 아닌 시청이 있는 영상 ID 모음이다.
+    건너뛴 중간 화는 시청이 없으므로 다음 볼 화가 되지 않는다.
+    """
+    if isinstance(watched, Mapping):
+        seen = {video_id for video_id, status in watched.items() if status.finished or status.abandoned}
+    else:
+        seen = set(watched)
+    for index in reversed(range(len(video_ids))):
+        if video_ids[index] in seen:
+            return video_ids[index + 1] if index + 1 < len(video_ids) else None
+    return video_ids[0] if video_ids else None
 
 
 class SeriesStore:

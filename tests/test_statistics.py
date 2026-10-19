@@ -333,15 +333,15 @@ def test_combined_summary_matches_original_status_and_statistics_for_every_video
         abandoned = not finished and any(row.classify(settings) == ViewingKind.ABANDONED for row in rows)
         last = max((row for row in rows if row.last_position is not None), key=lambda row: row.id, default=None)
         point = last.last_position if abandoned and last is not None else None
+        counted = [row for row in rows if row.classify(settings) != ViewingKind.GLANCE]
         expected = ViewingStatus(
-            finished, abandoned, finished_count >= settings.favorite_count, finished_count,
+            finished, abandoned, len(counted) >= settings.favorite_count, finished_count, len(counted),
             point, point / last.duration * 100 if point is not None else None,
             max((row.updated_at for row in rows), default=None))
         assert viewing_status(tuple(rows), settings) == expected
         assert summary.statuses[vid] == expected
-        counted = [row for row in rows if row.classify(settings) != ViewingKind.GLANCE]
         stats = summary.statistics[vid]
-        assert stats.viewing_count == len(counted)
+        assert stats.viewing_count == expected.viewing_count == len(counted)
         assert stats.watched_seconds == pytest.approx(sum(row.played_seconds for row in counted))
         assert stats.last_viewed_at == (expected.last_viewed_at.isoformat() if expected.last_viewed_at else None)
 
@@ -354,7 +354,7 @@ def test_resume_percent_uses_duration_of_last_position_even_when_latest_viewing_
     )
     records = [ViewingRecord(v.id, v.video_id, v.duration, v.played_seconds,
                              v.started_at, v.updated_at, v.last_position) for v in rows]
-    expected = ViewingStatus(abandoned=True, resume_point=60, stopped_percent=30,
+    expected = ViewingStatus(abandoned=True, resume_point=60, stopped_percent=30, viewing_count=1,
                              last_viewed_at=rows[0].updated_at)
     assert viewing_status(rows, ViewingSettings()) == expected
     assert summarize_viewings(reversed(records), [1], ViewingSettings()).statuses[1] == expected

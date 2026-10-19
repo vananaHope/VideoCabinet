@@ -11,9 +11,11 @@ from typing import Iterable, Iterator, NamedTuple
 
 @dataclass(frozen=True)
 class ViewingSettings:
+    """`favorite_count`는 틀어보기를 뺀 시청(다 본 시청·보다 만 시청)의 횟수 기준이다."""
+
     finished_ratio: float = 0.9
     abandoned_ratio: float = 0.05
-    favorite_count: int = 2
+    favorite_count: int = 3
     resume_rewind: float = 3
     save_interval: float = 5
 
@@ -21,7 +23,7 @@ class ViewingSettings:
         if not 0 < self.abandoned_ratio < self.finished_ratio <= 1:
             raise ValueError("시청 분류 비율은 0 < 보다 만 < 다 봄 <= 1이어야 합니다.")
         if not isinstance(self.favorite_count, int) or self.favorite_count < 1:
-            raise ValueError("즐겨 보는 영상의 횟수는 양의 정수여야 합니다.")
+            raise ValueError("즐겨 보는 영상의 시청 횟수는 양의 정수여야 합니다.")
         if not isfinite(self.resume_rewind) or self.resume_rewind < 0:
             raise ValueError("이어보기 되감기는 유한한 음이 아닌 값이어야 합니다.")
         if not isfinite(self.save_interval) or self.save_interval <= 0:
@@ -110,6 +112,8 @@ class ViewingStatus:
     abandoned: bool = False
     favorite: bool = False
     finished_count: int = 0
+    # 틀어보기를 뺀 시청(다 본 시청 + 보다 만 시청) 수. 즐겨 보는 영상의 기준이다.
+    viewing_count: int = 0
     resume_point: float | None = None
     stopped_percent: float | None = None
     last_viewed_at: datetime | None = None
@@ -152,6 +156,7 @@ class ViewingSummary:
 class _ViewingState:
     """단일·일괄 조회가 공유하는 상태 계산. 통계 합계는 만들지 않는다."""
     finished_count: int = 0
+    viewing_count: int = 0
     has_abandoned: bool = False
     last_viewed_at: datetime | None = None
     last_position_id: int | None = None
@@ -161,6 +166,7 @@ class _ViewingState:
     def add(self, viewing: Viewing | ViewingRecord, settings: ViewingSettings) -> ViewingKind:
         kind = classify_viewing(viewing.played_seconds, viewing.duration, settings)
         self.finished_count += kind == ViewingKind.FINISHED
+        self.viewing_count += kind != ViewingKind.GLANCE
         self.has_abandoned = self.has_abandoned or kind == ViewingKind.ABANDONED
         updated = (datetime.fromisoformat(viewing.updated_at)
                    if isinstance(viewing.updated_at, str) else viewing.updated_at)
@@ -179,13 +185,13 @@ class _ViewingState:
         abandoned = not finished and self.has_abandoned
         point = self.last_position if abandoned else None
         return ViewingStatus(
-            finished, abandoned, self.finished_count >= settings.favorite_count, self.finished_count,
-            point, point / self.last_duration * 100 if point is not None else None, self.last_viewed_at)
+            finished, abandoned, self.viewing_count >= settings.favorite_count, self.finished_count,
+            self.viewing_count, point,
+            point / self.last_duration * 100 if point is not None else None, self.last_viewed_at)
 
 
 @dataclass(slots=True)
 class _ViewingTotals(_ViewingState):
-    viewing_count: int = 0
     seconds: float = 0.0
 
 
@@ -199,7 +205,6 @@ def summarize_viewings(records: Iterable[ViewingRecord], video_ids: Iterable[int
             continue
         kind = total.add(record, settings)
         if kind != ViewingKind.GLANCE:
-            total.viewing_count += 1
             total.seconds += record.played_seconds
     statuses, statistics = {}, {}
     for vid, total in totals.items():
