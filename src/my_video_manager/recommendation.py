@@ -9,14 +9,25 @@ from .series import next_episode
 from .tags import Tag
 
 ROW_LIMIT = 20
-# 줄 우선순위 순서. 새 줄은 여기와 select_recommendations의 후보에 함께 더한다.
-ROW_TITLES = {
-    "similar_tags": "태그가 비슷함",  # #203의 취향 맞춤이 대체할 때까지 유지한다.
-    "forgotten": "잊고 있던 영상",
-    "continue_watching": "이어 보기",
-    "next_episode": "다음 화",
-    "highlight_review": "하이라이트 복습",
-}
+
+
+@dataclass(frozen=True)
+class RecommendationRowDefinition:
+    kind: str
+    title: str
+    dedicated: bool = False
+
+
+# 표시 순서가 원본이다. 전용 줄부터 배정하며, 각 그룹 안의 배정 순서는 표시 순서다.
+# 새 줄은 정의와 select_recommendations의 후보를 더한다. 일반 줄은 dedicated=False다.
+ROW_DEFINITIONS = (
+    RecommendationRowDefinition("similar_tags", "태그가 비슷함"),  # #203의 취향 맞춤이 대체한다.
+    RecommendationRowDefinition("forgotten", "잊고 있던 영상"),
+    RecommendationRowDefinition("continue_watching", "이어 보기", dedicated=True),
+    RecommendationRowDefinition("next_episode", "다음 화", dedicated=True),
+    RecommendationRowDefinition("highlight_review", "하이라이트 복습", dedicated=True),
+)
+ROW_TITLES = {row.kind: row.title for row in ROW_DEFINITIONS}
 
 
 @dataclass(frozen=True)
@@ -35,10 +46,10 @@ class RecommendationRow:
 
 
 def assign_rows(candidates, limit=ROW_LIMIT) -> tuple[RecommendationRow, ...]:
-    """우선순위 순 후보 줄에서 영상마다 자신이 상위 limit 안에 드는 가장 위 줄 하나에만 배정한다.
+    """배정 순서대로 후보 줄을 받아 영상마다 상위 limit 안에 드는 첫 줄 하나에 배정한다.
 
-    위 줄에 배정한 영상을 아래 줄 후보에서 먼저 뺀 뒤 자르므로, 위 줄에서 밀려난 영상은
-    아래 줄 조건에 맞으면 그 줄에 나올 수 있다. 빈 줄은 결과에서 뺀다.
+    앞서 배정한 영상을 뒤 줄 후보에서 먼저 뺀 뒤 자르므로, 앞 줄에서 밀려난 영상은
+    뒤 줄 조건에 맞으면 그 줄에 나올 수 있다. 표시 순서와는 별개이며 빈 줄은 뺀다.
     """
     placed, rows = set(), []
     for row in candidates:
@@ -121,9 +132,12 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
         if vid in allowed and status.abandoned and now - stopped_at[vid] > continue_period:
             ranked["forgotten"].append(((stopped_at[vid].timestamp(), vid), Recommendation(
                 video, f"{status.stopped_percent:.0f}%에서 멈춘 뒤 {_elapsed_days(now, stopped_at[vid])}일 지났어요")))
-    return assign_rows(RecommendationRow(kind, ROW_TITLES[kind],
-                                         tuple(item for _, item in sorted(items, key=lambda pair: pair[0])))
-                       for kind, items in ranked.items())
+    allocation_order = sorted(ROW_DEFINITIONS, key=lambda row: not row.dedicated)
+    assigned = assign_rows(RecommendationRow(row.kind, row.title,
+                           tuple(item for _, item in sorted(ranked[row.kind], key=lambda pair: pair[0])))
+                           for row in allocation_order)
+    by_kind = {row.kind: row for row in assigned}
+    return tuple(by_kind[row.kind] for row in ROW_DEFINITIONS if row.kind in by_kind)
 
 
 class RecommendationStore:
