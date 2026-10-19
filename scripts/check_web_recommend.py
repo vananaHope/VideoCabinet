@@ -486,6 +486,19 @@ def verify():
         returned_to_card()
         assert window.pages.count() == 2
         checks.append('실창 카드 클릭 재생 → 복귀')
+
+        key(window, Qt.Key.Key_Backspace)
+        wait_until(lambda: video_id in {v.id for v in core.dismissed_videos()})
+        wait_until(lambda: active(window) not in (None, chosen))
+        chosen = active(window)
+        video_id = int(chosen.removeprefix('recommendation-'))
+        before = [item['video']['id'] for item in page.rows[0]['items']]
+        play_and_wait()
+        clock.now += timedelta(days=1)
+        key(window, Qt.Key.Key_Escape)
+        returned_to_card()
+        after = [item['video']['id'] for item in page.rows[0]['items']]
+        checks.append(f'실창 관심 없음 → 자동 선택 카드 Enter mpv 재생 → Esc: 같은 카드 초점 (줄 {before} → {after})')
     finally:
         close(window)
 
