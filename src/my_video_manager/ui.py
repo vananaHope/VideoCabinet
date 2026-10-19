@@ -1,11 +1,13 @@
 """화면은 입력을 코어에 전달하고 결과를 표시한다."""
 
+from dataclasses import dataclass
+
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
 
 from .adapters import MpvPlayer
-from .core import AppCore, CommandType
+from .core import AppCore, Command, CommandType
 from .subtitle_controls import SubtitleControls
 from .translation_controls import TranslationControls
 from .web_dialogs_entries import HighlightList
@@ -13,7 +15,21 @@ from .key_display import display_keys
 from .tray import TrayControls
 from .web_dialogs_entries import ReviewDialog
 from .playback_page import PlaybackPage
+from .qt_keys import key_name
 from .theme import apply_theme
+
+
+@dataclass
+class TransitionHold:
+    """긴급 탈출로 멈춘 엔진·재생 항목에 묶인 모아보기 자동 전환 보류.
+
+    끝 도달은 코어가 항목별로 기억하고, EOF와 진행 중인 사용자 탐색은 여기서 기억한다.
+    엔진이나 재생 세션(모아보기 항목)이 바뀌면 보류는 그 항목과 함께 버린다.
+    """
+    player: object
+    session: object
+    eof: bool = False
+    seeking: bool = False
 
 
 class MainWindow(QMainWindow):
@@ -26,6 +42,8 @@ class MainWindow(QMainWindow):
         self.player_factory = player_factory
         self.playback_list = ()
         self._return_to_gems = False
+        # 긴급 탈출로 멈춘 엔진. 사용자가 재개하기 전까지 모아보기 자동 전환을 미룬다.
+        self._hold = None
         self.position_timer = QTimer(self)
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
@@ -149,6 +167,25 @@ class MainWindow(QMainWindow):
     def navigate_web_tab(self, tab):
         self.web_host.navigate(tab)
 
+    def emergency_hide(self):
+        """긴급 탈출: 확인 없이 일시정지하고 전체 화면을 푼 뒤 창을 트레이로 숨긴다.
+
+        재생 세션과 현재 화면은 그대로 두므로 트레이 열기로 같은 장면의 일시정지 상태로 돌아온다.
+        """
+        focus = QApplication.focusWidget()
+        if self.player:
+            try:
+                # 이미 엔진이 보낸 구간 끝·EOF 보고가 다음 항목을 자동 재생하지 않게 먼저 보류한다.
+                if self._current_hold() is None:
+                    self._hold = TransitionHold(self.player, self.core.playback.session)
+                self.player.pause()
+                self.sync_position()
+            except Exception as error:
+                # 숨기기가 먼저다. 실패는 복귀한 화면에 보인다.
+                self.playback_page.show_error(f"일시정지 실패: {error}")
+        self.set_playback_fullscreen(False)
+        self.tray.hide_for_emergency(focus)
+
     @property
     def worker(self):
         return self.library_page.worker
@@ -204,22 +241,56 @@ class MainWindow(QMainWindow):
 
     def stop_player(self):
         self.position_timer.stop()
+        # 닫는 엔진의 일시정지 상태는 읽지 않는다. 남은 보고는 기존처럼 처리한다.
+        self._hold = None
         if self.player:
             self.player.close()
             self.sync_position()
             self.player = None
 
+    def _current_hold(self):
+        """지금 엔진·재생 항목의 보류. 엔진이나 항목이 바뀌었으면 버린다."""
+        hold = self._hold
+        if hold is not None and (hold.player is not self.player
+                                 or hold.session is not self.core.playback.session):
+            hold = self._hold = None
+        return hold
+
+    def user_seeking(self):
+        """사용자가 같은 항목 안에서 탐색을 시작했다.
+
+        보류한 EOF는 탐색 전 위치의 것이므로 버리고, 탐색 완료 보고가 오기 전에는 보류 전환을 적용하지 않는다.
+        엔진의 정지 해제가 탐색 완료 보고보다 먼저 관측될 수 있기 때문이다.
+        """
+        if (hold := self._current_hold()) is not None:
+            hold.eof, hold.seeking = False, True
+
     def sync_position(self):
         if self.player and self.core.playback.session is not None:
+            # 긴급 탈출로 멈춘 엔진은 사용자가 재개하기 전까지 모아보기 자동 전환을 미룬다.
+            # 위치·복습 보고는 그대로 반영한다.
+            hold = self._current_hold()
+            resumed = hold is not None and not self.player.paused
             # 상대 탐색과 Home/End 절대 탐색 모두 mpv 이벤트의 seeked 표시를 쓴다.
             session = self.core.playback.session
             for position, seeked in self.player.take_positions():
                 self.core.playback.report(position, seeked=seeked)
+                if hold is not None:
+                    if seeked:
+                        hold.eof = hold.seeking = False
+                    continue
                 self.core.advance_reel_if_due()
                 if self.core.playback.session is not session:
                     break  # 자동 전환 뒤 이전 엔진의 나머지 보고는 버린다.
             eof = self.player.take_eof()
-            if self.core.playback.session is session and eof:
+            if hold is not None:
+                if not hold.seeking:
+                    hold.eof = hold.eof or eof
+                if resumed and not hold.seeking:
+                    # 남은 보고를 모두 반영한 뒤 미룬 전환을 이 항목에 적용한다.
+                    self._hold = None
+                    self.core.advance_reel_if_due(eof=hold.eof)
+            elif self.core.playback.session is session and eof:
                 self.core.advance_reel_if_due(eof=True)
             self.core.save_viewings()
             position = self.core.playback.position
@@ -331,6 +402,13 @@ class MainWindow(QMainWindow):
                 return super().eventFilter(watched, event)
             if not event.isAutoRepeat():
                 self.show_fullscreen_settings_menu()
+            return True
+        if self.core.command_for_key(key_name(event) or "") == Command(CommandType.EMERGENCY_HIDE):
+            # 재생 화면과 웹 셸의 모든 탭이 이 필터 한 곳에서 받는다.
+            if self.web_host.dialogs.blocks_shell_actions:
+                return super().eventFilter(watched, event)
+            if not event.isAutoRepeat():
+                self.emergency_hide()
             return True
         handle_key = getattr(self.pages.currentWidget(), "handle_key", None)
         return handle_key(event) if callable(handle_key) else False

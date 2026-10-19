@@ -8,7 +8,7 @@ from PySide6.QtGui import QDesktopServices
 
 from .app_version import current_version, RELEASES_URL
 
-from .key_bindings import KeyBindings, RESERVED_KEYS, normalize_key
+from .key_bindings import KeyBindings, RESERVED_KEYS, check_command_key, normalize_key
 from .key_display import display_keys
 from .qt_keys import key_name
 from .web_settings_contract import SETTINGS
@@ -178,7 +178,7 @@ class WebSettingsPage(WebPageController):
         return dict(version=current_version(), releasesUrl=RELEASES_URL,
                     bindings=[dict(id=KeyBindings.identifier(row.command), label=row.label,
                     keys=list(row.keys), defaults=list(row.default_keys), display=display_keys(row.keys),
-                    defaultDisplay=display_keys(row.default_keys)) for row in self.core.key_bindings()],
+                    defaultDisplay=display_keys(row.default_keys), note=row.note) for row in self.core.key_bindings()],
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,
                     automaticDetection=self.core.automatic_detection_enabled(),
                     translationCli=self.core.translation_cli, translation=self.core.translation_settings(),
@@ -225,6 +225,14 @@ class WebSettingsPage(WebPageController):
             else:
                 result['error'] = '지원하는 키를 누르세요. 문자·숫자·방향키·기능키와 Ctrl/Alt/Shift 조합을 사용할 수 있습니다. Esc로 취소합니다.'
                 result['continuing'] = True
+        else:
+            command = next(row.command for row in self.core.key_bindings()
+                           if KeyBindings.identifier(row.command) == self.capture_command)
+            try:
+                check_command_key(command, result['key'])
+            except ValueError as error:
+                # 캡처를 이어 가 다른 조합을 바로 누를 수 있게 한다.
+                result.update(key='', display='', error=f'{error} Esc로 취소합니다.', continuing=True)
         if not result['continuing']:
             self.capture_command = None
         self.bridge.keyCaptured.emit(encode(result))

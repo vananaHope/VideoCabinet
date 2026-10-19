@@ -346,7 +346,9 @@ def test_display_multiple_or_unassigned_keys(keys, expected):
 def test_fullscreen_default_label_rebinding_and_reset(tmp_path):
     core = open_core(tmp_path)
     assert core.key_bindings()[0].command.kind == CommandType.TOGGLE_PAUSE
-    assert core.key_bindings()[-1].command.kind == CommandType.TOGGLE_FULLSCREEN
+    # 재생 명령 뒤에 재생 밖에서도 동작하는 긴급 탈출이 온다.
+    assert [row.command.kind for row in core.key_bindings()][-2:] == [
+        CommandType.TOGGLE_FULLSCREEN, CommandType.EMERGENCY_HIDE]
     command = Command(CommandType.TOGGLE_FULLSCREEN)
     row = next(row for row in core.key_bindings() if row.command == command)
     assert row.label == "전체 화면 켜기 / 끄기"
@@ -417,3 +419,99 @@ def test_highlight_list_key_registers_saves_and_respects_existing_customization(
     assert draft(reopened)[command] == ()
     with pytest.raises(ValueError, match='하이라이트 패널'):
         reopened.reset_key_bindings(command)
+
+
+def test_emergency_hide_default_label_note_rebinding_and_reset(tmp_path):
+    core = open_core(tmp_path)
+    command = Command(CommandType.EMERGENCY_HIDE)
+    row = next(row for row in core.key_bindings() if row.command == command)
+    assert row.label == "긴급 탈출(창 숨기기)"
+    assert row.keys == row.default_keys == ("Ctrl+Shift+H",)
+    assert "재생 화면 밖" in row.note
+    assert all(not other.note for other in core.key_bindings() if other.command != command)
+    assert core.command_for_key("ctrl+shift+h") == command
+    assert core.command_for_key("Ctrl+H") is None
+    bindings = draft(core)
+    bindings[command] = ("Ctrl+Alt+B",)
+    core.save_key_bindings(bindings)
+    for app in (core, open_core(tmp_path)):
+        assert app.command_for_key("Ctrl+Alt+B") == command
+        assert app.command_for_key("Ctrl+Shift+H") is None
+    core.reset_key_bindings(command)
+    assert open_core(tmp_path).command_for_key("Ctrl+Shift+H") == command
+    bindings = draft(core)
+    bindings[command] = ("Alt+F9",)
+    core.save_key_bindings(bindings)
+    core.reset_key_bindings()
+    assert open_core(tmp_path).command_for_key("Ctrl+Shift+H") == command
+    assert open_core(tmp_path).command_for_key("Alt+F9") is None
+
+
+@pytest.mark.parametrize("key, message", [("Ctrl+P", "재생 / 일시정지"), ("Ctrl+3", "예약 키"),
+                                          ("Alt+S", "예약 키"), ("Esc", "Esc")])
+def test_emergency_hide_conflicting_or_reserved_keys_are_rejected(tmp_path, key, message):
+    core = open_core(tmp_path)
+    bindings = draft(core)
+    bindings[Command(CommandType.TOGGLE_PAUSE)] = ("Enter", "Ctrl+P")
+    bindings[Command(CommandType.EMERGENCY_HIDE)] = (key,)
+    with pytest.raises(ValueError, match=message):
+        core.save_key_bindings(bindings)
+    assert open_core(tmp_path).command_for_key("Ctrl+Shift+H") == Command(CommandType.EMERGENCY_HIDE)
+
+
+def test_emergency_hide_is_unassigned_when_existing_user_already_uses_its_key(tmp_path):
+    core = open_core(tmp_path)
+    core.settings.set("keys.bindings", {"toggle_subtitles:0": ["Ctrl+Shift+H"]})
+    reopened = open_core(tmp_path)
+    command = Command(CommandType.EMERGENCY_HIDE)
+    assert reopened.command_for_key("Ctrl+Shift+H") == Command(CommandType.TOGGLE_SUBTITLES)
+    assert draft(reopened)[command] == ()
+    with pytest.raises(ValueError, match="긴급 탈출"):
+        reopened.reset_key_bindings(command)
+    assert draft(open_core(tmp_path))[command] == ()
+
+
+@pytest.mark.parametrize("key", ["H", "Shift+H", "Enter", "F9", "Shift+F9", "Space"])
+def test_emergency_hide_rejects_keys_without_ctrl_alt_or_meta(tmp_path, key):
+    core = open_core(tmp_path)
+    command = Command(CommandType.EMERGENCY_HIDE)
+    bindings = draft(core)
+    bindings[Command(CommandType.TOGGLE_PAUSE)] = ("P",)
+    bindings[command] = (key,)
+    with pytest.raises(ValueError, match="Ctrl·Alt·Win 중 하나"):
+        core.save_key_bindings(bindings)
+    with pytest.raises(ValueError, match="Ctrl·Alt·Win 중 하나"):
+        core.set_key_bindings({key: command})
+    reopened = open_core(tmp_path)
+    assert reopened.command_for_key("Ctrl+Shift+H") == command
+    assert reopened.command_for_key("P") is None
+
+
+@pytest.mark.parametrize("key", ["Ctrl+H", "Alt+F9", "Meta+H", "Ctrl+Alt+Shift+Space"])
+def test_emergency_hide_accepts_ctrl_alt_or_meta_combinations(tmp_path, key):
+    core = open_core(tmp_path)
+    command = Command(CommandType.EMERGENCY_HIDE)
+    bindings = draft(core)
+    bindings[command] = (key,)
+    core.save_key_bindings(bindings)
+    assert open_core(tmp_path).command_for_key(key) == command
+
+
+def test_other_commands_still_accept_keys_without_modifiers(tmp_path):
+    core = open_core(tmp_path)
+    bindings = draft(core)
+    bindings[Command(CommandType.TOGGLE_FULLSCREEN)] = ("Shift+F",)
+    core.save_key_bindings(bindings)
+    assert open_core(tmp_path).command_for_key("Shift+F") == Command(CommandType.TOGGLE_FULLSCREEN)
+
+
+def test_stored_emergency_hide_key_without_modifier_loads_as_unassigned(tmp_path):
+    core = open_core(tmp_path)
+    core.settings.set("keys.bindings", {"emergency_hide:0": ["H"], "point_highlight:0": ["J"]})
+    reopened = open_core(tmp_path)
+    assert draft(reopened)[Command(CommandType.EMERGENCY_HIDE)] == ()
+    assert reopened.command_for_key("H") is None
+    assert reopened.command_for_key("Ctrl+Shift+H") is None
+    assert reopened.command_for_key("J") == Command(CommandType.POINT_HIGHLIGHT)
+    reopened.reset_key_bindings(Command(CommandType.EMERGENCY_HIDE))
+    assert open_core(tmp_path).command_for_key("Ctrl+Shift+H") == Command(CommandType.EMERGENCY_HIDE)

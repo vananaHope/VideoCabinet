@@ -322,6 +322,33 @@ def test_unsupported_key_keeps_capture_until_supported_input(window_factory):
     assert '예약 키' in results[-1]['error']
 
 
+def test_emergency_hide_capture_requires_ctrl_or_alt_and_does_not_hide(window_factory):
+    window = window_factory()
+    window.navigate_web_tab('settings')
+    window.activateWindow()
+    tick()
+    bridge = bridges(window)['settings']
+    results = []
+    bridge.keyCaptured.connect(lambda raw: results.append(json.loads(raw)))
+    target = window.web_host.view.focusProxy()
+    bridge.beginCapture('emergency_hide:0')
+    for key, modifier in ((Qt.Key.Key_H, Qt.KeyboardModifier.NoModifier),
+                          (Qt.Key.Key_H, Qt.KeyboardModifier.ShiftModifier)):
+        QTest.keyClick(target, key, modifier)
+        assert results[-1]['continuing'] and not results[-1]['key']
+        assert 'Ctrl·Alt·Win 중 하나' in results[-1]['error']
+    # 캡처 중의 긴급 탈출 키는 창을 숨기지 않고 캡처된다.
+    QTest.keyClick(target, Qt.Key.Key_H, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    assert window.isVisible()
+    assert results[-1]['key'] == 'Ctrl+Shift+H' and not results[-1]['continuing']
+    keys = {row['id']: row['keys'] for row in json.loads(bridge.snapshot())['bindings']}
+    note = next(row['note'] for row in json.loads(bridge.snapshot())['bindings'] if row['id'] == 'emergency_hide:0')
+    assert '재생 화면 밖' in note and 'Ctrl·Alt·Win' in note
+    keys['emergency_hide:0'] = ['H']
+    assert 'Ctrl·Alt·Win 중 하나' in json.loads(bridge.saveKeys(json.dumps(keys)))['error']
+    assert window.core.command_for_key('Ctrl+Shift+H').kind == CommandType.EMERGENCY_HIDE
+
+
 def test_inactive_refresh_skips_payload_and_timer_only_emits_changes(window_factory, core, monkeypatch):
     window = window_factory()
     pages = window.web_host.controllers

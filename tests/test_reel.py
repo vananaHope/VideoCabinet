@@ -736,3 +736,19 @@ def test_playback_exposes_filtered_snapshot_position_and_total(library):
     assert (core.reel_playback.index, core.reel_playback.total) == (2, 2)
     press(core, "Home")
     assert (core.reel_playback.index, core.reel_playback.total) == (1, 2)
+
+
+def test_seeking_back_before_a_deferred_advance_keeps_the_current_item(library):
+    core, _ = library
+    video = core.videos()[0]
+    first = mark(core, video, 10, 20)
+    mark(core, video, 40, 50)
+    core.start_reel(None, first.id)
+    core.playback.report(20)
+    # 전환을 미룬 사이 사용자가 구간 안으로 되돌아가면 끝 도달은 취소된다.
+    core.playback.report(15, seeked=True)
+    core.advance_reel_if_due()
+    assert current_id(core) == first.id
+    core.playback.report(20)
+    core.advance_reel_if_due()
+    assert core.reel_playback.start == 40

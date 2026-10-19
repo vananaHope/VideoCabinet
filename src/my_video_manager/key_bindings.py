@@ -64,7 +64,33 @@ def command_label(command: Command) -> str:
         "toggle_reel_repeat": "구간 반복 켜기 / 끄기",
         "toggle_fullscreen": "전체 화면 켜기 / 끄기",
         "toggle_highlight_list": "하이라이트 패널 접기 / 펴기",
+        "emergency_hide": "긴급 탈출(창 숨기기)",
     }.get(kind, kind)
+
+
+def command_note(command: Command) -> str:
+    """키 배치 화면의 명령 안내. 다른 명령은 재생 화면에서만 동작한다."""
+    if command.kind.value == "emergency_hide":
+        return "재생 화면 밖 모든 탭에서도 동작합니다. 일시정지하고 창을 트레이로 숨깁니다. Ctrl·Alt·Win 중 하나가 들어간 조합만 지정할 수 있습니다."
+    return ""
+
+
+def check_command_key(command: Command, key: str) -> None:
+    """정규화한 키가 이 명령에 쓸 수 있는지 검사한다.
+
+    긴급 탈출은 웹 셸의 입력 중에도 받으므로 글자 입력과 겹치지 않게 Ctrl·Alt·Meta 조합만 허용한다.
+    Shift만 붙은 키는 대문자 입력이라 수정자 없는 키로 본다.
+    """
+    if command.kind.value == "emergency_hide" and not {"Ctrl", "Alt", "Meta"} & set(key.split("+")[:-1]):
+        raise ValueError(f"{key}: ‘{command_label(command)}’은 Ctrl·Alt·Win 중 하나가 들어간 조합만 지정할 수 있습니다.")
+
+
+def _allowed(command: Command, key: str) -> bool:
+    try:
+        check_command_key(command, key)
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -73,6 +99,7 @@ class KeyBinding:
     label: str
     keys: tuple[str, ...]
     default_keys: tuple[str, ...]
+    note: str = ""
 
 
 class KeyBindings:
@@ -97,7 +124,8 @@ class KeyBindings:
                     normalized = tuple(dict.fromkeys(normalize_key(key) for key in keys))
                 except ValueError:
                     continue
-                customized[command] = normalized
+                # 이 명령에 쓸 수 없는 저장 키는 미할당으로 둔다.
+                customized[command] = tuple(key for key in normalized if _allowed(command, key))
             # 서로 다른 사용자 명령의 중복 키는 어느 쪽도 임의로 우선하지 않는다.
             owners = {}
             for command, keys in customized.items():
@@ -114,7 +142,7 @@ class KeyBindings:
         return f"{command.kind.value}:{command.amount:g}"
 
     def rows(self) -> tuple[KeyBinding, ...]:
-        return tuple(KeyBinding(c, command_label(c), self.bindings[c], keys)
+        return tuple(KeyBinding(c, command_label(c), self.bindings[c], keys, command_note(c))
                      for c, keys in self.defaults.items())
 
     def validate(self, bindings: Mapping[Command, tuple[str, ...]]) -> dict[Command, tuple[str, ...]]:
@@ -127,6 +155,7 @@ class KeyBindings:
                 raise ValueError("명령의 키는 목록이어야 합니다.")
             normalized = tuple(dict.fromkeys(normalize_key(key) for key in keys))
             for key in normalized:
+                check_command_key(command, key)
                 if key in owners and owners[key] != command:
                     raise ValueError(f"{key}: ‘{command_label(owners[key])}’와 ‘{command_label(command)}’가 같은 키를 사용합니다.")
                 owners[key] = command
