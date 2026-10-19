@@ -67,6 +67,13 @@ class TrayControls(QObject):
 
     def random_play(self):
         self.open()
+        # 긴급 탈출 복귀도 열기와 같은 경로를 쓴다. 열린 대화상자를 재생 화면으로 덮지 않는다.
+        modal = QApplication.activeModalWidget()
+        if self.window.web_host.dialogs.blocks_shell_actions or modal is not None:
+            if modal is not None:
+                modal.raise_()
+                modal.activateWindow()
+            return
         self.window.random_play()
 
     def hide_for_emergency(self, focus=None):

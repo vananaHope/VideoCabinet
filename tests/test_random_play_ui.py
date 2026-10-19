@@ -12,8 +12,8 @@ from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QVBoxLayout
 from my_video_manager.core import Command, CommandType, ScanResult
 from my_video_manager.random_play import NO_CANDIDATE_MESSAGE
 from my_video_manager.web_contract import TABS
-from test_emergency_hide_ui import app, window, key
-from test_emergency_hide_dialogs_ui import js, view, rename_dialog, focus_field
+from test_emergency_hide_ui import app, window, key, emergency_key
+from test_emergency_hide_dialogs_ui import js, view, rename_dialog, focus_field, type_text, field_value
 from test_web_dialogs import within
 from qt_wait import wait_for
 
@@ -175,6 +175,82 @@ def test_tray_random_restores_hidden_window_and_ignores_filter(window):
     assert window.core.playback.session.video_id in {video.id for video in window.core.videos()}
     key(window, Qt.Key.Key_Escape)
     assert window.pages.currentWidget() is window.web_host
+
+
+def assert_shell_keys_blocked(window, target):
+    page, tab, session = window.pages.currentWidget(), window.web_host.active_tab, window.core.playback.session
+    keys = [(Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier) for index in range(8)]
+    keys += [(Qt.Key.Key_S, Qt.KeyboardModifier.AltModifier), (Qt.Key.Key_R, MODIFIERS)]
+    for code, modifiers in keys:
+        QTest.keyClick(target, code, modifiers)
+        QApplication.processEvents()
+        assert window.pages.currentWidget() is page
+        assert window.web_host.active_tab == tab
+        assert window.core.playback.session is session
+        assert not window.settings_menu.isVisible()
+
+
+@pytest.mark.parametrize("emergency", [False, True])
+def test_tray_random_keeps_web_dialog_visible_and_shell_keys_blocked(window, emergency):
+    dialogs = window.web_host.dialogs
+
+    def check():
+        focus_field(window, "영상 제목")
+        type_text(window, "Unsaved title")
+        if emergency:
+            emergency_key(window)
+            assert not window.isVisible()
+        tray_action(window).trigger()
+        QApplication.processEvents()
+        assert window.player is None and window.core.playback.session is None
+        assert window.isVisible() and window.pages.currentWidget() is window.web_host
+        assert dialogs.active and window.web_host.view.isVisible()
+        wait_for(lambda: js(window, '!!document.querySelector("[role=dialog]")?.getClientRects().length'))
+        assert field_value(window, "영상 제목") == "Unsaved title"
+        # offscreen은 숨겼다 연 창을 활성 창으로 복원하지 않는다. Qt 활성 상태를
+        # 명시해 비활성 창 가드가 대화상자 키 차단의 결함을 가리지 않게 한다.
+        QApplication.setActiveWindow(window)
+        QApplication.processEvents()
+        assert window.isActiveWindow()
+        assert_shell_keys_blocked(window, view(window))
+        assert dialogs.active and window.web_host.view.isVisible()
+        QTest.keyClick(view(window), Qt.Key.Key_Escape)
+        wait_for(lambda: not dialogs.active)
+
+    within(rename_dialog(window), dialogs, check)
+    tray_action(window).trigger()
+    assert window.player is not None
+
+
+@pytest.mark.parametrize("modality", [Qt.WindowModality.WindowModal, Qt.WindowModality.ApplicationModal])
+def test_tray_random_keeps_qt_modal_visible_and_shell_keys_blocked(window, modality):
+    dialog = QDialog(window)
+    dialog.setWindowModality(modality)
+    layout = QVBoxLayout(dialog)
+    edit = QLineEdit(dialog)
+    edit.setText("Unsaved text")
+    layout.addWidget(edit)
+    dialog.show()
+    dialog.activateWindow()
+    edit.setFocus()
+    QApplication.processEvents()
+    try:
+        assert QApplication.activeModalWidget() is dialog
+        tray_action(window).trigger()
+        QApplication.processEvents()
+        assert window.player is None and window.core.playback.session is None
+        assert window.isVisible() and dialog.isVisible()
+        assert QApplication.activeModalWidget() is dialog
+        assert QApplication.activeWindow() is dialog
+        assert edit.text() == "Unsaved text"
+        assert_shell_keys_blocked(window, edit)
+        assert dialog.isVisible()
+        QTest.keyClick(edit, Qt.Key.Key_Escape)
+        assert not dialog.isVisible()
+    finally:
+        dialog.close()
+    tray_action(window).trigger()
+    assert window.player is not None
 
 
 def test_settings_catalog_capture_and_save_random_key(window):
