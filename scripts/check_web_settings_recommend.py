@@ -256,12 +256,16 @@ def screenshots():
     definitions = tuple(replace(period, label=period.label + ' 기간(긴 이름 확인용)', description=long_text.strip())
                         for period in core.recommendation_period_definitions())
     core.recommendation_period_definitions = lambda: definitions
+    # 잘못된 저장값: 그 칸에만 경고를 보이고 화면은 연다.
+    core.settings.set('recommend.revisit_days', -5)
     window = make_window(core)
     open_section(window)
     capture(window, 'settings-recommend-long')
     layouts['long'] = state = layout(window)
     assert not state['horizontal'] and all(row['controlsInside'] and not row['formOverflow'] for row in state['rows']), state
-    checks.append('긴 이름·설명: 줄바꿈, 입력·단추 칸 안, 가로 넘침 없음')
+    assert [row['error'] is not None for row in state['rows']] == [False, True, False, False, False], state
+    assert state['rows'][1]['value'] == '' and state['rows'][1]['invalid'], state
+    checks.append('긴 이름·설명: 줄바꿈, 입력·단추 칸 안, 가로 넘침 없음 / 잘못된 저장값은 그 칸에만 경고')
     close(window)
 
 

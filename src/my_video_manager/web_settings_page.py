@@ -204,18 +204,21 @@ class WebSettingsPage(WebPageController):
                     defaultDisplay=display_keys(row.default_keys), note=row.note) for row in self.core.key_bindings()],
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,
                     automaticDetection=self.core.automatic_detection_enabled(),
-                    recommendationPeriods=self.recommendation_periods(),
+                    recommendationPeriods=[self.recommendation_period(period) for period
+                                           in self.core.recommendation_period_definitions()],
                     translationCli=self.core.translation_cli, translation=self.core.translation_settings(),
                     heldTranslations=sum(entry.state == 'held' for entry in queue),
                     failedTranslations=sum(entry.state == 'failed' for entry in queue),
                     update=update_status_data(self.core, self.window.updates))
 
-    def recommendation_periods(self):
-        days = self.core.recommendation_period_days()
-        return [dict(criterion=period.criterion, label=period.label, description=period.description,
-                     days=days[period.criterion], defaultDays=period.default_days,
-                     minimumDays=period.minimum_days, maximumDays=period.maximum_days)
-                for period in self.core.recommendation_period_definitions()]
+    def recommendation_period(self, period):
+        # 잘못된 저장값이 있어도 설정 화면은 열고, 그 기간 칸에서 고치게 한다.
+        try:
+            days, error = self.core.recommendation_period(period.criterion), ''
+        except ValueError:
+            days, error = None, '저장된 값이 잘못되어 이 기간으로 추천을 계산하지 못합니다. 새 값을 저장하거나 기본값으로 되돌리세요.'
+        return dict(criterion=period.criterion, label=period.label, description=period.description, days=days, error=error,
+                    defaultDays=period.default_days, minimumDays=period.minimum_days, maximumDays=period.maximum_days)
 
     def refresh(self):
         if not self.is_active():

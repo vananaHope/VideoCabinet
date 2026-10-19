@@ -771,7 +771,8 @@ export interface RecommendationPeriodData {
   criterion: string
   label: string
   description: string
-  days: number
+  days: number | null
+  error: string
   defaultDays: number
   minimumDays: number
   maximumDays: number

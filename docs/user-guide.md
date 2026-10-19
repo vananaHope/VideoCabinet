@@ -354,7 +354,7 @@ Tab으로 버튼 사이를 이동하고 Space로 실행할 수 있습니다.
 
 - 일반: 최소 길이(폴더 관리와 같은 값), 자동 감지 켜기/끄기, 위험 작업으로 표시한 완전 종료와 확인·취소.
 - 키 배치: 명령별 키 캡처, 저장 전 충돌 안내, 개별·전체 기본값, 적용. 변경한 키는 재생·F1 안내·빈 모아보기 안내에 바로 반영됩니다. 캡처 중에는 Ctrl+1~8·Alt+S·F1이 페이지를 옮기지 않으며 Esc는 캡처만 취소합니다. 적용 전 변경은 분류·페이지 이동 중 유지되며, 현재 키와 별도 초안으로 표시합니다. 미적용 건수를 확인하고 변경 취소로 초안을 모두 버릴 수 있습니다.
-- 추천: 추천 줄이 영상을 고르는 다섯 기간(이어 보기·하이라이트 복습·새로 추가됨·다시 보기·잊고 있던 영상)을 일 단위로 바꿉니다. 기간마다 뜻을 설명하고 저장된 값·기본값·허용 범위(0~365000일, 소수 가능)를 함께 보입니다. 칸에 입력하고 Enter나 저장을 누르면 저장하고, 기본값을 누르면 그 기간을 바로 기본값으로 되돌립니다. 저장하지 않은 입력은 **저장 안 됨**으로 표시합니다. 빈 값·숫자가 아닌 값·음수·범위 밖 값은 저장하지 않고 그 칸 아래에 오류를 안내합니다. 저장한 기간은 추천 탭을 열 때 다시 계산해 바로 반영합니다. 배치와 키보드 저장·추천 탭 반영은 `scripts/check_web_settings_recommend.py --offscreen`이 `.local/screens-204/`에 기본값·모두 바꾼 값·여러 칸 오류·긴 설명 화면으로 남깁니다.
+- 추천: 추천 줄이 영상을 고르는 다섯 기간(이어 보기·하이라이트 복습·새로 추가됨·다시 보기·잊고 있던 영상)을 일 단위로 바꿉니다. 기간마다 뜻을 설명하고 저장된 값·기본값·허용 범위(0~365000일, 소수 가능)를 함께 보입니다. 칸에 입력하고 Enter나 저장을 누르면 저장하고, 기본값을 누르면 그 기간을 바로 기본값으로 되돌립니다. 저장하지 않은 입력은 **저장 안 됨**으로 표시합니다. 빈 값·숫자가 아닌 값·음수·범위 밖 값은 저장하지 않고 그 칸 아래에 오류를 안내합니다. 이미 저장된 값이 잘못되었으면 설정 화면은 그대로 열고 그 칸에만 경고를 보이므로, 새 값을 저장하거나 기본값으로 되돌려 고칩니다. 저장한 기간은 추천 탭을 열 때 다시 계산해 바로 반영합니다. 배치와 키보드 저장·추천 탭 반영은 `scripts/check_web_settings_recommend.py --offscreen`이 `.local/screens-204/`에 기본값·모두 바꾼 값·여러 칸 오류·긴 설명 화면으로 남깁니다.
 - 번역: 현재 방식·모델·추론 강도·키 상태·이어받기 설정과 실패·보류 건수, 선택·재시도 대화상자 진입.
 - 받아쓰기: 영상별 원어 지정과 자동 규칙 안내, 자막 대기열로 이동. 새 모델·GPU 설정은 추가하지 않습니다.
 - 업데이트: 현재 버전, 마지막 확인 시각과 결과(없음·패치·전체 설치 필요·실패 이유), 새 버전의 업데이트·나중에·이 버전 건너뛰기, 건너뛴 버전과 건너뛰기 취소, 내려받기·설치 진행(진행률·취소·지금 설치·다시 시도), 지금 확인, 시작할 때 확인 켜기/끄기. 상태별 이미지(셸 새 버전 알림·내려받기·설치 전 확인·다음 실행 결과 포함)는 `scripts/check_web_update.py --offscreen`이 `.local/screens-140/`에 만듭니다.
@@ -489,7 +489,7 @@ Enter 또는 되돌리기 버튼을 누르면 다시 추천 대상이 됩니다.
 `recommend.rewatch_days`(다시 보기, 기본 60), `recommend.unwatched_days`(잊고 있던 영상, 기본 30)입니다.
 다섯 기간은 **설정 → 추천**에서 바꿉니다.
 `core.recommendation_period_definitions()`는 설정 화면이 그릴 이름·설명·기본값·허용 범위를,
-`core.recommendation_period_days()`는 다섯 기간의 현재 값을 돌려줍니다.
+`core.recommendation_period_days()`는 다섯 기간의 현재 값을, `core.recommendation_period(criterion)`은 기간 하나의 현재 값을 돌려줍니다.
 `core.set_recommendation_period_days(criterion, days)`는 검증한 값만 저장하며,
 `core.reset_recommendation_period_days(criterion)`는 저장값을 지워 기본값으로 되돌립니다.
 잘못된 값(음수, 무한, 상한 초과, 수가 아닌 값, 불리언)은 예외로 거부하고 저장하지 않으며,
@@ -521,7 +521,7 @@ Enter 또는 되돌리기 버튼을 누르면 다시 추천 대상이 됩니다.
 
 공개 코어 API: `recommendations()`는 추천 줄 목록(`RecommendationRow`: 고유 key·종류·제목·영상과 이유·겹친 태그)을 반환하며,
 `dismiss_video(video_id)`, `dismissed_videos()`, `restore_dismissed_video(video_id)`로 관심 없음을 관리합니다.
-`recommendation_period_definitions()`, `recommendation_period_days()`, `set_recommendation_period_days(criterion, days)`,
+`recommendation_period_definitions()`, `recommendation_period_days()`, `recommendation_period(criterion)`, `set_recommendation_period_days(criterion, days)`,
 `reset_recommendation_period_days(criterion)`로 다섯 추천 기간을 읽고 검증해 저장하고 기본값으로 되돌립니다.
 `viewing_status_map()`과 `video_tags_map()`은 제외·시청 없음·태그 없음까지 포함한 영상 ID별 전체 상태를
 일괄 조회합니다. `library_snapshot()`은 영상·시청 상태와 기록·태그·시리즈를 한 번씩 조회한 결과를 반환하고,

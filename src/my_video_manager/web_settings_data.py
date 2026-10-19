@@ -18,7 +18,8 @@ class RecommendationPeriodData(TypedDict):
     criterion: str
     label: str
     description: str
-    days: float
+    days: float | None
+    error: str
     defaultDays: float
     minimumDays: float
     maximumDays: float

@@ -106,3 +106,16 @@ def test_changed_period_applies_when_returning_to_recommend_tab(settings, clock)
     window.navigate_web_tab('settings')
     assert 'error' not in json.loads(bridge.resetRecommendationPeriod('new_arrivals'))
     assert kinds() == ['new_arrivals']
+
+
+def test_broken_stored_period_keeps_settings_open_and_reset_repairs_it(window_factory, core):
+    core.settings.set('recommend.rewatch_days', -5)
+    window = window_factory()
+    window.navigate_web_tab('settings')
+    bridge = window.web_host.controllers['settings'].bridge
+    rows = {row['criterion']: row for row in json.loads(bridge.snapshot())['recommendationPeriods']}
+    assert rows['rewatch']['days'] is None and rows['rewatch']['error']
+    assert all(row['days'] is not None and not row['error'] for key, row in rows.items() if key != 'rewatch')
+    assert 'error' not in json.loads(bridge.resetRecommendationPeriod('rewatch'))
+    rows = {row['criterion']: row for row in json.loads(bridge.snapshot())['recommendationPeriods']}
+    assert rows['rewatch']['days'] == 60 and not rows['rewatch']['error']

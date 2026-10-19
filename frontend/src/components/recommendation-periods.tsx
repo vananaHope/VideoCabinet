@@ -2,7 +2,7 @@ import { useState } from "react"
 import type { RecommendationPeriodData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Notice } from "@/components/ui/notice"
+import { NoticeStack } from "@/components/ui/notice"
 import { StatusBadge } from "@/components/page-parts"
 
 type Save = (criterion: string, days: string) => Promise<void>
@@ -14,9 +14,10 @@ function PeriodRow({ period, onSave, onReset }: { period: RecommendationPeriodDa
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const id = `settings-recommend-${period.criterion}`
-  const saved = String(period.days)
+  const saved = period.days === null ? "" : String(period.days)
   const text = draft ?? saved
   const changed = draft !== null && draft !== saved
+  const describedBy = [`${id}-description`, `${id}-range`, (error || period.error) && `${id}-notices`].filter(Boolean).join(" ")
   const atDefault = period.days === period.defaultDays && !changed
   async function run(task: () => Promise<void>) {
     if (saving) return
@@ -33,14 +34,18 @@ function PeriodRow({ period, onSave, onReset }: { period: RecommendationPeriodDa
         <p id={`${id}-description`} className="text-sm text-muted-foreground">{period.description}</p>
       </div>
       <div className="flex items-center gap-2">
-        <Input id={id} className="w-28" inputMode="decimal" autoComplete="off" value={text} aria-invalid={!!error || undefined} aria-describedby={`${id}-description ${id}-range${error ? ` ${id}-error` : ""}`} onChange={event => { setDraft(event.target.value); setError("") }} />
+        <Input id={id} className="w-28" inputMode="decimal" autoComplete="off" value={text} aria-invalid={!!(error || period.error) || undefined} aria-describedby={describedBy} onChange={event => { setDraft(event.target.value); setError("") }} />
         <span>일</span>
         <Button type="submit" variant="outline" aria-disabled={saving || !changed || undefined}>저장</Button>
         <Button type="button" variant="ghost" aria-label={`${period.label} 기본값`} aria-disabled={saving || atDefault || undefined} onClick={() => { if (!atDefault) void run(() => onReset(period.criterion)) }}>기본값</Button>
       </div>
     </div>
-    <p id={`${id}-range`} role="status" className="text-xs text-muted-foreground">저장된 값 {saved}일 · 기본값 {period.defaultDays}일 · {period.minimumDays}~{period.maximumDays}일, 소수 가능</p>
-    {error && <Notice id={`${id}-error`} tone="error" className="mt-2" onDismiss={() => setError("")}>{error}</Notice>}
+    <p id={`${id}-range`} role="status" className="text-xs text-muted-foreground">{period.days === null ? "저장된 값을 읽지 못함" : `저장된 값 ${saved}일`} · 기본값 {period.defaultDays}일 · {period.minimumDays}~{period.maximumDays}일, 소수 가능</p>
+    {/* 요청 실패는 닫을 수 있고, 잘못된 저장값 경고는 고치면 사라진다. */}
+    <NoticeStack id={`${id}-notices`} className="mt-2" items={[
+      error && { tone: "error", message: error, onDismiss: () => setError("") },
+      period.error && { tone: "warning", message: period.error },
+    ]} />
   </form>
 }
 
