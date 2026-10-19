@@ -227,20 +227,57 @@ def pick_by_typing(query):
     return after[-1]
 
 
-def check_ime_enter():
-    """조합 중 Enter는 태그를 고르지 않고 창도 닫거나 재생하지 않는다."""
+def check_ime_enter(query):
+    """검색해 ↓로 활성화한 후보가 있어도 조합 중 Enter는 고르지 않고, 조합을 끝낸 뒤 Enter는 고른다."""
     before = chips()
-    js("""(() => { const input = document.querySelector('[role=dialog] [role=combobox]'); input.focus()
-      input.dispatchEvent(new CompositionEvent('compositionstart', {bubbles: true}))
-      input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', isComposing: true, bubbles: true, cancelable: true})) })()""")
+    type_text(query)
+    key(Qt.Key.Key_Down)
+    INPUT = "document.querySelector('[role=dialog] [role=combobox]')"
+    active = js(f"{INPUT}.getAttribute('aria-activedescendant')")
+    assert active and js(f"document.getElementById('{active}').getAttribute('aria-selected')") == 'false', active
+    js(f"""(() => {{ const input = {INPUT}
+      input.dispatchEvent(new CompositionEvent('compositionstart', {{bubbles: true}}))
+      input.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Enter', isComposing: true, bubbles: true, cancelable: true}})) }})()""")
     settle()
     assert dialog_open() and chips() == before and played == [], ('enter', dialog_open(), chips(), before, played)
-    js("""document.querySelector('[role=dialog] [role=combobox]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', isComposing: true, bubbles: true, cancelable: true}))""")
+    assert js(f"{INPUT}.getAttribute('aria-activedescendant')") == active
+    js(f"{INPUT}.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Escape', isComposing: true, bubbles: true, cancelable: true}}))")
     settle()
     assert dialog_open() and chips() == before and played == [], (dialog_open(), chips(), before, played)
-    js("document.querySelector('[role=dialog] [role=combobox]').dispatchEvent(new CompositionEvent('compositionend', {bubbles: true}))")
+    js(f"{INPUT}.dispatchEvent(new CompositionEvent('compositionend', {{bubbles: true}}))")
     settle(100)
-    metrics['checks'].append('IME 조합 중 Enter·Esc: 태그를 고르지 않고 창을 닫거나 재생하지 않음')
+    # 조합이 끝나면 같은 활성 후보에서 Enter가 실제로 고른다(guard가 Enter를 계속 막지 않는지도 본다).
+    assert js(f"{INPUT}.getAttribute('aria-activedescendant')") == active
+    key(Qt.Key.Key_Return)
+    after = chips()
+    assert len(after) == len(before) + 1, (before, after)
+    metrics['checks'].append('활성 후보가 있을 때 IME 조합 중 Enter·Esc: 고르지 않고 창 유지 → 조합 끝난 뒤 Enter로 그 후보 고름')
+    return after[-1]
+
+
+def check_reload_failure():
+    """성공 → 닫기 → 같은 태그 목록으로 다시 열기 → 조회 실패: 이전 후보로 세지 않고 오류 안내·재생 막힘."""
+    assert not dialog_open()
+    # 같은 태그 목록(라이브러리 갱신 없음)에서 한 번 성공적으로 센 뒤 닫는다.
+    open_dialog_by_keyboard()
+    wait(lambda: (status() or '').startswith('후보 ') and not play_disabled())
+    key(Qt.Key.Key_Escape)
+    assert not dialog_open()
+    original = core.random_tag_candidates
+
+    def fail(*args, **kwargs):
+        raise OSError('검사용 조회 실패')
+    core.random_tag_candidates = fail
+    try:
+        open_dialog_by_keyboard()
+        wait(lambda: (status() or '').startswith('후보를 세지 못했습니다.'))
+        assert chips() and '검사용 조회 실패' in status() and play_disabled(), (chips(), status())
+        capture('dialog-reload-failed')
+    finally:
+        core.random_tag_candidates = original
+    key(Qt.Key.Key_Escape)
+    assert not dialog_open()
+    metrics['checks'].append('다시 열 때 후보 조회 실패: 오류 안내와 함께 재생 막힘(이전 후보 무효화)')
 
 
 def tab_to_play():
@@ -321,8 +358,7 @@ try:
             metrics['checks'].append('태그 0개: "등록한 태그가 없습니다." 안내, 재생 막힘')
         else:
             first = pick_by_typing('000')
-            check_ime_enter()
-            second = pick_by_typing('002')
+            second = check_ime_enter('002')
             count, ids = expected_count([first, second])
             wait(lambda: status() == f'후보 {count}개')
             assert not play_disabled()
@@ -364,6 +400,7 @@ try:
             state = json.loads(js("""JSON.stringify({active: document.activeElement.id, descendant: document.getElementById('library-grid').getAttribute('aria-activedescendant')})"""))
             assert page.selected_id == video_id and state == {'active': 'library-grid', 'descendant': f'video-{video_id}'}, state
             metrics['checks'].append('Tab으로 재생 단추 → Enter: 고른 태그 영상 재생 요청 → 복귀 시 그 영상 선택·격자 초점')
+            check_reload_failure()
             if missing_only:
                 open_dialog_by_keyboard()
                 # 이전에 고른 태그는 남아 있다. 모두 빼고 파일 없음만 붙은 태그를 고른다.

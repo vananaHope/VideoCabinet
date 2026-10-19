@@ -83,7 +83,10 @@ class LibraryBridge(QObject):
         # 페이지가 가진 스냅숏으로 계산해 DB를 다시 읽지 않는다.
         if self.page.snapshot is None:
             return encode({'tags': []})
-        return encode({'tags': tag_candidates_data(self.page.core.random_tag_candidates(self.page.snapshot))})
+        try:
+            return encode({'tags': tag_candidates_data(self.page.core.random_tag_candidates(self.page.snapshot))})
+        except (ValueError, OSError) as error:
+            return encode({'error': str(error)})
 
     @LIBRARY.slot('randomPlayTags')
     def randomPlayTags(self, tag_ids):

@@ -21,9 +21,12 @@ export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onRetu
 
   // 태그별 후보는 창을 열 때와 라이브러리가 갱신될 때(태그 목록이 바뀜)만 받는다.
   // 태그를 바꿀 때는 받은 집합의 합집합 크기만 세어 메인 스레드에 다시 묻지 않는다.
+  // 새로 받는 동안과 받지 못했을 때는 이전 후보로 세지 않는다(재생도 막힌다).
   useEffect(() => {
     if (!open) return
     let current = true
+    setCandidates(null)
+    setError("")
     load().then(value => {
       if (!current) return
       setCandidates({ tags, byTag: new Map(value.map(tag => [tag.id, tag.videoIds])) })
@@ -37,7 +40,7 @@ export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onRetu
     if (!candidates || candidates.tags !== tags) return null
     return new Set(chosen.flatMap(id => candidates.byTag.get(id) ?? [])).size
   }, [candidates, chosen, tags])
-  const playable = chosen.length > 0 && !!count
+  const playable = chosen.length > 0 && !error && !!count
 
   function play() {
     if (!playable) return
@@ -53,7 +56,7 @@ export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onRetu
       onEscapeKeyDown={event => { if (tagPickerKeepsEscape(event)) event.preventDefault() }}>
       <header className="space-y-2">
         <Dialog.Title className="text-lg font-semibold">태그에서 무작위 재생</Dialog.Title>
-        <Dialog.Description className="text-sm text-muted-foreground">고른 태그 중 하나라도 붙은 영상에서 하나를 골라 재생합니다.</Dialog.Description>
+        <Dialog.Description className="text-sm text-muted-foreground">고른 태그 중 하나라도 붙은 영상에서 하나를 골라 재생합니다. 후보 수는 파일 없음·제외 영상을 뺀 수라 태그 옆 숫자(붙은 영상 수)보다 적을 수 있습니다.</Dialog.Description>
       </header>
       <TagPicker tags={tags} label="태그" mode="multiple" chips selected={chosen} onChange={setSelected} />
       <p role="status" className="text-sm text-muted-foreground empty:hidden">{error ? `후보를 세지 못했습니다. ${error}`

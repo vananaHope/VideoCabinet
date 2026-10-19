@@ -231,6 +231,15 @@ def test_tag_candidates_come_from_page_snapshot_without_rereading(bridge, monkey
     assert json.loads(bridge.randomTagCandidates()) == {'tags': []}
 
 
+def test_tag_candidates_failure_is_error_reply(bridge, monkeypatch):
+    bridge, page, app = bridge
+
+    def fail(snapshot):
+        raise OSError('읽기 실패')
+    monkeypatch.setattr(page.core, 'random_tag_candidates', fail)
+    assert json.loads(bridge.randomTagCandidates()) == {'error': '읽기 실패'}
+
+
 @pytest.mark.parametrize('tag_ids', ['[]', '[999999]'])
 def test_tag_random_play_without_candidates_is_info(bridge, tag_ids):
     bridge, page, app = bridge
