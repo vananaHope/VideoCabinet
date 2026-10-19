@@ -572,6 +572,10 @@ class AppCore:
         return {period.criterion: self._recommendations.days(period.criterion)
                 for period in RECOMMENDATION_PERIODS}
 
+    def recommendation_period(self, criterion: str) -> float:
+        """기간 하나의 현재 일수. 저장값이 잘못됐으면 그 기간만 예외로 알린다."""
+        return self._recommendations.days(criterion)
+
     def set_recommendation_period_days(self, criterion: str, days: float) -> None:
         """기간 하나를 검증해 저장한다. 잘못된 값은 예외로 거부하고 저장하지 않는다."""
         self._recommendations.set_days(criterion, days)

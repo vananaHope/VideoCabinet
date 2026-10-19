@@ -767,6 +767,17 @@ export interface SettingKeyData {
   note: string
 }
 
+export interface RecommendationPeriodData {
+  criterion: string
+  label: string
+  description: string
+  days: number | null
+  error: string
+  defaultDays: number
+  minimumDays: number
+  maximumDays: number
+}
+
 export interface SettingsData {
   version: string
   releasesUrl: string
@@ -774,6 +785,7 @@ export interface SettingsData {
   minimum: number
   scanning: boolean
   automaticDetection: boolean
+  recommendationPeriods: Array<RecommendationPeriodData>
   translationCli: string
   translation: TranslationSettingsData
   heldTranslations: number
@@ -844,6 +856,8 @@ export interface SettingsBridge {
   cancelCapture: (reply: Reply) => void
   setMinimum: (seconds: number, reply: Reply) => void
   setAutomaticDetection: (enabled: boolean, reply: Reply) => void
+  setRecommendationPeriod: (criterion: string, days: string, reply: Reply) => void
+  resetRecommendationPeriod: (criterion: string, reply: Reply) => void
   checkUpdate: (reply: Reply) => void
   setAutomaticUpdateCheck: (enabled: boolean, reply: Reply) => void
   action: (name: SettingsAction, reply: Reply) => void
@@ -865,6 +879,8 @@ export function publicSettingsBridge(raw: SettingsBridge): SettingsBridge {
     cancelCapture: raw.cancelCapture.bind(raw),
     setMinimum: raw.setMinimum.bind(raw),
     setAutomaticDetection: raw.setAutomaticDetection.bind(raw),
+    setRecommendationPeriod: raw.setRecommendationPeriod.bind(raw),
+    resetRecommendationPeriod: raw.resetRecommendationPeriod.bind(raw),
     checkUpdate: raw.checkUpdate.bind(raw),
     setAutomaticUpdateCheck: raw.setAutomaticUpdateCheck.bind(raw),
     action: raw.action.bind(raw),

@@ -25,21 +25,32 @@ class RecommendationRowDefinition:
 
 @dataclass(frozen=True)
 class RecommendationPeriodDefinition:
-    """설정 화면이 그릴 수 있는 기간 하나의 이름·기본값·허용 범위."""
+    """설정 화면이 그릴 수 있는 기간 하나의 이름·설명·기본값·허용 범위."""
     criterion: str
     label: str
     default_days: float
+    description: str
     minimum_days: float = PERIOD_MINIMUM_DAYS
     maximum_days: float = PERIOD_MAXIMUM_DAYS
 
 
 # 설정 화면에 표시하는 순서다. 설정 키는 recommend.<criterion>_days다.
 RECOMMENDATION_PERIODS = (
-    RecommendationPeriodDefinition("continue_watching", "이어 보기", 30),
-    RecommendationPeriodDefinition("revisit", "하이라이트 복습", 30),
-    RecommendationPeriodDefinition("new_arrivals", "새로 추가됨", 14),
-    RecommendationPeriodDefinition("rewatch", "다시 보기", 60),
-    RecommendationPeriodDefinition("unwatched", "잊고 있던 영상", 30),
+    RecommendationPeriodDefinition(
+        "continue_watching", "이어 보기", 30,
+        "보다 만 영상을 이어 보기에 두는 기간입니다. 넘기면 잊고 있던 영상으로 옮깁니다."),
+    RecommendationPeriodDefinition(
+        "revisit", "하이라이트 복습", 30,
+        "하이라이트를 만들거나 마지막으로 복습한 뒤 이 기간이 지나면 복습을 권합니다."),
+    RecommendationPeriodDefinition(
+        "new_arrivals", "새로 추가됨", 14,
+        "추가한 뒤 아직 안 본 영상을 새로 추가됨에 두는 기간입니다."),
+    RecommendationPeriodDefinition(
+        "rewatch", "다시 보기", 60,
+        "즐겨 보는 영상을 마지막으로 본 뒤 이 기간을 넘기면 다시 보기를 권합니다."),
+    RecommendationPeriodDefinition(
+        "unwatched", "잊고 있던 영상", 30,
+        "추가한 뒤 이 기간을 넘기도록 안 본 영상을 잊고 있던 영상으로 꺼냅니다."),
 )
 RECOMMENDATION_PERIODS_BY_CRITERION = {period.criterion: period for period in RECOMMENDATION_PERIODS}
 
@@ -66,9 +77,12 @@ def recommendation_period_definition(criterion: str) -> RecommendationPeriodDefi
 
 
 def validate_period_days(definition: RecommendationPeriodDefinition, days) -> float:
-    """유한한 수이며 정의된 범위 안인지 확인한다. 불리언과 문자열은 수가 아니다."""
-    if (isinstance(days, bool) or not isinstance(days, (int, float)) or not isfinite(days)
-            or not definition.minimum_days <= days <= definition.maximum_days):
+    """유한한 수이며 정의된 범위 안인지 확인한다. 불리언과 문자열은 수가 아니다.
+
+    범위를 먼저 본다. float로 바꿀 수 없을 만큼 큰 정수에 isfinite를 부르면 OverflowError가 난다.
+    """
+    if (isinstance(days, bool) or not isinstance(days, (int, float))
+            or not definition.minimum_days <= days <= definition.maximum_days or not isfinite(days)):
         raise ValueError("추천 기간은 0 이상 365000 이하의 유한한 일수여야 합니다.")
     return days
 

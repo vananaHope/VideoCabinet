@@ -14,6 +14,17 @@ class SettingKeyData(TypedDict):
     note: str
 
 
+class RecommendationPeriodData(TypedDict):
+    criterion: str
+    label: str
+    description: str
+    days: float | None
+    error: str
+    defaultDays: float
+    minimumDays: float
+    maximumDays: float
+
+
 class SettingsData(TypedDict):
     version: str
     releasesUrl: str
@@ -21,6 +32,7 @@ class SettingsData(TypedDict):
     minimum: float
     scanning: bool
     automaticDetection: bool
+    recommendationPeriods: list[RecommendationPeriodData]
     translationCli: str
     translation: TranslationSettingsData
     heldTranslations: int
