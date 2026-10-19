@@ -3,7 +3,7 @@
 from PySide6.QtCore import QObject, QTimer
 import json
 
-from .web_library_data import details_data, highlights_data
+from .web_library_data import details_data, highlights_data, tag_candidates_data
 from .web_library_contract import MENU_ACTIONS, SCAN_LOCKED_ACTIONS, LIBRARY
 from .web_json import encode
 from .random_play import NO_CANDIDATE_MESSAGE
@@ -75,11 +75,35 @@ class LibraryBridge(QObject):
     @LIBRARY.slot('randomPlay')
     def randomPlay(self):
         # 범위는 페이지의 현재 결과다. 조건이 없으면 현재 결과가 곧 영상 전체다.
+        return self.random_play(lambda: {'video_ids': self.page.visible_video_ids()})
+
+    @LIBRARY.slot('randomTagCandidates')
+    def randomTagCandidates(self):
+        # 태그 고르기 창이 열릴 때 한 번 받아 후보 수(합집합 크기)를 화면에서 센다.
+        # 페이지가 가진 스냅숏으로 계산해 DB를 다시 읽지 않는다.
+        if self.page.snapshot is None:
+            return encode({'tags': []})
+        try:
+            return encode({'tags': tag_candidates_data(self.page.core.random_tag_candidates(self.page.snapshot))})
+        except (ValueError, OSError) as error:
+            return encode({'error': str(error)})
+
+    @LIBRARY.slot('randomPlayTags')
+    def randomPlayTags(self, tag_ids):
+        # 고른 태그 중 하나라도 붙은 영상(OR)에서 고른다. 후보는 코어가 최신 DB로 다시 정한다.
+        def scope():
+            ids = json.loads(tag_ids)
+            if not isinstance(ids, list) or not all(type(tag_id) is int for tag_id in ids):
+                raise ValueError('태그 목록이 올바르지 않습니다.')
+            return {'tag_ids': ids}
+        return self.random_play(scope)
+
+    def random_play(self, scope):
         # 재생은 상태를 바꾸지 않는 작업이라 검사 중에도 막지 않는다.
         if self.busy:
             return encode({'error': '진행 중인 작업이 끝난 뒤 다시 시도하세요.'})
         try:
-            video_id = self.page.core.pick_random_video(video_ids=self.page.visible_video_ids())
+            video_id = self.page.core.pick_random_video(**scope())
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
         if video_id is None:

@@ -85,6 +85,11 @@ export interface TagUsageData {
   videoCount: number
 }
 
+export interface TagCandidatesData {
+  id: number
+  videoIds: Array<number>
+}
+
 export interface VideoData {
   id: number
   title: string
@@ -212,6 +217,8 @@ export interface LibraryBridge {
   playHighlight: (videoId: number, highlightId: number, reply: Reply) => void
   editHighlight: (videoId: number, highlightId: number, reply: Reply) => void
   randomPlay: (reply: Reply) => void
+  randomTagCandidates: (reply: Reply) => void
+  randomPlayTags: (tagIds: string, reply: Reply) => void
   thumbnailsChanged: Signal<string>
   libraryChanged: Signal<string>
   libraryDetailsChanged: Signal<number>
@@ -231,6 +238,8 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
     playHighlight: raw.playHighlight.bind(raw),
     editHighlight: raw.editHighlight.bind(raw),
     randomPlay: raw.randomPlay.bind(raw),
+    randomTagCandidates: raw.randomTagCandidates.bind(raw),
+    randomPlayTags: raw.randomPlayTags.bind(raw),
     thumbnailsChanged: Object.freeze({ connect: raw.thumbnailsChanged.connect.bind(raw.thumbnailsChanged), disconnect: raw.thumbnailsChanged.disconnect.bind(raw.thumbnailsChanged) }),
     libraryChanged: Object.freeze({ connect: raw.libraryChanged.connect.bind(raw.libraryChanged), disconnect: raw.libraryChanged.disconnect.bind(raw.libraryChanged) }),
     libraryDetailsChanged: Object.freeze({ connect: raw.libraryDetailsChanged.connect.bind(raw.libraryDetailsChanged), disconnect: raw.libraryDetailsChanged.disconnect.bind(raw.libraryDetailsChanged) }),

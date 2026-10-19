@@ -9,8 +9,9 @@ import { LibraryGrid } from "@/components/library-grid"
 import type { HighlightSnapshot } from "@/components/highlight-panel"
 import { DetailPanel } from "@/components/detail-panel"
 import { RandomPlayButton } from "@/components/random-play-button"
+import { RandomTagDialog } from "@/components/random-tag-dialog"
 import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
-import type { LibraryData, DetailsData, HighlightData, LibraryViewOptions } from "@/bridge-types"
+import type { LibraryData, DetailsData, HighlightData, LibraryViewOptions, TagCandidatesData } from "@/bridge-types"
 
 export default function LibraryPage() {
   const [bridge, setBridge] = useState<LibraryBridge | null>(null)
@@ -24,6 +25,8 @@ export default function LibraryPage() {
   const [revealRequest, setRevealRequest] = useState(0)
   // 후보 없음 안내는 그때의 결과에 묶어, 결과가 바뀌면 함께 사라진다.
   const [randomNotice, setRandomNotice] = useState<{ message: string; scope: string } | null>(null)
+  const [tagDialogOpen, setTagDialogOpen] = useState(false)
+  const randomMenu = useRef<HTMLButtonElement>(null)
   const optionsRef = useRef<LibraryViewOptions | null>(null)
   const [error, setError] = useState("")
   const [detailRevision, setDetailRevision] = useState(0)
@@ -156,11 +159,15 @@ export default function LibraryPage() {
       showError(error)
     })
   }
-  function randomPlay() {
+  const loadTagCandidates = useCallback(() => bridge
+    ? request<{ tags: TagCandidatesData[] }>(reply => bridge.randomTagCandidates(reply)).then(result => result.tags)
+    : Promise.resolve([]), [bridge])
+  // tagIds가 없으면 현재 결과에서, 있으면 그 태그 중 하나라도 붙은 영상에서 고른다. 재생·복귀·안내는 같은 경로다.
+  function randomPlay(tagIds?: number[]) {
     if (!bridge) return
     const scope = resultScope
     holdLayout()
-    request<{ videoId: number | null; message?: string }>(reply => bridge.randomPlay(reply)).then(({ videoId, message }) => {
+    request<{ videoId: number | null; message?: string }>(reply => tagIds ? bridge.randomPlayTags(JSON.stringify(tagIds), reply) : bridge.randomPlay(reply)).then(({ videoId, message }) => {
       if (videoId === null) {
         releaseLayout()
         setRandomNotice({ message: message ?? "", scope })
@@ -197,8 +204,12 @@ export default function LibraryPage() {
         <Button size="sm" variant="outline" aria-label="정렬 방향" onClick={() => filter({ descending: !data.options.descending })}>{data.options.descending ? "내림차순 ↓" : "오름차순 ↑"}</Button>
         <LibraryFilters options={data.options} tags={data.tags} onChange={filter} />
         <p aria-label="라이브러리 등록·표시 개수" className="shrink-0 text-xs text-muted-foreground">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
-        {/* #205가 '태그에서…' 범위를 이 목록에 더한다. */}
-        <RandomPlayButton scopes={[{ key: "results", label: "현재 결과에서", onSelect: randomPlay }]} />
+        <RandomPlayButton menuRef={randomMenu} scopes={[
+          { key: "results", label: "현재 결과에서", onSelect: () => randomPlay() },
+          { key: "tags", label: "태그에서…", onSelect: () => setTagDialogOpen(true), opensDialog: true },
+        ]} />
+        <RandomTagDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} tags={data.tags} load={loadTagCandidates}
+          onPlay={randomPlay} onReturnFocus={() => randomMenu.current?.focus()} />
       </div>
       <LibraryFilterChips options={data.options} chips={data.chips} onChange={filter} />
     </>}
@@ -213,7 +224,7 @@ export default function LibraryPage() {
         title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>}
       {foldersOpen && <LibraryFolders collapsedIds={data.options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
       <LibraryGrid cardSize={data?.options.card_size ?? 'medium'} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} />
-      <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} />
+      <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} onRandomTag={tagId => randomPlay([tagId])} />
     </div>
   </main>
 }

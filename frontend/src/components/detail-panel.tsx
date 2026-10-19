@@ -5,6 +5,7 @@ import { EmptyState, Tabs } from "@/components/page-parts"
 import { HighlightPanel, type HighlightSnapshot } from "@/components/highlight-panel"
 import { ExternalSubtitleList } from "@/components/external-subtitle-list"
 import { Thumbnail, duration, viewing } from "@/components/video-card"
+import { TagMenuChips } from "@/components/video-tags"
 import type { VideoData, DetailsData } from "@/bridge-types"
 import { actions, lockedDuringScan, type Action } from "@/bridge"
 
@@ -38,8 +39,8 @@ function translationSummary(details: DetailsData) {
   const reason = details.translation_skip_reason && skipReasons[details.translation_skip_reason]
   return `${details.subtitleLabel} 없음${reason ? ` · ${reason}` : ""}`
 }
-type Props = VariantProps<typeof detailVariants> & { video?: VideoData; details: DetailsData | null; highlights: HighlightSnapshot | null; revision: number; tab: string; onTabChange: (tab: string) => void; scanning: boolean; onAction: (action: Action, id: number) => void; onHighlight: (videoId: number, highlightId: number, edit: boolean) => void }
-export function DetailPanel({ video, details, highlights, revision, tab, onTabChange, scanning, onAction, onHighlight, variant }: Props) {
+type Props = VariantProps<typeof detailVariants> & { video?: VideoData; details: DetailsData | null; highlights: HighlightSnapshot | null; revision: number; tab: string; onTabChange: (tab: string) => void; scanning: boolean; onAction: (action: Action, id: number) => void; onHighlight: (videoId: number, highlightId: number, edit: boolean) => void; onRandomTag: (tagId: number) => void }
+export function DetailPanel({ video, details, highlights, revision, tab, onTabChange, scanning, onAction, onHighlight, onRandomTag, variant }: Props) {
   return <aside aria-label="선택 영상 상세" className={detailVariants({ variant })}>
     {!video ? <EmptyState title="선택한 영상 없음" description="영상을 선택하면 상세 정보와 작업이 표시됩니다." /> : <>
       <h2 title={video.title} className="line-clamp-2 shrink-0 text-sm leading-5 font-semibold wrap-anywhere">{video.title}</h2>
@@ -51,7 +52,7 @@ export function DetailPanel({ video, details, highlights, revision, tab, onTabCh
         <p>{duration(video.duration)} · {viewing(video)}</p>
         {video.missing ? <Notice tone="warning" size="compact" role="note">파일 없음 · 다시 검사하거나 파일을 연결하세요.</Notice> : <p>위치 {video.locationCount}개</p>}
         {video.resumePoint !== null && <p>이어볼 위치 {duration(video.resumePoint)} ({Math.round(video.stoppedPercent ?? 0)}%)</p>}
-        <p>태그: {video.tags.map(t => t.name).join(", ") || "없음"}</p>
+        <TagMenuChips tags={video.tags} onRandomPlay={onRandomTag} />
         <p>시리즈: {video.series || "없음"}</p>
         {details && <>
           {/* 말소리 없음과 번역 미등록 사유는 정보 안내다. 줄 수 요약은 일반 정보 줄로 둔다. */}

@@ -278,3 +278,49 @@ def test_selected_abandoned_video_keeps_existing_resume_position(core):
     assert core.pick_random_video(video_ids=[video_id]) == video_id
     assert core.playback.session is None
     assert core.resume_start(video_id) == 37
+
+
+def union_count(candidates, tag_ids):
+    return len(set().union(*(candidates.get(tag_id, frozenset()) for tag_id in tag_ids)))
+
+
+@pytest.mark.parametrize("from_snapshot", [False, True])
+def test_tag_candidates_union_matches_or_count_for_any_selection(core, from_snapshot):
+    """태그 고르기 창은 태그별 후보를 한 번 받아 합집합 크기를 센다. 그 값이 코어 OR 후보 수와 같다."""
+    a, b, c, d = core.videos()
+    red = core.add_video_tag(a.id, "red")
+    core.add_video_tag(b.id, "red")
+    blue = core.add_video_tag(b.id, "blue")
+    core.add_video_tag(c.id, "blue")
+    gone = core.add_video_tag(d.id, "gone")
+    core.add_video_tag(c.id, "gone")
+    unused = core.create_tag("unused")
+    core.playback.start(a.id, 10)
+    core.execute_highlight_command(core.command_for_key("Insert"))
+    core.playback.end()
+    highlight_only = core.add_highlight_tag(core.highlights(a.id)[0].id, "highlight only")
+    d.locations[0].path.unlink()
+    core.scan()
+    core.exclude_video(c.id)
+
+    candidates = core.random_tag_candidates(core.library_snapshot() if from_snapshot else None)
+    assert candidates == {red.id: {a.id, b.id}, blue.id: {b.id}}
+    selections = [[], [red.id], [blue.id], [red.id, blue.id], [gone.id], [gone.id, blue.id],
+                  [unused.id, highlight_only.id], [red.id, red.id, 999999]]
+    for tag_ids in selections:
+        assert union_count(candidates, tag_ids) == core.random_video_count(tag_ids=tag_ids), tag_ids
+    assert core.pick_random_video(tag_ids=[gone.id, blue.id], choice=FixedChoice([b.id], b.id)) == b.id
+
+
+def test_tag_candidates_include_finished_and_reflect_changes(core):
+    a, b = core.videos()[:2]
+    tag = core.add_video_tag(a.id, "seen")
+    core.playback.start(a.id, 0)
+    core.playback.report(95)
+    core.playback.end()
+    assert core.viewing_status(a.id).finished
+    assert core.random_tag_candidates() == {tag.id: {a.id}}
+    core.add_video_tag(b.id, tag.name)
+    assert core.random_tag_candidates() == {tag.id: {a.id, b.id}}
+    core.delete_tag(tag.id)
+    assert core.random_tag_candidates() == {}

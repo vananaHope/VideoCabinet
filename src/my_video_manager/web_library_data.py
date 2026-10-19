@@ -22,6 +22,12 @@ class TagUsageData(TypedDict):
     videoCount: int
 
 
+class TagCandidatesData(TypedDict):
+    """무작위 재생 태그 고르기용. 코어 규칙으로 거른 그 태그의 후보 영상 ID다."""
+    id: int
+    videoIds: list[int]
+
+
 class VideoData(TypedDict):
     id: int
     title: str
@@ -117,6 +123,10 @@ def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
 
 def tag_usage_data(usage) -> list[TagUsageData]:
     return [TagUsageData(id=u.tag.id, name=u.tag.name, key=u.key, videoCount=u.video_count) for u in usage]
+
+
+def tag_candidates_data(candidates) -> list[TagCandidatesData]:
+    return [TagCandidatesData(id=tag_id, videoIds=sorted(ids)) for tag_id, ids in sorted(candidates.items())]
 
 
 def highlights_data(core, video_id) -> list[HighlightData]:

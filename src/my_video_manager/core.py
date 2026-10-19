@@ -968,10 +968,11 @@ class AppCore:
                 video_id for video_id, tags in self.video_tags_map().items()
                 if any(tag.id in selected_tags for tag in tags)
             }
+        from .random_play import is_candidate
+
         return tuple(
             video.id for video in self.videos()
-            if not video.missing and not video.excluded
-            and (selected_ids is None or video.id in selected_ids)
+            if is_candidate(video) and (selected_ids is None or video.id in selected_ids)
         )
 
     def random_video_count(
@@ -984,6 +985,19 @@ class AppCore:
         상태를 바꾸지 않으므로 검사(scan)가 쥔 잠금을 잡지 않는다.
         """
         return len(self._random_video_candidates(video_ids=video_ids, tag_ids=tag_ids))
+
+    def random_tag_candidates(self, snapshot: LibrarySnapshot | None = None) -> dict[int, frozenset[int]]:
+        """태그 ID별 무작위 재생 후보 영상 ID. 후보가 없는 태그는 싣지 않는다.
+
+        고른 태그들의 random_video_count(tag_ids=...)는 이 집합들의 합집합 크기와 같다.
+        snapshot(library_snapshot 결과)을 주면 DB를 다시 읽지 않고 그 조회 결과로 계산한다.
+        태그를 바꿀 때마다 후보 수를 다시 묻지 않도록 태그 고르기 창이 한 번 받아 쓴다.
+        """
+        from .random_play import tag_candidates
+
+        if snapshot is None:
+            return tag_candidates(self.videos(), self.video_tags_map())
+        return tag_candidates(snapshot.videos, snapshot.tags)
 
     def pick_random_video(
         self, *, video_ids: Iterable[int] | None = None, tag_ids: Iterable[int] | None = None,
