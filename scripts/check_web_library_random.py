@@ -304,7 +304,11 @@ except Exception as error:
     metrics['failure'] = repr(error)
     raise
 finally:
-    (args.output / f'metrics-{args.count}.json').write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(json.dumps(metrics, ensure_ascii=False, indent=2))
-    wait(lambda: not window.tray.quit_blocker(), 120)
-    window.tray.quit()
+    try:
+        (args.output / f'metrics-{args.count}.json').write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
+        # 콘솔 인코딩(cp949 등)에서 '▾' 같은 글자를 못 써 UnicodeEncodeError로 끝나지 않게 ASCII로 escape한다.
+        print(json.dumps(metrics, ensure_ascii=True, indent=2))
+    finally:
+        # 결과 출력이 실패해도 트레이 정리는 건너뛰지 않는다.
+        wait(lambda: not window.tray.quit_blocker(), 120)
+        window.tray.quit()
