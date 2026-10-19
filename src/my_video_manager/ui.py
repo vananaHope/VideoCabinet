@@ -1,5 +1,7 @@
 """화면은 입력을 코어에 전달하고 결과를 표시한다."""
 
+from dataclasses import dataclass
+
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
@@ -17,6 +19,19 @@ from .qt_keys import key_name
 from .theme import apply_theme
 
 
+@dataclass
+class TransitionHold:
+    """긴급 탈출로 멈춘 엔진·재생 항목에 묶인 모아보기 자동 전환 보류.
+
+    끝 도달은 코어가 항목별로 기억하고, EOF와 진행 중인 사용자 탐색은 여기서 기억한다.
+    엔진이나 재생 세션(모아보기 항목)이 바뀌면 보류는 그 항목과 함께 버린다.
+    """
+    player: object
+    session: object
+    eof: bool = False
+    seeking: bool = False
+
+
 class MainWindow(QMainWindow):
     def __init__(self, core: AppCore, *, player_factory=MpvPlayer, folder_watch_options=None,
                  update_check_options=None):
@@ -28,8 +43,7 @@ class MainWindow(QMainWindow):
         self.playback_list = ()
         self._return_to_gems = False
         # 긴급 탈출로 멈춘 엔진. 사용자가 재개하기 전까지 모아보기 자동 전환을 미룬다.
-        self._held_player = None
-        self._held_eof = False
+        self._hold = None
         self.position_timer = QTimer(self)
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
@@ -162,8 +176,8 @@ class MainWindow(QMainWindow):
         if self.player:
             try:
                 # 이미 엔진이 보낸 구간 끝·EOF 보고가 다음 항목을 자동 재생하지 않게 먼저 보류한다.
-                if self._held_player is not self.player:
-                    self._held_player, self._held_eof = self.player, False
+                if self._current_hold() is None:
+                    self._hold = TransitionHold(self.player, self.core.playback.session)
                 self.player.pause()
                 self.sync_position()
             except Exception as error:
@@ -228,37 +242,54 @@ class MainWindow(QMainWindow):
     def stop_player(self):
         self.position_timer.stop()
         # 닫는 엔진의 일시정지 상태는 읽지 않는다. 남은 보고는 기존처럼 처리한다.
-        self._held_player, self._held_eof = None, False
+        self._hold = None
         if self.player:
             self.player.close()
             self.sync_position()
             self.player = None
 
+    def _current_hold(self):
+        """지금 엔진·재생 항목의 보류. 엔진이나 항목이 바뀌었으면 버린다."""
+        hold = self._hold
+        if hold is not None and (hold.player is not self.player
+                                 or hold.session is not self.core.playback.session):
+            hold = self._hold = None
+        return hold
+
+    def user_seeking(self):
+        """사용자가 같은 항목 안에서 탐색을 시작했다.
+
+        보류한 EOF는 탐색 전 위치의 것이므로 버리고, 탐색 완료 보고가 오기 전에는 보류 전환을 적용하지 않는다.
+        엔진의 정지 해제가 탐색 완료 보고보다 먼저 관측될 수 있기 때문이다.
+        """
+        if (hold := self._current_hold()) is not None:
+            hold.eof, hold.seeking = False, True
+
     def sync_position(self):
         if self.player and self.core.playback.session is not None:
             # 긴급 탈출로 멈춘 엔진은 사용자가 재개하기 전까지 모아보기 자동 전환을 미룬다.
-            # 위치·복습 보고는 그대로 반영하고, 끝 도달은 코어가, EOF는 여기서 기억한다.
-            held = self._held_player is self.player
-            if self._held_player is not None and not held:
-                self._held_player, self._held_eof = None, False  # 엔진이 바뀌면 보류 대상이 없다.
-            resumed = held and not self.player.paused
+            # 위치·복습 보고는 그대로 반영한다.
+            hold = self._current_hold()
+            resumed = hold is not None and not self.player.paused
             # 상대 탐색과 Home/End 절대 탐색 모두 mpv 이벤트의 seeked 표시를 쓴다.
             session = self.core.playback.session
             for position, seeked in self.player.take_positions():
                 self.core.playback.report(position, seeked=seeked)
-                if held:
-                    self._held_eof = self._held_eof and not seeked
+                if hold is not None:
+                    if seeked:
+                        hold.eof = hold.seeking = False
                     continue
                 self.core.advance_reel_if_due()
                 if self.core.playback.session is not session:
                     break  # 자동 전환 뒤 이전 엔진의 나머지 보고는 버린다.
             eof = self.player.take_eof()
-            if held:
-                self._held_eof = self._held_eof or eof
-                if resumed:
-                    # 남은 보고를 모두 반영한 뒤 미룬 전환을 적용한다.
-                    eof, self._held_player, self._held_eof = self._held_eof, None, False
-                    self.core.advance_reel_if_due(eof=eof)
+            if hold is not None:
+                if not hold.seeking:
+                    hold.eof = hold.eof or eof
+                if resumed and not hold.seeking:
+                    # 남은 보고를 모두 반영한 뒤 미룬 전환을 이 항목에 적용한다.
+                    self._hold = None
+                    self.core.advance_reel_if_due(eof=hold.eof)
             elif self.core.playback.session is session and eof:
                 self.core.advance_reel_if_due(eof=True)
             self.core.save_viewings()

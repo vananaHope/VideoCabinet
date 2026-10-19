@@ -150,6 +150,7 @@ class PlaybackPage(QWidget):
             window.sync_position()
             window.reel.sync()
             if window.player:
+                window.user_seeking()
                 if command is not None:
                     window.player.execute(command)
                 else:
