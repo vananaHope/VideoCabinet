@@ -87,17 +87,25 @@ export default function RecommendPage() {
     }
   }, [activeId])
 
+  // 화면에 보이는 카드를 커서로 확정한다. 관심 없음으로 대신 고른 카드도 재생·관심 없음 전에 확정해야
+  // 돌아왔을 때 줄 순서가 바뀌어도 그 카드를 따라간다.
+  function select(position: Position) {
+    const row = rows[position.row]
+    const item = row.items[position.column]
+    remembered.current.set(row.kind, item.video.id)
+    setCursor({ kind: row.kind, ...position, videoId: item.video.id })
+    return item
+  }
   function move(position: Position) {
-    const videoId = rows[position.row].items[position.column].video.id
-    remembered.current.set(rows[position.row].kind, videoId)
-    setCursor({ kind: rows[position.row].kind, ...position, videoId })
-    reveal(videoId)
+    reveal(select(position).video.id)
   }
-  function play(videoId: number) {
-    if (bridge) request(reply => bridge.play(videoId, reply)).catch(showError)
+  function play(position: Position) {
+    const { video } = select(position)
+    if (bridge) request(reply => bridge.play(video.id, reply)).catch(showError)
   }
-  function dismiss(videoId: number, title: string) {
-    if (bridge) request(reply => bridge.dismiss(videoId, reply)).then(() => setDismissed({ id: videoId, title })).catch(showError)
+  function dismiss(position: Position) {
+    const { video } = select(position)
+    if (bridge) request(reply => bridge.dismiss(video.id, reply)).then(() => setDismissed({ id: video.id, title: video.title })).catch(showError)
   }
   function restore(videoId: number) {
     if (!bridge) return
@@ -108,8 +116,7 @@ export default function RecommendPage() {
   }
   function key(event: KeyboardEvent<HTMLDivElement>) {
     if (!active || (event.target as HTMLElement).closest('[role="menu"]')) return
-    const item = rows[active.row].items[active.column]
-    if (openKeyboardMenu(event, document.getElementById(cardId(item.video.id)))) return
+    if (openKeyboardMenu(event, document.getElementById(cardId(rows[active.row].items[active.column].video.id)))) return
     if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.nativeEvent.isComposing) return
     const last = rows[active.row].items.length - 1
     if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "Home" || event.key === "End") {
@@ -125,8 +132,8 @@ export default function RecommendPage() {
     } else if (event.key === "Enter" || event.key === "Backspace") {
       event.preventDefault()
       if (!event.repeat) {
-        if (event.key === "Enter") play(item.video.id)
-        else dismiss(item.video.id, item.video.title)
+        if (event.key === "Enter") play(active)
+        else dismiss(active)
       }
     }
   }
@@ -149,11 +156,11 @@ export default function RecommendPage() {
         {rows.map((row, rowIndex) => <section key={row.kind} role="row" aria-label={`${row.title} · ${row.items.length}개`} className="flex flex-col gap-1">
           <div role="rowheader" className="flex items-baseline gap-2 px-1"><h2 className="text-sm font-semibold">{row.title}</h2><span className="text-xs text-muted-foreground">{row.items.length}개</span></div>
           <div className="recommendation-row rounded-lg p-1">
-            {row.items.map((item, column) => <RecommendationMenu key={item.video.id} onPlay={() => play(item.video.id)} onDismiss={() => dismiss(item.video.id, item.video.title)}
+            {row.items.map((item, column) => <RecommendationMenu key={item.video.id} onPlay={() => play({ row: rowIndex, column })} onDismiss={() => dismiss({ row: rowIndex, column })}
               onClose={() => document.getElementById("recommendations")?.focus({ preventScroll: true })}>
               <RecommendationCard id={cardId(item.video.id)} video={item.video} reason={item.reason} role="gridcell" aria-selected={activeId === item.video.id} tabIndex={-1}
                 variant={activeId === item.video.id ? "selected" : "default"}
-                onClick={() => { move({ row: rowIndex, column }); play(item.video.id) }} onContextMenu={() => move({ row: rowIndex, column })} />
+                onClick={() => play({ row: rowIndex, column })} onContextMenu={() => move({ row: rowIndex, column })} />
             </RecommendationMenu>)}
           </div>
         </section>)}

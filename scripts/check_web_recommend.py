@@ -363,6 +363,59 @@ def screenshots():
     checks.append('긴 제목·긴 이유: 카드 폭·높이 유지, 말줄임과 두 줄 자름')
 
 
+class FakePlayer:
+    """mpv 없이 재생 왕복을 돌린다. 처음 위치 보고 한 번으로 35초까지 본 것으로 한다."""
+
+    def __init__(self, surface):
+        self.positions = [(35.0, False)]
+        self.paused = False
+
+    def play(self, path, start, *, subtitle):
+        pass
+
+    def close(self):
+        pass
+
+    def take_positions(self):
+        positions, self.positions = self.positions, []
+        return positions
+
+    def take_eof(self):
+        return False
+
+
+def fallback_return():
+    # 관심 없음으로 자동 선택된 카드를 방향키 없이 Enter로 재생하고 돌아오면, 줄 순서가 바뀌어도 그 카드로 돌아온다.
+    core, clock, folder = library('fallback')
+    videos = [add(core, folder, title) for title in titles(3)]
+    for video in videos:
+        watch(core, video, 25)
+        clock.now += timedelta(days=1)
+    window = make_window(core)
+    window.player_factory = FakePlayer
+    page = open_recommend(window)
+    before = [item['video']['id'] for item in page.rows[0]['items']]
+    assert before == [v.id for v in reversed(videos)], before
+    js(window, "document.getElementById('recommendations').focus()")
+    key(window, Qt.Key.Key_Right)
+    wait_until(lambda: active(window) == f'recommendation-{before[1]}')
+    key(window, Qt.Key.Key_Backspace)
+    wait_until(lambda: read(window, f"!document.getElementById('recommendation-{before[1]}')"))
+    chosen = f'recommendation-{before[2]}'
+    assert active(window) == chosen, active(window)
+    key(window, Qt.Key.Key_Return)
+    wait_until(lambda: window.pages.currentWidget() is window.playback_page)
+    assert core.playback.session.video_id == before[2]
+    clock.now += timedelta(days=1)
+    window.back_to_list()
+    wait_until(lambda: [item['video']['id'] for item in page.rows[0]['items']] == [before[2], before[0]])
+    wait_until(lambda: read(window, "document.activeElement.id") == 'recommendations')
+    settle()
+    assert active(window) == chosen, (active(window), chosen)
+    close(window)
+    checks.append('관심 없음 뒤 자동 선택 카드 Enter 재생 → 줄 순서가 바뀐 복귀에도 같은 카드')
+
+
 def verify():
     videos = []
     core, clock, folder = library('verify', Clock())
@@ -440,6 +493,8 @@ def verify():
 try:
     if not args.no_screenshots or args.offscreen:
         screenshots()
+    if args.offscreen:
+        fallback_return()
     if args.verify:
         verify()
     result = {'checks': checks, 'offscreen': args.offscreen, 'layouts': layouts,
