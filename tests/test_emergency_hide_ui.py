@@ -228,3 +228,16 @@ def test_subtitle_queue_keeps_processing_after_emergency_hide(tmp_path, app, mon
         assert transcriber.calls and not window.isVisible()
     finally:
         opened.close()
+
+
+def test_maximized_window_returns_maximized_after_fullscreen_emergency_hide(window):
+    play_to_twenty_seconds(window)
+    window.showMaximized()
+    QApplication.processEvents()
+    key(window, Qt.Key.Key_Apostrophe)
+    assert window.isFullScreen()
+    emergency_key(window)
+    assert not window.isVisible()
+    window.tray.open()
+    QApplication.processEvents()
+    assert window.isVisible() and window.isMaximized() and not window.isFullScreen()
