@@ -347,8 +347,8 @@ def test_fullscreen_default_label_rebinding_and_reset(tmp_path):
     core = open_core(tmp_path)
     assert core.key_bindings()[0].command.kind == CommandType.TOGGLE_PAUSE
     # 재생 명령 뒤에 재생 밖에서도 동작하는 긴급 탈출이 온다.
-    assert [row.command.kind for row in core.key_bindings()][-2:] == [
-        CommandType.TOGGLE_FULLSCREEN, CommandType.EMERGENCY_HIDE]
+    assert [row.command.kind for row in core.key_bindings()][-3:] == [
+        CommandType.TOGGLE_FULLSCREEN, CommandType.EMERGENCY_HIDE, CommandType.RANDOM_PLAY]
     command = Command(CommandType.TOGGLE_FULLSCREEN)
     row = next(row for row in core.key_bindings() if row.command == command)
     assert row.label == "전체 화면 켜기 / 끄기"
@@ -428,7 +428,8 @@ def test_emergency_hide_default_label_note_rebinding_and_reset(tmp_path):
     assert row.label == "긴급 탈출(창 숨기기)"
     assert row.keys == row.default_keys == ("Ctrl+Shift+H",)
     assert "재생 화면 밖" in row.note
-    assert all(not other.note for other in core.key_bindings() if other.command != command)
+    assert all(not other.note for other in core.key_bindings()
+               if other.command.kind not in (CommandType.EMERGENCY_HIDE, CommandType.RANDOM_PLAY))
     assert core.command_for_key("ctrl+shift+h") == command
     assert core.command_for_key("Ctrl+H") is None
     bindings = draft(core)
@@ -515,3 +516,57 @@ def test_stored_emergency_hide_key_without_modifier_loads_as_unassigned(tmp_path
     assert reopened.command_for_key("J") == Command(CommandType.POINT_HIGHLIGHT)
     reopened.reset_key_bindings(Command(CommandType.EMERGENCY_HIDE))
     assert open_core(tmp_path).command_for_key("Ctrl+Shift+H") == Command(CommandType.EMERGENCY_HIDE)
+
+
+def test_random_play_default_rebinding_restart_and_resets(tmp_path):
+    core = open_core(tmp_path)
+    command = Command(CommandType.RANDOM_PLAY)
+    row = next(row for row in core.key_bindings() if row.command == command)
+    assert row.keys == row.default_keys == ("Ctrl+Shift+R",)
+    assert row.note
+    assert core.command_for_key("shift+ctrl+r") == command
+    bindings = draft(core)
+    bindings[command] = ("alt+f9",)
+    core.save_key_bindings(bindings)
+    for app in (core, open_core(tmp_path)):
+        assert app.command_for_key("Alt+F9") == command
+        assert app.command_for_key("Ctrl+Shift+R") is None
+    core.reset_key_bindings(command)
+    assert open_core(tmp_path).command_for_key("Ctrl+Shift+R") == command
+    core.save_key_bindings(bindings)
+    core.reset_key_bindings()
+    assert draft(open_core(tmp_path)) == {row.command: row.default_keys for row in core.key_bindings()}
+
+
+@pytest.mark.parametrize("key", ["Ctrl+Shift+H", "Enter", "Esc", "Alt+S", "F1",
+                                     *(f"Ctrl+{i}" for i in range(1, 9)), "R", "Shift+R", "F9"])
+def test_random_play_conflicts_reserved_and_unmodified_keys_do_not_save(tmp_path, key):
+    core = open_core(tmp_path)
+    original = draft(core)
+    bindings = dict(original)
+    bindings[Command(CommandType.RANDOM_PLAY)] = (key,)
+    with pytest.raises(ValueError):
+        core.save_key_bindings(bindings)
+    assert draft(core) == draft(open_core(tmp_path)) == original
+
+
+def test_random_play_default_collision_preserves_existing_user_key(tmp_path):
+    core = open_core(tmp_path)
+    core.settings.set("keys.bindings", {"emergency_hide:0": ["Ctrl+Shift+R"]})
+    reopened = open_core(tmp_path)
+    command = Command(CommandType.RANDOM_PLAY)
+    assert reopened.command_for_key("Ctrl+Shift+R") == Command(CommandType.EMERGENCY_HIDE)
+    assert draft(reopened)[command] == ()
+    with pytest.raises(ValueError):
+        reopened.reset_key_bindings(command)
+    assert draft(open_core(tmp_path))[command] == ()
+    reopened.reset_key_bindings()
+    assert open_core(tmp_path).command_for_key("Ctrl+Shift+R") == command
+
+
+def test_random_play_stored_unmodified_key_is_unassigned(tmp_path):
+    core = open_core(tmp_path)
+    core.settings.set("keys.bindings", {"random_play:0": ["R"]})
+    reopened = open_core(tmp_path)
+    assert draft(reopened)[Command(CommandType.RANDOM_PLAY)] == ()
+    assert reopened.command_for_key("R") is None

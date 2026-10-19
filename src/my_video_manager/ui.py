@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         self.player = None
         self.player_factory = player_factory
         self.playback_list = ()
+        self._composing_widget = None
         # 긴급 탈출로 멈춘 엔진. 사용자가 재개하기 전까지 모아보기 자동 전환을 미룬다.
         self._hold = None
         # 긴급 탈출로 닫은 메뉴와 그때의 화면. 복귀 때 같은 화면이면 메뉴를 다시 연다.
@@ -273,6 +274,22 @@ class MainWindow(QMainWindow):
         self.playback_list = self.library_page.visible_video_ids()
         self.play_video(video_id)
 
+    def random_play(self):
+        """단축키·트레이의 범위는 항상 영상 전체이며 일반 재생 전환으로 기록을 마감한다."""
+        from .random_play import NO_CANDIDATE_MESSAGE
+        try:
+            video_id = self.core.pick_random_video()
+        except (ValueError, OSError) as error:
+            QMessageBox.warning(self, "무작위 재생 실패", str(error))
+            return
+        if video_id is None:
+            self.show_status(NO_CANDIDATE_MESSAGE)
+            if self.isFullScreen():
+                self.playback_page.show_notice(NO_CANDIDATE_MESSAGE, reveal=True)
+            return
+        self.playback_list = tuple(video.id for video in self.core.videos())
+        self.play_video(video_id)
+
     def show_search(self):
         self.navigate_web_tab('search')
 
@@ -446,6 +463,11 @@ class MainWindow(QMainWindow):
             self.player.set_subtitle(self.core.playback_subtitle(video_id))
 
     def eventFilter(self, watched, event):
+        # Qt 입력 이벤트는 WebEngine 입력란에도 전달된다. 조합 종료·초점 이동 때만 해제한다.
+        if event.type() == QEvent.Type.InputMethod:
+            self._composing_widget = watched if event.preeditString() else None
+        elif event.type() == QEvent.Type.FocusOut and watched is self._composing_widget:
+            self._composing_widget = None
         if (self.isActiveWindow() and QApplication.activeModalWidget() is None
                 and QApplication.activePopupWidget() is None):
             settings = self.web_host.controllers.get('settings')
@@ -461,6 +483,11 @@ class MainWindow(QMainWindow):
         if (event.type() != QEvent.Type.KeyPress or not self.isActiveWindow()
                 or QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None):
             return super().eventFilter(watched, event)
+        if self.core.command_for_key(key_name(event) or "") == Command(CommandType.RANDOM_PLAY):
+            if not (self.web_host.dialogs.blocks_shell_actions or self._composing_widget is not None
+                    or event.isAutoRepeat()):
+                self.random_play()
+            return True
         if (event.modifiers() == Qt.KeyboardModifier.ControlModifier
                 and Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_8):
             if self.web_host.dialogs.blocks_shell_actions:

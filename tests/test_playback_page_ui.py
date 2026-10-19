@@ -125,7 +125,7 @@ def test_next_episode_keeps_fullscreen_and_sidebar_navigation_exits(window):
     assert window.core.playback.session.video_id == window.core.videos()[1].id
     window.sync_position()
     assert "2/2" in window.playback_page.title_label.text()
-    key(window, Qt.Key.Key_3, Qt.KeyboardModifier.ControlModifier)
+    key(window, Qt.Key.Key_4, Qt.KeyboardModifier.ControlModifier)
     assert not window.isFullScreen()
     assert window.core.playback.session is None
     assert window.web_host.active_tab == 'search'
