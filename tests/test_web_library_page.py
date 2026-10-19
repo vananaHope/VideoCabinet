@@ -90,7 +90,9 @@ def test_view_channel_composes_filters_persists_and_refreshes_presence(window_fa
     video = core.videos()[0]
     tag = core.add_video_tag(video.id, '고른 태그')
     page.refresh()
-    options = {**default_options(), 'mode': 'folders', 'folder': 'direct', 'tags': [tag.id],
+    assert json.loads(page.bridge.snapshot())['tags'] == [
+        {'id': tag.id, 'name': '고른 태그', 'key': '고른 태그', 'videoCount': 1}]
+    options ={**default_options(), 'mode': 'folders', 'folder': 'direct', 'tags': [tag.id],
                'card_size': 'large', 'sort': 'added', 'descending': True}
     result = json.loads(page.bridge.view(json.dumps(options)))
     assert result['visibleIds'] == [video.id]

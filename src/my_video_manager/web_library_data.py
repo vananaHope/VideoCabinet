@@ -14,6 +14,14 @@ class TagData(TypedDict):
     name: str
 
 
+class TagUsageData(TypedDict):
+    """태그 고르기 목록 항목. key는 코어가 정규화한 검색용 이름이다."""
+    id: int
+    name: str
+    key: str
+    videoCount: int
+
+
 class VideoData(TypedDict):
     id: int
     title: str
@@ -74,7 +82,7 @@ class DetailsData(TypedDict):
 
 class LibraryData(TypedDict):
     videos: list[VideoData]
-    tags: list[TagData]
+    tags: list[TagUsageData]
     visibleIds: list[int]
     selectedId: int | None
     scanning: bool
@@ -105,6 +113,10 @@ def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
             hasSubtitles=video.id in subtitled_ids,
         ))
     return result
+
+
+def tag_usage_data(usage) -> list[TagUsageData]:
+    return [TagUsageData(id=u.tag.id, name=u.tag.name, key=u.key, videoCount=u.video_count) for u in usage]
 
 
 def highlights_data(core, video_id) -> list[HighlightData]:

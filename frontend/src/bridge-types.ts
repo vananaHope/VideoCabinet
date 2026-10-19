@@ -78,6 +78,13 @@ export interface TagData {
   name: string
 }
 
+export interface TagUsageData {
+  id: number
+  name: string
+  key: string
+  videoCount: number
+}
+
 export interface VideoData {
   id: number
   title: string
@@ -179,7 +186,7 @@ export interface HighlightData {
 
 export interface LibraryData {
   videos: Array<VideoData>
-  tags: Array<TagData>
+  tags: Array<TagUsageData>
   visibleIds: Array<number>
   selectedId: number | null
   scanning: boolean

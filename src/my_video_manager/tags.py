@@ -11,6 +11,14 @@ class Tag:
     name: str
 
 
+@dataclass(frozen=True)
+class TagUsage:
+    """태그와 그 태그가 붙은 영상 수. key는 검색용 정규화 이름이다."""
+    tag: Tag
+    key: str
+    video_count: int
+
+
 def normalize_tag_name(name: str) -> str:
     """표시 이름은 NFC로 보존하고 제어·서식 문자를 제거한 뒤 공백을 정리한다."""
     name = "".join(char for char in name if unicodedata.category(char) not in {"Cc", "Cf"})
@@ -68,6 +76,15 @@ class Tags:
             # LIKE의 %, _를 검색 문법으로 해석하지 않고 Unicode casefold를 일관되게 쓴다.
             return tuple(Tag(row["id"], row["name"]) for row in db.execute(
                 "SELECT * FROM tags ORDER BY name_key, id") if row["name_key"].startswith(key))
+
+    def usage(self) -> tuple[TagUsage, ...]:
+        """붙은 영상 수가 많은 순, 같으면 이름순. 제외 영상과 하이라이트 연결은 세지 않는다."""
+        with self._connect() as db:
+            return tuple(TagUsage(Tag(row["id"], row["name"]), row["name_key"], row["video_count"]) for row in db.execute(
+                """SELECT t.id, t.name, t.name_key, COUNT(v.id) AS video_count FROM tags t
+                   LEFT JOIN video_tags a ON a.tag_id = t.id
+                   LEFT JOIN videos v ON v.id = a.video_id AND v.excluded = 0
+                   GROUP BY t.id ORDER BY video_count DESC, t.name_key, t.id"""))
 
     def _create(self, db, name) -> Tag:
         name, key = self._name(name)
