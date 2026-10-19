@@ -171,10 +171,40 @@ def test_distinct_viewings_do_not_combine_and_finished_never_regresses(library):
     status = core.viewing_status(video_id)
     assert status.finished and not status.abandoned
     assert status.resume_point is None and core.resume_start(video_id) == 0
-    assert not status.favorite
+    # 다 본 시청 하나와 보다 만 시청 둘을 합쳐 즐겨 보는 영상이 된다. 틀어보기는 세지 않는다.
+    assert status.favorite and status.viewing_count == 3 and status.finished_count == 1
     watch(core, video_id, 5, 100)
-    assert core.viewing_status(video_id).favorite
-    assert core.viewing_status(video_id).finished_count == 2
+    status = core.viewing_status(video_id)
+    assert status.finished_count == 2 and status.viewing_count == 4
+
+
+@pytest.mark.parametrize("ends, favorite, viewing_count", [
+    ([40, 40, 40], True, 3),      # 보다 만 시청 3회
+    ([4, 4, 4], False, 0),        # 틀어보기 3회
+    ([95, 95, 4], False, 2),      # 다 본 시청 2회 + 틀어보기 1회
+    ([95, 95], False, 2),         # 다 본 시청 2회
+    ([95, 40, 40], True, 3),      # 다 본 시청 1회 + 보다 만 시청 2회
+    ([95, 95, 40], True, 3),      # 다 본 시청 2회 + 보다 만 시청 1회
+])
+def test_favorite_counts_viewings_except_glances(library, ends, favorite, viewing_count):
+    core, video_id, _ = library
+    for end in ends:
+        watch(core, video_id, 0, end)
+    status = core.viewing_status(video_id)
+    assert (status.viewing_count, status.favorite) == (viewing_count, favorite)
+
+
+def test_favorite_count_can_be_lowered(library):
+    core, video_id, clock = library
+    settings = ViewingSettings(favorite_count=2)
+    reopened = AppCore(media=Media(), clock=clock, database=core.database, viewing_settings=settings)
+    watch(reopened, video_id, 0, 4)
+    watch(reopened, video_id, 0, 4)
+    assert not reopened.viewing_status(video_id).favorite
+    watch(reopened, video_id, 0, 40)
+    assert not reopened.viewing_status(video_id).favorite
+    watch(reopened, video_id, 0, 40)
+    assert reopened.viewing_status(video_id).favorite
 
 
 def test_settings_are_injected_and_history_reclassified(library):
@@ -183,7 +213,6 @@ def test_settings_are_injected_and_history_reclassified(library):
     settings = ViewingSettings(finished_ratio=0.8, abandoned_ratio=0.1, favorite_count=3, resume_rewind=7)
     reopened = AppCore(media=Media(), clock=clock, database=core.database, viewing_settings=settings)
     assert reopened.resume_start(video_id) == 68
-    watch(reopened, video_id, 0, 80)
     watch(reopened, video_id, 0, 80)
     assert not reopened.viewing_status(video_id).favorite
     watch(reopened, video_id, 0, 80)

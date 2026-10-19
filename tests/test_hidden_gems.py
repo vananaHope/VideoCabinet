@@ -132,6 +132,7 @@ def test_priority_dedup_and_tag_order(library):
     favorite = add("즐겨 보는 영상")
     watch(core, favorite)
     watch(core, favorite)
+    watch(core, favorite)
     core.add_video_tag(favorite.id, "과학")
     core.add_video_tag(favorite.id, "우주")
     abandoned = add("보다 만")
@@ -159,6 +160,7 @@ def test_similar_tags_requires_favorite_video_tags_and_no_meaningful_viewing(lib
     favorite, target = add("즐겨 보는 영상"), add("대상")
     core.add_video_tag(favorite.id, "공유")
     core.add_video_tag(target.id, "공유")
+    watch(core, favorite)
     watch(core, favorite)
     assert ids(core) == []
     watch(core, favorite)
@@ -322,6 +324,7 @@ def test_series_allows_first_unfinished_plus_one_finished_revisit(library, norma
     finished, first, later = add("다 본 강의"), add("첫 미완료"), add("뒤 미완료")
     core.create_series("강의", (finished.id, first.id, later.id))
     watch(core, finished)
+    watch(core, finished)
     watch(core, finished)  # 태그 기준의 즐겨 보는 영상
     mark(core, finished)
     watch(core, later, 40)  # 뒤 미완료 화의 일반 기준은 적용하지 않는다.
@@ -403,6 +406,7 @@ def test_series_revisit_exceptions_still_share_ten_item_limit(library):
 def test_favorite_tag_evidence_excludes_only_excluded_videos(library, state, expected):
     core, _, add = library
     favorite, target = add("즐겨 보는 영상"), add("대상")
+    watch(core, favorite)
     watch(core, favorite)
     watch(core, favorite)
     core.add_video_tag(favorite.id, "주제")

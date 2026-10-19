@@ -684,7 +684,8 @@ OS가 자동화 키를 전달하지 않는 환경에서는 이 검사가 실패�
 
 시청 기본값은 `AppCore(viewing_settings=ViewingSettings(...))`로 주입합니다.
 `finished_ratio`, `abandoned_ratio`, `favorite_count`, `resume_rewind`, `save_interval`을 바꿀 수 있으며
-설정 화면은 후속 범위입니다. 재생 어댑터는 mpv의 `time-pos`를 보고하고 `seek`부터
+설정 화면은 후속 범위입니다. `favorite_count`는 틀어보기를 뺀 시청(다 본 시청·보다 만 시청) 횟수의 기준이고
+기본값은 3입니다. 재생 어댑터는 mpv의 `time-pos`를 보고하고 `seek`부터
 `playback-restart`까지는 구간을 연결하지 않습니다. 화면은 이 보고를 UI 스레드에서
 `core.playback.report(position, seeked=...)`로 전달합니다.
 `core.playback.start(video_id, position, record_viewing=False)`로 시작하면 시청 기록이 생기지 않아

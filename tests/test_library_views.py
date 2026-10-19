@@ -31,7 +31,7 @@ def ids(core, **changes):
 def test_state_filters_use_shared_viewing_summary_including_glances_and_favorites(library):
     core = library
     a, b, c = core.videos()
-    for vid, ends in ((a.id, [4]), (b.id, [40, 1]), (c.id, [95, 95, 2])):
+    for vid, ends in ((a.id, [4]), (b.id, [40, 1]), (c.id, [95, 40, 40, 2])):
         for end in ends:
             core.playback.start(vid, 0)
             core.playback.report(end)
