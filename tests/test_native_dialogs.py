@@ -122,7 +122,8 @@ def real_window_rows(probe=None):
     problem = windows_key_probe.desktop_lock_problem()
     if problem:
         pytest.fail(problem)
-    env = dict(os.environ, QT_QPA_PLATFORM="windows", PYTHONPATH=os.pathsep.join(sys.path))
+    # 자식 출력(한글 stderr 포함)이 로캘 기본(cp949)이 아니라 부모 해석과 같은 UTF-8로 나가게 한다.
+    env = dict(os.environ, QT_QPA_PLATFORM="windows", PYTHONPATH=os.pathsep.join(sys.path), PYTHONIOENCODING="utf-8")
     result = subprocess.run([sys.executable, str(probe or windows_key_probe.PROBE)], capture_output=True, text=True,
                             encoding="utf-8", env=env, timeout=120)
     assert result.returncode == 0, result.stderr[-2000:]
