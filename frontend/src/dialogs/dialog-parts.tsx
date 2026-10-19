@@ -3,6 +3,7 @@ import { Dialog } from 'radix-ui'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { DialogRow } from '@/bridge-types'
 import { SelectField } from '@/components/ui/select'
+import { tagPickerKeepsEscape } from '@/lib/tag-search'
 import './dialogs.css'
 
 export function DialogFrame({ title, description, children, onClose, composing, onSize, wide }: { title: string; description: string; children: ReactNode; onClose: () => void; composing: { current: boolean }; onSize: (width: number, height: number) => void; wide: boolean }) {
@@ -21,7 +22,8 @@ export function DialogFrame({ title, description, children, onClose, composing, 
     <Dialog.Content ref={setContent} data-dialog-frame data-wide={wide} className="fixed inset-4 z-40 m-auto flex h-fit flex-col gap-4 overflow-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"
       onInteractOutside={event => event.preventDefault()}
       onEscapeKeyDown={event => {
-        if (composing.current || content?.querySelector('[role="combobox"][aria-expanded="true"]')) event.preventDefault()
+        // 태그 고르기가 검색어·활성 후보를 먼저 지울 Esc는 대화상자를 닫지 않는다.
+        if (composing.current || tagPickerKeepsEscape(event)) event.preventDefault()
       }}>
       <header className="space-y-2"><Dialog.Title className="text-lg font-semibold">{title}</Dialog.Title>
         <Dialog.Description className="text-sm text-muted-foreground">{description || '입력한 내용을 확인한 뒤 저장하세요.'}</Dialog.Description></header>

@@ -666,30 +666,32 @@ def test_dropdown_in_playback_dialog_closes_and_the_dialog_returns(window):
     open_playback_dialog(window, check, entry=window.translations.settings)
 
 
-def test_tag_candidates_close_on_hiding_and_the_typed_text_returns(window):
+def test_tag_picker_drops_active_candidate_on_hiding_and_the_typed_text_returns(window):
     from my_video_manager.web_dialogs_entries import TagEditor
     core = window.core
     first, second = core.videos()
     core.add_video_tag(second.id, "lecture")
     dialogs = window.web_host.dialogs
+    active = '[data-dialog-frame] [role=option][data-active]'
 
     def check():
-        focus_field(window, "태그 이름")
+        focus_field(window, "태그 검색")
         type_text(window, "le")
-        wait_shown(window, '[aria-label="태그 자동 완성"]')
+        wait_shown(window, '[aria-label="태그 검색 결과"]')
         QTest.keyClick(view(window), Qt.Key.Key_Down)
         settle(window)
-        assert js(window, "!!document.querySelector('[role=option][aria-selected=true]')")
+        assert js(window, f"!!document.querySelector('{active}')")
         press_emergency(view(window))
         assert not window.isVisible() and dialogs.active
         settle_hidden(window)
-        assert no_popup(window, '[aria-label="태그 자동 완성"]')
+        assert no_popup(window, active)
         restore(window)
-        assert_stays_closed(window, '[aria-label="태그 자동 완성"]')
-        # 고르던 후보는 추가되지 않고 입력한 글자와 초점이 그대로다.
-        assert field_value(window, "태그 이름") == "le"
+        assert_stays_closed(window, active)
+        # 고르던 후보는 붙지 않고 입력한 글자와 초점이 그대로다. 목록은 대화상자 안에 늘 펼쳐져 있다.
+        assert field_value(window, "태그 검색") == "le"
+        assert js(window, "!!" + shown('[aria-label="태그 검색 결과"]'))
         assert [tag.name for tag in core.video_tags(first.id)] == []
-        assert_focus_returned(window, window, "태그 이름")
+        assert_focus_returned(window, window, "태그 검색")
 
     within(lambda: TagEditor(core, video_id=first.id, parent=window).exec(), dialogs, check)
 

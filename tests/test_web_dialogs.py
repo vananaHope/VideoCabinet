@@ -123,6 +123,25 @@ def test_tag_entry_immediate_changes_nested_manager_and_stale_frame(window_facto
     within(lambda: TagEditor(core, video_id=video.id, parent=window).exec(), dialogs, check)
 
 
+def test_tag_entry_lists_registered_tags_by_video_count(window_factory, core):
+    window = window_factory()
+    dialogs = window.web_host.dialogs
+    video, other, third = core.videos()[:3]
+    core.add_video_tag(other.id, '자주')
+    core.add_video_tag(third.id, '자주')
+    core.add_video_tag(third.id, 'SF액션')
+    core.create_tag('새 태그')
+    def check():
+        data = state(dialogs)
+        assert [(t['name'], t['videoCount']) for t in data['tags']] == [('자주', 2), ('SF액션', 1), ('새 태그', 0)]
+        assert data['rows'] == []
+        data = act(dialogs, 'add', name=data['tags'][1]['name'])
+        assert [row['title'] for row in data['rows']] == ['SF액션']
+        assert [(t['name'], t['videoCount']) for t in data['tags']] == [('SF액션', 2), ('자주', 2), ('새 태그', 0)]
+        assert len(core.tags()) == 3
+    within(lambda: TagEditor(core, video_id=video.id, parent=window).exec(), dialogs, check)
+
+
 def test_series_entry_saves_order_without_changing_other_series(window_factory, core):
     window = window_factory()
     dialogs = window.web_host.dialogs
