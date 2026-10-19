@@ -429,7 +429,8 @@ class Library:
             warnings = self.external_subtitles.refresh(
                 folders=None if folders is None else roots,
                 skipped_folders=() if folders is None else skipped, preserved_folders=disconnected,
-                complete_scan=folders is None and not any(issue.failed for issue in result.issues))
+                complete_scan=folders is None,
+                failed_paths=tuple(issue.path for issue in result.issues if issue.failed))
             return ScanResult(result.added, result.issues + tuple(ScanIssue(*warning) for warning in warnings),
                               reconnected=result.reconnected)
 

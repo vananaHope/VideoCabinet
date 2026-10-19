@@ -1009,7 +1009,7 @@ def test_interrupted_scan_does_not_finish_parser_generation(library, monkeypatch
 
 
 @pytest.mark.parametrize('blocked', ['file', 'folder', 'disconnected'])
-def test_inaccessible_scan_does_not_finish_parser_generation(library, monkeypatch, blocked):
+def test_inaccessible_scan_defers_only_failed_paths(library, monkeypatch, blocked):
     core, video = library
     sidecar = video.with_suffix('.srt')
     sidecar.write_bytes(srt().encode('utf-8'))
@@ -1036,10 +1036,125 @@ def test_inaccessible_scan_does_not_finish_parser_generation(library, monkeypatc
             video.parent.rename(moved)
         try:
             assert core.scan().issues
-            assert core.settings.get('external_subtitles.parser_generation') == 1
+            assert core.settings.get('external_subtitles.parser_generation') == 2
+            pending = core.settings.get('external_subtitles.pending_reparse_paths')
+            assert str(sidecar if blocked == 'file' else video.parent) in pending
         finally:
             if blocked == 'disconnected':
                 moved.rename(video.parent)
     core.scan()
     assert core.settings.get('external_subtitles.parser_generation') == 2
+    assert core.settings.get('external_subtitles.pending_reparse_paths') == []
     assert core.search('체중이동').results
+
+
+@pytest.mark.parametrize('recovery_scope', ['full', 'partial'])
+def test_disconnected_parser_generation_recovers_only_pending_folder(library, monkeypatch, recovery_scope):
+    core, video = library
+    other_folder = video.parent.with_name('offline')
+    other_folder.mkdir()
+    other = other_folder / 'other.mkv'
+    other.write_bytes(b'other video')
+    content = '<SYNC Start=1000><P>첫 대사<SYNC Start=2000>복구 대사<SYNC Start=3000>&nbsp;'
+    old = content.replace('복구 대사', ' ' * len('복구 대사'.encode('utf-8')))
+    sidecars = [path.with_suffix('.smi') for path in (video, other)]
+    for path, sidecar in zip((video, other), sidecars):
+        core.add_watched_folder(path.parent)
+        sidecar.write_bytes(old.encode('utf-8'))
+        core.add_file(path)
+        stamp = sidecar.stat()
+        sidecar.write_bytes(content.encode('utf-8'))
+        os.utime(sidecar, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        assert sidecar.stat().st_size == stamp.st_size
+    core.settings.set('external_subtitles.parser_generation', 1)
+    moved = other_folder.with_name('removed')
+    other_folder.rename(moved)
+    original = Path.read_bytes
+    reads = []
+    def read(path):
+        if path in sidecars:
+            reads.append(path)
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    core.scan()
+    assert reads == [sidecars[0]]
+    assert len(core.search('복구대사').results) == 1
+    assert core.settings.get('external_subtitles.parser_generation') == 2
+    assert core.settings.get('external_subtitles.pending_reparse_paths') == [str(other_folder)]
+    core = make_core(video.parent.parent)
+    reads.clear()
+    core.scan()
+    assert reads == []
+    # WindowsPath의 기존 비교 규칙으로 대소문자/구분자 차이도 같은 경로다.
+    if os.name == 'nt':
+        core.settings.set('external_subtitles.pending_reparse_paths', [str(other_folder).upper().replace('\\', '/')])
+    moved.rename(other_folder)
+    core.scan(**({'folders': [other_folder]} if recovery_scope == 'partial' else {}))
+    assert reads == [sidecars[1]]
+    assert len(core.search('복구대사').results) == 2
+    assert core.settings.get('external_subtitles.pending_reparse_paths') == []
+    reads.clear()
+    core.scan()
+    assert reads == []
+
+
+@pytest.mark.parametrize('failure', ['subtitle', 'video'])
+def test_access_failure_does_not_reparse_healthy_subtitles(library, monkeypatch, failure):
+    core, video = library
+    other = video.with_name('other.mkv')
+    other.write_bytes(b'other video')
+    sidecar, healthy = video.with_suffix('.srt'), other.with_suffix('.srt')
+    for path in (sidecar, healthy):
+        path.write_bytes(srt().encode('utf-8'))
+    core.add_file(video)
+    core.add_file(other)
+    core.settings.set('external_subtitles.parser_generation', 1)
+    original = Path.read_bytes
+    reads = []
+    def read(path):
+        if path in (sidecar, healthy):
+            reads.append(path)
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    with monkeypatch.context() as patch:
+        if failure == 'subtitle':
+            def denied(path):
+                if path == sidecar:
+                    raise PermissionError(13, 'denied')
+                return read(path)
+            patch.setattr(Path, 'read_bytes', denied)
+        else:
+            original_stat = Path.stat
+            def denied_stat(path, *args, **kwargs):
+                if path == video:
+                    raise PermissionError(13, 'denied')
+                return original_stat(path, *args, **kwargs)
+            patch.setattr(Path, 'stat', denied_stat)
+        assert core.scan().issues
+        assert healthy in reads
+        assert core.settings.get('external_subtitles.parser_generation') == 2
+        assert str(sidecar if failure == 'subtitle' else video) in core.settings.get('external_subtitles.pending_reparse_paths')
+        reads.clear()
+        assert core.scan().issues
+        assert reads == []  # 접근 실패 자체의 재시도는 허용하지만 정상 파일은 재파싱하지 않는다.
+    core.scan()
+    assert reads == [sidecar]
+    assert core.settings.get('external_subtitles.pending_reparse_paths') == []
+    reads.clear()
+    core.scan()
+    assert reads == []
+
+
+def test_removed_watched_folder_clears_pending_reparse(library):
+    core, video = library
+    core.add_watched_folder(video.parent)
+    video.with_suffix('.srt').write_bytes(srt().encode('utf-8'))
+    core.add_file(video)
+    core.settings.set('external_subtitles.parser_generation', 1)
+    moved = video.parent.with_name('removed')
+    video.parent.rename(moved)
+    core.scan()
+    assert core.settings.get('external_subtitles.pending_reparse_paths') == [str(video.parent)]
+    core.remove_watched_folder(video.parent)
+    core.scan()
+    assert core.settings.get('external_subtitles.pending_reparse_paths') == []
