@@ -31,8 +31,11 @@ export function Thumbnail({ video, variant }: { video: VideoData } & VariantProp
 
 type Props = Omit<ComponentProps<"button">, "className"> & VariantProps<typeof cardVariants> & { video: VideoData; cardSize?: string }
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" })
+export function calendarDate(value: string) {
+  return dateFormatter.format(new Date(value))
+}
 function lastViewed(value: string | null) {
-  return value ? dateFormatter.format(new Date(value)) : "기록 없음"
+  return value ? calendarDate(value) : "기록 없음"
 }
 function VideoStatistics({ video }: { video: VideoData }) {
   const glanceOnly = video.viewingCount === 0 && video.lastViewedAt !== null

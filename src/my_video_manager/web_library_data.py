@@ -45,6 +45,8 @@ class VideoData(TypedDict):
     viewingCount: int
     watchedSeconds: float
     lastViewedAt: str | None
+    # 수정한 날짜(ISO 시각). 파일 없음이거나 수정 시각을 모르면 없다. missing으로 둘을 구별한다.
+    modifiedAt: str | None
     hasSubtitles: bool
 
 
@@ -104,6 +106,7 @@ def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
     for video in snapshot.videos:
         status = snapshot.statuses[video.id]
         statistics = snapshot.video_statistics.get(video.id)
+        modified = video.modified_at
         result.append(VideoData(
             id=video.id, title=video.title, duration=video.duration,
             # 숫자 host는 Chromium이 IP로 정규화하므로 고정 host 아래에 ID를 둔다.
@@ -116,6 +119,7 @@ def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
             viewingCount=statistics.viewing_count if statistics else 0,
             watchedSeconds=statistics.watched_seconds if statistics else 0,
             lastViewedAt=statistics.last_viewed_at if statistics else None,
+            modifiedAt=modified.isoformat() if modified else None,
             hasSubtitles=video.id in subtitled_ids,
         ))
     return result

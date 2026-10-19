@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -61,6 +62,32 @@ def test_snapshot_preserves_core_status_tags_and_json_without_file_paths(core):
     assert json.loads(encoded) == data
     core.exclude_video(first.id)
     assert first.id not in filter_ids(snapshot_data(core.library_snapshot()), '', None)
+
+
+def test_snapshot_carries_modified_date_and_rescan_refreshes_it(core, tmp_path):
+    path = tmp_path / 'Python 기초.mkv'
+    moment = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    os.utime(path, (moment.timestamp(), moment.timestamp()))
+    core.scan()
+    data = {v['id']: v for v in snapshot_data(core.library_snapshot())}
+    video = next(v for v in core.videos() if v.locations[0].path == path)
+    assert data[video.id]['modifiedAt'] == moment.isoformat()
+    assert datetime.fromisoformat(data[video.id]['modifiedAt']) == video.modified_at
+
+    # 파일을 바꾼 뒤 다시 검사하면 화면이 받는 값과 거르기 결과가 새 시각을 따른다.
+    newer = datetime(2026, 10, 12, 12, tzinfo=timezone.utc)
+    os.utime(path, (newer.timestamp(), newer.timestamp()))
+    core.scan()
+    data = {v['id']: v for v in snapshot_data(core.library_snapshot())}
+    assert data[video.id]['modifiedAt'] == newer.isoformat()
+    options = {**core.library_view_options(), 'modified_preset': 'custom',
+               'modified_from': '2026-10-10', 'modified_to': '2026-10-14'}
+    assert core.library_view_ids(options) == [video.id]
+
+    path.unlink()
+    core.scan()
+    data = {v['id']: v for v in snapshot_data(core.library_snapshot())}
+    assert data[video.id]['missing'] and data[video.id]['modifiedAt'] is None
 
 
 def test_combined_filter_unicode_casefold_and_details_match_public_core(core):
