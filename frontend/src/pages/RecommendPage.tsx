@@ -7,7 +7,7 @@ import { EmptyState, PageHeader } from "@/components/page-parts"
 import { RecommendationCard, RecommendationMenu } from "@/components/recommendation-card"
 import { openKeyboardMenu } from "@/components/library-grid"
 
-type Cursor = { kind: string; row: number; column: number; videoId: number }
+type Cursor = { key: string; row: number; column: number; videoId: number }
 type Position = { row: number; column: number }
 
 const cardId = (videoId: number) => `recommendation-${videoId}`
@@ -21,7 +21,7 @@ function locate(rows: RecommendationRowData[], cursor: Cursor | null): Position 
     const column = data.items.findIndex(item => item.video.id === cursor.videoId)
     if (column >= 0) return { row, column }
   }
-  const same = rows.findIndex(data => data.kind === cursor.kind)
+  const same = rows.findIndex(data => data.key === cursor.key)
   const row = same >= 0 ? same : Math.min(cursor.row, rows.length - 1)
   return { row, column: Math.min(cursor.column, rows[row].items.length - 1) }
 }
@@ -92,8 +92,8 @@ export default function RecommendPage() {
   function select(position: Position) {
     const row = rows[position.row]
     const item = row.items[position.column]
-    remembered.current.set(row.kind, item.video.id)
-    setCursor({ kind: row.kind, ...position, videoId: item.video.id })
+    remembered.current.set(row.key, item.video.id)
+    setCursor({ key: row.key, ...position, videoId: item.video.id })
     return item
   }
   function move(position: Position) {
@@ -127,7 +127,7 @@ export default function RecommendPage() {
       event.preventDefault()
       const row = Math.max(0, Math.min(rows.length - 1, active.row + (event.key === "ArrowUp" ? -1 : 1)))
       const items = rows[row].items
-      const saved = items.findIndex(entry => entry.video.id === remembered.current.get(rows[row].kind))
+      const saved = items.findIndex(entry => entry.video.id === remembered.current.get(rows[row].key))
       move({ row, column: row === active.row ? active.column : saved >= 0 ? saved : Math.min(active.column, items.length - 1) })
     } else if (event.key === "Enter" || event.key === "Backspace") {
       event.preventDefault()
@@ -153,8 +153,8 @@ export default function RecommendPage() {
       description={data?.loaded ? "영상을 보거나 하이라이트·태그를 남기면 이유와 함께 여기에 보여 줍니다. 관심 없음으로 뺀 영상은 ‘관심 없음 되돌리기’에서 다시 추천받을 수 있어요." : ""} />)
       : <div id="recommendations" role="grid" aria-label="추천 줄" aria-activedescendant={activeId !== null ? cardId(activeId) : undefined} tabIndex={0} onKeyDown={key}
         className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
-        {rows.map((row, rowIndex) => <section key={row.kind} role="row" aria-label={`${row.title} · ${row.items.length}개`} className="flex flex-col gap-1">
-          <div role="rowheader" className="flex items-baseline gap-2 px-1"><h2 className="text-sm font-semibold">{row.title}</h2><span className="text-xs text-muted-foreground">{row.items.length}개</span></div>
+        {rows.map((row, rowIndex) => <section key={row.key} role="row" aria-label={`${row.title} · ${row.items.length}개`} className="flex flex-col gap-1">
+          <div role="rowheader" className="flex items-baseline gap-2 px-1"><h2 className="text-sm font-semibold">{row.title}</h2><span className="shrink-0 text-xs text-muted-foreground">{row.items.length}개</span></div>
           <div className="recommendation-row rounded-lg p-1">
             {row.items.map((item, column) => <RecommendationMenu key={item.video.id} onPlay={() => play({ row: rowIndex, column })} onDismiss={() => dismiss({ row: rowIndex, column })}
               onClose={() => document.getElementById("recommendations")?.focus({ preventScroll: true })}>

@@ -150,6 +150,7 @@ class ViewingRecord(NamedTuple):
 class ViewingSummary:
     statuses: dict[int, ViewingStatus]
     statistics: dict[int, VideoViewingStatistics]
+    records: tuple[ViewingRecord, ...] = ()
 
 
 @dataclass(slots=True)
@@ -198,6 +199,7 @@ class _ViewingTotals(_ViewingState):
 def summarize_viewings(records: Iterable[ViewingRecord], video_ids: Iterable[int],
                        settings: ViewingSettings) -> ViewingSummary:
     """전체 기간의 상태와 수치를 같은 순회에서 계산한다. DB·Qt와 무관하다."""
+    records = tuple(records)
     totals = {vid: _ViewingTotals() for vid in video_ids}
     for record in records:
         total = totals.get(record.video_id)
@@ -212,7 +214,7 @@ def summarize_viewings(records: Iterable[ViewingRecord], video_ids: Iterable[int
         statistics[vid] = VideoViewingStatistics(
             vid, total.viewing_count, total.seconds,
             total.last_viewed_at.isoformat() if total.last_viewed_at is not None else None)
-    return ViewingSummary(statuses, statistics)
+    return ViewingSummary(statuses, statistics, records)
 
 
 @dataclass(frozen=True)

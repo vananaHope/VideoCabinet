@@ -21,7 +21,7 @@ from .revisit import Revisits
 from .series import Series, SeriesStore, adjacent_video
 from .search import Search, SearchResponse
 from .tags import Tag, Tags
-from .viewing import Viewing, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
+from .viewing import Viewing, ViewingRecord, ViewingRecorder, ViewingSettings, ViewingStatus, ViewingStore, viewing_status
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 from .translation import (Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection,
                           translation_skip_reason)
@@ -101,6 +101,7 @@ class LibrarySnapshot:
     tags: dict[int, tuple[Tag, ...]]
     series: tuple[Series, ...]
     video_statistics: dict[int, VideoViewingStatistics] = field(default_factory=dict)
+    viewing_records: tuple[ViewingRecord, ...] = ()
 
 
 # 무작위 재생의 직전 선택만 감싸는 잠금. 검사(scan)가 쥐는 AppCore._lock과 공유하지 않는다.
@@ -527,7 +528,7 @@ class AppCore:
                        for s in self._series.list())
         viewing_summary = self._viewings.summary()
         return LibrarySnapshot(videos, viewing_summary.statuses, self.video_tags_map(), series,
-                               viewing_summary.statistics)
+                               viewing_summary.statistics, viewing_summary.records)
 
     def library_details(self, video_id: int) -> LibraryDetails:
         """선택한 영상 하나의 상세 요약. 파일 없음·제외 여부와 무관하게 기록을 읽는다."""
@@ -553,6 +554,7 @@ class AppCore:
         return select_recommendations(
             snapshot.videos, snapshot.statuses, snapshot.tags, snapshot.series,
             self._recommendations.dismissed_ids(), self._recommendations.revisit_times(), now=self._clock(),
+            viewing_records=snapshot.viewing_records, viewing_settings=self._viewings.settings,
             unwatched_days=self._recommendations.days("unwatched"), revisit_days=self._recommendations.days("revisit"),
             continue_watching_days=self._recommendations.days("continue_watching"))
 

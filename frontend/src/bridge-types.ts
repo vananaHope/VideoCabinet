@@ -236,6 +236,7 @@ export interface RecommendationItemData {
 }
 
 export interface RecommendationRowData {
+  key: string
   kind: string
   title: string
   items: Array<RecommendationItemData>

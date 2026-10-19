@@ -12,6 +12,7 @@ class RecommendationItemData(TypedDict):
 
 
 class RecommendationRowData(TypedDict):
+    key: str
     kind: str
     title: str
     items: list[RecommendationItemData]
@@ -29,6 +30,6 @@ def rows_data(rows, snapshot, subtitled_ids=frozenset()) -> list[RecommendationR
     # 카드는 추천에 나온 영상만 만든다. 라이브러리 전체를 직렬화하지 않는다.
     shown_snapshot = replace(snapshot, videos=tuple(video for video in snapshot.videos if video.id in shown))
     videos = {card['id']: card for card in snapshot_data(shown_snapshot, subtitled_ids)}
-    return [RecommendationRowData(kind=row.kind, title=row.title, items=[
+    return [RecommendationRowData(key=row.key, kind=row.kind, title=row.title, items=[
         RecommendationItemData(video=videos[item.video.id], reason=item.reason) for item in row.items])
         for row in rows]
