@@ -16,6 +16,9 @@ import re
 
 EXTENSIONS = {".srt", ".vtt", ".smi"}
 WARNING_PREFIX = "외부 자막: "
+PARSER_GENERATION = 2
+PARSER_GENERATION_KEY = "external_subtitles.parser_generation"
+PENDING_REPARSE_KEY = "external_subtitles.pending_reparse_paths"
 LANGUAGES = {
     "ko": "ko", "kor": "ko", "korean": "ko", "krcc": "ko",
     "en": "en", "eng": "en", "english": "en", "encc": "en",
@@ -105,17 +108,23 @@ def _decode(data):
     # BOM을 우선한다. BOM 없는 UTF-16은 ASCII 타임코드의 NUL 바이트로 판별한다.
     # 짧은 CP949의 유효 UTF-8 바이트나 NUL 위치가 치우친 UTF-16은 오판할 수 있다.
     if data.startswith(b"\xef\xbb\xbf"):
-        return data.decode("utf-8-sig"), "utf-8-sig"
+        return data.rstrip(b"\x00").decode("utf-8-sig"), "utf-8-sig"
     if data.startswith((b"\xff\xfe", b"\xfe\xff")):
         encoding = "utf-16-le" if data.startswith(b"\xff\xfe") else "utf-16-be"
-        return data[2:].decode(encoding), encoding
-    if b"\x00" in data:
-        sample = data[:512]
+        if len(data) % 2 and data.endswith(b"\x00"):
+            data = data[:-1]
+        return data[2:].decode(encoding).rstrip("\x00"), encoding
+    # 판별에서만 끝 NUL을 제외한다. UTF-16의 마지막 코드 단위는 보존한다.
+    trimmed = data.rstrip(b"\x00")
+    if b"\x00" in trimmed:
+        sample = trimmed[:512]
         encoding = "utf-16-le" if sample[1::2].count(0) > sample[::2].count(0) else "utf-16-be"
-        return data.decode(encoding), encoding
+        if len(data) % 2 and data.endswith(b"\x00"):
+            data = data[:-1]
+        return data.decode(encoding).rstrip("\x00"), encoding
     for encoding in ("utf-8", "cp949", "euc-kr"):
         try:
-            return data.decode(encoding), encoding
+            return trimmed.decode(encoding), encoding
         except UnicodeDecodeError:
             pass
     raise _ReadError("지원 인코딩(UTF-8, UTF-16, CP949/EUC-KR)으로 읽을 수 없습니다.")
@@ -183,6 +192,7 @@ class _Sami(HTMLParser):
         self.language_class = ""
         self.parts = []
         self.in_paragraph = False
+        self.has_p = False
         self.hidden = 0
         self.skipped = 0
 
@@ -198,8 +208,9 @@ class _Sami(HTMLParser):
     def _sync(self):
         self._paragraph()
         if self.start is not None:
-            self.syncs.append((self.start, self.paragraphs))
+            self.syncs.append((self.start, self.paragraphs, self.has_p))
         self.paragraphs = {}
+        self.has_p = False
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -208,13 +219,14 @@ class _Sami(HTMLParser):
         elif not self.hidden and tag == "sync":
             self._sync()
             value = attrs.get("start") or ""
-            if not re.fullmatch(r"\d+", value):
+            if not re.fullmatch(r"-?\d+", value):
                 self.skipped += 1
                 self.start = None
             else:
                 self.start = int(value) / 1000
         elif not self.hidden and tag == "p":
             self._paragraph()
+            self.has_p = True
             self.language_class = (attrs.get("class") or "").casefold()
             self.in_paragraph = True
         elif not self.hidden and tag == "br" and self.in_paragraph:
@@ -227,7 +239,12 @@ class _Sami(HTMLParser):
             self._paragraph()
 
     def handle_data(self, data):
-        if self.in_paragraph and not self.hidden:
+        if self.hidden:
+            return
+        if not self.in_paragraph and self.start is not None and data.strip():
+            self.language_class = ""
+            self.in_paragraph = True
+        if self.in_paragraph:
             self.parts.append(data)
 
 
@@ -245,12 +262,11 @@ def _sami(text, language, duration):
             declared[name.casefold()] = _language(match[1])
     histories = {}
     skipped = parser.skipped
-    for start, paragraphs in parser.syncs:
-        # A P-less SYNC closes every active class; a blank P closes only its class.
-        paragraphs = paragraphs or dict.fromkeys(histories, "")
-        if any(histories.get(name) and start < histories[name][-1][0] for name in paragraphs):
-            skipped += 1
-            continue
+    for start, paragraphs, has_p in sorted(parser.syncs, key=lambda sync: sync[0]):
+        start = max(0, start)
+        # P-less SYNC replaces all active classes with its default text (if any).
+        if not has_p:
+            paragraphs = dict.fromkeys(histories, "") | paragraphs
         for name, value in paragraphs.items():
             histories.setdefault(name, []).append((start, value))
     tracks = {}
@@ -266,8 +282,9 @@ def _sami(text, language, duration):
 
 
 class ExternalSubtitles:
-    def __init__(self, connect):
+    def __init__(self, connect, settings):
         self._connect = connect
+        self._settings = settings
         with connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS external_subtitle_files (
                 id INTEGER PRIMARY KEY, video_id INTEGER NOT NULL REFERENCES videos(id),
@@ -334,16 +351,19 @@ class ExternalSubtitles:
                          paths[row["id"]].name, row["warning"], tuple(tracks), tails[row["id"]])
                          for row, tracks in files.values())
 
-    def refresh(self, video_ids=None, *, folders=None, skipped_folders=(), preserved_folders=()):
-        """한 검사에서 디렉터리별 목록을 한 번만 읽고 크기·mtime이 바뀐 파일만 파싱한다.
+    def refresh(self, video_ids=None, *, folders=None, skipped_folders=(), preserved_folders=(),
+                complete_scan=False, failed_paths=()):
+        """한 검사에서 폴더 목록은 한 번만 읽고, 변경되었거나 경고가 있는 파일을 파싱한다.
 
         preserved_folders(끊긴 감시 폴더) 아래의 자막 기록은 확인하지 않고 그대로 둔다.
         """
+        reparse = self._settings.get(PARSER_GENERATION_KEY) != PARSER_GENERATION
+        pending = {Path(path) for path in self._settings.get(PENDING_REPARSE_KEY, [])}
+        deferred = {Path(path) for path in (*preserved_folders, *failed_paths, *skipped_folders)}
         with self._connect() as db:
             locations = db.execute("""SELECT l.video_id, l.path, v.duration FROM locations l
                 JOIN videos v ON v.id=l.video_id""").fetchall()
-            old = db.execute("""SELECT f.*, EXISTS(SELECT 1 FROM external_subtitles s WHERE s.file_id=f.id)
-                AS has_tracks FROM external_subtitle_files f""").fetchall()
+            old = db.execute("SELECT * FROM external_subtitle_files").fetchall()
             if preserved_folders:
                 def available(row):
                     return not any(Path(row["path"]).is_relative_to(folder) for folder in preserved_folders)
@@ -395,23 +415,31 @@ class ExternalSubtitles:
                     if owners.get(candidate, len(stem)) > len(stem):
                         continue
                     owners[candidate] = len(stem)
+                    # 영상 읽기 실패가 계속되면 그 영상의 미완료 표지는 유지하되,
+                    # 이미 읽은 정상 자막까지 매 검사마다 다시 파싱하지 않는다.
+                    retry_location = (any(path.is_relative_to(root) for root in pending)
+                                      and not any(path.is_relative_to(root) for root in deferred))
+                    retry = retry_location or any(candidate.is_relative_to(root) for root in pending)
                     found[(location["video_id"], str(candidate))] = (candidate, _language(candidate.stem[len(path.stem):]),
-                                                                    location["duration"])
-            for key, (path, language, duration) in found.items():
+                                                                    location["duration"], retry)
+            for key, (path, language, duration, retry) in found.items():
                 saved = previous.get(key)
                 size = mtime = encoding = warning = None
                 tracks = ()
                 try:
                     info = path.stat()
                     size, mtime = info.st_size, info.st_mtime_ns
-                    if saved and (saved["size"], saved["mtime_ns"]) == (size, mtime) and (not saved["warning"] or saved["has_tracks"]):
-                        if saved["warning"]:
-                            warnings.append((path, saved["warning"]))
+                    if not (reparse or retry) and saved and (saved["size"], saved["mtime_ns"]) == (size, mtime) and not saved["warning"]:
                         continue
                     text, encoding = _decode(path.read_bytes())
                     if "\x00" in text:
                         raise _ReadError("자막에 NUL 문자가 있습니다.")
-                    tracks, skipped = (_sami(text, language, duration) if path.suffix.casefold() == ".smi"
+                    is_smi = path.suffix.casefold() == ".smi"
+                    detect_format = is_smi and not re.search(r"<sync\b", text, re.I)
+                    if detect_format and re.search(r"^\s*\[(?:Script Info|Events)\]\s*$", text, re.I | re.M):
+                        raise _ReadError("SMI가 아닌 ASS 형식입니다. ASS 자막은 지원하지 않습니다.")
+                    timed_text = detect_format and any(_CUE.match(row) for row in text.splitlines())
+                    tracks, skipped = (_sami(text, language, duration) if is_smi and not timed_text
                                        else _timed_text(text, language))
                     if not any(track.lines for track in tracks):
                         raise _ReadError("읽을 수 있는 자막 줄이 없습니다.")
@@ -423,6 +451,8 @@ class ExternalSubtitles:
                 except CancelledError:
                     raise
                 except Exception as error:
+                    if isinstance(error, OSError):
+                        deferred.add(path)
                     warning = f"{WARNING_PREFIX}{_read_error_message(error)}"
                     tracks = ()
                 if warning:
@@ -448,4 +478,19 @@ class ExternalSubtitles:
                 if key not in found and Path(row["path"]).parent not in unavailable:
                     db.execute("DELETE FROM external_subtitle_files WHERE id=?", (row["id"],))
                     db.commit()
-            return tuple(warnings)
+        # 부분 검사/등록으로 전체 라이브러리의 세대 이전을 완료했다고 기록하지 않는다.
+        # 중단 예외는 이 지점에 도달하지 않으며 다음 검사에서 재시도한다.
+        if video_ids is None and (complete_scan or (not reparse and folders is not None)):
+            deferred.update(unavailable)
+            # 부분 검사는 완전히 포함한 미완료 범위만 정리한다. 전체 검사에서는
+            # 더 이상 등록 위치/감시 폴더가 없는 오래된 경로도 자연스럽게 제거된다.
+            remaining = {path for path in pending if not complete_scan
+                         and not any(path.is_relative_to(root) for root in folders)}
+            remaining.update(path for path in deferred if reparse or any(
+                path.is_relative_to(root) or root.is_relative_to(path) for root in pending))
+            # 먼저 미완료 범위를 저장한다. 두 쓰기 사이에 중단되면 이전 세대가 남아
+            # 전체 재시도를 하므로, 못 읽은 범위를 완료한 것으로 잃지 않는다.
+            self._settings.set(PENDING_REPARSE_KEY, sorted(map(str, remaining)))
+            if reparse and complete_scan:
+                self._settings.set(PARSER_GENERATION_KEY, PARSER_GENERATION)
+        return tuple(warnings)
