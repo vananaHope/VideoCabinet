@@ -283,6 +283,29 @@ def test_playback_dialog_moved_after_hiding_stays_hidden_until_return(window):
     open_playback_dialog(window, check, before_container=press)
 
 
+def test_tray_queue_view_after_hiding_playback_dialog_keeps_the_dialog_over_the_shell(window):
+    """숨긴 동안 트레이 대기열 보기로 돌아오면 재생을 정리하고 대화상자는 웹 셸 위에 그대로 남는다."""
+    play_to_twenty_seconds(window)
+    dialogs = window.web_host.dialogs
+
+    def check():
+        wait_for(lambda: dialogs.container is not None and dialogs.container.isVisible())
+        identifier = state(dialogs)["id"]
+        focus_field(window, "원어")
+        type_text(window, "ja")
+        press_emergency(view(window))
+        assert not window.isVisible()
+        window.tray.show_queue()
+        QTest.qWait(300)
+        assert window.isVisible() and window.pages.currentWidget() is window.web_host
+        assert window.web_host.active_tab == "queue"
+        assert dialogs.container is None and window.web_host.view.parent() is window.web_host
+        assert dialogs.active and state(dialogs)["id"] == identifier
+        assert field_value(window, "원어") == "ja"
+
+    open_playback_dialog(window, check)
+
+
 def test_playback_dialog_without_tray_minimizes_with_the_dialog_left_to_the_os(window, monkeypatch):
     """트레이가 없으면 최소화로 대신한다. 대화상자는 운영체제가 소유 창과 함께 내리므로 따로 감추지 않는다."""
     _, player = play_to_twenty_seconds(window)
