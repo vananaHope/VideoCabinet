@@ -67,6 +67,9 @@ class WebDialogs(QObject):
         self.result = 0
         self.moving = False
         self.web_modal = False
+        # 웹이 알린 지금 열린 목록(선택 목록·후보·메뉴)과 긴급 탈출 때 기억한 목록.
+        self.open_popup = ''
+        self._emergency_popup = ''
         self.native_busy = False
         self.metrics = []
         self.last_payload = None
@@ -90,6 +93,7 @@ class WebDialogs(QObject):
 
     def reset_web_modal(self, *_):
         self.web_modal = False
+        self.open_popup = ''
         self.sync_shortcut()
 
     def sync_shortcut(self):
@@ -192,9 +196,19 @@ class WebDialogs(QObject):
             self.container.activateWindow()
 
     def hide_for_emergency(self):
-        """긴급 탈출: 옮겨 띄운 대화상자를 창과 함께 감춘다. 대화상자 작업과 입력 내용은 그대로 둔다."""
+        """긴급 탈출: 옮겨 띄운 대화상자를 창과 함께 감춘다. 대화상자 작업과 입력 내용은 그대로 둔다.
+
+        웹 목록은 창이 숨으며 blur로 닫히므로 숨기기 전에 열린 목록을 기억한다.
+        """
+        self._emergency_popup = self.open_popup
         if self.container:
             self.container.hide()
+
+    def reopen_popup(self):
+        """긴급 탈출 전에 열려 있던 웹 목록을 다시 열게 한다."""
+        popup, self._emergency_popup = self._emergency_popup, ''
+        if popup:
+            self.bridge.popupRestore.emit(popup)
 
     def resize_container(self, width, height):
         self.content_size = (width, height)

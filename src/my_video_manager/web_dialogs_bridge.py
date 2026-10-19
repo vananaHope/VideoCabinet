@@ -10,6 +10,7 @@ from .web_json import encode
 
 class DialogsBridge(QObject):
     dialogsChanged = DIALOGS.signal('dialogsChanged')
+    popupRestore = DIALOGS.signal('popupRestore')
 
     def __init__(self, dialogs):
         super().__init__(dialogs)
@@ -23,6 +24,12 @@ class DialogsBridge(QObject):
     def modalState(self, opened):
         self.dialogs.web_modal = bool(opened) and self.dialogs.host.isVisible()
         self.dialogs.sync_shortcut()
+        return encode({'ok': True})
+
+    @DIALOGS.slot('popupState')
+    def popupState(self, identifier):
+        # 긴급 탈출 때 다시 열 목록. 빈 문자열은 열린 목록 없음.
+        self.dialogs.open_popup = identifier
         return encode({'ok': True})
 
     @DIALOGS.slot('contentSize')

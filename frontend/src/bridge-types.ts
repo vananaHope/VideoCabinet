@@ -618,19 +618,23 @@ export interface DialogSnapshot {
 export interface DialogsBridge {
   snapshot: (reply: Reply) => void
   modalState: (open: number, reply: Reply) => void
+  popupState: (id: string, reply: Reply) => void
   contentSize: (id: string, width: number, height: number, reply: Reply) => void
   act: (id: string, action: string, payload: string, reply: Reply) => void
   candidates: (prefix: string, reply: Reply) => void
   dialogsChanged: Signal<string>
+  popupRestore: Signal<string>
 }
 export function publicDialogsBridge(raw: DialogsBridge): DialogsBridge {
   return Object.freeze({
     snapshot: raw.snapshot.bind(raw),
     modalState: raw.modalState.bind(raw),
+    popupState: raw.popupState.bind(raw),
     contentSize: raw.contentSize.bind(raw),
     act: raw.act.bind(raw),
     candidates: raw.candidates.bind(raw),
     dialogsChanged: Object.freeze({ connect: raw.dialogsChanged.connect.bind(raw.dialogsChanged), disconnect: raw.dialogsChanged.disconnect.bind(raw.dialogsChanged) }),
+    popupRestore: Object.freeze({ connect: raw.popupRestore.connect.bind(raw.popupRestore), disconnect: raw.popupRestore.disconnect.bind(raw.popupRestore) }),
   })
 }
 

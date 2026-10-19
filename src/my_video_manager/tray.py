@@ -51,6 +51,9 @@ class TrayControls(QObject):
             # 전체 화면 풀기와 숨기기로 옮겨 간 초점을 숨기기 전 위젯으로 되돌린다.
             if isValid(focus) and focus.isVisible() and focus.window() in (self.window, self.window.web_host.dialogs.container):
                 focus.setFocus()
+        if emergency:
+            # 설정 메뉴·드롭다운 목록처럼 창과 함께 닫힌 팝업을 같은 자리에 다시 연다.
+            self.window.reopen_emergency_popups()
 
     def activated(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):

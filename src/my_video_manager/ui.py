@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QShortcut
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QMessageBox, QStackedWidget
 
 from .adapters import MpvPlayer
 from .core import AppCore, Command, CommandType
@@ -12,6 +12,7 @@ from .subtitle_controls import SubtitleControls
 from .translation_controls import TranslationControls
 from .web_dialogs_entries import HighlightList
 from .key_display import display_keys
+from .native_dialogs import native_dialog_escape
 from .tray import TrayControls
 from .web_dialogs_entries import ReviewDialog
 from .playback_page import PlaybackPage
@@ -34,7 +35,7 @@ class TransitionHold:
 
 class MainWindow(QMainWindow):
     def __init__(self, core: AppCore, *, player_factory=MpvPlayer, folder_watch_options=None,
-                 update_check_options=None):
+                 update_check_options=None, native_dialogs_factory=native_dialog_escape):
         apply_theme(QApplication.instance())
         super().__init__()
         self.core = core
@@ -44,6 +45,9 @@ class MainWindow(QMainWindow):
         self._return_to_gems = False
         # 긴급 탈출로 멈춘 엔진. 사용자가 재개하기 전까지 모아보기 자동 전환을 미룬다.
         self._hold = None
+        # 긴급 탈출로 닫은 메뉴와 그때의 화면. 복귀 때 같은 화면이면 메뉴를 다시 연다.
+        self._emergency_popups = []
+        self._emergency_view = None
         self.position_timer = QTimer(self)
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
@@ -92,9 +96,9 @@ class MainWindow(QMainWindow):
         self.pages.currentChanged.connect(self.page_changed)
 
         QApplication.instance().installEventFilter(self)
-        from .native_dialogs import NativeDialogEscape
         # Windows 기본 파일 창은 Qt 이벤트 필터를 거치지 않으므로 따로 받는다.
-        self.native_dialogs = NativeDialogEscape(self, self.is_emergency_key, self.emergency_hide)
+        self.native_dialogs = native_dialogs_factory(self, self.is_emergency_key, self.emergency_hide)
+        self.native_dialogs.install()
         self.refresh()
         from .resolution_controls import ResolutionControls
         self.resolutions = ResolutionControls(self)
@@ -186,8 +190,12 @@ class MainWindow(QMainWindow):
             if QApplication.activeModalWidget() is modal:
                 break
         focus = QApplication.focusWidget()
-        # 메뉴·드롭다운 팝업은 닫는다. 옮겨 띄운 대화상자는 창과 함께 감췄다가 복귀 때 그대로 보인다.
+        # 메뉴 팝업은 창과 함께 닫고 복귀 때 같은 자리에 다시 연다. 웹 목록은 웹 대화상자 층이 기억한다.
+        self._emergency_view = self._view()
+        self._emergency_popups = []
         while (popup := QApplication.activePopupWidget()) is not None:
+            if isinstance(popup, QMenu):
+                self._emergency_popups.append((popup, self.mapFromGlobal(popup.pos()), popup.activeAction()))
             if not popup.close():
                 break
         if self.player:
@@ -202,6 +210,30 @@ class MainWindow(QMainWindow):
                 self.playback_page.show_error(f"일시정지 실패: {error}")
         self.set_playback_fullscreen(False)
         self.tray.hide_for_emergency(focus)
+
+    def _view(self):
+        return self.pages.currentWidget(), self.web_host.active_tab, self.core.playback.session
+
+    def reopen_emergency_popups(self):
+        """긴급 탈출 전에 열려 있던 메뉴·목록을 다시 연다.
+
+        그사이 화면이 바뀌었으면(트레이 대기열 보기 등) 열지 않는다.
+        """
+        popups, self._emergency_popups = self._emergency_popups, []
+        if self._emergency_view != self._view():
+            return
+        self.web_host.dialogs.reopen_popup()
+        for menu, offset, action in reversed(popups):
+            if menu is self.settings_menu:
+                point = self.web_host.settings_menu_point()
+            elif menu is self.playback_page.menu:
+                button = self.playback_page.menu_button
+                point = button.mapToGlobal(button.rect().topRight())
+            else:
+                point = self.mapToGlobal(offset)
+            menu.popup(point)
+            if action is not None and action in menu.actions():
+                menu.setActiveAction(action)
 
     def is_emergency_key(self, name):
         return self.core.command_for_key(name or "") == Command(CommandType.EMERGENCY_HIDE)

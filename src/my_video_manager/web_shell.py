@@ -242,6 +242,14 @@ class WebShellHost(QWidget):
             from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self.focus_content)
 
+    def settings_menu_point(self, rect=None):
+        """설정 메뉴를 열 전역 좌표. rect는 웹 설정 탭의 CSS 좌표이고 없으면 창 우측 위를 쓴다."""
+        window, menu = self.window, self.window.settings_menu
+        if self.isVisible() and rect:
+            zoom = self.view.zoomFactor()
+            return self.view.mapToGlobal(QPoint(round(rect[0] * zoom) - menu.sizeHint().width(), round(rect[1] * zoom)))
+        return window.mapToGlobal(QPoint(window.width() - menu.sizeHint().width() - 16, 12))
+
     def popup_settings_menu(self):
         """웹 설정 탭의 실제 CSS 좌표를 Qt 전역 좌표로 바꾼다. 숨은 웹은 창 우측 위를 쓴다."""
         window = self.window
@@ -251,14 +259,7 @@ class WebShellHost(QWidget):
             from shiboken6 import isValid
             if not isValid(self) or not isValid(window) or not window.isActiveWindow():
                 return
-            rect = json.loads(rect) if rect else None
-            if self.isVisible() and rect:
-                zoom = self.view.zoomFactor()
-                point = self.view.mapToGlobal(QPoint(round(rect[0] * zoom) - menu.sizeHint().width(),
-                                                    round(rect[1] * zoom)))
-            else:
-                point = window.mapToGlobal(QPoint(window.width() - menu.sizeHint().width() - 16, 12))
-            menu.popup(point)
+            menu.popup(self.settings_menu_point(json.loads(rect) if rect else None))
 
         if self.isVisible() and self._frontend_ready:
             self.engine_page.runJavaScript("""JSON.stringify((() => {

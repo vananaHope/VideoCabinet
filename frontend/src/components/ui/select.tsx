@@ -2,6 +2,7 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react"
 import { Select as SelectPrimitive } from "radix-ui"
+import { useRestorablePopup } from "@/lib/popup-restore"
 
 // QtWebEngine은 native select 팝업을 다시 그리지 못하므로 목록을 페이지 안에 그리는 Radix Select를 쓴다.
 function Select({
@@ -159,6 +160,8 @@ function SelectField({
   "aria-label": string
 }) {
   const [open, setOpen] = React.useState(false)
+  // 긴급 탈출로 창 blur에 닫힌 목록은 복귀 때 다시 연다.
+  useRestorablePopup(open, () => setOpen(true))
   const known = options.some(([option]) => option === value)
   // 열린 목록의 Tab·Shift+Tab은 native select처럼 커서 항목을 확정하고 목록만 닫는다.
   // 포커스는 트리거로 돌아오고, 다음 Tab·Shift+Tab이 다음·이전 요소로 이동한다.
