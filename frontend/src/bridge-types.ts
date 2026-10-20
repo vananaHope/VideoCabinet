@@ -699,24 +699,41 @@ export interface RestorableVideoData {
   excluded: boolean
 }
 
+export interface ScanIssueData {
+  path: string
+  message: string
+}
+
+export interface ScanReportData {
+  revision: number
+  dismissible: boolean
+  message: string
+  failed: boolean
+  failures: Array<ScanIssueData>
+  subtitleWarnings: Array<ScanIssueData>
+  notes: Array<ScanIssueData>
+}
+
 export interface FoldersData {
   folders: Array<string>
   excluded: Array<RestorableVideoData>
   dismissed: Array<RestorableVideoData>
   minimum: number
   scanning: boolean
-  report: string
+  report: ScanReportData
   automaticDetection: boolean
   unwatched: Array<string>
   watchStartFailed: boolean
 }
 
 export type FolderAction = "addFolder" | "removeFolder" | "scan" | "addFile" | "restoreExcluded" | "restoreDismissed" | "manageTags"
+export type ScanNoticeGroup = "failures" | "subtitleWarnings" | "summary"
 export interface FoldersBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void
   action: (name: FolderAction, target: string, reply: Reply) => void
   setMinimum: (seconds: number, reply: Reply) => void
+  dismissReport: (revision: number, group: ScanNoticeGroup, reply: Reply) => void
   foldersChanged: Signal<string>
   foldersFocusRequested: Signal<string>
   foldersError: Signal<string>
@@ -727,6 +744,7 @@ export function publicFoldersBridge(raw: FoldersBridge): FoldersBridge {
     snapshot: raw.snapshot.bind(raw),
     action: raw.action.bind(raw),
     setMinimum: raw.setMinimum.bind(raw),
+    dismissReport: raw.dismissReport.bind(raw),
     foldersChanged: Object.freeze({ connect: raw.foldersChanged.connect.bind(raw.foldersChanged), disconnect: raw.foldersChanged.disconnect.bind(raw.foldersChanged) }),
     foldersFocusRequested: Object.freeze({ connect: raw.foldersFocusRequested.connect.bind(raw.foldersFocusRequested), disconnect: raw.foldersFocusRequested.disconnect.bind(raw.foldersFocusRequested) }),
     foldersError: Object.freeze({ connect: raw.foldersError.connect.bind(raw.foldersError), disconnect: raw.foldersError.disconnect.bind(raw.foldersError) }),

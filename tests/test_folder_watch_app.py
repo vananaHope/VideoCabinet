@@ -9,11 +9,12 @@ from PySide6.QtWidgets import QSystemTrayIcon
 
 from my_video_manager.core import AppCore, ScanResult
 from my_video_manager.library import ScanIssue
+from my_video_manager.library_operations import ScanReport
 from my_video_manager.ui import MainWindow
 from qt_wait import wait_for
 from test_folder_watch import FakeWatcher
 from test_library_return_ui import Player
-from test_startup_scan import Media, settle
+from test_startup_scan import Media, settle, shown_report
 
 FAST = dict(debounce_seconds=0.1, stable_seconds=0.3, poll_seconds=0.1)
 
@@ -272,7 +273,7 @@ def test_failed_batch_scan_reports_and_next_batch_runs(app, monkeypatch):
     monkeypatch.setattr(core, 'scan', failing)
     window.folder_watch.batch_ready.emit((folder / 'a',))
     wait_for(lambda: len(scans) == 2 and window.worker is None)
-    assert 'injected batch failure' in window.web_host.controllers['folders'].report
+    assert 'injected batch failure' in shown_report(window.web_host.controllers['folders'])
     monkeypatch.setattr(core, 'scan', scan)
     window.folder_watch.batch_ready.emit((folder / 'b',))
     wait_for(lambda: len(scans) == 3 and window.worker is None)
@@ -313,13 +314,45 @@ def test_repeated_automatic_failure_is_reported_once(app, monkeypatch):
         wait_for(lambda: len(scans) == count + 1 and window.worker is None)
 
     run(issue)
-    assert '감시 폴더를 찾을 수 없습니다' in folders.report
-    folders.report_scan('사용자가 본 다른 안내')
+    assert '감시 폴더를 찾을 수 없습니다' in shown_report(folders)
+    folders.report_scan(ScanReport('사용자가 본 다른 안내'))
     run(issue)  # 드라이브가 분리된 동안 같은 실패가 다시 나와도 조용하다.
-    assert folders.report == '사용자가 본 다른 안내'
+    assert folders.report == ScanReport('사용자가 본 다른 안내')
     run()  # 다시 연결되어 실패가 사라지면 기억도 지운다.
     run(issue)
-    assert '감시 폴더를 찾을 수 없습니다' in folders.report
+    assert '감시 폴더를 찾을 수 없습니다' in shown_report(folders)
+
+
+def test_dismissed_result_stays_closed_after_unchanged_quiet_scan(app, monkeypatch):
+    # #201 R1: 조용한 검사가 바뀐 것이 없어 이전 안내를 되돌려도 닫은 결과는 되살아나지 않고, 새 실패는 다시 보인다.
+    core, folder, scans, order, _, create = app
+    window = create(RecordingWatcher(order))
+    wait_for(lambda: scans == [None] and window.worker is None)
+    folders = window.web_host.controllers['folders']
+    root = core.watched_folders()[0].path
+    results = []
+
+    def scan(*, folders=None):
+        scans.append(folders)
+        return results.pop(0)
+
+    monkeypatch.setattr(core, 'scan', scan)
+
+    def run(*result):
+        results.append(ScanResult(0, result))
+        count = len(scans)
+        window.folder_watch.batch_ready.emit((root,))
+        wait_for(lambda: len(scans) == count + 1 and window.worker is None)
+        return json.loads(folders.bridge.snapshot())['report']
+
+    report = run(ScanIssue(root, '감시 폴더를 찾을 수 없습니다.'))
+    assert report['failures'] and report['dismissible']
+    folders.bridge.dismissReport(report['revision'], 'failures')
+    folders.bridge.dismissReport(report['revision'], 'summary')
+    report = run(ScanIssue(root, '감시 폴더를 찾을 수 없습니다.'))
+    assert (report['failures'], report['message']) == ([], '')
+    report = run(ScanIssue(root, '액세스가 거부되었습니다.'))
+    assert report['failures'] == [{'path': str(root), 'message': '액세스가 거부되었습니다.'}] and report['message']
 
 
 def test_disconnected_root_failure_is_reported_once_and_again_after_reconnect(app):
@@ -338,16 +371,16 @@ def test_disconnected_root_failure_is_reported_once_and_again_after_reconnect(ap
 
     folder.rename(detached)
     batch(folder)
-    assert str(folder) in folders.report and not core.video(existing).missing
-    folders.report_scan('사용자가 본 다른 안내')
+    assert str(folder) in shown_report(folders) and not core.video(existing).missing
+    folders.report_scan(ScanReport('사용자가 본 다른 안내'))
     batch(folder)  # 재연결 전 같은 실패가 다시 나와도 조용하다.
     batch(folder / 'a')  # 루트 없이 하위 폴더만 지정해도 새 안내가 없으면 조용하다.
-    assert folders.report == '사용자가 본 다른 안내' and not core.video(existing).missing
+    assert folders.report == ScanReport('사용자가 본 다른 안내') and not core.video(existing).missing
     detached.rename(folder)
     batch(folder)  # 재연결 묶음: 실패가 사라져 기억을 지운다.
     folder.rename(detached)
     batch(folder)
-    assert str(folder) in folders.report
+    assert str(folder) in shown_report(folders)
     detached.rename(folder)
 
 
@@ -366,8 +399,8 @@ def test_new_failure_after_reconnect_is_reported(app, monkeypatch):
 
     folder.rename(detached)
     batch(folder)
-    assert str(folder) in folders.report
-    folders.report_scan('사용자가 본 다른 안내')
+    assert str(folder) in shown_report(folders)
+    folders.report_scan(ScanReport('사용자가 본 다른 안내'))
     detached.rename(folder)
     broken = folder / 'a' / 'broken.mkv'
     broken.write_bytes(b'locked by another program')
@@ -380,7 +413,7 @@ def test_new_failure_after_reconnect_is_reported(app, monkeypatch):
 
     monkeypatch.setattr(core._media, 'read', locked)
     batch(folder)
-    assert '다른 프로세스가 파일을 사용 중입니다' in folders.report
+    assert '다른 프로세스가 파일을 사용 중입니다' in shown_report(folders)
 
 
 def test_same_path_with_new_cause_is_reported(app, monkeypatch):
@@ -401,8 +434,8 @@ def test_same_path_with_new_cause_is_reported(app, monkeypatch):
         count = len(scans)
         window.folder_watch.batch_ready.emit((root,))
         wait_for(lambda: len(scans) == count + 1 and window.worker is None)
-        assert expected in folders.report
-        folders.report_scan('사용자가 본 다른 안내')
+        assert expected in shown_report(folders)
+        folders.report_scan(ScanReport('사용자가 본 다른 안내'))
 
 
 def test_batches_wait_while_folder_action_is_busy(app):

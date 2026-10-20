@@ -4,7 +4,9 @@ import sqlite3
 
 from PySide6.QtCore import QObject, QTimer
 
+from .library_operations import ScanReport
 from .web_folders_contract import FOLDERS
+from .web_folders_data import SCAN_NOTICE_GROUPS, scan_report_data
 from .web_json import encode
 from .web_page import WebPageController
 
@@ -28,6 +30,14 @@ class FoldersBridge(QObject):
     @FOLDERS.slot('snapshot')
     def snapshot(self):
         return encode(self.page.payload())
+
+    @FOLDERS.slot('dismissReport')
+    def dismissReport(self, revision, group):
+        if group not in SCAN_NOTICE_GROUPS:
+            return encode({'error': '없는 검사 안내입니다.'})
+        self.page.dismiss_report(revision, group)
+        # 바뀐 상태는 foldersChanged로만 보낸다. 늦게 도착한 응답이 그사이 온 새 결과를 덮지 않게 데이터를 싣지 않는다.
+        return encode({'ok': True})
 
     @FOLDERS.slot('setMinimum')
     def setMinimum(self, seconds):
@@ -95,7 +105,8 @@ class WebFoldersPage(WebPageController):
     def __init__(self, host):
         super().__init__(host)
         self.library = host.controllers['library']
-        self.report = '폴더를 추가하면 자동으로 검사합니다.'
+        self.report = ScanReport('폴더를 추가하면 자동으로 검사합니다.')
+        self.report_revision = 0
         self.bridge = FoldersBridge(self)
         self.unwatched = ()
         # 감시 실패는 신호 없이 바뀌므로 보이는 동안만 가볍게 확인한다.
@@ -125,9 +136,16 @@ class WebFoldersPage(WebPageController):
         self.window.navigate_web_tab('folders')
         self.host.request_focus('folders-' + section)
 
-    def report_scan(self, text):
-        self.report = text
+    def report_scan(self, report):
+        self.report = report
+        self.report_revision += 1
         self.refresh()
+
+    def dismiss_report(self, revision, group):
+        # 응답 전에 새 결과가 왔으면 사용자가 보지 못한 새 결과를 닫지 않는다.
+        if revision == self.report_revision and self.report.finished:
+            self.report = self.report.dismiss(group)
+            self.refresh()
 
     def payload(self):
         def rows(videos):
@@ -138,8 +156,8 @@ class WebFoldersPage(WebPageController):
         return dict(folders=[str(folder.path) for folder in self.core.watched_folders()],
                     excluded=rows(self.core.excluded_videos()), dismissed=rows(self.core.dismissed_videos()),
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,
-                    report=self.report, automaticDetection=watch.enabled, unwatched=list(self.unwatched),
-                    watchStartFailed=watch.enabled and watch.start_failed)
+                    report=scan_report_data(self.report, self.report_revision), automaticDetection=watch.enabled,
+                    unwatched=list(self.unwatched), watchStartFailed=watch.enabled and watch.start_failed)
 
     def refresh(self):
         if self.is_active():

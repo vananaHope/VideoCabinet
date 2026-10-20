@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { connectBridge, request } from "@/bridge"
-import type { FolderAction, FoldersBridge, FoldersData } from "@/bridge-types"
+import type { FolderAction, FoldersBridge, FoldersData, ScanNoticeGroup } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
 import { InlineNotice, Notice, NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, EmptyState, PageHeader, StatusBadge, Tabs } from "@/components/page-parts"
 import { MinimumDuration } from "@/components/minimum-duration"
+import { ScanReport } from "@/components/scan-report"
 
 export default function FoldersPage() {
   const [bridge, setBridge] = useState<FoldersBridge | null>(null)
@@ -12,6 +13,9 @@ export default function FoldersPage() {
   const [error, setError] = useState("")
   const [section, setSection] = useState("folders")
   const [remove, setRemove] = useState<string | null>(null)
+  const reportRevision = useRef(0)
+  const dismissSequence = useRef(0)
+  useEffect(() => { reportRevision.current = data?.report.revision ?? 0 }, [data])
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}
@@ -33,6 +37,29 @@ export default function FoldersPage() {
     return () => { disposed = true; disconnect() }
   }, [])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(error => setError(String(error))) }, [bridge])
+  function dismissReport(revision: number, group: ScanNoticeGroup, index: number) {
+    if (!bridge) return
+    const sequence = ++dismissSequence.current
+    // 초점은 가장 최근 닫기의 응답에서만, 그사이 새 결과가 오지 않았고(revision) 사용자가 초점을 검사 안내 밖으로
+    // 옮기지 않았을 때만 옮긴다. 닫은 단추가 사라지면 초점은 body로 빠지므로 body는 아직 옮기지 않은 것으로 본다.
+    const current = () => {
+      const section = document.getElementById('folders-report')
+      const active = document.activeElement
+      return sequence === dismissSequence.current && reportRevision.current === revision
+        && (!active || active === document.body || !!section?.contains(active))
+    }
+    // 닫은 상태는 foldersChanged로만 받는다. 응답은 늦게 올 수 있어 그사이 온 새 검사 결과를 덮지 않도록 데이터를 싣지 않는다.
+    request(reply => bridge.dismissReport(revision, group, reply)).then(() => {
+      if (!current()) return
+      // 닫은 단추가 사라지므로 같은 자리에 온 다음 검사 안내의 닫기 단추로, 남은 안내가 없으면 검사 안내 구역으로 초점을 옮긴다.
+      requestAnimationFrame(() => {
+        if (!current()) return
+        const section = document.getElementById('folders-report')
+        const remaining = [...section?.querySelectorAll<HTMLElement>('button[aria-label="안내 닫기"]') ?? []]
+        ;(remaining[Math.min(index, remaining.length - 1)] ?? section)?.focus()
+      })
+    }).catch(error => setError(String(error)))
+  }
   function act(name: FolderAction, target = "") {
     setError("")
     if (bridge) request(reply => bridge.action(name, target, reply)).catch(error => setError(String(error)))
@@ -59,7 +86,8 @@ export default function FoldersPage() {
       : <><p className="border-b px-3 py-2 text-sm text-muted-foreground">{section === 'excluded' ? '되돌리면 라이브러리에 다시 보입니다. 파일과 기록은 그대로 남아 있습니다.' : '되돌린 영상은 다시 추천에 나올 수 있습니다. 라이브러리 표시는 그대로입니다.'}</p>{videos.length ? <ul className="divide-y">{videos.map(video => <li key={video.id} className="flex items-center gap-3 px-3 py-1.5"><div className="min-w-0 flex-1"><p className="break-all">{video.title}</p>{(video.missing || (section !== 'excluded' && video.excluded)) && <p className="text-xs text-muted-foreground">{section !== 'excluded' && video.excluded ? '제외' : '파일 없음'}</p>}</div><Button variant="outline" size="sm" disabled={section === 'excluded' && data.scanning} onClick={() => act(section === 'excluded' ? 'restoreExcluded' : 'restoreDismissed', String(video.id))}>되돌리기</Button></li>)}</ul> : <div className="p-3"><EmptyState title={section === 'excluded' ? '제외한 영상이 없습니다' : '관심 없음으로 뺀 영상이 없습니다'} description="되돌릴 영상이 있으면 여기에 표시합니다." /></div>}</>}
     </section>
     <MinimumDuration id="folders-minimum" value={data.minimum} scanning={data.scanning} onSave={async value => { await request(reply => bridge.setMinimum(value, reply)) }} />
-    <section className="space-y-1 rounded-xl border bg-card px-4 py-3" aria-label="검사 안내"><h2 className="text-sm font-semibold">검사 안내</h2>{data.scanning && <div role="progressbar" aria-label="영상 검사 중" className="h-1 animate-pulse rounded-full bg-primary" />}<p role="status" className="max-h-20 overflow-y-auto whitespace-pre-wrap break-all text-sm text-muted-foreground">{data.report}</p></section>
+    {/* 검사 안내는 폴더 목록이 최소 높이를 지키고 남은 자리까지만 차지하고, 넘치면 안내 묶음 안에서 스크롤한다. */}
+    <section id="folders-report" tabIndex={-1} className="flex min-h-0 flex-col gap-2 outline-none" aria-label="검사 안내">{data.scanning && <div role="progressbar" aria-label="영상 검사 중" className="h-1 shrink-0 animate-pulse rounded-full bg-primary" />}<ScanReport report={data.report} onDismiss={(group, index) => dismissReport(data.report.revision, group, index)} /></section>
     <ConfirmDialog open={remove !== null} onOpenChange={open => { if (!open) setRemove(null) }} title="감시 폴더 해제" description="이 폴더 아래의 모든 위치를 해제합니다. 다른 위치가 없는 영상은 파일 없음으로 남습니다. 실제 파일과 영상 기록은 유지하며, 겹치는 감시 폴더의 위치는 다음 검사에서 복귀합니다." confirmLabel="해제" onConfirm={() => { if (remove) act('removeFolder', remove); setRemove(null) }} />
   </main>
 }
