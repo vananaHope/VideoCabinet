@@ -15,6 +15,7 @@ from test_web_library_data import core, Media
 from test_web_library_page import window_factory
 from test_playback_page_ui import Player
 from my_video_manager.core import AppCore, CommandType, ScanIssue, ScanResult
+from qt_wait import wait_for
 
 
 @pytest.mark.parametrize('section', ['excluded', 'dismissed'])
@@ -168,8 +169,9 @@ def test_scan_report_groups_issues_by_kind_and_keeps_status_summary(window_facto
     wait_for_scan(window)
     report = json.loads(bridges(window)['folders'].snapshot())['report']
     total = len(core.videos())
+    assert report.pop('revision') > 0
     assert report == {
-        'message': f'영상 0개 등록 · 전체 {total}개', 'failed': False,
+        'message': f'영상 0개 등록 · 전체 {total}개', 'failed': False, 'dismissible': True,
         'failures': [{'path': str(denied), 'message': '액세스가 거부되었습니다.'}],
         'subtitleWarnings': [{'path': str(subtitle), 'message': '2개 블록을 건너뜀'},
                              {'path': str(denied), 'message': '자막 폴더를 읽지 못했습니다.'}],
@@ -413,3 +415,94 @@ def test_folders_reactivation_delivers_changes_skipped_while_hidden(window_facto
     window.web_host.show()
     assert len(changes) == 1
     assert str(folder.resolve()) in changes[0]['folders']
+
+
+def test_duplicate_scan_issues_are_shown_once(window_factory, core, tmp_path):
+    # #201 R3: 코어가 같은 경로의 같은 안내를 두 번 내도 화면에는 한 번만, 개수도 맞춘다. 경로가 다르면 합치지 않는다.
+    first, second = tmp_path / 'a.mkv', tmp_path / 'b.mkv'
+    issues = (ScanIssue(first, 'Access denied'), ScanIssue(first, 'Access denied'), ScanIssue(second, 'Access denied'),
+              ScanIssue(first, '외부 자막: 1개 블록을 건너뜀', subtitle=True),
+              ScanIssue(first, '외부 자막: 1개 블록을 건너뜀', subtitle=True))
+    window = window_factory()
+    window.scan(operation=lambda: ScanResult(0, issues))
+    wait_for_scan(window)
+    report = json.loads(bridges(window)['folders'].snapshot())['report']
+    assert report['failures'] == [{'path': str(first), 'message': 'Access denied'},
+                                  {'path': str(second), 'message': 'Access denied'}]
+    assert report['subtitleWarnings'] == [{'path': str(first), 'message': '1개 블록을 건너뜀'}]
+    # 상태 표시줄 요약은 코어 결과 그대로다.
+    assert window.statusBar().currentMessage().endswith('안내 5개')
+
+
+def test_finished_scan_report_groups_can_be_dismissed_until_next_result(window_factory, core, tmp_path):
+    # #201 R1: 끝난 검사의 결과는 묶음마다 닫을 수 있고, 새 결과는 다시 보인다. 처음 설명·검사 중 문구는 닫지 않는다.
+    window = window_factory()
+    api = bridges(window)['folders']
+    initial = json.loads(api.snapshot())['report']
+    assert not initial['dismissible']
+    api.dismissReport(initial['revision'], 'summary')
+    assert json.loads(api.snapshot())['report']['message'] == initial['message']
+    issues = (ScanIssue(tmp_path / 'a.mkv', '액세스가 거부되었습니다.'),
+              ScanIssue(tmp_path / 'a.srt', '외부 자막: 1개 블록을 건너뜀', subtitle=True))
+    window.scan(operation=lambda: ScanResult(0, issues))
+    wait_for_scan(window)
+    report = json.loads(api.snapshot())['report']
+    assert report['dismissible'] and report['failures'] and report['subtitleWarnings'] and report['message']
+    report = json.loads(api.dismissReport(report['revision'], 'failures'))['report']
+    assert not report['failures'] and report['subtitleWarnings'] and report['message']
+    report = json.loads(api.dismissReport(report['revision'], 'summary'))['report']
+    assert (report['message'], report['subtitleWarnings'] != []) == ('', True)
+    assert 'error' in json.loads(api.dismissReport(report['revision'], 'unknown'))
+    stale = report['revision']
+    window.scan(operation=lambda: ScanResult(0, issues))
+    wait_for_scan(window)
+    # 응답 전에 온 새 결과는 이전 화면의 닫기 요청으로 닫히지 않는다.
+    report = json.loads(api.dismissReport(stale, 'subtitleWarnings'))['report']
+    assert report['failures'] and report['subtitleWarnings'] and report['message']
+
+    def fail():
+        raise RuntimeError('디스크 오류')
+
+    window.scan(operation=fail)
+    wait_for_scan(window)
+    report = json.loads(api.snapshot())['report']
+    assert report['dismissible'] and report['message'] == '검사 실패: 디스크 오류'
+    assert json.loads(api.dismissReport(report['revision'], 'summary'))['report']['message'] == ''
+
+
+def test_scan_failure_and_progress_have_one_live_region(window_factory, core):
+    # #201 R2: 같은 검사 사건은 셸 상태 안내 한 곳에서만 알리고, 폴더 화면의 검사 안내는 live region이 아니다.
+    window = window_factory()
+    host = window.web_host
+    wait_for(lambda: host._frontend_ready)
+    window.navigate_web_tab('folders')
+    wait_for(lambda: 'folders' in host._ready_pages)
+
+    def js(source):
+        result = []
+        host.engine_page.runJavaScript(source, result.append)
+        wait_for(lambda: bool(result))
+        return result[0]
+
+    def live(text):
+        return js(f"[...document.querySelectorAll('[role=alert],[role=status]')]"
+                  f".filter(e => e.textContent.includes({json.dumps(text)})).map(e => e.getAttribute('role')).join()")
+
+    def shown(text):
+        return text in js("document.querySelector('[aria-label=\"검사 안내\"]')?.textContent ?? ''")
+
+    finished = threading.Event()
+
+    def slow():
+        finished.wait(5)
+        raise RuntimeError('디스크 오류')
+
+    window.scan(operation=slow)
+    try:
+        wait_for(lambda: shown('영상을 검사하고'))
+        assert live('영상을 검사하고') == 'status'
+    finally:
+        finished.set()
+        wait_for_scan(window)
+    wait_for(lambda: shown('검사 실패: 디스크 오류'))
+    assert live('검사 실패: 디스크 오류') == 'alert'

@@ -323,6 +323,38 @@ def test_repeated_automatic_failure_is_reported_once(app, monkeypatch):
     assert '감시 폴더를 찾을 수 없습니다' in shown_report(folders)
 
 
+def test_dismissed_result_stays_closed_after_unchanged_quiet_scan(app, monkeypatch):
+    # #201 R1: 조용한 검사가 바뀐 것이 없어 이전 안내를 되돌려도 닫은 결과는 되살아나지 않고, 새 실패는 다시 보인다.
+    core, folder, scans, order, _, create = app
+    window = create(RecordingWatcher(order))
+    wait_for(lambda: scans == [None] and window.worker is None)
+    folders = window.web_host.controllers['folders']
+    root = core.watched_folders()[0].path
+    results = []
+
+    def scan(*, folders=None):
+        scans.append(folders)
+        return results.pop(0)
+
+    monkeypatch.setattr(core, 'scan', scan)
+
+    def run(*result):
+        results.append(ScanResult(0, result))
+        count = len(scans)
+        window.folder_watch.batch_ready.emit((root,))
+        wait_for(lambda: len(scans) == count + 1 and window.worker is None)
+        return json.loads(folders.bridge.snapshot())['report']
+
+    report = run(ScanIssue(root, '감시 폴더를 찾을 수 없습니다.'))
+    assert report['failures'] and report['dismissible']
+    folders.bridge.dismissReport(report['revision'], 'failures')
+    folders.bridge.dismissReport(report['revision'], 'summary')
+    report = run(ScanIssue(root, '감시 폴더를 찾을 수 없습니다.'))
+    assert (report['failures'], report['message']) == ([], '')
+    report = run(ScanIssue(root, '액세스가 거부되었습니다.'))
+    assert report['failures'] == [{'path': str(root), 'message': '액세스가 거부되었습니다.'}] and report['message']
+
+
 def test_disconnected_root_failure_is_reported_once_and_again_after_reconnect(app):
     # #133: 루트가 없으면 지정 검사는 위치를 보존하고 실패 ScanIssue를 돌려준다.
     core, folder, scans, order, _, create = app

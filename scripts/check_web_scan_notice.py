@@ -111,6 +111,9 @@ def key(code, modifiers=Qt.KeyboardModifier.NoModifier):
     settle()
 
 
+SHOWN = 'document.querySelector(\'[aria-label="검사 안내"]\').textContent'
+
+
 def run_scan(result):
     if callable(result):
         window.scan(operation=result)
@@ -121,8 +124,7 @@ def run_scan(result):
     report = host.controllers['folders'].payload()['report']
     marks = [report['message'], *(f'{title} {len(report[key])}개' for key, title in (
         ('failures', '영상 검사 오류'), ('subtitleWarnings', '외부 자막 경고')) if report[key])]
-    shown = 'document.querySelector(\'[aria-label="검사 안내"]\').textContent'
-    wait(lambda: all(mark in js(shown) for mark in marks), f'검사 안내 표시: {marks}')
+    wait(lambda: all(mark in js(SHOWN) for mark in marks), f'검사 안내 표시: {marks}')
     settle(300)
 
 
@@ -207,7 +209,11 @@ try:
     assert measure('failed')['tones'] == ['error']
     assert '검사 실패: 감시 폴더 목록을 읽지 못했습니다' in js('document.querySelector(\'[aria-label="검사 안내"]\').textContent')
     capture('failed')
-    checks.append('검사 중 진행 막대, 검사 실패는 오류 한 줄')
+    # 같은 실패는 셸 상태 안내 한 곳에서만 live region으로 알린다.
+    live = js('''[...document.querySelectorAll('[role=alert],[role=status]')]
+        .filter(e => e.textContent.includes('검사 실패: 감시 폴더 목록을 읽지 못했습니다')).length''')
+    assert live == 1, live
+    checks.append('검사 중 진행 막대, 검사 실패는 오류 한 줄(live region 하나)')
 
     run_scan(lambda: core.scan())
     report = window.web_host.controllers['folders'].payload()['report']
@@ -284,6 +290,22 @@ try:
     assert js('document.activeElement.getAttribute("aria-expanded")') == 'false'
     assert not js('!!document.querySelector(\'[aria-label="외부 자막 경고 목록"]\')')
     checks.append('실제 검사 뒤 외부 자막 경고 목록: Enter로 펼침, Tab으로 목록 진입, Space로 닫음')
+
+    # 끝난 검사 결과는 키보드로 닫고, 초점은 다음 안내의 닫기 단추 → 검사 안내 구역으로 간다.
+    dismiss = '[aria-label="검사 안내"] button[aria-label="안내 닫기"]'
+    js(f'document.querySelector({json.dumps(dismiss)}).focus()')
+    settle()
+    assert js('document.activeElement.closest("[data-slot=notice]").dataset.tone') == 'warning'
+    key(Qt.Key.Key_Return)
+    wait(lambda: '외부 자막 경고' not in js(SHOWN), '경고 닫힘')
+    wait(lambda: js('document.activeElement.closest("[data-slot=notice]")?.dataset.tone ?? ""') == 'info', '다음 안내로 초점')
+    key(Qt.Key.Key_Space)
+    wait(lambda: not js(f'!!document.querySelector({json.dumps(dismiss)})'), '요약 닫힘')
+    wait(lambda: js('document.activeElement.id') == 'folders-report', '검사 안내 구역으로 초점')
+    capture('dismissed')
+    run_scan(lambda: core.scan())
+    assert '외부 자막 경고 1개' in js(SHOWN)
+    checks.append('결과 닫기: Enter·Space로 닫고 초점은 다음 안내 → 구역, 새 검사 결과는 다시 보임')
     result = {'mode': 'offscreen' if args.offscreen else 'windows', 'checks': checks, 'passed': len(checks), 'layouts': layouts}
     (args.output / f'{result["mode"]}-results.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(result, ensure_ascii=False))
