@@ -306,6 +306,32 @@ try:
     run_scan(lambda: core.scan())
     assert '외부 자막 경고 1개' in js(SHOWN)
     checks.append('결과 닫기: Enter·Space로 닫고 초점은 다음 안내 → 구역, 새 검사 결과는 다시 보임')
+
+    # 늦은 닫기 응답: WebChannel의 다음 응답(type 10) 하나를 잡아 두고, 그사이 새 검사 결과가 보인 뒤 응답을 푼다.
+    run_scan(ScanResult(0, ()))
+    js('''window.heldReplies = []; window.receiveReply = qt.webChannelTransport.onmessage; window.holdReply = true;
+        qt.webChannelTransport.onmessage = function (event) {
+            const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+            if (window.holdReply && message.type === 10) { window.heldReplies.push(event); window.holdReply = false; return }
+            window.receiveReply.call(this, event)
+        }; true''')
+    # 초점 이동 여부를 보려고 닫기와 무관한 곳에 초점을 둔다(click()은 초점을 옮기지 않는다).
+    js('document.querySelector(`[data-tab="folders"]`).focus(); true')
+    js(f'document.querySelector({json.dumps(dismiss)}).click()')
+    wait(lambda: js('window.heldReplies.length') == 1, '닫기 응답 잡아 둠')
+    wait(lambda: '영상 0개 등록' not in js(SHOWN), '닫은 상태는 foldersChanged로 반영')
+
+    def late():
+        raise RuntimeError('닫기 뒤 새 결과')
+
+    run_scan(late)
+    js('window.receiveReply.call(qt.webChannelTransport, window.heldReplies.shift()); '
+       'qt.webChannelTransport.onmessage = window.receiveReply; true')
+    settle(1000)
+    assert '검사 실패: 닫기 뒤 새 결과' in js(SHOWN), js(SHOWN)
+    focused = js('document.activeElement.dataset.tab ?? document.activeElement.id')
+    assert focused == 'folders', f'늦은 응답으로 초점을 옮겼습니다: {focused}'
+    checks.append('늦은 닫기 응답이 그사이 온 새 검사 결과를 덮지 않고 초점도 옮기지 않음')
     result = {'mode': 'offscreen' if args.offscreen else 'windows', 'checks': checks, 'passed': len(checks), 'layouts': layouts}
     (args.output / f'{result["mode"]}-results.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(result, ensure_ascii=False))

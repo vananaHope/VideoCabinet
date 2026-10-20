@@ -36,7 +36,8 @@ class FoldersBridge(QObject):
         if group not in SCAN_NOTICE_GROUPS:
             return encode({'error': '없는 검사 안내입니다.'})
         self.page.dismiss_report(revision, group)
-        return self.snapshot()
+        # 바뀐 상태는 foldersChanged로만 보낸다. 늦게 도착한 응답이 그사이 온 새 결과를 덮지 않게 데이터를 싣지 않는다.
+        return encode({'ok': True})
 
     @FOLDERS.slot('setMinimum')
     def setMinimum(self, seconds):

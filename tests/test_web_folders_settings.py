@@ -438,6 +438,12 @@ def test_finished_scan_report_groups_can_be_dismissed_until_next_result(window_f
     # #201 R1: 끝난 검사의 결과는 묶음마다 닫을 수 있고, 새 결과는 다시 보인다. 처음 설명·검사 중 문구는 닫지 않는다.
     window = window_factory()
     api = bridges(window)['folders']
+
+    def dismiss(revision, group):
+        # 응답에는 데이터가 없고 바뀐 상태는 foldersChanged·snapshot으로 본다.
+        assert json.loads(api.dismissReport(revision, group)) == {'ok': True}
+        return json.loads(api.snapshot())['report']
+
     initial = json.loads(api.snapshot())['report']
     assert not initial['dismissible']
     api.dismissReport(initial['revision'], 'summary')
@@ -448,16 +454,16 @@ def test_finished_scan_report_groups_can_be_dismissed_until_next_result(window_f
     wait_for_scan(window)
     report = json.loads(api.snapshot())['report']
     assert report['dismissible'] and report['failures'] and report['subtitleWarnings'] and report['message']
-    report = json.loads(api.dismissReport(report['revision'], 'failures'))['report']
+    report = dismiss(report['revision'], 'failures')
     assert not report['failures'] and report['subtitleWarnings'] and report['message']
-    report = json.loads(api.dismissReport(report['revision'], 'summary'))['report']
+    report = dismiss(report['revision'], 'summary')
     assert (report['message'], report['subtitleWarnings'] != []) == ('', True)
     assert 'error' in json.loads(api.dismissReport(report['revision'], 'unknown'))
     stale = report['revision']
     window.scan(operation=lambda: ScanResult(0, issues))
     wait_for_scan(window)
     # 응답 전에 온 새 결과는 이전 화면의 닫기 요청으로 닫히지 않는다.
-    report = json.loads(api.dismissReport(stale, 'subtitleWarnings'))['report']
+    report = dismiss(stale, 'subtitleWarnings')
     assert report['failures'] and report['subtitleWarnings'] and report['message']
 
     def fail():
@@ -467,7 +473,7 @@ def test_finished_scan_report_groups_can_be_dismissed_until_next_result(window_f
     wait_for_scan(window)
     report = json.loads(api.snapshot())['report']
     assert report['dismissible'] and report['message'] == '검사 실패: 디스크 오류'
-    assert json.loads(api.dismissReport(report['revision'], 'summary'))['report']['message'] == ''
+    assert dismiss(report['revision'], 'summary')['message'] == ''
 
 
 def test_scan_failure_and_progress_have_one_live_region(window_factory, core):

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { connectBridge, request } from "@/bridge"
 import type { FolderAction, FoldersBridge, FoldersData, ScanNoticeGroup } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,8 @@ export default function FoldersPage() {
   const [error, setError] = useState("")
   const [section, setSection] = useState("folders")
   const [remove, setRemove] = useState<string | null>(null)
+  const reportRevision = useRef(0)
+  useEffect(() => { reportRevision.current = data?.report.revision ?? 0 }, [data])
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}
@@ -36,8 +38,10 @@ export default function FoldersPage() {
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(error => setError(String(error))) }, [bridge])
   function dismissReport(revision: number, group: ScanNoticeGroup, index: number) {
     if (!bridge) return
-    request<FoldersData>(reply => bridge.dismissReport(revision, group, reply)).then(next => {
-      setData(next)
+    // 닫은 상태는 foldersChanged로만 받는다. 응답은 늦게 올 수 있어 그사이 온 새 검사 결과를 덮지 않도록 데이터를 싣지 않는다.
+    request(reply => bridge.dismissReport(revision, group, reply)).then(() => {
+      // 그사이 새 결과가 왔으면 사용자가 보던 안내가 아니므로 초점을 옮기지 않는다.
+      if (reportRevision.current !== revision) return
       // 닫은 단추가 사라지므로 같은 자리에 온 다음 검사 안내의 닫기 단추로, 남은 안내가 없으면 검사 안내 구역으로 초점을 옮긴다.
       requestAnimationFrame(() => {
         const section = document.getElementById('folders-report')
