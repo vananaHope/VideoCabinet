@@ -699,13 +699,26 @@ export interface RestorableVideoData {
   excluded: boolean
 }
 
+export interface ScanIssueData {
+  path: string
+  message: string
+}
+
+export interface ScanReportData {
+  message: string
+  failed: boolean
+  failures: Array<ScanIssueData>
+  subtitleWarnings: Array<ScanIssueData>
+  notes: Array<ScanIssueData>
+}
+
 export interface FoldersData {
   folders: Array<string>
   excluded: Array<RestorableVideoData>
   dismissed: Array<RestorableVideoData>
   minimum: number
   scanning: boolean
-  report: string
+  report: ScanReportData
   automaticDetection: boolean
   unwatched: Array<string>
   watchStartFailed: boolean

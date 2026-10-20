@@ -14,7 +14,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
     tab = 'library'
     default_focus = 'grid'
     scan_state_changed = Signal(bool)
-    scan_message = Signal(str)
+    scan_message = Signal(object)
     refreshed = Signal()
 
     def __init__(self, host):

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 from test_web_library_data import core, Media
 from test_web_library_page import window_factory
 from test_playback_page_ui import Player
-from my_video_manager.core import AppCore, CommandType, ScanResult
+from my_video_manager.core import AppCore, CommandType, ScanIssue, ScanResult
 
 
 @pytest.mark.parametrize('section', ['excluded', 'dismissed'])
@@ -143,7 +143,7 @@ def test_scan_locks_mutations_but_allows_dismissed_restore_and_reports(window_fa
     window.scan(operation=scan)
     try:
         state = json.loads(api['folders'].snapshot())
-        assert state['scanning'] and '검사' in state['report']
+        assert state['scanning'] and '검사' in state['report']['message']
         for action in ('addFolder', 'removeFolder', 'addFile', 'scan', 'restoreExcluded'):
             assert 'error' in json.loads(api['folders'].action(action, ''))
         for name in ('folders', 'settings'):
@@ -155,7 +155,36 @@ def test_scan_locks_mutations_but_allows_dismissed_restore_and_reports(window_fa
         finished.set()
         wait_for_scan(window)
     state = json.loads(api['folders'].snapshot())
-    assert not state['scanning'] and '영상 0개 등록' in state['report']
+    assert not state['scanning'] and '영상 0개 등록' in state['report']['message']
+
+
+def test_scan_report_groups_issues_by_kind_and_keeps_status_summary(window_factory, core, tmp_path):
+    # #201: 화면은 코어가 나눈 종류를 받는다. 상태 표시줄 요약은 예전처럼 안내 수까지 보인다.
+    denied, subtitle, junction = tmp_path / '막힌 폴더', tmp_path / '영상.srt', tmp_path / '연결'
+    issues = (ScanIssue(subtitle, '외부 자막: 2개 블록을 건너뜀', subtitle=True), ScanIssue(denied, '액세스가 거부되었습니다.'),
+              ScanIssue(junction, '건너뜀: 연결', failed=False), ScanIssue(denied, '외부 자막: 자막 폴더를 읽지 못했습니다.', subtitle=True))
+    window = window_factory()
+    window.scan(operation=lambda: ScanResult(0, issues))
+    wait_for_scan(window)
+    report = json.loads(bridges(window)['folders'].snapshot())['report']
+    total = len(core.videos())
+    assert report == {
+        'message': f'영상 0개 등록 · 전체 {total}개', 'failed': False,
+        'failures': [{'path': str(denied), 'message': '액세스가 거부되었습니다.'}],
+        'subtitleWarnings': [{'path': str(subtitle), 'message': '2개 블록을 건너뜀'},
+                             {'path': str(denied), 'message': '자막 폴더를 읽지 못했습니다.'}],
+        'notes': [{'path': str(junction), 'message': '건너뜀: 연결'}]}
+    assert window.statusBar().currentMessage() == f'영상 0개 등록 · 전체 {total}개 · 안내 4개'
+
+    def fail():
+        raise RuntimeError('디스크 오류')
+
+    window.scan(operation=fail)
+    wait_for_scan(window)
+    report = json.loads(bridges(window)['folders'].snapshot())['report']
+    assert (report['message'], report['failed'], report['failures'], report['subtitleWarnings']) == (
+        '검사 실패: 디스크 오류', True, [], [])
+    assert window.statusBar().currentMessage() == '검사 실패: 디스크 오류'
 
 
 def test_minimum_shared_between_pages_and_survives_restart(window_factory, core):

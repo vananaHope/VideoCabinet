@@ -4,7 +4,9 @@ import sqlite3
 
 from PySide6.QtCore import QObject, QTimer
 
+from .library_operations import ScanReport
 from .web_folders_contract import FOLDERS
+from .web_folders_data import scan_report_data
 from .web_json import encode
 from .web_page import WebPageController
 
@@ -95,7 +97,7 @@ class WebFoldersPage(WebPageController):
     def __init__(self, host):
         super().__init__(host)
         self.library = host.controllers['library']
-        self.report = '폴더를 추가하면 자동으로 검사합니다.'
+        self.report = ScanReport('폴더를 추가하면 자동으로 검사합니다.')
         self.bridge = FoldersBridge(self)
         self.unwatched = ()
         # 감시 실패는 신호 없이 바뀌므로 보이는 동안만 가볍게 확인한다.
@@ -125,8 +127,8 @@ class WebFoldersPage(WebPageController):
         self.window.navigate_web_tab('folders')
         self.host.request_focus('folders-' + section)
 
-    def report_scan(self, text):
-        self.report = text
+    def report_scan(self, report):
+        self.report = report
         self.refresh()
 
     def payload(self):
@@ -138,7 +140,7 @@ class WebFoldersPage(WebPageController):
         return dict(folders=[str(folder.path) for folder in self.core.watched_folders()],
                     excluded=rows(self.core.excluded_videos()), dismissed=rows(self.core.dismissed_videos()),
                     minimum=self.core.minimum_duration, scanning=self.library.worker is not None,
-                    report=self.report, automaticDetection=watch.enabled, unwatched=list(self.unwatched),
+                    report=scan_report_data(self.report), automaticDetection=watch.enabled, unwatched=list(self.unwatched),
                     watchStartFailed=watch.enabled and watch.start_failed)
 
     def refresh(self):

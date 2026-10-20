@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from my_video_manager.core import AppCore, MediaInfo
+from my_video_manager.core import AppCore, MediaInfo, ScanIssueKind
 from my_video_manager.search import SOURCE_LABELS
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 
@@ -1158,3 +1158,26 @@ def test_removed_watched_folder_clears_pending_reparse(library):
     core.remove_watched_folder(video.parent)
     core.scan()
     assert core.settings.get('external_subtitles.pending_reparse_paths') == []
+
+
+def test_scan_issue_kinds_keep_subtitle_warnings_apart_from_failures(library, monkeypatch):
+    # #201: 검사 안내는 코어가 정한 종류로 나뉜다. 외부 자막 경고는 접두어가 아니라 종류로 구별한다.
+    core, video = library
+    video.with_suffix(".srt").write_text(srt("정상 줄") + "\n끝 잔여 블록\n", encoding="utf-8")
+    first = core.add_file(video)
+    assert [issue.kind for issue in first.issues] == [ScanIssueKind.SUBTITLE]
+    again = core.add_file(video)
+    assert sorted(issue.kind.value for issue in again.issues) == ["note", "subtitle"]
+    core.add_watched_folder(video.parent)
+    broken = video.with_name("broken.mkv")
+    broken.write_bytes(b"broken")
+    read = Media.read
+
+    def failing(self, path):
+        if path == broken:
+            raise OSError("media failed")
+        return read(self, path)
+
+    monkeypatch.setattr(Media, "read", failing)
+    kinds = {issue.path: issue.kind for issue in core.scan().issues}
+    assert kinds[broken] is ScanIssueKind.FAILURE and kinds[video.with_suffix(".srt")] is ScanIssueKind.SUBTITLE

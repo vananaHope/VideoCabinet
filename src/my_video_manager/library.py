@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 import hashlib
 import logging
 import math
@@ -81,11 +82,26 @@ class Video:
         return _EPOCH + timedelta(seconds=seconds, microseconds=nanoseconds // 1000)
 
 
+class ScanIssueKind(Enum):
+    """검사 안내의 종류. 안내 위계로는 실패가 오류, 외부 자막이 경고, 알림이 정보다."""
+    FAILURE = 'failure'  # 영상 검사 실패(폴더·파일 접근 오류 등)
+    SUBTITLE = 'subtitle'  # 외부 자막 읽기 경고. 영상 등록에는 영향이 없다.
+    NOTE = 'note'  # 건너뜀·다시 찾음처럼 확인만 하면 되는 알림
+
+
 @dataclass(frozen=True)
 class ScanIssue:
     path: Path
     message: str
+    # 실패한 경로는 다음 검사에서 다시 읽는다. 외부 자막 경고도 그 판단에 쓰므로 종류와 따로 둔다.
     failed: bool = True
+    subtitle: bool = False
+
+    @property
+    def kind(self) -> ScanIssueKind:
+        if self.subtitle:
+            return ScanIssueKind.SUBTITLE
+        return ScanIssueKind.FAILURE if self.failed else ScanIssueKind.NOTE
 
 
 @dataclass(frozen=True)
@@ -366,7 +382,7 @@ class Library:
             with self._connect() as db:
                 affected.update(row[0] for row in db.execute("SELECT video_id FROM locations WHERE path=?", (str(path),)))
             warnings = self.external_subtitles.refresh(affected)
-            return ScanResult(result.added, result.issues + tuple(ScanIssue(*warning) for warning in warnings),
+            return ScanResult(result.added, result.issues + tuple(ScanIssue(*warning, subtitle=True) for warning in warnings),
                               reconnected=result.reconnected)
 
     def reconnect_video(self, video_id: int, path: Path) -> None:
@@ -457,7 +473,7 @@ class Library:
                 skipped_folders=() if folders is None else skipped, preserved_folders=disconnected,
                 complete_scan=folders is None,
                 failed_paths=tuple(issue.path for issue in result.issues if issue.failed))
-            return ScanResult(result.added, result.issues + tuple(ScanIssue(*warning) for warning in warnings),
+            return ScanResult(result.added, result.issues + tuple(ScanIssue(*warning, subtitle=True) for warning in warnings),
                               reconnected=result.reconnected)
 
     def _scan(self, roots, *, include_direct, skipped, disconnected, on_registered=None) -> ScanResult:

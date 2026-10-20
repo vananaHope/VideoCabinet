@@ -10,7 +10,8 @@ import sqlite3
 from threading import Lock, RLock
 from typing import Callable, Iterable, Mapping
 
-from .library import Library, Location, MediaInfo, MediaReader, ScanIssue, ScanResult, Video, WatchedFolder
+from .library import (Library, Location, MediaInfo, MediaReader, ScanIssue, ScanIssueKind, ScanResult, Video,
+                      WatchedFolder)
 from .settings import Settings
 from .highlights import Highlight, Highlights
 from .key_bindings import KeyBinding, KeyBindings

@@ -12,10 +12,18 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox, QSystemTrayIcon
 
 from my_video_manager.core import AppCore, ScanResult
 from my_video_manager.library import MediaInfo
+from my_video_manager.library_operations import ScanReport
 from my_video_manager.ui import MainWindow
 from my_video_manager.web_contract import TABS
 from qt_wait import wait_for
 from test_library_return_ui import Player
+
+
+def shown_report(folders):
+    """폴더 관리 화면에 넘긴 검사 안내를 문구와 '경로: 메시지' 줄로 편다."""
+    report = folders.payload()['report']
+    issues = (*report['failures'], *report['subtitleWarnings'], *report['notes'])
+    return '\n'.join((report['message'], *(f"{issue['path']}: {issue['message']}" for issue in issues)))
 
 
 class Media:
@@ -212,7 +220,7 @@ def test_unchanged_startup_is_quiet_but_manual_completion_is_reported(startup, p
     window = create()
     folders = window.web_host.controllers['folders']
     if previous_report is not None:
-        folders.report_scan(previous_report)
+        folders.report_scan(ScanReport(previous_report))
     previous_report = folders.report
     wait_for(lambda: len(calls) == 1 and window.worker is None)
     assert folders.report == previous_report
@@ -292,7 +300,7 @@ def test_add_file_racing_quiet_startup_scan_reports_error_and_keeps_it(startup, 
     wait_for(lambda: window.worker is None)
     # 조용한 완료가 문구를 복원해도 거부된 파일이 등록되지 않았다는 사실은 오류에 남는다.
     assert errors == ['진행 중인 검사가 끝난 뒤 다시 시도하세요.']
-    assert folders.report != '진행 중인 검사가 끝난 뒤 다시 시도하세요.'
+    assert '진행 중인 검사가 끝난 뒤 다시 시도하세요.' not in shown_report(folders)
     assert {video.title for video in core.videos()} == {'existing'}
 
 
@@ -331,10 +339,10 @@ def test_quiet_completion_does_not_overwrite_a_newer_notice(startup, monkeypatch
     started, release = stretch_quiet_startup_scan(core, calls, monkeypatch)
     window.show()
     wait_for(started.is_set)
-    folders.report_scan('검사 중 들어온 안내')
+    folders.report_scan(ScanReport('검사 중 들어온 안내'))
     release.set()
     wait_for(lambda: window.worker is None)
-    assert folders.report == '검사 중 들어온 안내'
+    assert folders.report == ScanReport('검사 중 들어온 안내')
 
 
 def test_startup_warning_is_not_silenced(startup):
@@ -344,7 +352,7 @@ def test_startup_warning_is_not_silenced(startup):
     folder.rmdir()
     window = create(watched=False)
     wait_for(lambda: len(calls) == 1 and window.worker is None)
-    assert str(folder) in window.web_host.controllers['folders'].report
+    assert str(folder) in shown_report(window.web_host.controllers['folders'])
 
 
 def test_failed_startup_releases_worker_and_manual_retry_works(startup, monkeypatch):
@@ -358,12 +366,12 @@ def test_failed_startup_releases_worker_and_manual_retry_works(startup, monkeypa
     monkeypatch.setattr(core, 'scan', fail)
     window = create()
     wait_for(lambda: len(calls) == 1 and window.worker is None)
-    assert 'injected scan failure' in window.web_host.controllers['folders'].report
+    assert 'injected scan failure' in shown_report(window.web_host.controllers['folders'])
     assert not window.library_page.payload()['scanning']
     monkeypatch.setattr(core, 'scan', scan)
     window.scan()
     wait_for(lambda: len(calls) == 2 and window.worker is None)
-    assert 'injected scan failure' not in window.web_host.controllers['folders'].report
+    assert 'injected scan failure' not in shown_report(window.web_host.controllers['folders'])
 
 
 def test_full_exit_before_deferred_scan_prevents_worker_start(startup):

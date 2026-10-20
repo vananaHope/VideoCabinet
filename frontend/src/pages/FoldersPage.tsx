@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { InlineNotice, Notice, NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, EmptyState, PageHeader, StatusBadge, Tabs } from "@/components/page-parts"
 import { MinimumDuration } from "@/components/minimum-duration"
+import { ScanReport } from "@/components/scan-report"
 
 export default function FoldersPage() {
   const [bridge, setBridge] = useState<FoldersBridge | null>(null)
@@ -59,7 +60,7 @@ export default function FoldersPage() {
       : <><p className="border-b px-3 py-2 text-sm text-muted-foreground">{section === 'excluded' ? '되돌리면 라이브러리에 다시 보입니다. 파일과 기록은 그대로 남아 있습니다.' : '되돌린 영상은 다시 추천에 나올 수 있습니다. 라이브러리 표시는 그대로입니다.'}</p>{videos.length ? <ul className="divide-y">{videos.map(video => <li key={video.id} className="flex items-center gap-3 px-3 py-1.5"><div className="min-w-0 flex-1"><p className="break-all">{video.title}</p>{(video.missing || (section !== 'excluded' && video.excluded)) && <p className="text-xs text-muted-foreground">{section !== 'excluded' && video.excluded ? '제외' : '파일 없음'}</p>}</div><Button variant="outline" size="sm" disabled={section === 'excluded' && data.scanning} onClick={() => act(section === 'excluded' ? 'restoreExcluded' : 'restoreDismissed', String(video.id))}>되돌리기</Button></li>)}</ul> : <div className="p-3"><EmptyState title={section === 'excluded' ? '제외한 영상이 없습니다' : '관심 없음으로 뺀 영상이 없습니다'} description="되돌릴 영상이 있으면 여기에 표시합니다." /></div>}</>}
     </section>
     <MinimumDuration id="folders-minimum" value={data.minimum} scanning={data.scanning} onSave={async value => { await request(reply => bridge.setMinimum(value, reply)) }} />
-    <section className="space-y-1 rounded-xl border bg-card px-4 py-3" aria-label="검사 안내"><h2 className="text-sm font-semibold">검사 안내</h2>{data.scanning && <div role="progressbar" aria-label="영상 검사 중" className="h-1 animate-pulse rounded-full bg-primary" />}<p role="status" className="max-h-20 overflow-y-auto whitespace-pre-wrap break-all text-sm text-muted-foreground">{data.report}</p></section>
+    <section className="flex max-h-72 min-h-0 shrink-0 flex-col gap-2 rounded-xl border bg-card px-4 py-3" aria-label="검사 안내"><h2 className="text-sm font-semibold">검사 안내</h2>{data.scanning && <div role="progressbar" aria-label="영상 검사 중" className="h-1 shrink-0 animate-pulse rounded-full bg-primary" />}<ScanReport report={data.report} /></section>
     <ConfirmDialog open={remove !== null} onOpenChange={open => { if (!open) setRemove(null) }} title="감시 폴더 해제" description="이 폴더 아래의 모든 위치를 해제합니다. 다른 위치가 없는 영상은 파일 없음으로 남습니다. 실제 파일과 영상 기록은 유지하며, 겹치는 감시 폴더의 위치는 다음 검사에서 복귀합니다." confirmLabel="해제" onConfirm={() => { if (remove) act('removeFolder', remove); setRemove(null) }} />
   </main>
 }

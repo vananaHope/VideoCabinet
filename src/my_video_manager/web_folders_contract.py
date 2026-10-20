@@ -10,4 +10,5 @@ FOLDERS = BridgeContract(name='folders', interface='FoldersBridge', slots={
 }, signals={'foldersChanged': str, 'foldersFocusRequested': str, 'foldersError': str},
     aliases=(TypeAlias('FolderAction', ('addFolder', 'removeFolder', 'scan', 'addFile',
                                        'restoreExcluded', 'restoreDismissed', 'manageTags')),),
-    data_types=(web_folders_data.RestorableVideoData, web_folders_data.FoldersData))
+    data_types=(web_folders_data.RestorableVideoData, web_folders_data.ScanIssueData,
+                web_folders_data.ScanReportData, web_folders_data.FoldersData))
