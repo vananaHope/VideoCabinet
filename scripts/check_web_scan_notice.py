@@ -128,6 +128,21 @@ def run_scan(result):
     settle(300)
 
 
+def hold_next_reply():
+    """WebChannel의 다음 응답(type 10) 하나를 잡아 둔다. 신호(type 1)는 그대로 전달한다."""
+    js('''window.heldReplies = []; window.receiveReply = qt.webChannelTransport.onmessage; window.holdReply = true;
+        qt.webChannelTransport.onmessage = function (event) {
+            const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+            if (window.holdReply && message.type === 10) { window.heldReplies.push(event); window.holdReply = false; return }
+            window.receiveReply.call(this, event)
+        }; true''')
+
+
+def release_reply():
+    js('window.receiveReply.call(qt.webChannelTransport, window.heldReplies.shift()); '
+       'qt.webChannelTransport.onmessage = window.receiveReply; true')
+
+
 def toggle():
     return '[aria-label="검사 안내"] button[aria-expanded]'
 
@@ -309,12 +324,7 @@ try:
 
     # 늦은 닫기 응답: WebChannel의 다음 응답(type 10) 하나를 잡아 두고, 그사이 새 검사 결과가 보인 뒤 응답을 푼다.
     run_scan(ScanResult(0, ()))
-    js('''window.heldReplies = []; window.receiveReply = qt.webChannelTransport.onmessage; window.holdReply = true;
-        qt.webChannelTransport.onmessage = function (event) {
-            const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-            if (window.holdReply && message.type === 10) { window.heldReplies.push(event); window.holdReply = false; return }
-            window.receiveReply.call(this, event)
-        }; true''')
+    hold_next_reply()
     # 초점 이동 여부를 보려고 닫기와 무관한 곳에 초점을 둔다(click()은 초점을 옮기지 않는다).
     js('document.querySelector(`[data-tab="folders"]`).focus(); true')
     js(f'document.querySelector({json.dumps(dismiss)}).click()')
@@ -325,13 +335,37 @@ try:
         raise RuntimeError('닫기 뒤 새 결과')
 
     run_scan(late)
-    js('window.receiveReply.call(qt.webChannelTransport, window.heldReplies.shift()); '
-       'qt.webChannelTransport.onmessage = window.receiveReply; true')
+    release_reply()
     settle(1000)
     assert '검사 실패: 닫기 뒤 새 결과' in js(SHOWN), js(SHOWN)
     focused = js('document.activeElement.dataset.tab ?? document.activeElement.id')
     assert focused == 'folders', f'늦은 응답으로 초점을 옮겼습니다: {focused}'
     checks.append('늦은 닫기 응답이 그사이 온 새 검사 결과를 덮지 않고 초점도 옮기지 않음')
+
+    # 연속 닫기: 첫 닫기 응답을 잡아 둔 채 두 번째를 닫고 입력란에 입력한 뒤 첫 응답을 풀어도 초점은 입력란에 남는다.
+    run_scan(ScanResult(0, (ScanIssue(workspace / '연속 닫기.mkv', '액세스가 거부되었습니다.'),
+                            ScanIssue(workspace / '연속 닫기.srt', '외부 자막: 1개 블록을 건너뜀', subtitle=True))))
+    hold_next_reply()
+    window.activateWindow()
+    host.view.setFocus()
+    js(f'document.querySelector({json.dumps(dismiss)}).focus(); true')
+    assert js('document.activeElement.closest("[data-slot=notice]").dataset.tone') == 'error'
+    key(Qt.Key.Key_Return)
+    wait(lambda: js('window.heldReplies.length') == 1 and '영상 검사 오류' not in js(SHOWN), '첫 닫기 응답 잡아 둠')
+    js(f'document.querySelector({json.dumps(dismiss)}).focus(); true')
+    assert js('document.activeElement.closest("[data-slot=notice]").dataset.tone') == 'warning'
+    key(Qt.Key.Key_Return)
+    wait(lambda: js('document.activeElement.closest("[data-slot=notice]")?.dataset.tone ?? ""') == 'info', '두 번째 닫기 초점')
+    js('document.getElementById("folders-minimum").focus(); document.getElementById("folders-minimum").select(); true')
+    QTest.keyClicks(QApplication.focusWidget(), '123')
+    settle()
+    assert (js('document.activeElement.id'), js('document.activeElement.value')) == ('folders-minimum', '123')
+    release_reply()
+    settle(800)
+    focused = js('document.activeElement.id || document.activeElement.getAttribute("aria-label")')
+    assert focused == 'folders-minimum', f'오래된 첫 닫기 응답이 초점을 가져갔습니다: {focused}'
+    assert js('document.getElementById("folders-minimum").value') == '123'
+    checks.append('연속 닫기에서 오래된 첫 응답이 사용자가 옮긴 입력란 초점을 가져가지 않음')
     result = {'mode': 'offscreen' if args.offscreen else 'windows', 'checks': checks, 'passed': len(checks), 'layouts': layouts}
     (args.output / f'{result["mode"]}-results.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(result, ensure_ascii=False))

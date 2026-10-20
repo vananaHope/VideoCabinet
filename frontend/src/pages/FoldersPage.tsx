@@ -14,6 +14,7 @@ export default function FoldersPage() {
   const [section, setSection] = useState("folders")
   const [remove, setRemove] = useState<string | null>(null)
   const reportRevision = useRef(0)
+  const dismissSequence = useRef(0)
   useEffect(() => { reportRevision.current = data?.report.revision ?? 0 }, [data])
   useEffect(() => {
     let disposed = false
@@ -38,12 +39,21 @@ export default function FoldersPage() {
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(error => setError(String(error))) }, [bridge])
   function dismissReport(revision: number, group: ScanNoticeGroup, index: number) {
     if (!bridge) return
+    const sequence = ++dismissSequence.current
+    // 초점은 가장 최근 닫기의 응답에서만, 그사이 새 결과가 오지 않았고(revision) 사용자가 초점을 검사 안내 밖으로
+    // 옮기지 않았을 때만 옮긴다. 닫은 단추가 사라지면 초점은 body로 빠지므로 body는 아직 옮기지 않은 것으로 본다.
+    const current = () => {
+      const section = document.getElementById('folders-report')
+      const active = document.activeElement
+      return sequence === dismissSequence.current && reportRevision.current === revision
+        && (!active || active === document.body || !!section?.contains(active))
+    }
     // 닫은 상태는 foldersChanged로만 받는다. 응답은 늦게 올 수 있어 그사이 온 새 검사 결과를 덮지 않도록 데이터를 싣지 않는다.
     request(reply => bridge.dismissReport(revision, group, reply)).then(() => {
-      // 그사이 새 결과가 왔으면 사용자가 보던 안내가 아니므로 초점을 옮기지 않는다.
-      if (reportRevision.current !== revision) return
+      if (!current()) return
       // 닫은 단추가 사라지므로 같은 자리에 온 다음 검사 안내의 닫기 단추로, 남은 안내가 없으면 검사 안내 구역으로 초점을 옮긴다.
       requestAnimationFrame(() => {
+        if (!current()) return
         const section = document.getElementById('folders-report')
         const remaining = [...section?.querySelectorAll<HTMLElement>('button[aria-label="안내 닫기"]') ?? []]
         ;(remaining[Math.min(index, remaining.length - 1)] ?? section)?.focus()
