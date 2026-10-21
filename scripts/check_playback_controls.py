@@ -4,10 +4,12 @@ python scripts/check_playback_controls.py --offscreen
 python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scripts/python.exe scripts/check_playback_controls.py --real
 
 --offscreen은 가짜 플레이어로 1100×720(가장 넓은 상태 포함)과 더 좁은 창의 조작 줄이 넘치지 않는지,
-하이라이트·속도 단추부터 짧게 줄이는지 보고 위젯 grab 이미지를 남긴다.
+하이라이트·속도 단추부터 짧게 줄이는지 보고 위젯 grab 이미지를 남긴다. 모아보기 단추가 더해진 가장 넓은 줄과
+그 전체 화면 구성(1280 폭)도 재고, 상태별 남은 폭을 결과 JSON의 slack에 남긴다.
 --real은 데스크톱 잠금 안에서 합성 영상과 실제 mpv, Windows 마우스·키 입력으로 단추 클릭, Tab 이동,
 단추 초점에서의 재생 키, 하이라이트·구간 단추, 속도 목록 고르기와 목록 밖 속도 표시,
-재생 메뉴 '설정'(창 모드·전체 화면), 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기를 확인한다.
+재생 메뉴 '설정'(창 모드·전체 화면), 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기,
+전체 화면 모아보기의 ⇤ ⇥ ↻ 반복·⏮ ⏭ 단추 클릭을 확인한다.
 실창에서는 화면 캡처를 하지 않는다. 데이터는 worktree 밖 임시 폴더에 만들고 지운다.
 """
 
@@ -438,7 +440,61 @@ def real(app, directory, result):
     wait(lambda: core.playback.session is None, '목록으로 단추')
     assert not window.isFullScreen() and window.pages.currentWidget() is window.web_host
     passed('fullscreen-list-button')
+    real_reel(window, page, directory, click, press, passed)
     window.tray.quit()
+
+
+def real_reel(window, page, directory, click, press, passed):
+    """하이라이트 모아보기를 전체 화면에서 재생하며 모아보기 단추와 ⏮ ⏭를 Windows 마우스로 누른다."""
+    from my_video_manager.adapters import FFmpegMediaReader
+    core = window.core
+    source = directory / '실창 조작 줄 2.mp4'
+    subprocess.run([FFmpegMediaReader().ffmpeg, '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=24',
+                    '-t', '90', '-c:v', 'libx264', '-preset', 'ultrafast', '-y', str(source)], check=True)
+    core.add_file(source)
+    # 첫 영상(앞 검사의 하이라이트 포함)에 항목 둘을 더하고, 둘째 영상에 항목 하나를 둔다.
+    # 검사 중 자동으로 다음 항목에 넘어가지 않게 40초 구간으로 둔다.
+    videos = sorted(core.videos(), key=lambda v: v.title)
+    for video, starts in zip(videos, ((10, 60), (10,))):
+        core.switch_to(video.id)
+        for start in starts:
+            core.playback.report(start, seeked=True)
+            core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
+            highlight = next(h for h in core.highlights(video.id) if h.start == start)
+            core.update_highlight(highlight.id, start=start, end=start + 40, note='')
+    core.end_playback()
+    window.reel.start()
+    wait(lambda: core.reel_playback is not None and core.playback.position > 10.5, '모아보기 재생 시작')
+    index = lambda: core.reel_playback.index
+    second_video_first = 1 + sum(1 for entry in core.reel_entries() if entry.highlight.video_id == videos[0].id)
+    press(0xDE)  # ': 전체 화면
+    wait(window.isFullScreen, '모아보기 전체 화면')
+
+    offsets = iter(range(-60, 60, 7))
+
+    def press_button(button, done, label):
+        # 커서를 영상 위에서 움직여 숨은 조작 줄을 다시 보이게 한 뒤 누른다.
+        center = page.surface.mapToGlobal(page.surface.rect().center())
+        ratio = page.screen().devicePixelRatio()
+        ctypes.windll.user32.SetCursorPos(round((center.x() + next(offsets)) * ratio), round(center.y() * ratio))
+        wait(button.isVisible, f'{label}: 조작 줄 표시')
+        click(button)
+        wait(done, label)
+        assert window.isFullScreen() and window.surface.hasFocus(), f'{label}: 전체 화면·영상 초점'
+
+    press_button(page.reel_next_button, lambda: index() == 2, '⇥ 다음 항목')
+    press_button(page.reel_previous_button, lambda: index() == 1, '⇤ 이전 항목')
+    press_button(page.reel_repeat_button, lambda: core.reel_repeat and page.reel_repeat_button.isChecked(), '↻ 반복 켜기')
+    press(0xDC)  # \: 키로 끄면 단추도 꺼진다.
+    wait(lambda: not core.reel_repeat and not page.reel_repeat_button.isChecked(), '백슬래시 키로 반복 끄기')
+    press_button(page.next_button, lambda: index() == second_video_first, '⏭ 다음 영상 첫 하이라이트')
+    press_button(page.previous_button, lambda: index() == 1, '⏮ 이전 영상 첫 항목')
+    passed('reel-buttons-fullscreen-click')
+    press(0x1B)  # Esc: 전체 화면 끄기
+    press(0x1B)  # Esc: 모아보기 목록
+    wait(lambda: core.reel_playback is None, '모아보기 목록 복귀')
+    assert all(button.isHidden() for button in page.reel_buttons)
+    passed('reel-buttons-hidden-after-reel')
 
 
 def main():
