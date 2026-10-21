@@ -713,3 +713,11 @@ def test_control_bar_shortens_labels_only_while_narrow(window):
     window.resize(3000, 720)
     QApplication.processEvents()
     assert [button.text() for button in page.compact_order] == labels
+    # 창 크기가 그대로여도 단추 글자가 길어져 넘치면 다시 줄인다.
+    window.resize(window.width() - (page.controls.width() - full), 720)
+    QApplication.processEvents()
+    assert not any(button.compact for button in page.compact_order)
+    page.subtitle_language_button.set_label("다듬은 자막", "다듬은")
+    QApplication.processEvents()
+    assert page.subtitle_language_button.text() == "다듬은"
+    assert row.minimumSize().width() <= page.controls.width()

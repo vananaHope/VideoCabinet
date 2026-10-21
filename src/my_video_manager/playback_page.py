@@ -35,6 +35,11 @@ class ControlButton(QToolButton):
         """좁은 창에서 줄이기 전의 글자."""
         return self._labels[0]
 
+    def compact_saving(self):
+        """짧은 글자로 바꾸면 줄어드는 폭. 글자를 바꿔 보지 않고 계산한다."""
+        metrics = self.fontMetrics()
+        return max(0, metrics.horizontalAdvance(self._labels[0]) - metrics.horizontalAdvance(self._labels[1]))
+
     def set_label(self, text, compact=None):
         self._labels = (text, compact or text)
         self._show_label()
@@ -217,13 +222,20 @@ class PlaybackPage(QWidget):
         self.update_controls()
 
     def fit_controls(self):
-        """조작 줄이 넘치면 compact_order 순서대로 단추 글자를 짧게 바꾼다."""
+        """조작 줄이 넘치면 compact_order 순서대로 단추 글자를 짧게 바꾼다.
+
+        결과가 같으면 글자를 건드리지 않으므로, 글자·표시가 바뀔 때마다 불러도 레이아웃 요청이 되풀이되지 않는다.
+        """
+        # 지금 줄인 단추를 모두 되돌렸을 때 넘치는 폭에서 시작한다.
+        excess = (self.controls.layout().minimumSize().width() - self.controls.width()
+                  + sum(button.compact_saving() for button in self.compact_order
+                        if button.compact and not button.isHidden()))
         for button in self.compact_order:
-            button.set_compact(False)
-        for button in self.compact_order:
-            if self.controls.layout().minimumSize().width() <= self.controls.width():
-                return
-            button.set_compact(True)
+            saving = 0 if button.isHidden() else button.compact_saving()
+            compact = excess > 0 and saving > 0
+            if compact:
+                excess -= saving
+            button.set_compact(compact)
 
     def focus_content(self):
         if self.isVisible() and QApplication.activeModalWidget() is None:
@@ -370,7 +382,8 @@ class PlaybackPage(QWidget):
 
     def eventFilter(self, watched, event):
         kind = event.type()
-        if watched is self.controls and kind == QEvent.Type.Resize:
+        if watched is self.controls and kind in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
+            # 창 크기뿐 아니라 단추 글자·표시가 바뀌어도 다시 맞춘다.
             self.fit_controls()
         if watched is self.surface and kind == QEvent.Type.Resize and self._help_requested:
             QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))

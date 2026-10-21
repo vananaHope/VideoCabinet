@@ -471,6 +471,20 @@ cuDNN 684,630,375바이트 / DLL 1,007,375,176바이트입니다.
 
 ## 구조와 테스트
 
+### 재생 조작 줄 검증
+
+재생 화면은 Qt이므로 조작 줄은 웹 검사 대신 아래 검사로 확인합니다.
+
+```powershell
+.venv/Scripts/python.exe scripts/check_playback_controls.py --offscreen
+python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scripts/python.exe scripts/check_playback_controls.py --real
+```
+
+첫 명령은 가짜 플레이어로 1100×720 창의 기본 줄과 가장 넓은 줄(열린 구간·다듬은 자막·자막 작업 표시)이
+글자를 줄이지 않고 넘치지 않는지 확인하고 `.local/playback-controls/`에 위젯 이미지를 남깁니다.
+두 번째 명령은 합성 영상과 실제 mpv, Windows 마우스·키 입력으로 단추 클릭 뒤 재생 키, Tab 이동과 단추 초점에서의 →·Space·Enter,
+키 안내 닫기 단추(앱 창 활성 유지), 전체 화면 조작 줄의 '전체 화면 끄기'·'목록으로'를 확인합니다. 실창 스크린샷은 찍지 않습니다.
+
 ### 웹 모아보기·검색 검증
 
 영상 상세의 정보 탭에는 외부 자막 파일 이름, 언어별 줄 수와 읽기 경고가 나옵니다.
@@ -685,8 +699,8 @@ OS가 자동화 키를 전달하지 않는 환경에서는 이 검사가 실패�
 - `ui.py`: 페이지 연결, 창 내부 키 전달, 재생 시작·종료와 트레이 연결을 담당하는 메인 셸.
 - `theme.py`: 웹 토큰 기반 네이티브 재생·트레이·공용 경고의 팔레트와 스타일.
 - `library_details.py`: 선택 영상의 상세 요약 결과. `AppCore.library_details`는 자막·번역·하이라이트 소유 모듈에서 한 영상만 조회한다.
-- `playback_page.py`: 영상 중심 재생 배치·아래쪽 바·작업 메뉴와 `show_position`·`show_reel` 표시 API. 전체 화면의 임시 바와 Esc 우선순위를 처리한다.
-- `playback_help.py`: F1으로 켜는 별도 반투명 안내 창. 현재 키 배치·모아보기 키 의미·하이라이트 색 범례를 mpv 위에 표시한다.
+- `playback_page.py`: 영상 중심 재생 배치·아래쪽 바(조작 줄)·작업 메뉴와 `show_position`·`show_reel` 표시 API. 전체 화면의 임시 바와 Esc 우선순위를 처리한다. 재생 키와 조작 줄 단추는 모두 `run_command(command)`로 명령 하나를 실행한다. 새 단추·영상 클릭도 이 함수를 부르며, 좁은 창에서 글자를 줄일 단추는 `compact_order`에 더한다.
+- `playback_help.py`: F1·⌨ 단추로 켜는 별도 반투명 안내 창. 현재 키 배치·모아보기 키 의미·하이라이트 색 범례를 mpv 위에 표시한다. 앱 창의 활성 상태와 초점은 가져가지 않고, 닫기 단추로 마우스로도 닫는다.
 - `settings.py`: JSON 값을 저장하는 공용 `Settings` 저장소. 라이브러리·번역·키 배치 설정이 함께 사용하며 키 배치는 `keys.bindings`에 저장.
 - `single_instance.py`: 데이터 폴더별 중복 실행 방지와 기존 창 활성화 요청.
 - `tray.py`: 트레이 숨기기·복귀·완전 종료와 대기열 완료 알림.
