@@ -71,7 +71,7 @@ class PlaybackHelp(QWidget):
         self.text.setText("<b>키 안내 · " + ("하이라이트 모아보기" if reel else "일반 재생")
                           + "</b><br>F1 켜기 / 끄기 · Esc 안내 닫기"
                           + "<table>" + table + "</table><br>" + legend
-                          + "<br>Tab 메뉴·목록 이동 · 목록에서 ↑↓ 선택, Enter 이동"
+                          + "<br>Tab 조작 단추·메뉴·목록 이동 · 단추에서 Space 누르기 · 목록에서 ↑↓ 선택, Enter 이동"
                           + f"<br>{SETTINGS_KEY} 설정 메뉴 · {page_keys(TABS)} 재생을 끝내고 페이지 이동"
                           + "<br>Esc: 안내 닫기 → 전체 화면 끄기 → 목록 복귀")
 
