@@ -9,7 +9,8 @@ from my_video_manager.core import AppCore
 from my_video_manager.playback_page import SPEED_CHOICES
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.ui import MainWindow
-from test_playback_page_ui import Player, app, click, key, window
+from qt_wait import wait_for
+from test_playback_page_ui import Player, app, click, click_video, key, window
 from test_translation import Media, Transcriber, Translator, finish, source
 
 
@@ -58,9 +59,13 @@ def test_speed_key_and_speed_list_show_new_speed(window):
     assert statuses(window) == ["1.25×", "0.5×", "0.25×"]
 
 
-def test_reel_repeat_key_shows_on_and_off_only_during_reel(window):
+def test_reel_repeat_key_outside_reel_has_no_status(window):
     key(window, Qt.Key.Key_Backslash)
     assert statuses(window) == []
+
+
+@pytest.mark.parametrize("method", ["key", "button"])
+def test_each_input_shows_reel_repeat_on_and_off(window, method):
     core = window.core
     for video in core.videos():
         core.switch_to(video.id)
@@ -69,9 +74,18 @@ def test_reel_repeat_key_shows_on_and_off_only_during_reel(window):
     window.reel.open()
     window.reel.start()
     window.sync_position()
-    key(window, Qt.Key.Key_Backslash)
-    key(window, Qt.Key.Key_Backslash)
-    assert statuses(window) == ["모아보기 반복 켜짐", "모아보기 반복 꺼짐"]
+    operate(window, method, Qt.Key.Key_Backslash, "reel_repeat_button")
+    assert window.player.statuses == shown("모아보기 반복 켜짐")
+    operate(window, method, Qt.Key.Key_Backslash, "reel_repeat_button")
+    assert window.player.statuses == shown("모아보기 반복 켜짐", "모아보기 반복 꺼짐")
+
+
+def test_video_click_shows_pause_and_resume(window):
+    click_video(window)
+    wait_for(lambda: window.player.paused)
+    click_video(window)
+    wait_for(lambda: not window.player.paused)
+    assert window.player.statuses == shown("⏸ 일시정지", "▶ 재생")
 
 
 def test_seek_and_video_moves_have_no_playback_status(window):
