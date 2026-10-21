@@ -109,14 +109,22 @@ class LibraryBridge(QObject):
         if self.busy:
             return encode({'error': '진행 중인 작업이 끝난 뒤 다시 시도하세요.'})
         try:
-            video_id = self.page.core.pick_random_video(**scope())
+            from .random_continuous_play import RandomPlayScope
+            selected_scope = scope()
+            video_id = self.page.core.pick_random_video(**selected_scope)
+            if 'tag_ids' in selected_scope:
+                random_scope = RandomPlayScope("tags", tag_ids=tuple(selected_scope['tag_ids']))
+            elif 'video_ids' in selected_scope:
+                random_scope = RandomPlayScope("list", video_ids=tuple(selected_scope['video_ids']))
+            else:
+                random_scope = RandomPlayScope()
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
         if video_id is None:
             return encode({'videoId': None, 'message': NO_CANDIDATE_MESSAGE})
         self.busy = True
         self.page.selected_id = video_id
-        QTimer.singleShot(0, lambda: self.perform(action, video_id))
+        QTimer.singleShot(0, lambda: self.perform(action, video_id, random_scope=random_scope))
         return encode({'videoId': video_id})
 
     @LIBRARY.slot('highlights')
@@ -174,12 +182,15 @@ class LibraryBridge(QObject):
             if not edit and page.is_active():
                 page.focus_content()
 
-    def perform(self, action, video_id):
+    def perform(self, action, video_id, *, random_scope=None):
         page = self.page
         try:
             page.selected_id = video_id
             if action == 'play':
-                page.window.play(video_id)
+                if random_scope is None:
+                    page.window.play(video_id)
+                else:
+                    page.window.play(video_id, random_scope=random_scope)
             elif action == 'play_all':
                 page.window.play_random_video(video_id)
             else:

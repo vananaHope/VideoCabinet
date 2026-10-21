@@ -39,6 +39,12 @@ class StatisticsBridge(QObject):
             self.page.core.playback_location(video_id)
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
+        source = tuple(video['video_id'] for video in result['period']['top_videos'])
+
+        def play():
+            self.page.window.playback_list = source
+            self.page.window.play_video(video_id)
+
         # 기존 Python 재생 진입점이 복귀 탭과 mpv 수명주기를 함께 보존한다.
-        QTimer.singleShot(0, lambda: self.page.window.play_video(video_id))
+        QTimer.singleShot(0, play)
         return encode({'ok': True})

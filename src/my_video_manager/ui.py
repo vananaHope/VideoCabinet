@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QMessageBox, QSt
 
 from .adapters import MpvPlayer
 from .core import AppCore, Command, CommandType
+from .random_continuous_play import RandomPlayScope
 from .subtitle_controls import SubtitleControls
 from .translation_controls import TranslationControls
 from .web_dialogs_entries import HighlightList
@@ -22,7 +23,7 @@ from .theme import apply_theme
 
 @dataclass
 class TransitionHold:
-    """긴급 탈출로 멈춘 엔진·재생 항목에 묶인 모아보기 자동 전환 보류.
+    """긴급 탈출로 멈춘 엔진·재생 항목에 묶인 모아보기·무작위 이어 재생 전환 보류.
 
     끝 도달은 코어가 항목별로 기억하고, EOF와 진행 중인 사용자 탐색은 여기서 기억한다.
     엔진이나 재생 세션(모아보기 항목)이 바뀌면 보류는 그 항목과 함께 버린다.
@@ -43,8 +44,10 @@ class MainWindow(QMainWindow):
         self.player_factory = player_factory
         self.playback_list = ()
         self._composing_widget = None
-        # 긴급 탈출로 멈춘 엔진. 사용자가 재개하기 전까지 모아보기 자동 전환을 미룬다.
+        # 긴급 탈출로 멈춘 엔진. 사용자가 재개하기 전까지 영상·항목 끝 전환을 미룬다.
         self._hold = None
+        self._pending_random_eof = None
+        self._stopping_player = False
         # 긴급 탈출로 닫은 메뉴와 그때의 화면. 복귀 때 같은 화면이면 메뉴를 다시 연다.
         self._emergency_popups = []
         self._emergency_view = None
@@ -270,9 +273,10 @@ class MainWindow(QMainWindow):
     def scan(self, checked=False, *, operation=None):
         self.library_page.scan(checked, operation=operation)
 
-    def play(self, video_id):
-        self.playback_list = self.library_page.visible_video_ids()
-        self.play_video(video_id)
+    def play(self, video_id, *, random_scope=None):
+        self.playback_list = (random_scope.video_ids if random_scope is not None and random_scope.kind == "list"
+                              else self.library_page.visible_video_ids())
+        self.play_video(video_id, random_scope=random_scope, new_playback=True)
 
     def random_play(self):
         """단축키·트레이의 범위는 항상 영상 전체이며 일반 재생 전환으로 기록을 마감한다."""
@@ -292,17 +296,21 @@ class MainWindow(QMainWindow):
     def play_random_video(self, video_id):
         """영상 전체 범위에서 고른 영상을 재생한다. 라이브러리 ▾ '영상 전체에서'도 같은 재생 목록을 쓴다."""
         self.playback_list = tuple(video.id for video in self.core.videos())
-        self.play_video(video_id)
+        self.play_video(video_id, random_scope=RandomPlayScope())
 
     def show_search(self):
         self.navigate_web_tab('search')
 
-    def play_video(self, video_id, *, start=None):
-        if self.pages.currentWidget() is not self.playback_page:
+    def play_video(self, video_id, *, start=None, random_scope=None, new_playback=False):
+        from_list = self.pages.currentWidget() is not self.playback_page
+        if from_list:
             self._return_page = self.pages.currentWidget()
         try:
             self.stop_player()
-            self.load_player(video_id, self.core.switch_to(video_id, start=start))
+            begins_playback = from_list or new_playback or self.core.playback.session is None
+            source = self.playback_list if begins_playback or random_scope is not None else None
+            self.load_player(video_id, self.core.switch_to(
+                video_id, start=start, playback_video_ids=source, random_scope=random_scope))
         except Exception as error:
             self.end_playback()
             self.pages.setCurrentWidget(self._return_page)
@@ -322,8 +330,11 @@ class MainWindow(QMainWindow):
         self.surface.setFocus()
 
     def end_playback(self):
+        session = self.core.playback.session
+        if session is not None and self.core.random_continuous_enabled:
+            self.library_page.selected_id = session.video_id
         self.stop_player()
-        self.core.playback.end()
+        self.core.end_playback()
         self.reel.shown = None
         self.playback_page.show_reel(None, False, {})
 
@@ -331,10 +342,15 @@ class MainWindow(QMainWindow):
         self.position_timer.stop()
         # 닫는 엔진의 일시정지 상태는 읽지 않는다. 남은 보고는 기존처럼 처리한다.
         self._hold = None
+        self._pending_random_eof = None
         if self.player:
-            self.player.close()
-            self.sync_position()
-            self.player = None
+            self._stopping_player = True
+            try:
+                self.player.close()
+                self.sync_position()
+            finally:
+                self.player = None
+                self._stopping_player = False
 
     def _current_hold(self):
         """지금 엔진·재생 항목의 보류. 엔진이나 항목이 바뀌었으면 버린다."""
@@ -350,19 +366,27 @@ class MainWindow(QMainWindow):
         보류한 EOF는 탐색 전 위치의 것이므로 버리고, 탐색 완료 보고가 오기 전에는 보류 전환을 적용하지 않는다.
         엔진의 정지 해제가 탐색 완료 보고보다 먼저 관측될 수 있기 때문이다.
         """
+        self._pending_random_eof = None
         if (hold := self._current_hold()) is not None:
             hold.eof, hold.seeking = False, True
 
     def sync_position(self):
         if self.player and self.core.playback.session is not None:
-            # 긴급 탈출로 멈춘 엔진은 사용자가 재개하기 전까지 모아보기 자동 전환을 미룬다.
+            player = self.player
+            # 긴급 탈출로 멈춘 엔진은 사용자가 재개하기 전까지 영상·항목 끝 전환을 미룬다.
             # 위치·복습 보고는 그대로 반영한다.
             hold = self._current_hold()
             resumed = hold is not None and not self.player.paused
             # 상대 탐색과 Home/End 절대 탐색 모두 mpv 이벤트의 seeked 표시를 쓴다.
             session = self.core.playback.session
-            for position, seeked in self.player.take_positions():
+            for position, seeked in player.take_positions():
                 self.core.playback.report(position, seeked=seeked)
+                if seeked:
+                    self._pending_random_eof = None
+                if self.core.playback.session is not session:
+                    break
+                if self._stopping_player:
+                    continue
                 if hold is not None:
                     if seeked:
                         hold.eof = hold.seeking = False
@@ -370,24 +394,64 @@ class MainWindow(QMainWindow):
                 self.core.advance_reel_if_due()
                 if self.core.playback.session is not session:
                     break  # 자동 전환 뒤 이전 엔진의 나머지 보고는 버린다.
-            eof = self.player.take_eof()
-            if hold is not None:
+            eof = player.take_eof()
+            if self._stopping_player:
+                pass  # 마감 보고만 반영한다. 종료 중 EOF로 다음 영상을 열지 않는다.
+            elif hold is not None and self.core.playback.session is session:
                 if not hold.seeking:
                     hold.eof = hold.eof or eof
                 if resumed and not hold.seeking:
                     # 남은 보고를 모두 반영한 뒤 미룬 전환을 이 항목에 적용한다.
                     self._hold = None
                     self.core.advance_reel_if_due(eof=hold.eof)
+                    if hold.eof:
+                        self._queue_random_eof(session)
             elif self.core.playback.session is session and eof:
                 self.core.advance_reel_if_due(eof=True)
+                self._queue_random_eof(session)
             self.core.save_viewings()
             position = self.core.playback.position
             opened = self.core.open_highlight_start
             range_keys = next((display_keys(row.keys) for row in self.core.key_bindings()
                                if row.command.kind == CommandType.RANGE_HIGHLIGHT), "키 미할당")
             self.playback_page.show_position(position, self.progress.duration, opened, range_keys)
+            self._show_random_notice()
             return position
         return None
+
+    def _show_random_notice(self):
+        if (notice := self.core.take_random_continuous_notice()) is not None:
+            self.show_status(notice)
+            self.playback_page.show_notice(notice, reveal=True)
+
+    def _queue_random_eof(self, session):
+        if not self.core.random_continuous_enabled or self.core.playback.session is not session:
+            return
+        pending = (self.player, session)
+        if self._pending_random_eof is not None:
+            return
+        self._pending_random_eof = pending
+
+        def advance():
+            if self._pending_random_eof is not pending:
+                return
+            self._pending_random_eof = None
+            if self.player is not pending[0] or self.core.playback.session is not session:
+                return
+            if (hold := self._current_hold()) is not None:
+                if not hold.seeking:
+                    hold.eof = True
+                return
+            try:
+                target = self.core.advance_random_if_due(session, eof=True)
+                if target is not None:
+                    self.play_video(target)
+                self._show_random_notice()
+            except Exception as error:
+                self.playback_page.show_error(f"무작위 이어 재생 실패: {error}")
+
+        # PgDn·목록 복귀가 위치를 먼저 동기화해도 같은 이벤트에서 EOF와 중복 전환하지 않는다.
+        QTimer.singleShot(0, self, advance)
 
     def poll_position(self):
         try:
@@ -442,7 +506,8 @@ class MainWindow(QMainWindow):
         if self.pages.currentWidget() is not self.playback_page:
             self._return_page = self.pages.currentWidget()
         self.sync_position()
-        target = self.core.play_review_line(video_id, line_id)
+        source = self.library_page.visible_video_ids()
+        target = self.core.play_review_line(video_id, line_id, playback_video_ids=source)
         try:
             if self.player and target.action == "seek":
                 self.player.seek_to(target.start, resume=True)
@@ -454,7 +519,7 @@ class MainWindow(QMainWindow):
                     self.player = None
                 self.reel.shown = None
                 self.reel.update_label()
-                self.playback_list = self.library_page.visible_video_ids()
+                self.playback_list = source
                 self.load_player(video_id, target.start)
         except Exception:
             self.end_playback()

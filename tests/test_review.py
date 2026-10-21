@@ -888,3 +888,19 @@ def test_failed_range_retry_reports_unscanned_missing_file_without_changing_requ
     transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "retried"),))
     core.process_next_subtitle()
     assert (transcriber.calls[-1]["start"], transcriber.calls[-1]["duration"]) == (10, 10)
+
+
+def test_review_line_after_video_end_is_clamped_for_play_and_seek(setup):
+    core, vid, transcriber, _, _, _ = setup
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(105, 107, "late line"),))
+    core.request_subtitles(vid)
+    assert core.process_next_subtitle().state == "completed"
+    line = core.transcript(vid).lines[0]
+    play = core.play_review_line(vid, line.id)
+    assert play.action == "play" and play.start == 100
+    assert core.playback.position == 100
+    session = core.playback.session
+    seek = core.play_review_line(vid, line.id)
+    assert seek.action == "seek" and seek.start == 100
+    assert core.playback.session is session
+    assert len(core.viewings(vid)) == 1

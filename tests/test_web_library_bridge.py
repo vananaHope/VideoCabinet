@@ -27,7 +27,12 @@ class Page(QWidget):
         self.worker = None
         self.played = []
         self.played_all = []
-        self.window = SimpleNamespace(play=self.played.append, play_random_video=self.played_all.append)
+        self.played_scopes = []
+        self.window = SimpleNamespace(play=self.play, play_random_video=self.played_all.append)
+
+    def play(self, video_id, *, random_scope=None):
+        self.played.append(video_id)
+        self.played_scopes.append(random_scope)
 
     def is_active(self):
         return self.isVisible()
@@ -172,6 +177,7 @@ def test_random_play_picks_from_current_results_and_queues_existing_play(bridge)
         app.processEvents()
         picked.append(reply['videoId'])
     assert page.played == picked
+    assert all(scope.kind == 'list' and set(scope.video_ids) == results for scope in page.played_scopes)
     # 후보가 둘이면 직전 영상을 다시 고르지 않는다.
     assert all(a != b for a, b in zip(picked, picked[1:]))
     assert not bridge.busy
@@ -206,6 +212,20 @@ def test_whole_library_random_play_ignores_current_results_and_uses_whole_playli
     assert page.played_all == [reply['videoId']] and not bridge.busy
 
 
+def test_empty_random_scope_passes_all_videos_scope_to_playback(bridge):
+    from my_video_manager.random_continuous_play import RandomPlayScope
+
+    bridge, page, app = bridge
+    json.loads(bridge.filter('없는 제목', 0))
+    assert page.visible_ids == []
+    reply = json.loads(bridge.random_play(lambda: {}))
+    assert reply['videoId'] in page.video_ids
+    app.processEvents()
+    assert page.played == [reply['videoId']]
+    assert page.played_scopes == [RandomPlayScope()]
+    assert not bridge.busy
+
+
 def test_random_play_is_not_locked_during_scan(bridge):
     bridge, page, app = bridge
     page.worker = object()
@@ -232,6 +252,7 @@ def test_tag_random_play_uses_or_scope_beyond_current_results(bridge):
         app.processEvents()
         picked.append(reply['videoId'])
     assert page.played == picked and all(x != y for x, y in zip(picked, picked[1:]))
+    assert all(scope.kind == 'tags' and scope.tag_ids == (red.id, blue.id) for scope in page.played_scopes)
     assert not bridge.busy
 
 
