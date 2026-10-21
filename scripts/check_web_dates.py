@@ -9,7 +9,7 @@ DB와 파일은 임시 폴더에만 만든다.
 """
 import argparse
 from contextlib import closing
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -29,6 +29,7 @@ mode.add_argument('--offscreen', action='store_true')
 mode.add_argument('--verify', action='store_true')
 parser.add_argument('--videos', type=int, choices=(0, 6), default=6)
 parser.add_argument('--output', type=Path, default=Path('.local/screens-232'))
+parser.add_argument('--now', type=datetime.fromisoformat, help='검사 시각(시간대 포함 ISO). 기본은 지금')
 args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 if args.offscreen:
@@ -43,6 +44,7 @@ from my_video_manager.app_version import current_version
 from my_video_manager.backup import create_automatic_backup
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
 from my_video_manager.library_views import default_options
+from my_video_manager.translation_models import DEFAULT_MODEL, MODEL_POLICIES
 from my_video_manager.update_check import LAST_CHECK_KEY
 from my_video_manager.ui import MainWindow
 
@@ -95,7 +97,7 @@ app = QApplication([])
 temporary = tempfile.TemporaryDirectory(prefix='mvm-232-')
 directory = Path(temporary.name)
 args.output.mkdir(parents=True, exist_ok=True)
-now = datetime.now(timezone.utc).replace(microsecond=0)
+now = (args.now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
 clock = [now]
 core = AppCore(media=FakeMedia(), clock=lambda: clock[0], database=directory / 'library.sqlite3')
 core.set_minimum_duration(0)
@@ -381,8 +383,11 @@ def check_settings():
     no_old_shapes('settings-update')
     click_text('[data-category]', '번역')
     dialogs = host.dialogs
-    # 만료 전과 만료 뒤(주의 문구가 붙어 가장 길다) 정책 표시. 만료일은 기본 OpenCode Go 모델의 2026-10-31이다.
-    for name, moment in (('', now), ('-expired', datetime(2026, 11, 1, 3, tzinfo=timezone.utc))):
+    # 만료 전날과 다음 날(주의 문구가 붙어 가장 길다) 정책 표시. 기본 OpenCode Go 모델의 만료일 기준이라 검사 날짜와 상관없다.
+    # 정책은 시계의 UTC 날짜로 판정하므로 로컬 정오를 쓴다(UTC±11 안에서 같은 날짜).
+    valid_until = next(p for p in MODEL_POLICIES if p.model_id == DEFAULT_MODEL).valid_until
+    noon = lambda day: datetime.combine(day, time(12)).astimezone(timezone.utc)
+    for name, moment in (('', noon(valid_until - timedelta(days=1))), ('-expired', noon(valid_until + timedelta(days=1)))):
         clock[0] = moment
         done = []
 
@@ -391,7 +396,7 @@ def check_settings():
                 wait(lambda: js('!!document.querySelector("[data-translation-form]")'))
                 settle(300)
                 policy = js('document.querySelector(\'[role=note][aria-label="모델 정책"]\').textContent')
-                assert '무보존 계약 만료: 2026. 10. 31. (매월 갱신 확인 필요)' in policy, policy
+                assert f'무보존 계약 만료: {shown_date(valid_until)} (매월 갱신 확인 필요)' in policy, policy
                 assert ('주의:' in policy) == bool(name), policy
                 metrics[f'translation_policy{name}'] = policy
                 capture(f'settings-translation-policy{name}')
