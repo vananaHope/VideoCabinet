@@ -7,7 +7,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QPoint, QPointF, Qt, QTimer
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QToolTip
 
@@ -982,3 +983,131 @@ def test_fullscreen_reel_bar_shortens_list_button_then_tightens_spacing(window):
     QApplication.processEvents()
     assert page.list_button.text() == "모아보기 목록" and row.spacing() == 8
     assert not any(button.compact for button in page.compact_order)
+
+
+_mouse_time = 0
+
+
+def mouse(window, *kinds, widget=None, timestamp=None):
+    """영상 표면에 왼쪽 단추 이벤트를 차례로 보낸다. 실제 mpv 창은 마우스 입력을 표면에 넘긴다.
+
+    timestamp를 주지 않으면 이벤트마다 새 시각(ms)을 단다.
+    """
+    global _mouse_time
+    widget = widget or window.surface
+    center = QPointF(widget.rect().center())
+    for kind in kinds:
+        held = Qt.MouseButton.NoButton if kind == QEvent.Type.MouseButtonRelease else Qt.MouseButton.LeftButton
+        event = QMouseEvent(kind, center, QPointF(widget.mapToGlobal(center.toPoint())),
+                            Qt.MouseButton.LeftButton, held, Qt.KeyboardModifier.NoModifier)
+        _mouse_time += 1
+        event.setTimestamp(_mouse_time if timestamp is None else timestamp)
+        QApplication.sendEvent(widget, event)
+    QApplication.processEvents()
+
+
+PRESS, RELEASE, DOUBLE = (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease,
+                          QEvent.Type.MouseButtonDblClick)
+
+
+def click_video(window):
+    mouse(window, PRESS, RELEASE)
+
+
+def double_click_video(window):
+    """Windows 실창 순서: 두 번째 누름은 DblClick으로만 온다."""
+    mouse(window, PRESS, RELEASE, DOUBLE, RELEASE)
+
+
+def wait_past_click_interval(window):
+    loop = QEventLoop()
+    QTimer.singleShot(round(window.playback_page.clicks.interval * 1000) + 200, loop.quit)
+    loop.exec()
+
+
+def test_video_click_toggles_pause_only_after_double_click_interval(window):
+    page, player = window.playback_page, window.player
+    page.subtitles_button.setFocus()
+    click_video(window)
+    assert player.commands == []  # 두 번째 누름을 기다린다.
+    assert window.surface.hasFocus()
+    wait_for(lambda: player.paused)
+    assert player.commands == [Command(CommandType.TOGGLE_PAUSE)]
+    assert page.pause_button.text() == "▶"
+    click_video(window)
+    wait_for(lambda: not player.paused)
+    assert player.commands == [Command(CommandType.TOGGLE_PAUSE)] * 2
+
+
+def test_video_double_click_toggles_fullscreen_without_pausing_and_bar_still_reveals(window):
+    page, player = window.playback_page, window.player
+    double_click_video(window)
+    assert window.isFullScreen() and page.fullscreen_button.isChecked()
+    assert not page.bottom_bar.isVisible()
+    QTest.mouseMove(window.surface, window.surface.rect().center() + QPoint(20, 20))
+    wait_for(page.bottom_bar.isVisible)
+    wait_past_click_interval(window)
+    assert player.commands == [] and not player.paused
+    click_video(window)
+    wait_for(lambda: player.paused)  # 전체 화면에서도 한 번 클릭은 재생/일시정지다.
+    assert window.isFullScreen()
+    double_click_video(window)
+    assert not window.isFullScreen()
+    wait_past_click_interval(window)
+    assert player.commands == [Command(CommandType.TOGGLE_PAUSE)] and player.paused
+
+
+def test_video_click_closes_key_guide_or_menu_instead_of_clicking(window):
+    page, player = window.playback_page, window.player
+    key(window, Qt.Key.Key_F1)
+    assert page.help_panel.isVisible()
+    click_video(window)
+    assert not page.help_panel.isVisible() and not page.key_guide_button.isChecked()
+    click_video(window)  # 닫은 뒤의 누름은 닫기에 쓴 누름과 두 번 클릭이 되지 않는다.
+    assert not window.isFullScreen()
+    wait_for(lambda: player.paused)
+    player.commands.clear()
+    player.paused = False
+    page.menu.popup(page.menu_button.mapToGlobal(page.menu_button.rect().topRight()))
+    wait_for(page.menu.isVisible)
+    # 메뉴가 떠 있는 동안 표면에 누름이 오면 메뉴만 닫는다.
+    click_video(window)
+    assert not page.menu.isVisible()
+    wait_past_click_interval(window)
+    assert player.commands == [] and not window.isFullScreen()
+    # Qt는 메뉴 밖 누름으로 메뉴를 닫은 뒤 같은 시각을 단 누름을 표면에 다시 보낸다(replay).
+    page.menu.popup(page.menu_button.mapToGlobal(page.menu_button.rect().topRight()))
+    wait_for(page.menu.isVisible)
+    mouse(window, PRESS, widget=page.menu, timestamp=900000)
+    page.menu.close()
+    mouse(window, PRESS, RELEASE, timestamp=900000)
+    wait_past_click_interval(window)
+    assert player.commands == [] and not window.isFullScreen()
+    click_video(window)  # 그 뒤의 누름은 다시 클릭이다.
+    wait_for(lambda: player.paused)
+    assert player.commands == [Command(CommandType.TOGGLE_PAUSE)]
+
+
+def test_pending_click_does_not_reach_next_video_or_list(window):
+    first = window.player
+    click_video(window)
+    key(window, Qt.Key.Key_PageDown)
+    second = window.player
+    assert second is not first and first.closed
+    wait_past_click_interval(window)
+    assert first.commands == second.commands == [] and not second.paused
+    click_video(window)
+    window.back_to_list()
+    wait_past_click_interval(window)
+    assert second.commands == [] and window.player is None
+
+
+@pytest.mark.parametrize("kinds", [
+    (PRESS, RELEASE, PRESS, RELEASE),  # 판정 시간 안의 두 누름
+    (PRESS, RELEASE, PRESS, DOUBLE, RELEASE),  # 두 번째 누름에 Press와 DblClick이 함께 오는 플랫폼
+])
+def test_double_click_event_orders_count_each_physical_press_once(window, kinds):
+    mouse(window, *kinds)
+    assert window.isFullScreen()
+    wait_past_click_interval(window)
+    assert window.player.commands == [] and window.isFullScreen()
