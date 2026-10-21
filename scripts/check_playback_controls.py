@@ -81,6 +81,12 @@ class Player:
     def playback_options(self):
         return self.options
 
+    def apply_playback_options(self, options):
+        self.options = options
+
+    def seek_to(self, position, *, resume=False):
+        pass
+
     def set_subtitle(self, path):
         pass
 
@@ -141,8 +147,9 @@ def offscreen(app, directory, result):
         assert page.subtitle_language_button.label == language, (name, page.subtitle_language_button.label)
         assert fits(page), name
         shortened = [button for button in page.compact_order if button.compact]
-        # 짧은 글자가 따로 없는 단추(창 모드의 ⛶)는 순서에서 건너뛴다.
-        order = [button for button in page.compact_order if button.compact or button.compact_saving() > 0]
+        # 짧은 글자가 따로 없는 단추(창 모드의 ⛶)와 숨은 단추(일반 재생의 모아보기 단추)는 순서에서 건너뛴다.
+        order = [button for button in page.compact_order
+                 if button.compact or (button.compact_saving() > 0 and not button.isHidden())]
         assert shortened == order[:len(shortened)], (name, [b.accessibleName() for b in shortened])
         assert set(compact) <= set(shortened), (name, [b.accessibleName() for b in shortened])
         if not compact:
@@ -150,6 +157,8 @@ def offscreen(app, directory, result):
         # 아이콘·값만 남은 단추도 기능 이름(툴팁·접근성 이름)은 그대로다.
         assert all(button.toolTip() and button.accessibleName() for button in page.control_buttons), name
         result.setdefault('compact', {})[name] = [button.accessibleName() for button in shortened]
+        # 줄인 뒤 줄에 남는 폭. 뒤 이슈가 단추를 더할 때 기준으로 쓴다.
+        result.setdefault('slack', {})[name] = page.controls.width() - page.controls.layout().minimumSize().width()
         image = args.output / f'playback-{name}.png'
         assert window.grab().save(str(image))
         result['passed'].append(name)
@@ -184,7 +193,43 @@ def offscreen(app, directory, result):
     page.help_panel.close_button.click()
     assert not page.help_panel.isVisible()
     result['passed'].append('key-guide-close-button')
+    reel(window, page, check)
     window.tray.quit()
+
+
+def reel(window, page, check):
+    """하이라이트 모아보기 중의 조작 줄. 모아보기 단추 셋이 더해진 가장 넓은 줄과 모아보기를 끝낸 줄."""
+    core = window.core
+    core.playback.report(20)
+    core.execute_highlight_command(Command(CommandType.RANGE_HIGHLIGHT))  # 열린 구간을 닫아 첫 항목으로 쓴다.
+    core.playback.report(30)
+    core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
+    window.reel.start()
+    assert core.reel_playback is not None and all(button.isVisible() for button in page.reel_buttons)
+    # 열린 구간('구간 끝내기')·목록 밖 긴 속도·자막 꺼짐·일시정지·다듬은 자막에 반복 켜짐까지 함께 보이는 줄.
+    # 한국어 영상은 다듬은 자막으로 시작한다.
+    assert core.playback_subtitle_language == 'translated'
+    core.playback.report(core.reel_playback.start + 1)
+    core.execute_highlight_command(Command(CommandType.RANGE_HIGHLIGHT))
+    window.player.options = (99.75, False)
+    window.player.paused = True
+    page.reel_repeat_button.click()
+    window.sync_position()
+    assert core.reel_repeat and page.reel_repeat_button.isChecked()
+    assert page.reel_repeat_button.label == '↻ 반복 켜짐'
+    # 1100 폭에서는 하이라이트·속도·반복 단추에 이어 자막 단추와 열린 구간 표시까지 줄여야 들어간다.
+    check('reel-widest', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button,
+                                              page.reel_repeat_button, page.open_range_label))
+    assert page.open_range_label.text() == '【 00:00:11' and page.reel_repeat_button.text() == '↻'
+    # 전체 화면 줄에는 '모아보기 목록'과 '⛶ 전체 화면 끄기'가 더해진다. 흔한 가장 작은 화면 폭(1280)에서 그 구성을 잰다.
+    window.resize(1280, 720)
+    page.set_fullscreen(True)
+    page.bottom_bar.show()
+    check('reel-fullscreen-bar-1280', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
+    page.set_fullscreen(False)
+    window.resize(1100, 720)
+    window.end_playback()
+    assert not any(button.isVisible() or not button.isHidden() for button in page.reel_buttons)
 
 
 def real(app, directory, result):
