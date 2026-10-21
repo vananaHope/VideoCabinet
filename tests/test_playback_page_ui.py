@@ -182,7 +182,8 @@ def test_help_reflects_saved_keys_and_menu_keyboard_restores_surface_focus(windo
         key(window, Qt.Key.Key_Tab)
         visited.append(QApplication.focusWidget())
     # 창 모드에서는 전체 화면 전용 '목록으로'를 건너뛰고 조작 줄 왼쪽부터 메뉴까지 간다.
-    assert visited == [page.previous_button, page.pause_button, page.next_button,
+    # 무작위 이어 재생이 꺼져 있으면 범위 이름 단추는 숨어 있어 건너뛴다.
+    assert visited == [page.previous_button, page.pause_button, page.next_button, page.random_button,
                        page.point_button, page.range_button, page.speed_button, page.subtitles_button,
                        page.subtitle_language_button, page.key_guide_button, page.fullscreen_button,
                        page.menu_button]

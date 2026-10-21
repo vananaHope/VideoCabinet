@@ -5,7 +5,7 @@ from math import isfinite
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 from .review import ReviewConfirmationRequired
 from .web_dialogs_data import row, values
-from .web_library_data import tag_usage_data
+from .web_library_data import tag_candidates_data, tag_usage_data
 
 
 TITLES = {
@@ -15,7 +15,9 @@ TITLES = {
     'review': '자막 검수 · SRT 내보내기', 'line': '자막 줄 수정',
     'range': '구간 원어 자막 다시 생성', 'translation': '번역 방식 / 재시도',
     'video-rename': '제목 변경', 'video-exclude': '영상 제외',
+    'random-scope': '무작위 이어 재생 범위',
 }
+RANDOM_SCOPE_CHOICES = (('all', '영상 전체'), ('list', '재생을 시작한 목록'), ('tags', '태그 고르기'))
 
 
 class DialogModel:
@@ -32,6 +34,8 @@ class DialogModel:
         self.information = ''
         # 대화상자 갱신 타이머가 0.5초마다 snapshot을 만든다. 태그 사용 수는 대화상자 작업 뒤에만 다시 센다.
         self.tag_usage = None
+        # 범위 고르기의 범위별 후보 수와 태그별 후보. 창을 열 때 한 번 세고, 확인할 때 코어가 다시 센다.
+        self.scope_candidates = None
         if kind == 'highlight':
             h, duration = context['highlight'], context['duration']
             self.values = values(start=initial_time_input(h.start, duration),
@@ -61,6 +65,10 @@ class DialogModel:
                                  members=[str(v) for v in selected.video_ids])
         elif kind == 'video-rename':
             self.values['name'] = self.core.video(context['video_id']).title
+        elif kind == 'random-scope':
+            scope = self.core.random_continuous_scope
+            if scope is not None:
+                self.values.update(choice=scope.kind, members=[str(tag_id) for tag_id in scope.tag_ids])
         elif kind == 'video-exclude':
             video = self.core.video(context['video_id'])
             def exclude():
@@ -74,12 +82,22 @@ class DialogModel:
             self.tag_usage = tag_usage_data(self.core.tag_usage())
         return self.tag_usage
 
+    def random_scopes(self):
+        if self.scope_candidates is None:
+            from .random_continuous_play import RandomPlayScope
+            c = self.core
+            self.scope_candidates = (
+                c.random_scope_video_count(RandomPlayScope()),
+                c.random_scope_video_count(RandomPlayScope('list', c.playback_video_ids)),
+                tag_candidates_data(c.random_tag_candidates()))
+        return self.scope_candidates
+
     def snapshot(self):
         c, ctx, kind = self.core, self.context, self.kind
         task = c.subtitle_task(ctx['video_id']) if 'video_id' in ctx else None
         data = dict(task_kind=task.kind if task else '', task_label=task.label if task else '',
                     subtitle_label=task.subtitle_label if task else '', short_label=task.short_label if task else '',
-                    keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], tags=[], available=[],
+                    keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], tags=[], tag_candidates=[], available=[],
                     choices=[], values=self.values.copy(), maximum=0.0, locked=False, warning='',
                     confirmation=self.confirmation, confirm_title=self.confirm_title, confirm_destructive=self.confirm_destructive, translation=None, network_busy=False, information=self.information)
         if kind == 'tags':
@@ -106,6 +124,18 @@ class DialogModel:
                 for h in c.highlights(ctx['video_id'])])
         elif kind == 'highlight':
             data['maximum'] = time_input_maximum(ctx['duration'])
+        elif kind == 'random-scope':
+            every, listed, candidates = self.random_scopes()
+            source = c.playback_video_ids
+            # 후보 수는 태그 고르기의 후보 안내와 같은 단위(개)로 센다.
+            details = {'all': f'후보 {every}개',
+                       'list': f'{c.playback_source_name or "재생 목록"} {len(source)}편 · 후보 {listed}개',
+                       'tags': '고른 태그 중 하나라도 붙은 영상'}
+            empty = {'all': not every, 'list': not listed, 'tags': not candidates}
+            data.update(description='지금 영상은 끝까지 재생하고, 고른 범위는 다음 영상부터 씁니다. 이미 나온 영상과 이전·다음 기록은 그대로 둡니다.',
+                        choices=[row(key, title, details[key], '후보가 없어 고를 수 없습니다.' if empty[key] else '')
+                                 for key, title in RANDOM_SCOPE_CHOICES],
+                        tags=self.usage(), tag_candidates=candidates)
         elif kind == 'subtitles':
             transcript = c.transcript(ctx['video_id'])
             languages = list(dict.fromkeys(['자동 감지', 'ko', 'en', 'ja', 'zh', 'de', 'fr', 'es', self.values['choice']]))
@@ -191,6 +221,27 @@ class DialogModel:
             raise ValueError('확인 또는 취소를 먼저 선택하세요.')
         if action == 'close':
             self.owner.pop(accepted=bool(data.get('accepted', False)))
+            return
+        if kind == 'random-scope' and action == 'save':
+            from .random_continuous_play import RandomPlayScope
+            choice = data.get('choice')
+            if choice == 'all':
+                scope = RandomPlayScope()
+            elif choice == 'list':
+                scope = RandomPlayScope('list', c.playback_video_ids)
+            elif choice == 'tags':
+                members = data.get('members')
+                if not isinstance(members, list) or not members:
+                    raise ValueError('태그를 하나 이상 고르세요.')
+                scope = RandomPlayScope('tags', tag_ids=tuple(int(tag_id) for tag_id in members))
+            else:
+                raise ValueError('범위를 고르세요.')
+            # 창을 연 뒤 라이브러리가 바뀌었을 수 있어 확인할 때 다시 센다.
+            if not c.random_scope_video_count(scope):
+                self.scope_candidates = None
+                raise ValueError('고른 범위에 재생할 수 있는 영상이 없습니다. 다른 범위를 고르세요.')
+            c.set_random_continuous_scope(scope)
+            self.owner.pop(accepted=True)
             return
         if kind == 'video-rename' and action == 'save':
             c.rename_video(ctx['video_id'], data['name'])

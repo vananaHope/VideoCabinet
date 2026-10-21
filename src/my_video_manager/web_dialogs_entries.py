@@ -37,6 +37,11 @@ class HighlightList(_Entry):
         super().__init__(parent, 'highlights', video_id=video_id, duration=duration)
 
 
+class RandomScopeChooser(_Entry):
+    def __init__(self, core, parent):
+        super().__init__(parent, 'random-scope')
+
+
 class ReviewDialog(_Entry):
     def __init__(self, core, video_id, jump, changed, parent=None):
         super().__init__(parent, 'review', video_id=video_id, jump=jump, changed=changed)

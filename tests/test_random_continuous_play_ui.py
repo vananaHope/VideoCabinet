@@ -2,7 +2,7 @@
 import json
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -300,3 +300,131 @@ def test_player_failure_closes_viewings_and_discards_state(window, monkeypatch):
     assert window.core.playback.session is None
     assert not window.core.random_continuous_enabled
     assert all(v.ended_at is not None for v in window.core.viewings(first.id) + window.core.viewings(other.id))
+
+
+def test_random_button_toggles_core_and_button_and_off_stops_at_end(window):
+    wait_for(lambda: window.loaded)
+    core, page = window.core, window.playback_page
+    first, other = core.videos()
+    window.play(first.id)
+    assert not page.random_button.isChecked() and page.random_scope_button.isHidden()
+    page.random_button.click()
+    assert core.random_continuous_enabled and page.random_button.isChecked()
+    assert not page.random_scope_button.isHidden()
+    assert page.random_scope_button.label == f'현재 결과 {len(window.playback_list)}편'
+    assert page.random_scope_button.toolTip().startswith('무작위 이어 재생 범위 바꾸기')
+    page.random_button.click()
+    assert not core.random_continuous_enabled and not page.random_button.isChecked()
+    assert page.random_scope_button.isHidden()
+    window.player.reach_end(120)
+    window.sync_position()
+    QApplication.processEvents()
+    assert core.playback.session.video_id == first.id
+
+
+@pytest.mark.parametrize('entry', ['key', 'list', 'tags'])
+def test_random_entries_show_button_on_with_scope_name(window, entry):
+    wait_for(lambda: window.loaded)
+    core, page = window.core, window.playback_page
+    source = window.library_page.visible_video_ids()
+    if entry == 'key':
+        random_key(window)
+    elif entry == 'list':
+        json.loads(window.library_page.bridge.randomPlay())
+    else:
+        tag = core.add_video_tag(source[0], '음악')
+        core.add_video_tag(source[1], '아주긴태그이름이들어간영상')
+        json.loads(window.library_page.bridge.randomPlayTags(json.dumps([tag.id])))
+    wait_for(lambda: core.playback.session is not None)
+    window.sync_position()
+    assert page.random_button.isChecked() and not page.random_scope_button.isHidden()
+    expected = {'key': '전체', 'list': f'현재 결과 {len(source)}편', 'tags': '태그: 음악'}[entry]
+    assert page.random_scope_button.label == expected
+
+
+def test_reel_hides_random_button_and_scope(window):
+    wait_for(lambda: window.loaded)
+    core, page = window.core, window.playback_page
+    first = core.videos()[0]
+    window.play(first.id, random_scope=RandomPlayScope())
+    window.sync_position()
+    assert not page.random_button.isHidden() and not page.random_scope_button.isHidden()
+    window.player.advance(10)
+    window.sync_position()
+    core.execute_highlight_command(core.command_for_key('Insert'))
+    window.end_playback()
+    window.reel.start()
+    assert core.reel_playback is not None
+    assert page.random_button.isHidden() and page.random_scope_button.isHidden()
+
+
+def choose_scope(window, **payload):
+    """범위 이름 단추로 범위 고르기 창을 열고 웹 화면의 확인과 같은 명령을 보낸다."""
+    dialogs = window.web_host.dialogs
+    errors, opened = [], []
+
+    def run():
+        try:
+            dialog = json.loads(dialogs.bridge.snapshot())['dialog']
+            opened.append(dialog)
+            result = json.loads(dialogs.bridge.act(dialog['id'], 'save', json.dumps(payload)))
+            assert 'error' not in result, result
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            while dialogs.active:
+                dialogs.pop()
+    QTimer.singleShot(0, run)
+    window.playback_page.random_scope_button.click()
+    # 재생 화면에서 연 대화상자를 옮기는 JS 응답이 창을 닫은 뒤에 오지 않게 한 번 왕복해 둔다.
+    replies = []
+    window.web_host.engine_page.runJavaScript('1', replies.append)
+    wait_for(lambda: replies)
+    if errors:
+        raise errors[0]
+    return opened[0]
+
+
+@pytest.mark.parametrize('choice', ['all', 'list', 'tags'])
+def test_scope_dialog_applies_from_next_video_and_keeps_history(window, choice):
+    wait_for(lambda: window.loaded)
+    core, page = window.core, window.playback_page
+    first, other = core.videos()
+    tag = core.add_video_tag(other.id, '다음 영상')
+    window.play(first.id)
+    page.random_button.click()
+    # 시작 목록을 고르는 경우는 다른 범위에서 시작해 되돌아온다.
+    core.set_random_continuous_scope(RandomPlayScope('tags', tag_ids=(tag.id,)) if choice == 'list'
+                                     else RandomPlayScope('list', (first.id,)))
+    session = core.playback.session
+    payload = {'choice': choice, 'members': [str(tag.id)] if choice == 'tags' else []}
+    dialog = choose_scope(window, **payload)
+    assert dialog['kind'] == 'random-scope'
+    assert [row['id'] for row in dialog['choices']] == ['all', 'list', 'tags']
+    expected = {'all': RandomPlayScope(), 'list': RandomPlayScope('list', window.playback_list),
+                'tags': RandomPlayScope('tags', tag_ids=(tag.id,))}[choice]
+    assert core.random_continuous_scope == expected
+    assert core.playback.session is session  # 지금 영상은 그대로다.
+    window.sync_position()
+    assert page.random_scope_button.label == {'all': '전체', 'list': f'현재 결과 {len(window.playback_list)}편',
+                                              'tags': '태그: 다음 영상'}[choice]
+    window.player.reach_end(120)
+    window.sync_position()
+    QApplication.processEvents()
+    assert core.playback.session.video_id == other.id
+    key(window, Qt.Key.Key_PageUp)  # 이전 기록은 범위를 바꿔도 남는다.
+    assert core.playback.session.video_id == first.id
+
+
+def test_scope_dialog_rejects_scope_without_candidates(window):
+    wait_for(lambda: window.loaded)
+    core = window.core
+    first, other = core.videos()
+    tag = core.add_video_tag(other.id, '제외할 영상')
+    window.play(first.id, random_scope=RandomPlayScope())
+    core.exclude_video(other.id)
+    with pytest.raises(AssertionError, match='재생할 수 있는 영상이 없습니다'):
+        choose_scope(window, choice='tags', members=[str(tag.id)])
+    with pytest.raises(AssertionError, match='태그를 하나 이상'):
+        choose_scope(window, choice='tags', members=[])
+    assert core.random_continuous_scope == RandomPlayScope()
