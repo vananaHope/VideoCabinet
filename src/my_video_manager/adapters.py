@@ -273,9 +273,16 @@ class MpvPlayer:
             if resume:
                 self._player.pause = False
 
+    def prepare_close(self) -> None:
+        """위치 보고의 경계를 확정한다. 뒤의 native 해제는 다른 스레드에서 가능하다."""
+        with self._callback_lock:
+            if self._closing:
+                return
+            self._player.pause = True
+            self._closing = True
+
     def close(self) -> None:
         # 콜백의 native handle 접근을 끝낸 뒤 핸들을 해제한다.
         # terminate는 이벤트 스레드를 기다리므로 lock 밖에서 실행한다.
-        with self._callback_lock:
-            self._closing = True
+        self.prepare_close()
         self._player.terminate()

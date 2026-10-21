@@ -32,7 +32,13 @@ export default function App() {
       // F1 예약 키. 대화상자·IME 조합 중에는 셸이 보내지 않는다.
       const openKeyGuide = () => setKeyGuide(true)
       api.shellKeyGuideRequested.connect(openKeyGuide)
-      disconnect = () => { api.shellChanged.disconnect(changed); api.shellFocusRequested.disconnect(focus); api.shellStatusChanged.disconnect(setStatus); api.shellKeyGuideRequested.disconnect(openKeyGuide) }
+      // 페이지 데이터와 초점/스크롤 복원이 DOM에 반영되고 한 프레임을
+      // 그린 뒤에만 Qt의 이전 재생 표면을 걷는다. 시간 지연으로 추측하지 않는다.
+      const prepareReturn = (token: number) => requestAnimationFrame(() => requestAnimationFrame(() => {
+        request(reply => api.returnReady(token, reply)).catch(error => setError(String(error)))
+      }))
+      api.shellPrepareReturn.connect(prepareReturn)
+      disconnect = () => { api.shellChanged.disconnect(changed); api.shellFocusRequested.disconnect(focus); api.shellStatusChanged.disconnect(setStatus); api.shellKeyGuideRequested.disconnect(openKeyGuide); api.shellPrepareReturn.disconnect(prepareReturn) }
       const state = await request<ShellData>(reply => api.shellSnapshot(reply))
       if (!disposed) { setBridge(api); setTab(state.tab); setStatus(state.status) }
     }).catch(error => setError(String(error)))

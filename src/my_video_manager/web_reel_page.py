@@ -12,6 +12,8 @@ from .web_reel_data import entries_data, guidance
 class WebReelControls(ReelControls):
     """웹 태그를 코어로 넘기고, 엔진 전환은 기존 sync에 맡긴다."""
     def start(self, highlight_id=None, *, tag_id=None):
+        if self.window.tray.quitting:
+            return
         page = self.window.web_host.controllers['reel']
         page.status = ''
         try:

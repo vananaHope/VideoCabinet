@@ -7,10 +7,11 @@ from pathlib import Path
 
 from PySide6.QtCore import QLocale, QPoint, QUrl, Signal, Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QStackedLayout
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineUrlRequestInterceptor
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtQuickWidgets import QQuickWidget
 
 from .web_library_data import thumbnail_video_id
 from .web_json import encode
@@ -77,6 +78,9 @@ class WebShellHost(QWidget):
         self._loaded_notified = False
         self._ready_pages = set()
         self._pending_focus = None
+        self._return_generation = 0
+        self._return_token = None
+        self._return_focus_ready = False
         self.bridge = ShellBridge(self)
         register_thumbnail_scheme()
         use_korean_locale()
@@ -99,6 +103,7 @@ class WebShellHost(QWidget):
         self.channel.registerObject('shell', self.bridge)
         from .web_dialogs_host import WebDialogs
         self.dialogs = WebDialogs(self)
+        window.pages.currentChanged.connect(lambda _: self.sync_activation())
         self.channel.registerObject('dialogs', self.dialogs.bridge)
         self.engine_page.setWebChannel(self.channel)
         # file 페이지에서 비-file 썸네일 스킴 접근에 필요하다. 외부 네트워크는 interceptor가 차단한다.
@@ -112,7 +117,8 @@ class WebShellHost(QWidget):
         self.load_error.hide()
         layout.addWidget(self.load_error)
         layout.addWidget(self.view)
-        self.view.loadFinished.connect(lambda ok: self.load_error.setVisible(not ok))
+        self.view.loadFinished.connect(self.load_finished)
+        self.engine_page.renderProcessTerminated.connect(lambda *_: self.load_finished(False))
         self.view.loadStarted.connect(self.frontend_loading)
         self.entry = entry
         window.settings_menu.aboutToHide.connect(self.settings_closed)
@@ -176,10 +182,84 @@ class WebShellHost(QWidget):
         self._playback_return_tab = self.active_tab
 
     def return_from_playback(self):
-        self.window.end_playback()
-        self.set_tab(self._playback_return_tab)
-        self.window.pages.setCurrentWidget(self)
-        self.controllers[self.active_tab].return_from_playback()
+        self.show_page(self._playback_return_tab, returning=True)
+
+    @property
+    def return_pending(self):
+        return self._return_token is not None
+
+    def cancel_return(self):
+        self._return_generation += 1
+        self._return_token = None
+        self.window.playback_page.setEnabled(True)
+        self.window.pages.layout().setStackingMode(QStackedLayout.StackingMode.StackOne)
+        if self.window.pages.currentWidget() is self:
+            self.window.playback_page.hide()
+        self.window.player_shutdown.release()
+
+    def show_page(self, tab, *, returning=False):
+        """웹을 보이는 크기로 먼저 그린다. 준비 응답까지 이전 재생 표면이 앞을 덮는다."""
+        cover = self.window.isVisible() and (self.return_pending or
+                    self.window.pages.currentWidget() is self.window.playback_page)
+        self._return_generation += 1
+        self._return_token = self._return_generation if cover else None
+        self._return_focus_ready = False
+        try:
+            self.window.end_playback()
+            self.set_tab(tab)
+            self.dialogs.restore_page()
+            if cover:
+                # 현재 페이지를 바꾸면서 native mpv 자식을 숨겼다가 보이면
+                # 일시정지된 마지막 프레임도 지워진다. 준비 동안 두 페이지를
+                # 모두 표시하고 기존 재생 페이지를 위에 둔다.
+                self.window.pages.layout().setStackingMode(QStackedLayout.StackingMode.StackAll)
+            self.window.pages.setCurrentWidget(self)
+            if cover:
+                self.window.playback_page.show()
+                self.window.playback_page.raise_()
+                self.window.playback_page.setEnabled(False)
+            route = self.routes[tab]
+            if returning:
+                route.return_from_playback()
+            else:
+                route.refresh()
+                self.focus_content()
+            self._return_focus_ready = True
+            self.apply_pending_focus()
+            self.prepare_return()
+        except Exception:
+            self.cancel_return()
+            raise
+
+    def prepare_return(self):
+        if (self.return_pending and self._return_focus_ready and self._frontend_ready
+                and self.active_tab in self._ready_pages):
+            self.bridge.shellPrepareReturn.emit(self._return_token)
+
+    def finish_return(self, token):
+        # 새 재생·탭 이동·창 닫기 뒤 도착한 웹 응답은 현재 화면을 덮지 않는다.
+        if token != self._return_token or self.window.pages.currentWidget() is not self:
+            return
+        renderers = self.view.findChildren(QQuickWidget)
+        if not renderers:
+            self.load_finished(False)
+            return
+        # Chromium rAF와 Qt의 native 합성 완료는 다른 경계다. 특히 모달에서
+        # 돌아온 뷰는 rAF 뒤에도 이전 backing store를 가질 수 있다.
+        # 덮개에 가려진 QWidget은 일반 update가 생략될 수 있으므로
+        # 공개 렌더 API로 프레임을 완성한다. 반환 이미지는 저장하지 않는다.
+        renderers[0].grabFramebuffer()
+        self._return_token = None
+        # 대화상자에 옮겼던 QWebEngineView는 native 자식이 될 수 있다.
+        # 덮개부터 숨기면 부모의 빈 backing store가 먼저 노출되므로,
+        # 준비된 웹 native 표면을 먼저 위로 올린다.
+        self.raise_()
+        self.view.raise_()
+        self.view.repaint()
+        self.window.pages.layout().setStackingMode(QStackedLayout.StackingMode.StackOne)
+        self.window.playback_page.hide()
+        self.window.playback_page.setEnabled(True)
+        self.window.player_shutdown.release()
 
     def close_return_tab(self):
         """재생 중 창을 닫아 트레이로 숨길 때 둘 탭. 출발한 페이지가 원하면 그 탭, 아니면 라이브러리."""
@@ -187,12 +267,7 @@ class WebShellHost(QWidget):
         return tab if self.controllers[tab].keeps_tab_after_close else 'library'
 
     def navigate(self, tab):
-        route = self.routes[tab]
-        self.window.end_playback()
-        self.set_tab(tab)
-        self.window.pages.setCurrentWidget(self)
-        route.refresh()
-        self.focus_content()
+        self.show_page(tab)
 
     def handle_key(self, event):
         return False  # 예약 키는 창, 나머지는 Chromium/React가 처리한다.
@@ -210,6 +285,8 @@ class WebShellHost(QWidget):
         self.apply_pending_focus()
 
     def apply_pending_focus(self):
+        if self.return_pending and not self._return_focus_ready:
+            return
         controller = self.controllers.get(self.active_tab)
         ready = controller is None or controller.bridge is None or self.active_tab in self._ready_pages
         if self._frontend_ready and ready and self._pending_focus and self.isVisible():
@@ -221,11 +298,19 @@ class WebShellHost(QWidget):
                 self.bridge.shellFocusRequested.emit('shell')
 
     def frontend_loading(self):
+        if self.return_pending:
+            self._return_generation += 1
+            self._return_token = self._return_generation
         self._frontend_ready = False
         self._loaded_notified = False
         self._ready_pages.clear()
         controller = self.controllers.get(self.active_tab)
         self._pending_focus = self._pending_focus or (controller.default_focus if controller else 'shell')
+
+    def load_finished(self, ok):
+        self.load_error.setVisible(not ok)
+        if not ok and self.return_pending:
+            self.cancel_return()
 
     def frontend_ready(self):
         self._frontend_ready = True
@@ -238,6 +323,7 @@ class WebShellHost(QWidget):
         self.notify_loaded()
 
     def notify_loaded(self):
+        self.prepare_return()
         controller = self.controllers.get(self.active_tab)
         if (not self._loaded_notified and self._frontend_ready
                 and (controller is None or controller.bridge is None or self.active_tab in self._ready_pages)):

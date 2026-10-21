@@ -7,10 +7,12 @@ from .web_tabs import TABS
 SHELL = BridgeContract(
     name='shell', interface='ShellBridge',
     slots={'ready': (), 'shellSnapshot': (), 'navigate': (Argument('tab', str, 'Tab'),),
+           'returnReady': (Argument('token', int, 'number'),),
            'updateSnapshot': (),
            'updateChoice': (Argument('name', str, 'UpdateChoice'), Argument('version', str, 'string')),
            'updateAction': (Argument('name', str, 'UpdateAction'),), 'keyGuide': ()},
     signals={'shellChanged': str, 'shellStatusChanged': str, 'shellFocusRequested': str,
+             'shellPrepareReturn': int,
              'shellUpdateChanged': str, 'shellUpdateInstallChanged': str, 'shellKeyGuideRequested': str},
     aliases=(TypeAlias('Tab', tuple(name for name, _ in TABS)),
              TypeAlias('UpdateChoice', ('update', 'later', 'skip', 'unskip')),

@@ -63,13 +63,13 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
   useLayoutEffect(() => { virtual.measure() }, [virtual, rowHeight, columns])
   const selectedIndex = videos.findIndex(video => video.id === selectedId)
   const lastIds = useRef("")
-  useEffect(() => {
+  useLayoutEffect(() => {
     const ids = videos.map(v => v.id).join(",")
     if (ids !== lastIds.current) {
-      if (lastIds.current) scroll.current?.scrollTo({ top: 0 })
+      if (lastIds.current && !layoutPaused.current) scroll.current?.scrollTo({ top: 0 })
       lastIds.current = ids
     }
-  }, [videos])
+  }, [videos, layoutPaused])
 
   const revealed = useRef(revealRequest)
   useEffect(() => {

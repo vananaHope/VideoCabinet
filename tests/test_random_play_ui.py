@@ -232,6 +232,9 @@ def test_tray_random_keeps_web_dialog_visible_and_shell_keys_blocked(window, eme
         wait_for(lambda: not dialogs.active)
 
     within(rename_dialog(window), dialogs, check)
+    # Python 대화상자 스택이 닫힌 뒤 React 모달의 닫힘 보고가 도착한다.
+    # 사용자가 다시 조작할 수 있는 공개 상태까지 기다린다.
+    wait_for(lambda: not dialogs.blocks_shell_actions)
     tray_action(window).trigger()
     assert window.player is not None
 
@@ -314,6 +317,10 @@ def test_random_play_remains_available_during_scan(window, entry):
 @pytest.mark.parametrize("fullscreen", [False, True])
 def test_no_candidates_during_playback_keeps_current_viewing(window, fullscreen):
     random_key(window)
+    # 첫 위치 보고가 제목·안내 표시를 초기화한 뒤 후보 없음 조작을 한다.
+    # 타이머 초기화와 새 안내가 경합하는 별도 상황을 이 검사에 섞지 않는다.
+    wait_for(lambda: window.playback_page.title_label.text().startswith(
+             window.core.video(window.core.playback.session.video_id).title))
     if fullscreen:
         key(window, Qt.Key.Key_Apostrophe)
     session = window.core.playback.session
