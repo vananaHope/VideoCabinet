@@ -5,7 +5,7 @@ python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scri
 
 --offscreen은 가짜 플레이어로 1100×720(가장 넓은 상태 포함)과 더 좁은 창의 조작 줄이 넘치지 않는지,
 하이라이트·속도 단추부터 짧게 줄이는지 보고 위젯 grab 이미지를 남긴다. 모아보기 단추가 더해진 가장 넓은 줄과
-그 전체 화면 구성(1280 폭)도 재고, 상태별 남은 폭을 결과 JSON의 slack에 남긴다.
+그 전체 화면 구성(1280 폭)도 재고, 상태별 남은 폭(slack)과 더 줄여 확보할 수 있는 폭(reducible)을 결과 JSON에 남긴다.
 --real은 데스크톱 잠금 안에서 합성 영상과 실제 mpv, Windows 마우스·키 입력으로 단추 클릭, Tab 이동,
 단추 초점에서의 재생 키, 하이라이트·구간 단추, 속도 목록 고르기와 목록 밖 속도 표시,
 재생 메뉴 '설정'(창 모드·전체 화면), 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기,
@@ -161,6 +161,8 @@ def offscreen(app, directory, result):
         result.setdefault('compact', {})[name] = [button.accessibleName() for button in shortened]
         # 줄인 뒤 줄에 남는 폭. 뒤 이슈가 단추를 더할 때 기준으로 쓴다.
         result.setdefault('slack', {})[name] = page.controls.width() - page.controls.layout().minimumSize().width()
+        result.setdefault('reducible', {})[name] = sum(button.compact_saving() for button in page.compact_order
+                                                       if not button.compact and not button.isHidden())
         image = args.output / f'playback-{name}.png'
         assert window.grab().save(str(image))
         result['passed'].append(name)
