@@ -7,11 +7,11 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QToolTip
 
-from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
+from my_video_manager.core import AppCore, Command, CommandType, MediaInfo, playback_speed
 from my_video_manager.ui import MainWindow
 from qt_wait import wait_for
 
@@ -63,6 +63,8 @@ class Player:
             self.paused = not self.paused
         elif command.kind == CommandType.TOGGLE_SUBTITLES:
             self.options = (self.options[0], not self.options[1])
+        elif command.kind == CommandType.CHANGE_SPEED:
+            self.options = (playback_speed(self.options[0], command.amount), self.options[1])
 
 
 @pytest.fixture(scope="module")
@@ -167,16 +169,17 @@ def test_help_reflects_saved_keys_and_menu_keyboard_restores_surface_focus(windo
     assert "<b>N</b>" in page.help_panel.text.text()
     key(window, Qt.Key.Key_F1)
     visited = []
-    while not page.menu_button.hasFocus() and len(visited) < 10:
+    while not page.menu_button.hasFocus() and len(visited) < 20:
         key(window, Qt.Key.Key_Tab)
         visited.append(QApplication.focusWidget())
     # 창 모드에서는 전체 화면 전용 '목록으로'를 건너뛰고 조작 줄 왼쪽부터 메뉴까지 간다.
-    assert visited == [page.previous_button, page.pause_button, page.next_button, page.subtitles_button,
+    assert visited == [page.previous_button, page.pause_button, page.next_button,
+                       page.point_button, page.range_button, page.speed_button, page.subtitles_button,
                        page.subtitle_language_button, page.key_guide_button, page.fullscreen_button,
                        page.menu_button]
     key(window, Qt.Key.Key_Space)
     assert page.menu.isVisible()
-    assert len(page.menu.actions()) == 4
+    assert len(page.menu.actions()) == 5
     assert window.player.commands == []
     QTest.keyClick(page.menu, Qt.Key.Key_Escape)
     QApplication.processEvents()
@@ -206,7 +209,7 @@ def test_speed_subtitle_and_processing_status(window):
     page = window.playback_page
     window.player.options = (1.5, False)
     window.sync_position()
-    assert page.speed_label.text() == "1.5×"
+    assert page.speed_button.label == "속도 1.5×"
     assert page.subtitles_button.label == "자막 꺼짐"
     assert not page.subtitles_button.isChecked()
     assert page.subtitle_language_button.label == "자막 없음"
@@ -733,5 +736,124 @@ def test_control_bar_shortens_labels_only_while_narrow(window):
     assert not any(button.compact for button in page.compact_order)
     page.subtitle_language_button.set_label("다듬은 자막", "다듬은")
     QApplication.processEvents()
-    assert page.subtitle_language_button.text() == "다듬은"
+    assert page.subtitle_language_button.text() == "다듬은 자막"
     assert row.minimumSize().width() <= page.controls.width()
+    # 하이라이트 단추부터 아이콘만 남긴다. 줄어도 기능 이름(툴팁·접근성 이름)은 그대로다.
+    assert page.point_button.text() == "◆"
+    assert page.point_button.toolTip() == "지점 하이라이트 추가 · Insert"
+    assert page.point_button.accessibleName() == "지점 하이라이트 추가"
+
+
+def test_highlight_buttons_run_same_commands_as_insert_and_delete(window):
+    page, core = window.playback_page, window.core
+    video_id = core.playback.session.video_id
+    assert page.point_button.toolTip() == "지점 하이라이트 추가 · Insert"
+    assert page.range_button.toolTip() == "구간 하이라이트 시작 · Delete"
+    window.player.positions = [(10, True)]
+    click(page.point_button)
+    assert [(h.start, h.end) for h in core.highlights(video_id)] == [(10, None)]
+    window.player.positions = [(20, False)]
+    click(page.range_button)
+    assert core.open_highlight_start == 20
+    assert page.range_button.isChecked() and page.range_button.label == "】 구간 끝내기"
+    assert page.range_button.accessibleName() == "구간 하이라이트 끝내기"
+    assert page.range_button.toolTip() == "구간 하이라이트 끝내기 · Delete"
+    assert window.surface.hasFocus()
+    # 열린 구간은 키로도 끝낼 수 있고, 단추는 다시 '구간 시작'이 된다.
+    window.player.positions = [(30, False)]
+    key(window, Qt.Key.Key_Delete)
+    assert [(h.start, h.end) for h in core.highlights(video_id)] == [(10, None), (20, 30)]
+    assert not page.range_button.isChecked() and page.range_button.label == "【 구간 시작"
+    # 키로 연 구간은 단추로 끝낸다.
+    window.player.positions = [(40, False)]
+    key(window, Qt.Key.Key_Delete)
+    assert page.range_button.isChecked()
+    window.player.positions = [(50, False)]
+    click(page.range_button)
+    assert (40, 50) in [(h.start, h.end) for h in core.highlights(video_id)]
+    assert not page.range_button.isChecked()
+    assert window.player.commands == []
+
+
+def test_highlight_button_tooltips_follow_saved_bindings(window):
+    page = window.playback_page
+    bindings = {row.command: row.keys for row in window.core.key_bindings()}
+    bindings[Command(CommandType.POINT_HIGHLIGHT)] = ("P",)
+    bindings[Command(CommandType.RANGE_HIGHLIGHT)] = ()
+    bindings[Command(CommandType.CHANGE_SPEED, 0.25)] = ("]",)
+    window.core.save_key_bindings(bindings)
+    window.refresh_key_help()
+    assert page.point_button.toolTip() == "지점 하이라이트 추가 · P"
+    assert page.range_button.toolTip() == "구간 하이라이트 시작 · 키 미할당"
+    assert page.speed_button.toolTip() == "재생 속도 · 올리기 ] (닫는 대괄호) / 내리기 ↓"
+
+
+def with_menu(button, menu, action=None):
+    """InstantPopup 단추의 메뉴는 exec 안에서 열린다. 열린 동안 action(눌러 고르기)을 하고, 남아 있으면 닫는다.
+
+    메뉴가 열렸을 때의 활성 팝업과 체크된 항목을 돌려준다.
+    """
+    seen = {}
+    timer = QTimer()
+    timer.setInterval(10)
+
+    def run():
+        if not menu.isVisible():
+            return
+        timer.stop()
+        seen['popup'] = QApplication.activePopupWidget()
+        seen['checked'] = [item.text() for item in menu.actions() if item.isChecked()]
+        try:
+            if action is not None:
+                item = next(item for item in menu.actions() if item.text() == action)
+                QTest.mouseClick(menu, Qt.MouseButton.LeftButton, pos=menu.actionGeometry(item).center())
+        finally:
+            if menu.isVisible():
+                menu.close()
+
+    timer.timeout.connect(run)
+    timer.start()
+    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+    timer.stop()
+    QApplication.processEvents()
+    assert seen['popup'] is menu
+    assert not menu.isVisible()
+    return seen
+
+
+def test_speed_button_list_and_keys_beyond_list(window):
+    page = window.playback_page
+    assert page.speed_button.toolTip() == "재생 속도 · 올리기 ↑ / 내리기 ↓"
+    assert [action.text() for action in page.speed_menu.actions()] == [
+        "0.5×", "0.75×", "1×", "1.25×", "1.5×", "1.75×", "2×"]
+    assert with_menu(page.speed_button, page.speed_menu, "1.5×")['checked'] == ["1×"]
+    assert window.player.commands == [Command(CommandType.CHANGE_SPEED, 0.5)]
+    assert window.player.options[0] == 1.5
+    assert (page.speed_button.label, page.speed_button.accessibleName()) == ("속도 1.5×", "재생 속도 1.5×")
+    assert window.surface.hasFocus()
+    assert with_menu(page.speed_button, page.speed_menu)['checked'] == ["1.5×"]
+    # ↑ 키는 목록 끝(2×)을 넘어 갈 수 있고, 단추는 그 값을 그대로 보여 준다.
+    for _ in range(5):
+        key(window, Qt.Key.Key_Up)
+    window.sync_position()
+    assert page.speed_button.label == "속도 2.75×"
+    assert with_menu(page.speed_button, page.speed_menu, "0.5×")['checked'] == []
+    assert window.player.options[0] == 0.5
+    assert page.speed_button.label == "속도 0.5×"
+    assert window.player.commands[-1] == Command(CommandType.CHANGE_SPEED, -2.25)
+
+
+@pytest.mark.parametrize("fullscreen", [False, True])
+def test_playback_menu_settings_opens_same_menu_as_alt_s(window, fullscreen):
+    page = window.playback_page
+    if fullscreen:
+        key(window, Qt.Key.Key_Apostrophe)
+        page.reveal_bar()
+    with_menu(page.menu_button, page.menu, "설정 · Alt+S")
+    wait_for(lambda: QApplication.activePopupWidget() is window.settings_menu)
+    assert window.isFullScreen() is fullscreen
+    QTest.keyClick(window.settings_menu, Qt.Key.Key_Escape)
+    QApplication.processEvents()
+    assert window.surface.hasFocus()
+    assert window.isFullScreen() is fullscreen
+    assert window.core.playback.session is not None

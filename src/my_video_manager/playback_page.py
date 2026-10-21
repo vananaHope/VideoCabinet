@@ -15,6 +15,9 @@ from .playback_help import PlaybackHelp
 from .translation_kind import translation_task
 from .theme import playback_stylesheet, playback_font
 
+# 속도 단추 목록. ↑/↓ 키는 이 목록과 관계없이 MIN~MAX_PLAYBACK_SPEED를 0.25씩 움직인다.
+SPEED_CHOICES = (0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)
+
 
 class ControlButton(QToolButton):
     """조작 줄 단추. 마우스로 눌러도 초점을 가져가지 않아 영상의 키 입력이 그대로 이어진다.
@@ -126,9 +129,23 @@ class PlaybackPage(QWidget):
         self.pause_button = self._command_button("⏸", "일시정지", CommandType.TOGGLE_PAUSE)
         self.next_button = self._command_button("⏭", "다음 영상", CommandType.NEXT_VIDEO)
         self.position_label = QLabel("00:00:00.000 / 00:00:00.000")
+        self.point_button = self._command_button("◆ 지점", "지점 하이라이트 추가", CommandType.POINT_HIGHLIGHT)
+        self.point_button.set_label("◆ 지점", "◆")
+        self.range_button = self._command_button("【 구간 시작", "구간 하이라이트 시작", CommandType.RANGE_HIGHLIGHT)
+        self.range_button.setCheckable(True)
+        self.range_button.set_label("【 구간 시작", "【")
         self.open_range_label = QLabel()
         self.open_range_label.hide()
-        self.speed_label = QLabel("1×")
+        # 누르면 목록을 연다. 목록 밖 속도(↑/↓ 키)도 단추에는 그 값 그대로 보인다.
+        self.speed_button = ControlButton("속도 1×", "재생 속도 1×")
+        self.speed_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.speed_menu = QMenu(self.speed_button)
+        for speed in SPEED_CHOICES:
+            action = self.speed_menu.addAction(f"{speed:g}×", lambda checked=False, value=speed: self.choose_speed(value))
+            action.setCheckable(True)
+        self.speed_menu.aboutToShow.connect(self.check_current_speed)
+        self.speed_menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.focus_content))
+        self.speed_button.setMenu(self.speed_menu)
         self.subtitles_button = self._command_button("자막 켜짐", "자막 표시", CommandType.TOGGLE_SUBTITLES)
         self.subtitles_button.setCheckable(True)
         self.subtitles_button.setChecked(True)
@@ -144,21 +161,23 @@ class PlaybackPage(QWidget):
         self.fullscreen_button = self._command_button("⛶", "전체 화면", CommandType.TOGGLE_FULLSCREEN)
         self.fullscreen_button.setCheckable(True)
         for button in (self.previous_button, self.pause_button, self.next_button,
-                       self.key_guide_button, self.fullscreen_button):
+                       self.point_button, self.range_button, self.key_guide_button, self.fullscreen_button):
             button.setProperty('playbackRole', 'symbol')
         for widget in (self.list_button, self.previous_button, self.pause_button, self.next_button,
-                       self.position_label, self.open_range_label, self.speed_label,
-                       self.subtitles_button, self.subtitle_language_button):
+                       self.position_label, self.point_button, self.range_button, self.open_range_label,
+                       self.speed_button, self.subtitles_button, self.subtitle_language_button):
             row.addWidget(widget)
         row.addWidget(self.subtitle_work_label, 1)
         row.addWidget(self.key_guide_button)
         row.addWidget(self.fullscreen_button)
         # 단추·Tab 순서와 같다. 이 단추에 초점이 있어도 재생 키는 그대로 동작한다.
         self.control_buttons = (self.list_button, self.previous_button, self.pause_button, self.next_button,
+                                self.point_button, self.range_button, self.speed_button,
                                 self.subtitles_button, self.subtitle_language_button,
                                 self.key_guide_button, self.fullscreen_button)
-        # 창이 좁을 때 이 순서대로 짧은 글자로 바꾼다.
-        self.compact_order = [self.fullscreen_button, self.subtitle_language_button, self.subtitles_button]
+        # 창이 좁을 때 이 순서대로 짧은 글자로 바꾼다. 하이라이트·속도 단추가 먼저 아이콘·값만 남긴다.
+        self.compact_order = [self.point_button, self.range_button, self.speed_button,
+                              self.fullscreen_button, self.subtitle_language_button, self.subtitles_button]
         self.menu_button = QToolButton()
         self.menu_button.setText("메뉴 ⋯")
         self.menu_button.setAccessibleName("재생 작업 메뉴")
@@ -173,6 +192,8 @@ class PlaybackPage(QWidget):
             ("자막 검수 / SRT 내보내기", window.show_review),
         ):
             self.menu.addAction(label, lambda checked=False, action=callback: self.run_action(action))
+        # Alt+S와 같은 설정 메뉴. 이 메뉴가 닫히고 초점이 영상으로 돌아간 다음에 연다.
+        self.menu.addAction("설정 · Alt+S", lambda: QTimer.singleShot(0, window.show_fullscreen_settings_menu))
         self.menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.focus_content))
         self.menu_button.setMenu(self.menu)
         row.addWidget(self.menu_button)
@@ -220,6 +241,20 @@ class PlaybackPage(QWidget):
         """조작 줄 단추. 키와 같은 명령을 실행하고 바뀐 상태를 바로 보여 준다."""
         self.run_command(command)
         self.update_controls()
+
+    def current_speed(self):
+        options = getattr(self.shell.player, "playback_options", None)
+        return options()[0] if options else 1
+
+    def check_current_speed(self):
+        speed = self.current_speed()
+        for action, choice in zip(self.speed_menu.actions(), SPEED_CHOICES):
+            action.setChecked(choice == speed)
+
+    def choose_speed(self, speed):
+        """속도 목록의 값. ↑/↓ 키와 같은 속도 바꾸기 명령으로 지금 속도와의 차이만큼 바꾼다."""
+        if self.shell.player:
+            self.press(Command(CommandType.CHANGE_SPEED, speed - self.current_speed()))
 
     def fit_controls(self):
         """조작 줄이 넘치면 compact_order 순서대로 단추 글자를 짧게 바꾼다.
@@ -272,6 +307,13 @@ class PlaybackPage(QWidget):
                              (self.next_button, '다음 영상'), (self.subtitles_button, '자막 켜기/끄기'),
                              (self.fullscreen_button, '전체 화면 켜기/끄기')):
             button.setToolTip(f'{name} · {bindings[button.command.kind]}')
+        self.point_button.setToolTip(f'지점 하이라이트 추가 · {bindings[CommandType.POINT_HIGHLIGHT]}')
+        self.update_range_button()
+        # 속도는 올리기·내리기 두 명령이라 명령 종류 하나로 묶은 bindings 대신 명령마다 읽는다.
+        speed_keys = {row.command.amount > 0: display_keys(row.keys) for row in self.core.key_bindings()
+                      if row.command.kind == CommandType.CHANGE_SPEED}
+        self.speed_button.setToolTip(f'재생 속도 · 올리기 {speed_keys.get(True, "키 미할당")}'
+                                     f' / 내리기 {speed_keys.get(False, "키 미할당")}')
         # Esc는 바꿀 수 없는 목록 복귀 키다. 이름은 모아보기 중 표시('모아보기 목록')를 따른다.
         self.list_button.setToolTip(f'{self.list_button.label} · Esc')
         self.update_subtitle_language_tooltip()
@@ -376,7 +418,7 @@ class PlaybackPage(QWidget):
 
     def hide_temporary_bar(self):
         if self.fullscreen:
-            if (self.progress.dragging or self.menu.isVisible()
+            if (self.progress.dragging or self.menu.isVisible() or self.speed_menu.isVisible()
                     or self.bottom_bar.isAncestorOf(QApplication.focusWidget())):
                 self.bar_timer.start()
             elif not self._error:
@@ -424,8 +466,18 @@ class PlaybackPage(QWidget):
         self.subtitle_language_button.setToolTip(
             f'원어 / {task.subtitle_label} 전환 · {self._keys[CommandType.TOGGLE_SUBTITLE_LANGUAGE]}')
 
+    def update_range_button(self):
+        """열린 구간이 있으면 구간 단추가 '구간 끝내기'로 바뀌고 눌린 상태가 된다."""
+        opened = self.core.open_highlight_start is not None
+        self.range_button.set_label(*(("】 구간 끝내기", "】") if opened else ("【 구간 시작", "【")))
+        self.range_button.setChecked(opened)
+        name = "구간 하이라이트 끝내기" if opened else "구간 하이라이트 시작"
+        self.range_button.setAccessibleName(name)
+        self.range_button.setToolTip(f"{name} · {self._keys[CommandType.RANGE_HIGHLIGHT]}")
+
     def update_controls(self):
         """조작 줄의 재생·자막 상태를 플레이어와 코어에서 읽어 보여 준다."""
+        self.update_range_button()
         player = self.shell.player
         # stop_player는 엔진을 닫은 뒤 마지막 위치 보고를 저장한다.
         # 그 보고로 화면을 갱신할 때는 종료된 mpv 속성을 다시 읽지 않는다.
@@ -434,7 +486,8 @@ class PlaybackPage(QWidget):
         options = getattr(player, "playback_options", None)
         speed, visible = options() if options else (1, True)
         paused = getattr(player, "paused", False)
-        self.speed_label.setText(f"{speed:g}×")
+        self.speed_button.set_label(f"속도 {speed:g}×", f"{speed:g}×")
+        self.speed_button.setAccessibleName(f"재생 속도 {speed:g}×")
         self.pause_button.set_label("▶" if paused else "⏸")
         self.pause_button.setAccessibleName("재생" if paused else "일시정지")
         self.subtitles_button.setChecked(visible)
