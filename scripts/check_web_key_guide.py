@@ -151,6 +151,19 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
         app.processEvents()
         if not args.offscreen:
             assert QTest.qWaitForWindowActive(window, 5000)
+            # Qt 활성 창이어도 OS 전경 창이 아니면 keybd_event가 다른 창으로 간다.
+            hwnd = int(window.winId())
+            foreground = user32.GetForegroundWindow()
+            if foreground != hwnd:
+                thread = user32.GetWindowThreadProcessId(foreground, None)
+                current = ctypes.windll.kernel32.GetCurrentThreadId()
+                user32.AttachThreadInput(current, thread, True)
+                try:
+                    user32.BringWindowToTop(hwnd)
+                    user32.SetForegroundWindow(hwnd)
+                finally:
+                    user32.AttachThreadInput(current, thread, False)
+            wait(lambda: user32.GetForegroundWindow() == hwnd, 5)
 
     def press(vk, qt_key):
         """실창은 OS 키보드 입력, offscreen은 초점 위젯에 QTest 키."""
@@ -191,6 +204,8 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
             host.view.setFocus()
             settle(300)
             press(VK_F1, Qt.Key.Key_F1)
+            metrics['current'] = {'tab': tab, 'active': window.isActiveWindow(),
+                                  'foreground': None if args.offscreen else user32.GetForegroundWindow() == int(window.winId())}
             text = wait_guide()
             assert f'키 안내 · {label}' in text and f'지금 화면 · {label}' in text, text
             if args.variant == 'multi':
@@ -269,7 +284,23 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
                 if guide():
                     press(VK_ESCAPE, Qt.Key.Key_Escape)
                     wait_closed()
-                metrics['checks'].append('한글 조합 중 실제 F1(결과는 ime 항목)')
+                # 같은 조합 상태에서 무작위 재생 키(기존 규칙)가 어떻게 되는지 비교한다.
+                js(f"(() => {{ const e = document.querySelector({json.dumps(field)}); e.focus(); e.value = ''; e.dispatchEvent(new Event('input', {{bubbles: true}})) }})()")
+                settle(200)
+                for key in 'GK':
+                    press(ord(key), 0)
+                metrics['ime']['random_composing_before_key'] = window._composing_widget is not None
+                for vk in (VK_CONTROL, 0x10, ord('R')):
+                    user32.keybd_event(vk, 0, 0, 0)
+                for vk in (ord('R'), 0x10, VK_CONTROL):
+                    user32.keybd_event(vk, 0, 2, 0)
+                settle(800)
+                metrics['ime']['random_play_started'] = core.playback.session is not None
+                if core.playback.session is not None:
+                    activate()
+                    press(VK_ESCAPE, Qt.Key.Key_Escape)
+                    wait(lambda: core.playback.session is None)
+                metrics['checks'].append('한글 조합 중 실제 F1과 무작위 재생 키 비교(결과는 ime 항목)')
             finally:
                 user32.ActivateKeyboardLayout(previous, 0)
                 js(f"(() => {{ const e = document.querySelector('[aria-label=\"영상 제목 빠른 검색\"]'); e.value = ''; e.dispatchEvent(new Event('input', {{bubbles: true}})) }})()")
@@ -316,5 +347,6 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
             wait(lambda: core.playback.session is None)
     finally:
         window.tray.quit()
+        print('CURRENT', json.dumps(metrics.get('current'), ensure_ascii=False))
     (args.output / f'{prefix}-metrics.json').write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
