@@ -592,6 +592,7 @@ python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-204 -- .venv
    페이지 사이 브리지 호출은 공통 `shell` 외에는 하지 않습니다.
    페이지는 숨겨져도 마운트를 유지하므로 선택·검색어·스크롤을 보존할 수 있습니다.
    `pages/index.ts`에 컴포넌트 import와 `search: SearchPage` 한 줄을 추가합니다. 웹 페이지만 등록하고 `null` 항목은 두지 않습니다.
+   키 안내 '지금 화면'에 보일 이 페이지만의 키는 페이지 파일에 `export const keyGuide: readonly KeyGuideGroup[]`(`@/lib/key-guide`, 키가 없으면 `[]`)로 두고, `pages/index.ts`에 `import { keyGuide as searchKeys } from "./SearchPage"`와 `pageKeyGuides`의 `search: searchKeys,`를 한 줄씩 추가합니다(빠지면 typecheck가 실패합니다). 키 배치로 바꿀 수 있는 키는 여기에 글자로 쓰지 않고 `key_guide.py`가 지금 키 배치에서 읽어 넘깁니다.
 5. `.venv/Scripts/python scripts/generate_web_types.py`로 재생성한 뒤 `--check`, 전체 pytest,
    `frontend/`의 `npm run lint`, `npm run typecheck`, `npm run build`를 실행합니다.
    `scripts/check_web_library.py`로 1100×720 화면·단축키·Qt/mpv 왕복도 확인합니다.
