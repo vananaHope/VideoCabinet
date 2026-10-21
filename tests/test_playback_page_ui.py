@@ -152,7 +152,8 @@ def test_reel_next_item_preserves_fullscreen_and_shows_position(window):
     assert window.isFullScreen()
     assert "하이라이트 2/2" in window.playback_page.reel_label.text()
     page = window.playback_page
-    assert (page.list_button.text(), page.list_button.toolTip()) == ("모아보기 목록", "모아보기 목록 · Esc")
+    # 좁은 화면에서는 '목록'으로 줄 수 있다. 줄이기 전 글자와 툴팁은 모아보기 이름이다.
+    assert (page.list_button.label, page.list_button.toolTip()) == ("모아보기 목록", "모아보기 목록 · Esc")
     key(window, Qt.Key.Key_Backslash)
     assert "반복 켜짐" in window.playback_page.reel_label.text()
     key(window, Qt.Key.Key_F1)
@@ -960,3 +961,24 @@ def test_reel_buttons_in_fullscreen_bar_and_tab_focus(window):
     assert core.reel_repeat and page.reel_repeat_button.isChecked()
     key(window, Qt.Key.Key_Return)
     assert window.player.paused and core.reel_repeat
+
+
+def test_fullscreen_reel_bar_shortens_list_button_then_tightens_spacing(window):
+    # 1100 폭 전체 화면의 가장 넓은 줄은 scripts/check_playback_controls.py --offscreen이 실제 글꼴로 잰다.
+    page = window.playback_page
+    start_reel(window)
+    page.set_fullscreen(True)
+    page.bottom_bar.show()
+    row = page.controls.layout()
+    window.resize(3000, 720)
+    QApplication.processEvents()
+    assert page.list_button.text() == "모아보기 목록" and row.spacing() == 8
+    window.resize(600, 720)
+    QApplication.processEvents()
+    # 글자를 모두 줄인 뒤에도 넘치면 간격을 좁힌다. 줄어든 목록 단추도 이름·툴팁은 그대로다.
+    assert page.list_button.text() == "목록" and row.spacing() == 4
+    assert (page.list_button.accessibleName(), page.list_button.toolTip()) == ("모아보기 목록", "모아보기 목록 · Esc")
+    window.resize(3000, 720)
+    QApplication.processEvents()
+    assert page.list_button.text() == "모아보기 목록" and row.spacing() == 8
+    assert not any(button.compact for button in page.compact_order)

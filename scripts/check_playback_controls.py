@@ -111,11 +111,13 @@ def wait(predicate, label, seconds=10):
 
 
 def fits(page):
-    """조작 줄의 최소 폭이 줄 폭 안이고 보이는 단추가 모두 줄 안에 있다."""
+    """조작 줄의 최소 폭이 줄 폭 안이고, 보이는 단추·시간 표시가 모두 줄 안에서 눌리지(잘리지) 않는다."""
     row = page.controls.layout()
-    inside = all(widget.geometry().right() < page.controls.width()
-                 for widget in (*page.control_buttons, page.menu_button) if widget.isVisible())
-    return row.minimumSize().width() <= page.controls.width() and inside
+    widgets = [widget for widget in (*page.control_buttons, page.menu_button, page.position_label,
+                                     page.open_range_label) if widget.isVisible()]
+    inside = all(widget.geometry().right() < page.controls.width() for widget in widgets)
+    whole = all(widget.width() >= widget.sizeHint().width() for widget in widgets)
+    return row.minimumSize().width() <= page.controls.width() and inside and whole
 
 
 def offscreen(app, directory, result):
@@ -161,6 +163,7 @@ def offscreen(app, directory, result):
         result.setdefault('compact', {})[name] = [button.accessibleName() for button in shortened]
         # 줄인 뒤 줄에 남는 폭. 뒤 이슈가 단추를 더할 때 기준으로 쓴다.
         result.setdefault('slack', {})[name] = page.controls.width() - page.controls.layout().minimumSize().width()
+        result.setdefault('spacing', {})[name] = page.controls.layout().spacing()
         result.setdefault('reducible', {})[name] = sum(button.compact_saving() for button in page.compact_order
                                                        if not button.compact and not button.isHidden())
         image = args.output / f'playback-{name}.png'
@@ -185,6 +188,11 @@ def offscreen(app, directory, result):
     assert page.range_button.isChecked() and page.range_button.accessibleName() == '구간 하이라이트 끝내기'
     assert page.range_button.label == '】 구간 끝내기' and page.range_button.text() == '】'
     assert page.subtitles_button.text() == '자막 꺼짐' and page.speed_button.label == '속도 99.75×'
+    # 전체 화면 줄에는 '목록으로'와 '⛶ 전체 화면 끄기'가 더해진다. 최소 창 폭(1100)의 화면에서 그 구성을 잰다.
+    fullscreen_bar(page, True)
+    check('fullscreen-widest-1100', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
+    assert page.position_label.text() == '00:00:10.000 / 00:02:00.000'
+    fullscreen_bar(page, False)
     # 1100보다 좁은 화면(전체 화면 등)에서는 속도 단추가 값만 남고, 그다음에 자막·전체 화면 단추를 줄인다.
     window.resize(1040, 720)
     check('narrow', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
@@ -199,6 +207,13 @@ def offscreen(app, directory, result):
     result['passed'].append('key-guide-close-button')
     reel(window, page, check)
     window.tray.quit()
+
+
+def fullscreen_bar(page, enabled):
+    """창 크기는 그대로 두고 전체 화면 조작 줄 구성(목록 단추·전체 화면 끄기)을 보인다."""
+    page.set_fullscreen(enabled)
+    if enabled:
+        page.bottom_bar.show()
 
 
 def reel(window, page, check):
@@ -225,12 +240,17 @@ def reel(window, page, check):
     check('reel-widest', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button,
                                               page.reel_repeat_button, page.open_range_label))
     assert page.open_range_label.text() == '【 00:00:11' and page.reel_repeat_button.text() == '↻'
-    # 전체 화면 줄에는 '모아보기 목록'과 '⛶ 전체 화면 끄기'가 더해진다. 흔한 가장 작은 화면 폭(1280)에서 그 구성을 잰다.
+    # 전체 화면 줄에는 '모아보기 목록'과 '⛶ 전체 화면 끄기'가 더해진다. 최소 창 폭(1100)과 흔한 가장 작은 화면 폭(1280)의
+    # 화면에서 그 구성을 잰다. 1100에서는 글자를 모두 줄이고 간격까지 좁혀야 시간 표시와 단추가 잘리지 않는다.
+    fullscreen_bar(page, True)
+    check('reel-fullscreen-bar-1100', '다듬은 자막', compact=[button for button in page.compact_order
+                                                         if button.compact_saving() and not button.isHidden()])
+    assert page.position_label.text() == '00:00:11.000 / 00:02:00.000'
+    assert page.list_button.text() == '목록' and page.list_button.toolTip() == '모아보기 목록 · Esc'
+    assert page.list_button.accessibleName() == '모아보기 목록'
     window.resize(1280, 720)
-    page.set_fullscreen(True)
-    page.bottom_bar.show()
     check('reel-fullscreen-bar-1280', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
-    page.set_fullscreen(False)
+    fullscreen_bar(page, False)
     window.resize(1100, 720)
     window.end_playback()
     assert not any(button.isVisible() or not button.isHidden() for button in page.reel_buttons)

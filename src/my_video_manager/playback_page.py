@@ -17,6 +17,8 @@ from .theme import playback_stylesheet, playback_font
 
 # 속도 단추 목록. ↑/↓ 키는 이 목록과 관계없이 MIN~MAX_PLAYBACK_SPEED를 0.25씩 움직인다.
 SPEED_CHOICES = (0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)
+# 조작 줄 위젯 사이 간격. 글자를 모두 줄여도 넘치면(최소 창의 전체 화면 모아보기 줄) 좁은 간격을 쓴다.
+CONTROL_SPACING, TIGHT_CONTROL_SPACING = 8, 4
 
 
 def tool_button_menu_point(button, menu):
@@ -145,8 +147,9 @@ class PlaybackPage(QWidget):
         self.controls.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row = QHBoxLayout(self.controls)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+        row.setSpacing(CONTROL_SPACING)
         self.list_button = ControlButton("목록으로", "목록으로")
+        self.list_button.set_label("목록으로", "목록")
         self.list_button.clicked.connect(window.back_to_list)
         self.list_button.hide()  # 전체 화면에서 머리 줄 대신 쓴다.
         self.previous_button = self._command_button("⏮", "이전 영상", CommandType.PREVIOUS_VIDEO)
@@ -213,12 +216,12 @@ class PlaybackPage(QWidget):
                                 self.subtitles_button, self.subtitle_language_button,
                                 self.key_guide_button, self.fullscreen_button)
         # 창이 좁을 때 이 순서대로 짧은 글자로 바꾼다. 하이라이트·속도 단추가 먼저 아이콘·값만 남긴다.
-        # 모아보기 단추가 더해진 가장 넓은 줄은 열린 구간 표시와 메뉴 단추까지 줄여야 들어간다.
+        # 모아보기 단추가 더해진 가장 넓은 줄은 열린 구간 표시·메뉴 단추와 전체 화면의 목록 단추까지 줄여야 들어간다.
         self.menu_button = ControlButton("메뉴 ⋯", "재생 작업 메뉴")
         self.menu_button.set_label("메뉴 ⋯", "⋯")
         self.compact_order = [self.point_button, self.range_button, self.speed_button, self.reel_repeat_button,
                               self.fullscreen_button, self.subtitle_language_button, self.subtitles_button,
-                              self.open_range_label, self.menu_button]
+                              self.open_range_label, self.menu_button, self.list_button]
         self.menu_button.setToolTip("재생 작업 메뉴 · 키 안내는 F1")
         self.menu_button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -307,20 +310,27 @@ class PlaybackPage(QWidget):
         return None
 
     def fit_controls(self):
-        """조작 줄이 넘치면 compact_order 순서대로 단추 글자를 짧게 바꾼다.
+        """조작 줄이 넘치면 compact_order 순서대로 단추 글자를 짧게 바꾸고, 그래도 넘치면 간격을 좁힌다.
 
-        결과가 같으면 글자를 건드리지 않으므로, 글자·표시가 바뀔 때마다 불러도 레이아웃 요청이 되풀이되지 않는다.
+        결과가 같으면 글자·간격을 건드리지 않으므로, 글자·표시가 바뀔 때마다 불러도 레이아웃 요청이 되풀이되지 않는다.
         """
-        # 지금 줄인 단추를 모두 되돌렸을 때 넘치는 폭에서 시작한다.
-        excess = (self.controls.layout().minimumSize().width() - self.controls.width()
+        row = self.controls.layout()
+        gaps = max(0, sum(1 for index in range(row.count())
+                          if row.itemAt(index).widget() and not row.itemAt(index).widget().isHidden()) - 1)
+        # 지금 줄인 단추와 좁힌 간격을 모두 되돌렸을 때 넘치는 폭에서 시작한다.
+        excess = (row.minimumSize().width() - self.controls.width()
                   + sum(button.compact_saving() for button in self.compact_order
-                        if button.compact and not button.isHidden()))
+                        if button.compact and not button.isHidden())
+                  + (CONTROL_SPACING - row.spacing()) * gaps)
         for button in self.compact_order:
             saving = 0 if button.isHidden() else button.compact_saving()
             compact = excess > 0 and saving > 0
             if compact:
                 excess -= saving
             button.set_compact(compact)
+        spacing = TIGHT_CONTROL_SPACING if excess > 0 else CONTROL_SPACING
+        if row.spacing() != spacing:
+            row.setSpacing(spacing)
 
     def focus_content(self):
         if self.isVisible() and QApplication.activeModalWidget() is None:
@@ -613,7 +623,7 @@ class PlaybackPage(QWidget):
         self._reel = current is not None
         self.reel_label.setVisible(current is not None)
         self.back_button.setText("모아보기 목록 · Esc" if current else "목록으로 · Esc")
-        self.list_button.set_label("모아보기 목록" if current else "목록으로")
+        self.list_button.set_label("모아보기 목록" if current else "목록으로", "목록")
         self.list_button.setAccessibleName(self.list_button.label)
         self.list_button.setToolTip(f"{self.list_button.label} · Esc")
         if current:
