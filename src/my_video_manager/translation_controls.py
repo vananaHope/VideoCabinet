@@ -70,11 +70,14 @@ class TranslationControls(QObject):
             bar.showMessage(f"{bar.currentMessage()} · {result.notice}")
         self.video_changed.emit(result.video_id)
 
-    def toggle(self):
+    def toggle(self) -> bool:
+        """원어/번역 자막을 바꾼다. 바꿀 수 없으면 이유를 안내하고 False를 돌려준다."""
         changed, message = self.core.toggle_subtitle_language()
-        if changed:
-            self.window.player.set_subtitle(self.core.playback_subtitle(self.core.playback.session.video_id))
-        self.window.statusBar().showMessage(message, 4000)
+        if not changed:
+            self.window.statusBar().showMessage(message, 4000)
+            return False
+        self.window.player.set_subtitle(self.core.playback_subtitle(self.core.playback.session.video_id))
+        return True
 
     def finished(self):
         self.worker.deleteLater()

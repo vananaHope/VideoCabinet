@@ -115,13 +115,18 @@ def _prepare_mpv_runtime():
     return None
 
 
+OSD_FONT = "Malgun Gothic"
+
+
 class MpvPlayer:
     def __init__(self, window_id: int):
         _prepare_mpv_runtime()
         import mpv
 
+        # 재생 상태 표시(OSD)의 한국어 글꼴. 맑은 고딕은 모든 Windows에 들어 있어 따로 묶지 않는다.
         self._player = mpv.MPV(wid=str(window_id), input_default_bindings=False,
-                               input_vo_keyboard=False, osc=False, config=False, keep_open=True)
+                               input_vo_keyboard=False, osc=False, config=False, keep_open=True,
+                               osd_font=OSD_FONT)
         self._subtitle_path = None
         self._closing = False
         self._callback_lock = Lock()
@@ -223,6 +228,16 @@ class MpvPlayer:
             self._player.speed = playback_speed(self._player.speed, command.amount)
         elif command.kind == CommandType.TOGGLE_SUBTITLES:
             self._player.cycle("sub-visibility")
+
+    def show_status(self, text: str, duration: float) -> None:
+        """재생 상태 표시. 영상 위에 글자를 duration초 보이고 저절로 지운다.
+
+        client API 명령은 ${...} 속성 확장을 하지 않으므로 문구가 그대로 보인다.
+        종료가 시작된 뒤에는 해제된 핸들에 닿지 않도록 표시를 생략한다.
+        """
+        with self._callback_lock:
+            if not self._closing:
+                self._player.command("show-text", text, round(duration * 1000))
 
     def pause(self) -> None:
         """토글과 달리 이미 멈춘 재생은 그대로 둔다."""
