@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QShortcut
-from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QMessageBox, QStackedWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QMessageBox, QStackedWidget, QWidget, QVBoxLayout
 
 from .adapters import MpvPlayer
 from .core import AppCore, Command, CommandType
@@ -17,6 +17,7 @@ from .native_dialogs import native_dialog_escape
 from .tray import TrayControls
 from .web_dialogs_entries import ReviewDialog
 from .playback_page import PlaybackPage
+from .player_shutdown import PlayerShutdown
 from .qt_keys import key_name
 from .theme import apply_theme
 
@@ -41,6 +42,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.core = core
         self.player = None
+        self._player_surface = None
+        self.player_shutdown = PlayerShutdown(self)
         self.player_factory = player_factory
         self.playback_list = ()
         self._composing_widget = None
@@ -302,6 +305,9 @@ class MainWindow(QMainWindow):
         self.navigate_web_tab('search')
 
     def play_video(self, video_id, *, start=None, random_scope=None, new_playback=False):
+        if self.tray.quitting:
+            return
+        self.web_host.cancel_return()
         from_list = self.pages.currentWidget() is not self.playback_page
         if from_list:
             self._return_page = self.pages.currentWidget()
@@ -322,7 +328,7 @@ class MainWindow(QMainWindow):
             self.web_host.remember_playback_tab()
         self.pages.setCurrentIndex(1)
         if self.player is None:
-            self.player = self.player_factory(int(self.surface.winId()))
+            self.player = self.create_player()
         self.player.play(location.path, start, subtitle=self.core.playback_subtitle(video_id))
         self.progress.duration = next(v.duration for v in self.core.videos() if v.id == video_id)
         self.refresh_highlights()
@@ -338,19 +344,57 @@ class MainWindow(QMainWindow):
         self.reel.shown = None
         self.playback_page.show_reel(None, False, {})
 
-    def stop_player(self):
+    def create_player(self):
+        self.web_host.cancel_return()
+        # 종료 중인 mpv와 새 mpv가 같은 HWND를 그리거나 해제하지 않게
+        # 재생 표면 안에 엔진마다 별도 native 자식을 둔다.
+        if self.surface.layout() is None:
+            layout = QVBoxLayout(self.surface)
+            layout.setContentsMargins(0, 0, 0, 0)
+        surface = QWidget(self.surface)
+        # 기본 QWidget이 처리하지 않은 마우스 이벤트는 ignore되어 부모 surface로 전파된다.
+        surface.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
+        surface.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
+        self.surface.layout().addWidget(surface)
+        surface.show()
+        try:
+            player = self.player_factory(int(surface.winId()))
+        except Exception:
+            surface.deleteLater()
+            raise
+        self._player_surface = surface
+        self.player_shutdown.release()
+        return player
+
+    def stop_player(self, *, report=True):
         self.position_timer.stop()
         # 닫는 엔진의 일시정지 상태는 읽지 않는다. 남은 보고는 기존처럼 처리한다.
         self._hold = None
         self._pending_random_eof = None
         if self.player:
+            player, surface = self.player, self._player_surface
+            prepare = getattr(player, 'prepare_close', None)
             self._stopping_player = True
             try:
-                self.player.close()
-                self.sync_position()
+                if prepare is not None:
+                    prepare()
+                else:
+                    # prepare_close 없는 기존 주입 어댑터와의 호환 경로.
+                    # 제품 및 공용 테스트 플레이어는 위 비동기 종료 경로를 쓴다.
+                    player.close()
+                if report:
+                    self.sync_position()
             finally:
                 self.player = None
+                self._player_surface = None
                 self._stopping_player = False
+                if surface is not None:
+                    self.surface.layout().removeWidget(surface)
+                    if prepare is not None:
+                        self.player_shutdown.retire(player, surface, deferred=self.web_host.return_pending)
+                    else:
+                        surface.hide()
+                        surface.deleteLater()
 
     def _current_hold(self):
         """지금 엔진·재생 항목의 보류. 엔진이나 항목이 바뀌었으면 버린다."""
@@ -478,10 +522,7 @@ class MainWindow(QMainWindow):
             self.surface.setFocus()
 
     def show_library(self):
-        self.end_playback()
-        self.web_host.set_tab("library")
-        self.pages.setCurrentIndex(0)
-        self.library_page.refresh(focus=True)
+        self.web_host.show_page('library', returning=True)
 
     def back_to_list(self):
         if self.reel.shown is not None or self.core.reel_playback is not None:
@@ -513,10 +554,7 @@ class MainWindow(QMainWindow):
                 self.player.seek_to(target.start, resume=True)
             else:
                 # 코어는 이미 새 시청을 시작했다. 이전 엔진의 남은 보고를 새 시청에 보내지 않는다.
-                self.position_timer.stop()
-                if self.player:
-                    self.player.close()
-                    self.player = None
+                self.stop_player(report=False)
                 self.reel.shown = None
                 self.reel.update_label()
                 self.playback_list = source

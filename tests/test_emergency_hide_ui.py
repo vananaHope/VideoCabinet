@@ -85,6 +85,9 @@ class Player:
     def apply_playback_options(self, options):
         self.options = options
 
+    def prepare_close(self):
+        pass
+
     def close(self):
         pass
 

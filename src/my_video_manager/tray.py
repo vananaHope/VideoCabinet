@@ -167,6 +167,10 @@ class TrayControls(QObject):
             elif not QSystemTrayIcon.isSystemTrayAvailable():
                 raise RuntimeError("시스템 트레이를 사용할 수 없습니다. 설정(Ctrl+8)의 완전 종료를 이용하세요.")
             window.end_playback()
+            window.web_host.cancel_return()
+            window.player_shutdown.release()
+            if self.quitting:
+                window.player_shutdown.finish()
         except Exception as error:
             self.quitting = False
             self.resume()

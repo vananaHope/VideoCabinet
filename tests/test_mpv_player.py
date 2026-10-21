@@ -56,3 +56,13 @@ def test_status_after_close_is_skipped(player):
     player.close()
     player.show_status("자막 꺼짐", 1.5)
     assert engine().commands == [("show-text", "1.25×", 1500)]
+
+
+def test_status_after_prepare_close_is_skipped_before_native_termination(player):
+    player.show_status("1.25×", 1.5)
+    player.prepare_close()
+    assert not engine().terminated
+    player.show_status("자막 꺼짐", 1.5)
+    assert engine().commands == [("show-text", "1.25×", 1500)]
+    player.close()
+    assert engine().terminated

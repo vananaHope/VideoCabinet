@@ -23,10 +23,13 @@ class ReelControls:
         options = None
         if self.window.player:
             options = self.window.player.playback_options()
+            if current is None:
+                # 완료 복귀도 일반 목록 복귀와 같은 준비·종료 경계를 쓴다.
+                self.shown = current
+                self.open()
+                return
             # 코어는 이미 새 항목으로 전환했다. 이전 엔진에 남은 보고는 새 항목에 보내지 않는다.
-            self.window.position_timer.stop()
-            self.window.player.close()
-            self.window.player = None
+            self.window.stop_player(report=False)
         self.shown = current
         if current is None:
             self.open()
@@ -34,7 +37,7 @@ class ReelControls:
         try:
             location = self.core.playback_location(current.video_id)
             self.window.pages.setCurrentIndex(1)
-            self.window.player = self.window.player_factory(int(self.window.surface.winId()))
+            self.window.player = self.window.create_player()
             if options is not None:
                 self.window.player.apply_playback_options(options)
             self.window.player.play(location.path, current.start,

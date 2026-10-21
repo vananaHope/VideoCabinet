@@ -7,7 +7,7 @@ python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scri
 클릭 뒤에도 재생 키가 동작하는지, 전체 화면 커서 이동 → 조작 줄 표시,
 키 안내·재생 메뉴·속도 목록이 열린 상태의 클릭은 그것만 닫는지, 영상 전환 직후의 클릭이 이전 영상의 누름과
 두 번 클릭으로 묶이지 않는지, 클릭 직후 긴급 탈출 → 빠른 복원에서 재생이 다시 시작되지 않는지 본다.
-mpv 영상 창이 비활성이라 누름이 Qt 표면으로 오는지도 단언한다. 화면 캡처는 하지 않는다. 데이터는 worktree 밖 임시 폴더에 만들고 지운다.
+mpv 영상 창이 비활성이라 누름이 Qt 표면으로 오는지도 단언한다. 화면 캡처는 하지 않는다. 데이터는 출력 폴더 아래 임시 폴더에 만들고 지운다.
 """
 
 import argparse
@@ -25,6 +25,7 @@ import time
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument('--output', type=Path, default=Path('.local/video-click'))
+parser.add_argument('--verify', action='store_true', help='실제 mpv와 OS 입력으로 검증한다 (기본 동작).')
 args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'windows'
 
@@ -120,10 +121,11 @@ def real(app, directory, result):
     result['surface_events'] = presses.events
     window.play(next(video.id for video in core.videos() if video.title.endswith('01강')))
     wait(lambda: core.playback.position > 1, '재생 시작')
-    engine = user32.FindWindowExW(int(page.surface.winId()), None, 'mpv', None)
+    # 종료 중인 이전 엔진은 같은 표면 아래 남아 있을 수 있다. 현재 엔진의 wid 아래만 찾는다.
+    engine = user32.FindWindowExW(int(window._player_surface.winId()), None, 'mpv', None)
     assert engine, 'mpv 영상 창을 찾지 못했다'
     result['mpv_window_disabled'] = not user32.IsWindowEnabled(engine)
-    # 클릭 수신은 mpv가 자기 창을 비활성으로 만들어 마우스를 표면에 넘기는 데 기댄다.
+    # 비활성 mpv → 현재 엔진의 QWidget → 기본 ignore 전파 → 부모 surface 순서로 전달된다.
     assert result['mpv_window_disabled'], 'mpv 영상 창이 활성이라 클릭이 Qt 표면으로 오지 않는다'
     interval = page.clicks.interval
     result['double_click_interval'] = interval
@@ -292,7 +294,7 @@ def main():
     watchdog.daemon = True
     watchdog.start()
     app = QApplication([])
-    directory = Path(tempfile.mkdtemp(prefix='video-click-'))
+    directory = Path(tempfile.mkdtemp(prefix='video-click-', dir=args.output.resolve()))
     result = {'mode': 'real', 'passed': []}
     try:
         real(app, directory, result)

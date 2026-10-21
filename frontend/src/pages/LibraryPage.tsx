@@ -72,8 +72,6 @@ export default function LibraryPage() {
       }
       const focus = (target: string) => {
         if (target === 'shell') return
-        layoutPaused.current = false
-        window.dispatchEvent(new Event('resize'))
         requestAnimationFrame(() => requestAnimationFrame(() => {
           const position = savedScroll.current
           const grid = document.getElementById('library-grid')
@@ -83,6 +81,8 @@ export default function LibraryPage() {
             if (detail) detail.scrollTop = position.detail
             savedScroll.current = null
           }
+          layoutPaused.current = false
+          window.dispatchEvent(new Event('resize'))
           const destination = highlightReturn.current && detail ? detail : grid
           highlightReturn.current = false
           // 무작위로 고른 영상은 화면 밖일 수 있어 복원한 스크롤에서 그 카드까지 보이게 한다.

@@ -16,6 +16,7 @@ class ShellBridge(QObject):
     shellChanged = SHELL.signal('shellChanged')
     shellStatusChanged = SHELL.signal('shellStatusChanged')
     shellFocusRequested = SHELL.signal('shellFocusRequested')
+    shellPrepareReturn = SHELL.signal('shellPrepareReturn')
     shellUpdateChanged = SHELL.signal('shellUpdateChanged')
     shellUpdateInstallChanged = SHELL.signal('shellUpdateInstallChanged')
     shellKeyGuideRequested = SHELL.signal('shellKeyGuideRequested')
@@ -27,6 +28,19 @@ class ShellBridge(QObject):
     @SHELL.slot('ready')
     def ready(self):
         self.host.frontend_ready()
+        return encode({'ok': True})
+
+    @SHELL.slot('returnReady')
+    def returnReady(self, token):
+        try:
+            self.host.finish_return(token)
+        except Exception as error:
+            return encode({'error': str(error)})
+        return encode({'ok': True})
+
+    @SHELL.slot('returnFailed')
+    def returnFailed(self, token):
+        self.host.fail_return(token)
         return encode({'ok': True})
 
     @SHELL.slot('shellSnapshot')
