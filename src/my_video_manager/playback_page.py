@@ -410,44 +410,52 @@ class PlaybackPage(QWidget):
                 self.menu.popup(self.menu_button.mapToGlobal(self.menu_button.rect().topRight()))
             return True
         command = window.core.command_for_key(key_name(event) or "")
-        if command and command.kind == CommandType.TOGGLE_HIGHLIGHT_LIST:
-            if not event.isAutoRepeat():
+        return command is not None and self.run_command(command, repeated=event.isAutoRepeat())
+
+    def run_command(self, command, *, repeated=False) -> bool:
+        """재생 명령 하나를 실행한다. 키·단추가 모두 이 경로를 써서 동작이 갈라지지 않는다.
+
+        repeated는 키를 누르고 있어 반복된 입력이다. 처리하지 않은 명령이면 False다.
+        """
+        window = self.shell
+        if command.kind == CommandType.TOGGLE_HIGHLIGHT_LIST:
+            if not repeated:
                 self.toggle_highlights()
             return True
-        if command and command.kind == CommandType.TOGGLE_FULLSCREEN:
-            if not event.isAutoRepeat():
+        if command.kind == CommandType.TOGGLE_FULLSCREEN:
+            if not repeated:
                 window.set_playback_fullscreen(not window.isFullScreen())
             return True
-        if command and window.player:
-            try:
-                if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):
-                    if not event.isAutoRepeat():
-                        window.sync_position()
-                        target = window.core.execute_video_command(command, window.playback_list)
-                        if target is not None:
-                            window.play_video(target)
-                        else:
-                            window.reel.sync()
-                elif window.core.is_highlight_command(command):
-                    if event.isAutoRepeat() or window.sync_position() is None:
-                        return True
-                    window.reel.sync()
-                    if window.core.playback.session is None:
-                        return True
-                    target = window.core.execute_highlight_command(command)
-                    if target is not None:
-                        window.player.seek_to(target)
-                    window.reel.sync()
-                    window.refresh_highlights()
+        if not window.player:
+            return False
+        try:
+            if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):
+                if not repeated:
                     window.sync_position()
-                elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
-                    if not event.isAutoRepeat():
-                        window.translations.toggle()
-                elif command.kind == CommandType.SEEK:
-                    self.seek(command=command)
-                else:
-                    window.player.execute(command)
-            except Exception as error:
-                QMessageBox.warning(window, "재생 조작 실패", str(error))
-            return True
-        return False
+                    target = window.core.execute_video_command(command, window.playback_list)
+                    if target is not None:
+                        window.play_video(target)
+                    else:
+                        window.reel.sync()
+            elif window.core.is_highlight_command(command):
+                if repeated or window.sync_position() is None:
+                    return True
+                window.reel.sync()
+                if window.core.playback.session is None:
+                    return True
+                target = window.core.execute_highlight_command(command)
+                if target is not None:
+                    window.player.seek_to(target)
+                window.reel.sync()
+                window.refresh_highlights()
+                window.sync_position()
+            elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
+                if not repeated:
+                    window.translations.toggle()
+            elif command.kind == CommandType.SEEK:
+                self.seek(command=command)
+            else:
+                window.player.execute(command)
+        except Exception as error:
+            QMessageBox.warning(window, "재생 조작 실패", str(error))
+        return True
