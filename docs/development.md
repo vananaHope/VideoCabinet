@@ -490,6 +490,19 @@ python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/
 두 번째 명령은 합성 영상과 실제 mpv, Windows 마우스·키 입력으로 단추 클릭 뒤 재생 키, Tab 이동과 단추 초점에서의 →·Enter(재생 명령)·Space(단추 누르기),
 키 안내 닫기 단추(앱 창 활성 유지), 전체 화면 조작 줄의 '전체 화면 끄기'·'목록으로'를 확인합니다. 실창 스크린샷은 찍지 않습니다.
 
+영상 클릭은 실제 mpv 위에서 따로 확인합니다.
+
+```powershell
+python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scripts/python.exe scripts/check_video_click.py
+```
+
+mpv는 `wid`로 넣은 자기 창을 비활성(`WS_DISABLED`)으로 만들어 마우스 입력을 부모인 Qt 영상 표면에 넘깁니다.
+그래서 클릭은 mpv 입력 바인딩이 아니라 표면의 Qt 마우스 이벤트로 받고, 한 번/두 번 클릭은 `video_click.py`의 판정기가
+Windows 두 번 클릭 판정 시간으로 가릅니다(Windows는 두 번째 누름을 `MouseButtonDblClick`으로만 보냅니다).
+메뉴가 열린 채 영상을 누르면 Qt가 메뉴를 닫은 뒤 같은 `timestamp`를 단 누름을 표면에 다시 보내므로(replay), 그 누름은 클릭으로 세지 않습니다.
+검사는 창 모드·전체 화면의 한 번/두 번 클릭, 클릭 뒤 재생 키, 전체 화면 커서 이동 → 조작 줄,
+키 안내·재생 메뉴가 열린 상태의 클릭을 확인하고 `.local/video-click/real-result.json`에 결과를 남깁니다.
+
 ### 웹 모아보기·검색 검증
 
 영상 상세의 정보 탭에는 외부 자막 파일 이름, 언어별 줄 수와 읽기 경고가 나옵니다.
