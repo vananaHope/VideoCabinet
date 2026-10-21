@@ -164,7 +164,8 @@ class PlaybackPage(QWidget):
         self.next_button = self._command_button("⏭", "다음 영상", CommandType.NEXT_VIDEO)
         self.position_label = QLabel("00:00:00.000 / 00:00:00.000")
         # 무작위 이어 재생 켜기/끄기와, 켜져 있을 때 옆에 보이는 범위 이름 단추. 모아보기 중에는 숨긴다.
-        self.random_button = self._command_button("🔀", "무작위 이어 재생", CommandType.TOGGLE_RANDOM_CONTINUOUS)
+        # 🔀 뒤 VS15(︎)는 색 그림 문자 대신 글자 모양으로 그리게 해, 다른 기호 단추처럼 켜짐 색이 보이게 한다.
+        self.random_button = self._command_button("🔀︎", "무작위 이어 재생", CommandType.TOGGLE_RANDOM_CONTINUOUS)
         self.random_button.setCheckable(True)
         self.random_scope_button = ControlButton("", "무작위 이어 재생 범위")
         self.random_scope_button.setToolTip("무작위 이어 재생 범위 바꾸기")
