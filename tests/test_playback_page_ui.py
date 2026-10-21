@@ -31,6 +31,7 @@ class Player:
         self.closed = False
         self.seeks = []
         self.positions = []
+        self.paused = False
 
     def play(self, path, start, *, subtitle):
         pass
@@ -58,6 +59,10 @@ class Player:
 
     def execute(self, command):
         self.commands.append(command)
+        if command.kind == CommandType.TOGGLE_PAUSE:
+            self.paused = not self.paused
+        elif command.kind == CommandType.TOGGLE_SUBTITLES:
+            self.options = (self.options[0], not self.options[1])
 
 
 @pytest.fixture(scope="module")
@@ -144,6 +149,8 @@ def test_reel_next_item_preserves_fullscreen_and_shows_position(window):
     key(window, Qt.Key.Key_End)
     assert window.isFullScreen()
     assert "하이라이트 2/2" in window.playback_page.reel_label.text()
+    page = window.playback_page
+    assert (page.list_button.text(), page.list_button.toolTip()) == ("모아보기 목록", "모아보기 목록 · Esc")
     key(window, Qt.Key.Key_Backslash)
     assert "반복 켜짐" in window.playback_page.reel_label.text()
     key(window, Qt.Key.Key_F1)
@@ -159,8 +166,14 @@ def test_help_reflects_saved_keys_and_menu_keyboard_restores_surface_focus(windo
     key(window, Qt.Key.Key_F1)
     assert "<b>N</b>" in page.help_panel.text.text()
     key(window, Qt.Key.Key_F1)
-    key(window, Qt.Key.Key_Tab)
-    assert page.menu_button.hasFocus()
+    visited = []
+    while not page.menu_button.hasFocus() and len(visited) < 10:
+        key(window, Qt.Key.Key_Tab)
+        visited.append(QApplication.focusWidget())
+    # 창 모드에서는 전체 화면 전용 '목록으로'를 건너뛰고 조작 줄 왼쪽부터 메뉴까지 간다.
+    assert visited == [page.previous_button, page.pause_button, page.next_button, page.subtitles_button,
+                       page.subtitle_language_button, page.key_guide_button, page.fullscreen_button,
+                       page.menu_button]
     key(window, Qt.Key.Key_Space)
     assert page.menu.isVisible()
     assert len(page.menu.actions()) == 4
@@ -194,11 +207,16 @@ def test_speed_subtitle_and_processing_status(window):
     window.player.options = (1.5, False)
     window.sync_position()
     assert page.speed_label.text() == "1.5×"
-    assert "꺼짐" in page.subtitle_label.text()
+    assert page.subtitles_button.label == "자막 꺼짐"
+    assert not page.subtitles_button.isChecked()
+    assert page.subtitle_language_button.label == "자막 없음"
     page._details = replace(page._details, original_lines=3, translation_state="held")
     window.player.options = (1.5, True)
-    page.update_subtitle_label()
-    assert page.subtitle_label.text() == "자막 원어 · 번역 보류"
+    page.update_controls()
+    assert page.subtitles_button.label == "자막 켜짐"
+    assert page.subtitles_button.isChecked()
+    assert page.subtitle_language_button.label == "원어 자막"
+    assert page.subtitle_work_label.text() == "번역 보류"
 
 
 def test_custom_tab_still_plays_on_surface_and_only_navigates_when_menu_focused(window):
@@ -554,3 +572,166 @@ def test_progress_and_keyboard_seek_keep_reel_until_normal_boundary(window, inpu
     assert core.reel_playback.entry.highlight.id == second
     assert core.last_highlight_revisited_at(first) is None
     assert core.viewings(core.playback.session.video_id) == viewings
+
+
+def click(widget):
+    QTest.mouseClick(widget, Qt.MouseButton.LeftButton)
+    QApplication.processEvents()
+
+
+@pytest.mark.parametrize(("button", "pressed"), [
+    ("pause_button", Qt.Key.Key_Return),
+    ("subtitles_button", Qt.Key.Key_Slash),
+])
+def test_control_button_sends_same_command_as_key_and_keeps_surface_focus(window, button, pressed):
+    key(window, pressed)
+    by_key = list(window.player.commands)
+    assert len(by_key) == 1
+    click(getattr(window.playback_page, button))
+    assert window.player.commands == by_key * 2
+    assert window.surface.hasFocus()
+
+
+def test_previous_next_buttons_move_like_page_keys(window):
+    page, videos = window.playback_page, window.core.videos()
+    click(page.next_button)
+    assert window.core.playback.session.video_id == videos[1].id
+    click(page.previous_button)
+    assert window.core.playback.session.video_id == videos[0].id
+
+
+def test_pause_button_shape_and_accessible_name_follow_pause_state(window):
+    page = window.playback_page
+    window.sync_position()
+    assert (page.pause_button.text(), page.pause_button.accessibleName()) == ("⏸", "일시정지")
+    click(page.pause_button)
+    assert (page.pause_button.text(), page.pause_button.accessibleName()) == ("▶", "재생")
+    key(window, Qt.Key.Key_Return)
+    window.sync_position()
+    assert (page.pause_button.text(), page.pause_button.accessibleName()) == ("⏸", "일시정지")
+
+
+def test_subtitle_buttons_show_state_and_language_notice_matches_period_key(window):
+    page = window.playback_page
+    click(page.subtitles_button)
+    assert (page.subtitles_button.label, page.subtitles_button.isChecked()) == ("자막 꺼짐", False)
+    key(window, Qt.Key.Key_Period)
+    by_key = window.statusBar().currentMessage()
+    assert by_key
+    window.statusBar().clearMessage()
+    assert not page.message_label.isVisible()
+    click(page.subtitle_language_button)
+    assert window.statusBar().currentMessage() == by_key
+    assert page.message_label.isVisible() and page.message_label.text() == by_key
+
+
+def test_tooltips_show_current_keys_and_follow_saved_bindings(window):
+    page = window.playback_page
+    assert page.pause_button.toolTip() == "재생/일시정지 · Enter"
+    assert page.previous_button.toolTip() == "이전 영상 · Page Up"
+    assert page.subtitle_language_button.toolTip() == "원어 / 번역 자막 전환 · . (마침표)"
+    assert page.fullscreen_button.toolTip() == "전체 화면 켜기/끄기 · ' (작은따옴표)"
+    assert page.key_guide_button.toolTip() == "키 안내 · F1"
+    assert page.list_button.toolTip() == "목록으로 · Esc"
+    bindings = {row.command: row.keys for row in window.core.key_bindings()}
+    bindings[Command(CommandType.TOGGLE_PAUSE)] = ("Space",)
+    bindings[Command(CommandType.TOGGLE_SUBTITLES)] = ()
+    bindings[Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE)] = ("L",)
+    window.core.save_key_bindings(bindings)
+    window.refresh_key_help()
+    assert page.pause_button.toolTip() == "재생/일시정지 · Space"
+    assert page.subtitles_button.toolTip() == "자막 켜기/끄기 · 키 미할당"
+    assert page.subtitle_language_button.toolTip() == "원어 / 번역 자막 전환 · L"
+
+
+def tab_to(window, button):
+    window.surface.setFocus()
+    for _ in range(10):
+        key(window, Qt.Key.Key_Tab)
+        if button.hasFocus():
+            return
+    raise AssertionError("Tab으로 단추에 가지 못함")
+
+
+def test_focused_control_button_keeps_playback_keys_and_presses_with_space(window):
+    # 머리 줄 '목록으로'와 같은 규칙: Space는 초점 단추를 누르고, Enter 등은 지금 키 배치의 재생 명령이다.
+    page, videos = window.playback_page, window.core.videos()
+    tab_to(window, page.next_button)
+    key(window, Qt.Key.Key_Right)
+    key(window, Qt.Key.Key_Down)
+    key(window, Qt.Key.Key_Return)
+    assert window.player.commands == [Command(CommandType.SEEK, 5), Command(CommandType.CHANGE_SPEED, -0.25),
+                                      Command(CommandType.TOGGLE_PAUSE)]
+    assert window.core.playback.session.video_id == videos[0].id
+    key(window, Qt.Key.Key_Space)
+    assert window.core.playback.session.video_id == videos[1].id
+    tab_to(window, page.subtitles_button)
+    key(window, Qt.Key.Key_Enter)
+    assert window.player.commands == [Command(CommandType.TOGGLE_PAUSE)]
+    assert page.subtitles_button.isChecked()
+    key(window, Qt.Key.Key_Space)
+    assert window.player.commands == [Command(CommandType.TOGGLE_PAUSE), Command(CommandType.TOGGLE_SUBTITLES)]
+    assert not page.subtitles_button.isChecked()
+
+
+def test_key_guide_button_opens_and_mouse_closes_key_guide(window):
+    page = window.playback_page
+    click(page.key_guide_button)
+    assert page.help_panel.isVisible() and page.key_guide_button.isChecked()
+    assert not page.help_panel.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    assert not page.help_panel.windowFlags() & Qt.WindowType.WindowTransparentForInput
+    click(page.help_panel.close_button)
+    assert not page.help_panel.isVisible() and not page.key_guide_button.isChecked()
+    key(window, Qt.Key.Key_F1)
+    assert page.help_panel.isVisible() and page.key_guide_button.isChecked()
+    key(window, Qt.Key.Key_F1)
+    assert not page.help_panel.isVisible() and not page.key_guide_button.isChecked()
+
+
+def test_fullscreen_bar_turns_fullscreen_off_and_returns_to_list(window):
+    page = window.playback_page
+    assert not page.list_button.isVisible()
+    click(page.fullscreen_button)
+    assert window.isFullScreen() and page.fullscreen_button.isChecked()
+    assert not page.bottom_bar.isVisible()
+    page.reveal_bar()
+    assert page.list_button.isVisible()
+    assert page.list_button.toolTip() == "목록으로 · Esc"
+    assert page.fullscreen_button.accessibleName() == "전체 화면"
+    click(page.fullscreen_button)
+    assert not window.isFullScreen() and not page.fullscreen_button.isChecked()
+    assert window.core.playback.session is not None
+    assert not page.list_button.isVisible() and page.header.isVisible()
+    key(window, Qt.Key.Key_Apostrophe)
+    page.reveal_bar()
+    click(page.list_button)
+    assert not window.isFullScreen()
+    assert window.core.playback.session is None
+    assert window.pages.currentWidget() is window.web_host
+
+
+def test_control_bar_shortens_labels_only_while_narrow(window):
+    # 1100×720 실제 글꼴 폭은 scripts/check_playback_controls.py --offscreen이 확인한다.
+    page = window.playback_page
+    row = page.controls.layout()
+    window.resize(3000, 720)
+    QApplication.processEvents()
+    assert not any(button.compact for button in page.compact_order)
+    full = row.minimumSize().width()
+    labels = [button.text() for button in page.compact_order]
+    window.resize(window.width() - (page.controls.width() - full) - 1, 720)
+    QApplication.processEvents()
+    assert page.controls.width() == full - 1
+    assert any(button.compact for button in page.compact_order)
+    assert row.minimumSize().width() <= page.controls.width()
+    window.resize(3000, 720)
+    QApplication.processEvents()
+    assert [button.text() for button in page.compact_order] == labels
+    # 창 크기가 그대로여도 단추 글자가 길어져 넘치면 다시 줄인다.
+    window.resize(window.width() - (page.controls.width() - full), 720)
+    QApplication.processEvents()
+    assert not any(button.compact for button in page.compact_order)
+    page.subtitle_language_button.set_label("다듬은 자막", "다듬은")
+    QApplication.processEvents()
+    assert page.subtitle_language_button.text() == "다듬은"
+    assert row.minimumSize().width() <= page.controls.width()

@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox,
     QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
-from .core import CommandType
+from .core import Command, CommandType
 from .highlight_ui import HighlightProgress, PlaybackHighlights
 from .time_display import timestamp
 from .key_display import display_keys
@@ -14,6 +14,44 @@ from .qt_keys import key_name
 from .playback_help import PlaybackHelp
 from .translation_kind import translation_task
 from .theme import playback_stylesheet, playback_font
+
+
+class ControlButton(QToolButton):
+    """조작 줄 단추. 마우스로 눌러도 초점을 가져가지 않아 영상의 키 입력이 그대로 이어진다.
+
+    Tab으로만 초점을 받는다. 좁은 창에서는 짧은 글자(compact)로 바꿀 수 있다.
+    """
+
+    def __init__(self, text, name):
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setAccessibleName(name)
+        self.compact = False
+        self._labels = (text, text)
+        self.setText(text)
+
+    @property
+    def label(self):
+        """좁은 창에서 줄이기 전의 글자."""
+        return self._labels[0]
+
+    def compact_saving(self):
+        """짧은 글자로 바꾸면 줄어드는 폭. 글자를 바꿔 보지 않고 계산한다."""
+        metrics = self.fontMetrics()
+        return max(0, metrics.horizontalAdvance(self._labels[0]) - metrics.horizontalAdvance(self._labels[1]))
+
+    def set_label(self, text, compact=None):
+        self._labels = (text, compact or text)
+        self._show_label()
+
+    def set_compact(self, compact):
+        self.compact = compact
+        self._show_label()
+
+    def _show_label(self):
+        text = self._labels[self.compact]
+        if text != self.text():
+            self.setText(text)
 
 
 class PlaybackPage(QWidget):
@@ -75,19 +113,52 @@ class PlaybackPage(QWidget):
         self.progress.seek_requested.connect(self.seek)
         self.progress.setFixedHeight(30)
         bottom.addWidget(self.progress)
-        row = QHBoxLayout()
-        row.setSpacing(12)
+        # 조작 줄이 창 최소 너비를 넓히지 않게 하고, 좁으면 fit_controls가 단추 글자를 줄인다.
+        self.controls = QWidget()
+        self.controls.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        row = QHBoxLayout(self.controls)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        self.list_button = ControlButton("목록으로", "목록으로")
+        self.list_button.clicked.connect(window.back_to_list)
+        self.list_button.hide()  # 전체 화면에서 머리 줄 대신 쓴다.
+        self.previous_button = self._command_button("⏮", "이전 영상", CommandType.PREVIOUS_VIDEO)
+        self.pause_button = self._command_button("⏸", "일시정지", CommandType.TOGGLE_PAUSE)
+        self.next_button = self._command_button("⏭", "다음 영상", CommandType.NEXT_VIDEO)
         self.position_label = QLabel("00:00:00.000 / 00:00:00.000")
         self.open_range_label = QLabel()
         self.open_range_label.hide()
         self.speed_label = QLabel("1×")
-        self.subtitle_label = QLabel("자막 없음")
-        self.subtitle_label.setProperty('playbackRole', 'muted')
-        self.subtitle_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        row.addWidget(self.position_label)
-        row.addWidget(self.open_range_label)
-        row.addWidget(self.speed_label)
-        row.addWidget(self.subtitle_label, 1)
+        self.subtitles_button = self._command_button("자막 켜짐", "자막 표시", CommandType.TOGGLE_SUBTITLES)
+        self.subtitles_button.setCheckable(True)
+        self.subtitles_button.setChecked(True)
+        self.subtitle_language_button = self._command_button(
+            "자막 없음", "자막 종류 자막 없음", CommandType.TOGGLE_SUBTITLE_LANGUAGE)
+        self.subtitle_work_label = QLabel()
+        self.subtitle_work_label.setProperty('playbackRole', 'muted')
+        self.subtitle_work_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.key_guide_button = ControlButton("⌨", "키 안내")
+        self.key_guide_button.setCheckable(True)
+        self.key_guide_button.setToolTip("키 안내 · F1")
+        self.key_guide_button.clicked.connect(self.toggle_help)
+        self.fullscreen_button = self._command_button("⛶", "전체 화면", CommandType.TOGGLE_FULLSCREEN)
+        self.fullscreen_button.setCheckable(True)
+        for button in (self.previous_button, self.pause_button, self.next_button,
+                       self.key_guide_button, self.fullscreen_button):
+            button.setProperty('playbackRole', 'symbol')
+        for widget in (self.list_button, self.previous_button, self.pause_button, self.next_button,
+                       self.position_label, self.open_range_label, self.speed_label,
+                       self.subtitles_button, self.subtitle_language_button):
+            row.addWidget(widget)
+        row.addWidget(self.subtitle_work_label, 1)
+        row.addWidget(self.key_guide_button)
+        row.addWidget(self.fullscreen_button)
+        # 단추·Tab 순서와 같다. 이 단추에 초점이 있어도 재생 키는 그대로 동작한다.
+        self.control_buttons = (self.list_button, self.previous_button, self.pause_button, self.next_button,
+                                self.subtitles_button, self.subtitle_language_button,
+                                self.key_guide_button, self.fullscreen_button)
+        # 창이 좁을 때 이 순서대로 짧은 글자로 바꾼다.
+        self.compact_order = [self.fullscreen_button, self.subtitle_language_button, self.subtitles_button]
         self.menu_button = QToolButton()
         self.menu_button.setText("메뉴 ⋯")
         self.menu_button.setAccessibleName("재생 작업 메뉴")
@@ -105,7 +176,7 @@ class PlaybackPage(QWidget):
         self.menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.focus_content))
         self.menu_button.setMenu(self.menu)
         row.addWidget(self.menu_button)
-        bottom.addLayout(row)
+        bottom.addWidget(self.controls)
         self.message_label = QLabel()
         self.message_label.setWordWrap(True)
         self.message_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -118,6 +189,7 @@ class PlaybackPage(QWidget):
         bottom.addWidget(self.message_label)
         self._layout.addWidget(self.bottom_bar)
         self.help_panel = PlaybackHelp(window)
+        self.help_panel.close_requested.connect(self.close_help)
         self.bar_timer = QTimer(self)
         self.bar_timer.setSingleShot(True)
         self.bar_timer.setInterval(2500)
@@ -132,12 +204,38 @@ class PlaybackPage(QWidget):
         self.details_timer.start()
         window.statusBar().messageChanged.connect(self.show_notice)
         QApplication.instance().installEventFilter(self)
-        QWidget.setTabOrder(self.surface, self.menu_button)
-        QWidget.setTabOrder(self.menu_button, self.back_button)
-        QWidget.setTabOrder(self.back_button, self.highlights_button)
-        QWidget.setTabOrder(self.highlights_button, self.highlights_panel.list)
-        QWidget.setTabOrder(self.highlights_panel.list, self.surface)
+        order = (self.surface, *self.control_buttons, self.menu_button, self.back_button,
+                 self.highlights_button, self.highlights_panel.list, self.surface)
+        for first, second in zip(order, order[1:]):
+            QWidget.setTabOrder(first, second)
         self.refresh_key_help()
+
+    def _command_button(self, text, name, kind):
+        button = ControlButton(text, name)
+        button.command = Command(kind)
+        button.clicked.connect(lambda: self.press(button.command))
+        return button
+
+    def press(self, command):
+        """조작 줄 단추. 키와 같은 명령을 실행하고 바뀐 상태를 바로 보여 준다."""
+        self.run_command(command)
+        self.update_controls()
+
+    def fit_controls(self):
+        """조작 줄이 넘치면 compact_order 순서대로 단추 글자를 짧게 바꾼다.
+
+        결과가 같으면 글자를 건드리지 않으므로, 글자·표시가 바뀔 때마다 불러도 레이아웃 요청이 되풀이되지 않는다.
+        """
+        # 지금 줄인 단추를 모두 되돌렸을 때 넘치는 폭에서 시작한다.
+        excess = (self.controls.layout().minimumSize().width() - self.controls.width()
+                  + sum(button.compact_saving() for button in self.compact_order
+                        if button.compact and not button.isHidden()))
+        for button in self.compact_order:
+            saving = 0 if button.isHidden() else button.compact_saving()
+            compact = excess > 0 and saving > 0
+            if compact:
+                excess -= saving
+            button.set_compact(compact)
 
     def focus_content(self):
         if self.isVisible() and QApplication.activeModalWidget() is None:
@@ -169,6 +267,14 @@ class PlaybackPage(QWidget):
     def refresh_key_help(self):
         self.help_panel.refresh(self.core)
         bindings = {row.command.kind: display_keys(row.keys) for row in self.core.key_bindings()}
+        self._keys = bindings
+        for button, name in ((self.previous_button, '이전 영상'), (self.pause_button, '재생/일시정지'),
+                             (self.next_button, '다음 영상'), (self.subtitles_button, '자막 켜기/끄기'),
+                             (self.fullscreen_button, '전체 화면 켜기/끄기')):
+            button.setToolTip(f'{name} · {bindings[button.command.kind]}')
+        # Esc는 바꿀 수 없는 목록 복귀 키다. 이름은 모아보기 중 표시('모아보기 목록')를 따른다.
+        self.list_button.setToolTip(f'{self.list_button.label} · Esc')
+        self.update_subtitle_language_tooltip()
         self.highlights_button.setText('하이라이트 패널 ' + ('접기' if self.highlights_expanded else '펴기'))
         self.highlights_button.setToolTip('하이라이트 패널 접기 / 펴기 · '
                                          + bindings[CommandType.TOGGLE_HIGHLIGHT_LIST])
@@ -224,6 +330,7 @@ class PlaybackPage(QWidget):
             self.close_help()
         else:
             self._help_requested = True
+            self.key_guide_button.setChecked(True)
             self.refresh_key_help()
             self.help_panel.place_over(self.surface)
             self.help_panel.show()
@@ -231,11 +338,15 @@ class PlaybackPage(QWidget):
 
     def close_help(self):
         self._help_requested = False
+        self.key_guide_button.setChecked(False)
         self.help_panel.hide()
 
     def set_fullscreen(self, enabled):
         self.fullscreen = enabled
         self.header.setVisible(not enabled)
+        self.list_button.setVisible(enabled)
+        self.fullscreen_button.setChecked(enabled)
+        self.fullscreen_button.set_label("⛶ 전체 화면 끄기" if enabled else "⛶", "⛶")
         self.highlights_panel.setVisible(not enabled and self.highlights_expanded)
         self.bar_timer.stop()
         self.bottom_bar.setVisible(not enabled)
@@ -273,6 +384,9 @@ class PlaybackPage(QWidget):
 
     def eventFilter(self, watched, event):
         kind = event.type()
+        if watched is self.controls and kind in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
+            # 창 크기뿐 아니라 단추 글자·표시가 바뀌어도 다시 맞춘다.
+            self.fit_controls()
         if watched is self.surface and kind == QEvent.Type.Resize and self._help_requested:
             QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))
         if watched is self.shell:
@@ -303,9 +417,15 @@ class PlaybackPage(QWidget):
         video_id = self.core.playback.session.video_id
         self._details = self.core.library_details(video_id)
         self.refresh_highlights()
-        self.update_subtitle_label()
+        self.update_controls()
 
-    def update_subtitle_label(self):
+    def update_subtitle_language_tooltip(self):
+        task = translation_task(self._details.spoken_language if self._details else None)
+        self.subtitle_language_button.setToolTip(
+            f'원어 / {task.subtitle_label} 전환 · {self._keys[CommandType.TOGGLE_SUBTITLE_LANGUAGE]}')
+
+    def update_controls(self):
+        """조작 줄의 재생·자막 상태를 플레이어와 코어에서 읽어 보여 준다."""
         player = self.shell.player
         # stop_player는 엔진을 닫은 뒤 마지막 위치 보고를 저장한다.
         # 그 보고로 화면을 갱신할 때는 종료된 mpv 속성을 다시 읽지 않는다.
@@ -313,25 +433,34 @@ class PlaybackPage(QWidget):
             return
         options = getattr(player, "playback_options", None)
         speed, visible = options() if options else (1, True)
+        paused = getattr(player, "paused", False)
         self.speed_label.setText(f"{speed:g}×")
+        self.pause_button.set_label("▶" if paused else "⏸")
+        self.pause_button.setAccessibleName("재생" if paused else "일시정지")
+        self.subtitles_button.setChecked(visible)
+        self.subtitles_button.set_label("자막 켜짐" if visible else "자막 꺼짐", "자막")
         details = self._details
         if details is None:
             return
         task = translation_task(details.spoken_language)
-        state = task.subtitle_label if self.core.playback_subtitle_language == "translated" else "자막 원어"
-        if not visible:
-            state = "자막 꺼짐"
-        elif not details.original_lines:
-            state = "자막 없음"
+        if not details.original_lines:
+            language = ("자막 없음", "없음")
+        elif self.core.playback_subtitle_language == "translated":
+            language = (task.subtitle_label, task.short_label)
+        else:
+            language = ("원어 자막", "원어")
+        self.subtitle_language_button.set_label(*language)
+        self.subtitle_language_button.setAccessibleName(f"자막 종류 {language[0]}")
+        self.update_subtitle_language_tooltip()
         work = {"queued": "대기", "transcribing": "만드는 중", "translating": "진행 중",
                 "held": "보류", "failed": "실패"}
-        labels = [state]
+        labels = []
         if details.subtitle_state in work:
             labels.append(f"원어 {work[details.subtitle_state]}")
         if details.translation_state in work:
             labels.append(f"{task.label} {work[details.translation_state]}")
-        self.subtitle_label.setText(" · ".join(labels))
-        self.subtitle_label.setToolTip(self.subtitle_label.text())
+        self.subtitle_work_label.setText(" · ".join(labels))
+        self.subtitle_work_label.setToolTip(self.subtitle_work_label.text())
 
     def show_position(self, position, duration, open_start, range_keys):
         session = self.core.playback.session
@@ -358,11 +487,14 @@ class PlaybackPage(QWidget):
         self.open_range_label.setVisible(open_start is not None)
         self.position_label.setToolTip(f"구간 시작 {timestamp(open_start)} · {range_keys}: 끝내기"
                                       if open_start is not None else "")
-        self.update_subtitle_label()
+        self.update_controls()
 
     def show_reel(self, current, repeat, keys):
         self.reel_label.setVisible(current is not None)
         self.back_button.setText("모아보기 목록 · Esc" if current else "목록으로 · Esc")
+        self.list_button.set_label("모아보기 목록" if current else "목록으로")
+        self.list_button.setAccessibleName(self.list_button.label)
+        self.list_button.setToolTip(f"{self.list_button.label} · Esc")
         if current:
             self.reel_label.setText(f"하이라이트 {current.index}/{current.total} · 반복 {'켜짐' if repeat else '꺼짐'}")
         if self._help_requested:
@@ -398,10 +530,12 @@ class PlaybackPage(QWidget):
                 if not event.isAutoRepeat():
                     self.highlights_panel.activate(self.highlights_panel.list.currentItem())
                 return True
-        if focus in (self.menu_button, self.back_button, self.highlights_button) and event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+        if (focus in (self.menu_button, self.back_button, self.highlights_button, *self.control_buttons)
+                and event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)):
             return False
-        if (focus in (self.back_button, self.highlights_button) and event.key() == Qt.Key.Key_Space
-                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
+        # 초점 단추는 Space로만 누른다. Enter를 비롯한 다른 키는 아래에서 지금 키 배치의 재생 명령이 된다.
+        if (focus in (self.back_button, self.highlights_button, *self.control_buttons)
+                and event.key() == Qt.Key.Key_Space and event.modifiers() == Qt.KeyboardModifier.NoModifier):
             return False
         if (focus is self.menu_button
                 and event.modifiers() == Qt.KeyboardModifier.NoModifier
@@ -410,44 +544,52 @@ class PlaybackPage(QWidget):
                 self.menu.popup(self.menu_button.mapToGlobal(self.menu_button.rect().topRight()))
             return True
         command = window.core.command_for_key(key_name(event) or "")
-        if command and command.kind == CommandType.TOGGLE_HIGHLIGHT_LIST:
-            if not event.isAutoRepeat():
+        return command is not None and self.run_command(command, repeated=event.isAutoRepeat())
+
+    def run_command(self, command, *, repeated=False) -> bool:
+        """재생 명령 하나를 실행한다. 키·단추가 모두 이 경로를 써서 동작이 갈라지지 않는다.
+
+        repeated는 키를 누르고 있어 반복된 입력이다. 처리하지 않은 명령이면 False다.
+        """
+        window = self.shell
+        if command.kind == CommandType.TOGGLE_HIGHLIGHT_LIST:
+            if not repeated:
                 self.toggle_highlights()
             return True
-        if command and command.kind == CommandType.TOGGLE_FULLSCREEN:
-            if not event.isAutoRepeat():
+        if command.kind == CommandType.TOGGLE_FULLSCREEN:
+            if not repeated:
                 window.set_playback_fullscreen(not window.isFullScreen())
             return True
-        if command and window.player:
-            try:
-                if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):
-                    if not event.isAutoRepeat():
-                        window.sync_position()
-                        target = window.core.execute_video_command(command, window.playback_list)
-                        if target is not None:
-                            window.play_video(target)
-                        else:
-                            window.reel.sync()
-                elif window.core.is_highlight_command(command):
-                    if event.isAutoRepeat() or window.sync_position() is None:
-                        return True
-                    window.reel.sync()
-                    if window.core.playback.session is None:
-                        return True
-                    target = window.core.execute_highlight_command(command)
-                    if target is not None:
-                        window.player.seek_to(target)
-                    window.reel.sync()
-                    window.refresh_highlights()
+        if not window.player:
+            return False
+        try:
+            if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):
+                if not repeated:
                     window.sync_position()
-                elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
-                    if not event.isAutoRepeat():
-                        window.translations.toggle()
-                elif command.kind == CommandType.SEEK:
-                    self.seek(command=command)
-                else:
-                    window.player.execute(command)
-            except Exception as error:
-                QMessageBox.warning(window, "재생 조작 실패", str(error))
-            return True
-        return False
+                    target = window.core.execute_video_command(command, window.playback_list)
+                    if target is not None:
+                        window.play_video(target)
+                    else:
+                        window.reel.sync()
+            elif window.core.is_highlight_command(command):
+                if repeated or window.sync_position() is None:
+                    return True
+                window.reel.sync()
+                if window.core.playback.session is None:
+                    return True
+                target = window.core.execute_highlight_command(command)
+                if target is not None:
+                    window.player.seek_to(target)
+                window.reel.sync()
+                window.refresh_highlights()
+                window.sync_position()
+            elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
+                if not repeated:
+                    window.translations.toggle()
+            elif command.kind == CommandType.SEEK:
+                self.seek(command=command)
+            else:
+                window.player.execute(command)
+        except Exception as error:
+            QMessageBox.warning(window, "재생 조작 실패", str(error))
+        return True
