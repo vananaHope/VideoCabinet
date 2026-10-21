@@ -1,6 +1,8 @@
 """#242: 무작위 이어 재생 범위 고르기 창 offscreen 검사.
 
 python scripts/check_web_random_scope.py --offscreen
+MVM_REAL_WINDOW_TESTS=1 python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- \
+    .venv/Scripts/python.exe scripts/check_web_random_scope.py --real --library <영상 폴더>
 
 가짜 플레이어로 재생하며 조작 줄의 범위 이름 단추로 범위 고르기 창(웹 대화상자)을 열고,
 1100×720 창 가운데에 놓은 대화상자 grab 이미지를 남긴다. 데이터 개수별 배치를 본다.
@@ -8,7 +10,9 @@ python scripts/check_web_random_scope.py --offscreen
 - 태그 0개 라이브러리와 후보가 0인 시작 목록(고를 수 없는 범위와 이유)
 - 고른 태그의 후보가 0이면 확인할 수 없음
 - 영상 전체를 고르면 지금 영상은 그대로이고 범위만 바뀜(다음 영상부터 적용)
-실창 확인(전체 화면 포함, 영상 끝에서 새 범위)은 desktop_lock 안에서 사람이 하거나 별도 검사로 한다.
+--real은 desktop_lock 안에서 실제 mpv로 무작위 재생 키로 시작 → 🔀 켜짐·범위 이름 → 범위 고르기 창
+(창 모드·전체 화면) → 영상 끝에서 새 범위의 영상으로 넘어가는지, 🔀를 끄면 영상 끝에서 멈추는지 본다.
+화면 캡처는 하지 않으며 2분 30초 뒤 스스로 끝낸다.
 """
 import argparse
 from datetime import datetime, timezone
@@ -19,13 +23,18 @@ import tempfile
 import time
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-parser.add_argument('--offscreen', action='store_true', required=True)
+mode = parser.add_mutually_exclusive_group(required=True)
+mode.add_argument('--offscreen', action='store_true')
+mode.add_argument('--real', action='store_true')
+parser.add_argument('--library', type=Path)
 parser.add_argument('--output', type=Path, default=Path('.local/issue-242'))
 args = parser.parse_args()
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+if args.real and (os.environ.get('MVM_REAL_WINDOW_TESTS') != '1' or args.library is None):
+    parser.error('실창은 desktop_lock 안에서 MVM_REAL_WINDOW_TESTS=1, --library로 실행하세요.')
+os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu'
 
-from PySide6.QtCore import QEvent, QEventLoop, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer
 from PySide6.QtGui import QFontDatabase, QImage, QPainter
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
@@ -62,7 +71,8 @@ class Player:
 
 args.output.mkdir(parents=True, exist_ok=True)
 app = QApplication([])
-QSystemTrayIcon.isSystemTrayAvailable = staticmethod(lambda: True)
+if args.offscreen:
+    QSystemTrayIcon.isSystemTrayAvailable = staticmethod(lambda: True)
 for name in ('malgun.ttf', 'malgunbd.ttf', 'segoeui.ttf', 'seguisym.ttf'):
     QFontDatabase.addApplicationFont(str(Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts' / name))
 evidence = {'checks': [], 'screens': []}
@@ -274,10 +284,101 @@ def empty_tags(root):
         close(window)
 
 
+def real(root):
+    """실제 mpv와 실창. 짧은 영상 셋 중 하나에만 태그를 붙여, 범위를 그 태그로 바꾸면 다음 영상이 정해지게 한다."""
+    import threading
+    from my_video_manager.adapters import FFmpegMediaReader, MpvPlayer
+    # 멈춰도 데스크톱 잠금을 오래 잡지 않게 스스로 끝낸다.
+    watchdog = threading.Timer(150, lambda: os._exit(3))
+    watchdog.daemon = True
+    watchdog.start()
+    media = FFmpegMediaReader()
+    core = AppCore(media=media, clock=lambda: datetime.now(timezone.utc),
+                   database=root / 'data/library.sqlite3', random_choice=min)
+    core.set_automatic_detection_enabled(False)
+    core.set_automatic_update_check_enabled(False)
+    core.set_minimum_duration(0)
+    paths = [p for p in args.library.rglob('*') if p.suffix.lower() in ('.mkv', '.mp4', '.webm')]
+    for duration, name in sorted((media.read(p).duration, str(p)) for p in paths)[:3]:
+        core.add_file(Path(name))
+    assert len(core.videos()) == 3
+    evidence['media'] = [{'path': str(v.locations[0].path), 'duration': v.duration} for v in core.videos()]
+    window = MainWindow(core, player_factory=MpvPlayer)
+    window.resize(1100, 720)
+    loaded = []
+    window.web_host.frontend_loaded.connect(lambda: loaded.append(True))
+    page, dialogs = window.playback_page, window.web_host.dialogs
+    try:
+        window.show()
+        window.activateWindow()
+        wait(lambda: loaded)
+        wait(window.isActiveWindow)
+        QTest.keyClick(window.web_host.view, Qt.Key.Key_R,
+                       Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+        wait(lambda: core.playback.session is not None and core.playback.position > 0)
+        first = core.playback.session.video_id
+        wait(lambda: page.random_button.isChecked() and page.random_scope_button.isVisible())
+        assert page.random_scope_button.text() == '전체', page.random_scope_button.text()
+        evidence['checks'].append('Ctrl+Shift+R: 🔀 켜짐·범위 이름 전체')
+        target = next(v.id for v in core.videos() if v.id != first)
+        tag = core.add_video_tag(target, '실창 범위')
+
+        def choose_tag():
+            assert dialogs.container is not None and dialogs.container.isVisible()
+            click_radio(window, '태그 고르기')
+            js(window, f"""Array.from(document.querySelectorAll('[role=option]'))
+              .find(e => e.textContent.startsWith({json.dumps(tag.name)})).click()""")
+            settle()
+            assert js(window, "document.querySelector('[role=dialog] [role=status]')?.textContent") == '후보 1개'
+            js(window, "Array.from(document.querySelectorAll('[role=dialog] button')).find(e => e.textContent === '확인').click()")
+            wait(lambda: not dialogs.active)
+        scope_dialog(window, choose_tag)
+        assert core.random_continuous_scope == RandomPlayScope('tags', tag_ids=(tag.id,))
+        assert core.playback.session.video_id == first
+        wait(lambda: page.random_scope_button.text() == '태그: 실창 범위')
+        evidence['checks'].append('창 모드 범위 고르기: 태그로 바꿔도 지금 영상 유지')
+
+        window.set_playback_fullscreen(True)
+        wait(window.isFullScreen)
+        page.reveal_bar()
+
+        def fullscreen_cancel():
+            wait(lambda: dialogs.container is not None and dialogs.container.isVisible())
+            wait(lambda: QApplication.activeWindow() is dialogs.container)
+            evidence['fullscreen_dialog'] = [dialogs.container.width(), dialogs.container.height()]
+            js(window, "Array.from(document.querySelectorAll('[role=dialog] button')).find(e => e.textContent === '취소').click()")
+            wait(lambda: not dialogs.active)
+        scope_dialog(window, fullscreen_cancel)
+        assert window.isFullScreen() and core.random_continuous_scope.kind == 'tags'
+        evidence['checks'].append('전체 화면 범위 고르기 창: 위에 뜨고 활성, 취소하면 범위·전체 화면 유지')
+
+        page.seek(core.video(first).duration - 1)
+        wait(lambda: core.playback.session.video_id != first, seconds=20)
+        assert core.playback.session.video_id == target
+        evidence['checks'].append('영상 끝: 새 범위(태그)의 영상으로 넘어감')
+
+        wait(lambda: core.playback.position > 0)
+        page.random_button.click()
+        assert not core.random_continuous_enabled and not page.random_button.isChecked()
+        session = core.playback.session
+        page.seek(core.video(target).duration - 1)
+        settle(4000)
+        assert core.playback.session is session
+        evidence['checks'].append('🔀 끄기: 영상 끝에서 멈춤')
+        window.set_playback_fullscreen(False)
+        QTest.keyClick(window.surface, Qt.Key.Key_Escape)
+        wait(lambda: core.playback.session is None)
+    finally:
+        close(window)
+
+
 with tempfile.TemporaryDirectory(prefix='check-', dir=args.output) as temporary:
-    for index, scenario in enumerate((many_tags, no_tags, empty_tags)):
-        directory = Path(temporary) / str(index)
-        directory.mkdir()
-        scenario(directory)
+    if args.real:
+        real(Path(temporary))
+    else:
+        for index, scenario in enumerate((many_tags, no_tags, empty_tags)):
+            directory = Path(temporary) / str(index)
+            directory.mkdir()
+            scenario(directory)
 (args.output / 'random-scope-result.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps(evidence, ensure_ascii=False))
