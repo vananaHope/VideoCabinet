@@ -19,8 +19,8 @@ from time import perf_counter
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--offscreen', action='store_true')
 parser.add_argument('--count', type=int, default=24)
-parser.add_argument('--variant', choices=('default', 'multi'), default='default',
-                    help='multi: 무작위 재생에 키 셋, 긴급 탈출은 미할당')
+parser.add_argument('--variant', choices=('default', 'multi', 'long'), default='default',
+                    help='multi: 무작위 재생에 키 셋, 긴급 탈출은 미할당. long: 코어가 받는 가장 긴 단일 키 조합')
 parser.add_argument('--output', type=Path, default=Path('.local/issue-236-check'))
 args = parser.parse_args()
 if not args.offscreen and os.environ.get('MVM_REAL_WINDOW_TESTS') != '1':
@@ -118,6 +118,11 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
         bindings[Command(CommandType.RANDOM_PLAY)] = ('Ctrl+Shift+R', 'Ctrl+Alt+R', 'Ctrl+Alt+Shift+Left')
         bindings[Command(CommandType.EMERGENCY_HIDE)] = ()
         core.save_key_bindings(bindings)
+    elif args.variant == 'long':
+        bindings = {row.command: row.keys for row in core.key_bindings()}
+        bindings[Command(CommandType.RANDOM_PLAY)] = ('Ctrl+Alt+Shift+Meta+Backspace',)
+        bindings[Command(CommandType.EMERGENCY_HIDE)] = ('Ctrl+Alt+Shift+Meta+PgDn',)
+        core.save_key_bindings(bindings)
     window = MainWindow(core, player_factory=Player if args.offscreen else MpvPlayer)
     loaded = []
     window.web_host.frontend_loaded.connect(lambda: loaded.append(True))
@@ -189,10 +194,16 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
         return json.loads(js(f"""JSON.stringify((() => {{
           const dialog = {GUIDE}; const rect = dialog.getBoundingClientRect();
           const body = dialog.querySelector('[aria-label="키 목록"]');
-          const keys = Array.from(dialog.querySelectorAll('dt')).filter(dt => dt.scrollWidth > dt.clientWidth + 1).length;
+          // 키 칸이 넘치거나 키 칩 오른쪽 끝이 같은 줄 설명의 왼쪽 끝을 넘으면 겹친 것이다.
+          const keys = Array.from(dialog.querySelectorAll('tr')).filter(row => {{
+            const head = row.querySelector('th'), label = row.querySelector('td');
+            const right = Math.max(...Array.from(head.querySelectorAll('kbd, span')).map(e => e.getBoundingClientRect().right));
+            return head.scrollWidth > head.clientWidth + 1 || right > label.getBoundingClientRect().left + 0.5;
+          }}).length;
           return {{ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right,
                     viewport: [innerWidth, innerHeight], scrolls: body.scrollHeight > body.clientHeight + 1,
-                    horizontal: body.scrollWidth > body.clientWidth + 1, overflowingKeys: keys }}
+                    horizontal: body.scrollWidth > body.clientWidth + 1, overflowingKeys: keys,
+                    rows: dialog.querySelectorAll('tr').length }}
         }})())"""))
 
     try:
@@ -210,11 +221,14 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
             assert f'키 안내 · {label}' in text and f'지금 화면 · {label}' in text, text
             if args.variant == 'multi':
                 assert 'Ctrl+Alt+Shift+←' in text and '키 미할당' in text, text
+            if args.variant == 'long':
+                assert 'Ctrl+Alt+Shift+Win+Backspace' in text and 'Ctrl+Alt+Shift+Win+Page Down' in text, text
             box = layout()
             metrics['layout'][tab] = box
             assert 0 <= box['top'] and box['bottom'] <= box['viewport'][1], box
             assert 0 <= box['left'] and box['right'] <= box['viewport'][0], box
-            assert not box['horizontal'] and not box['overflowingKeys'], box
+            # 표 구조가 바뀌어 잴 줄이 없으면 넘침 검사가 저절로 통과하므로 앱 전체 6줄 이상을 확인한다.
+            assert box['rows'] >= 6 and not box['horizontal'] and not box['overflowingKeys'], box
             capture(f'{index + 1}-{tab}')
             press(VK_ESCAPE, Qt.Key.Key_Escape)
             wait_closed()
@@ -223,13 +237,30 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
 
         window.navigate_web_tab('library')
         wait(lambda: host.active_tab == 'library')
-        js('document.querySelector("header button[aria-label=\\"키 안내 (F1)\\"]").click()')
+        if len(core.videos()) >= 2:
+            # 격자에서 F1 → Esc로 닫으면 초점이 격자로 돌아와 방향키가 이어진다.
+            activate()
+            host.view.setFocus()
+            js('document.getElementById("library-grid").focus()')
+            settle(200)
+            press(VK_F1, Qt.Key.Key_F1)
+            wait_guide()
+            press(VK_ESCAPE, Qt.Key.Key_Escape)
+            wait_closed()
+            assert js('document.activeElement.id') == 'library-grid', js('document.activeElement.outerHTML.slice(0, 80)')
+            before = js('document.getElementById("library-grid").getAttribute("aria-activedescendant")')
+            press(0x27, Qt.Key.Key_Right)
+            wait(lambda: js('document.getElementById("library-grid").getAttribute("aria-activedescendant")') != before)
+            metrics['checks'].append('격자에서 F1 → Esc 뒤 초점이 격자로 돌아와 방향키로 선택 이동')
+        # 마우스로 누를 때처럼 단추에 초점을 둔 뒤 누른다. 닫으면 ⌨ 단추로 초점이 돌아온다.
+        js('(b => { b.focus(); b.click() })(document.querySelector("header button[aria-label=\\"키 안내 (F1)\\"]"))')
         wait_guide()
         capture('button')
         activate()
         press(VK_F1, Qt.Key.Key_F1)
         wait_closed()
-        metrics['checks'].append('⌨ 단추로 열기·F1로 닫기')
+        assert js('document.activeElement.getAttribute("aria-label")') == '키 안내 (F1)'
+        metrics['checks'].append('⌨ 단추로 열기·F1로 닫기·⌨ 단추로 초점 복귀')
 
         if not args.offscreen:
             # 웹 대화상자가 열려 있으면 실제 F1이 키 안내를 열지 않는다.
@@ -327,7 +358,7 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
             menu = window.tray.icon.contextMenu()
             menu.aboutToShow.emit()
             action = window.tray.hide_action
-            expected = '창 숨기기' if args.variant == 'multi' else '창 숨기기 · Ctrl+Shift+H'
+            expected = {'multi': '창 숨기기', 'long': '창 숨기기 · Ctrl+Alt+Shift+Win+Page Down'}.get(args.variant, '창 숨기기 · Ctrl+Shift+H')
             assert action.text() == expected and action.isEnabled(), action.text()
             action.trigger()
             settle(300)
@@ -349,4 +380,5 @@ with tempfile.TemporaryDirectory(prefix='mvm-236-') as temporary:
         window.tray.quit()
         print('CURRENT', json.dumps(metrics.get('current'), ensure_ascii=False))
     (args.output / f'{prefix}-metrics.json').write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(json.dumps(metrics, ensure_ascii=False, indent=2))
+    # 콘솔 인코딩(CP949 등)과 상관없이 끝나도록 화면 출력은 ASCII로 이스케이프한다. 파일은 위에서 UTF-8로 남겼다.
+    print(json.dumps(metrics, ensure_ascii=True, indent=2))

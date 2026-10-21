@@ -12,7 +12,7 @@ from my_video_manager.core import Command, CommandType
 from my_video_manager.key_guide import app_key_guide
 from my_video_manager.web_contract import TABS
 from test_emergency_hide_ui import app, window, key, emergency_key
-from test_emergency_hide_dialogs_ui import js, view, focus_field, rename_dialog, settle
+from test_emergency_hide_dialogs_ui import js, view, focus_field, field_value, rename_dialog, settle, type_text
 from test_web_dialogs import within
 from qt_wait import wait_for
 
@@ -82,7 +82,7 @@ EXPECTED = {
     "queue": ("처리 상태 목록", "자동 자막 규칙 목록"),
     "statistics": ("이 화면에만 쓰는 키는 없습니다",),
     "folders": ("이 화면에만 쓰는 키는 없습니다",),
-    "settings": ("새 키 입력 취소", "저장하지 않은 값 되돌리기"),
+    "settings": ("새 키 입력 취소", "입력한 기간 저장", "저장하지 않은 값 되돌리기"),
 }
 
 
@@ -139,6 +139,73 @@ def test_changed_bindings_appear_next_time_the_guide_opens(window):
     text = wait_guide(window)
     assert "Ctrl+Alt+R" in text and "Ctrl+Alt+P" in text and "키 미할당" in text
     assert "Ctrl+Shift+R" not in text and "Ctrl+Shift+H" not in text
+
+
+def test_longest_accepted_keys_do_not_overlap_their_labels(window):
+    # 코어가 받는 가장 긴 조합. 키 칸이 넘치거나 칩이 같은 줄 설명 위로 넘어가면 실패한다.
+    rebind(window, Command(CommandType.RANDOM_PLAY), ("Ctrl+Alt+Shift+Meta+Backspace",))
+    rebind(window, Command(CommandType.EMERGENCY_HIDE), ("Ctrl+Alt+Shift+Meta+PgDn",))
+    press_f1(window)
+    text = wait_guide(window)
+    assert "Ctrl+Alt+Shift+Win+Backspace" in text and "Ctrl+Alt+Shift+Win+Page Down" in text
+    rows = json.loads(js(window, f"""JSON.stringify(Array.from({GUIDE}.querySelectorAll('tr')).map(row => {{
+      const head = row.querySelector('th'), label = row.querySelector('td');
+      const right = Math.max(...Array.from(head.querySelectorAll('kbd, span')).map(e => e.getBoundingClientRect().right));
+      return [head.innerText, head.scrollWidth <= head.clientWidth + 1 && right <= label.getBoundingClientRect().left + 0.5];
+    }}))"""))
+    assert len(rows) >= 6 and all(fits for _, fits in rows), rows
+
+
+GRID = 'document.getElementById("library-grid")'
+
+
+def close_guide(window, how):
+    if how == "escape":
+        QTest.keyClick(view(window), Qt.Key.Key_Escape)
+    elif how == "f1":
+        wait_for(lambda: window.web_host.dialogs.blocks_shell_actions)
+        QTest.keyClick(view(window), Qt.Key.Key_F1)
+    elif how == "button":
+        js(window, f'Array.from({GUIDE}.querySelectorAll("button")).find(b => b.textContent === "닫기").click()')
+    else:
+        wait_for(lambda: window.web_host.dialogs.blocks_shell_actions)
+        QTest.mouseClick(view(window), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(4, view(window).height() - 4))
+    wait_closed(window)
+
+
+@pytest.mark.parametrize("how", ["escape", "f1", "button", "outside"])
+def test_closing_returns_focus_to_the_grid_and_arrow_keys_continue(window, how):
+    wait_for(lambda: window.loaded)
+    window.web_host.view.setFocus()
+    wait_for(lambda: js(window, f"!!{GRID}?.getAttribute('aria-activedescendant')"))
+    js(window, f"{GRID}.focus()")
+    settle(window)
+    press_f1(window)
+    wait_guide(window)
+    close_guide(window, how)
+    assert js(window, "document.activeElement.id") == "library-grid"
+    before = js(window, f"{GRID}.getAttribute('aria-activedescendant')")
+    QTest.keyClick(view(window), Qt.Key.Key_Right)
+    wait_for(lambda: js(window, f"{GRID}.getAttribute('aria-activedescendant')") != before)
+
+
+def test_closing_returns_focus_to_the_search_field_and_typing_continues(window):
+    focus_field(window, "영상 제목 빠른 검색")
+    press_f1(window)
+    wait_guide(window)
+    QTest.keyClick(view(window), Qt.Key.Key_Escape)
+    wait_closed(window)
+    type_text(window, "ab")
+    assert field_value(window, "영상 제목 빠른 검색") == "ab"
+
+
+def test_keyboard_button_gets_focus_back(window):
+    wait_for(lambda: window.loaded)
+    button = 'document.querySelector("header button[aria-label=\\"키 안내 (F1)\\"]")'
+    js(window, f"(b => {{ b.focus(); b.click() }})({button})")
+    wait_guide(window)
+    close_guide(window, "escape")
+    assert js(window, "document.activeElement.getAttribute('aria-label')") == "키 안내 (F1)"
 
 
 def test_web_dialog_ignores_f1_without_opening_the_guide(window):

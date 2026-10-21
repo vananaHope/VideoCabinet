@@ -17,7 +17,10 @@ const categories = [['general', '일반'], ['keys', '키 배치'], ['recommend',
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
   { title: "키 배치", rows: [{ keys: ["Esc"], label: "새 키 입력 취소" }] },
-  { title: "추천 기간", rows: [{ keys: ["Esc"], label: "입력 칸의 저장하지 않은 값 되돌리기" }] },
+  { title: "추천 기간", rows: [
+    { keys: ["Enter"], label: "입력한 기간 저장 (저장 단추와 같음)" },
+    { keys: ["Esc"], label: "입력 칸의 저장하지 않은 값 되돌리기 (되돌리기 단추와 같음)" },
+  ] },
 ]
 
 export default function SettingsPage() {
