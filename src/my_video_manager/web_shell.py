@@ -252,14 +252,13 @@ class WebShellHost(QWidget):
                 # 가려진 위젯은 update가 생략될 수 있어 프레임을 명시적으로
                 # 렌더한다. Qt 내부 위임 위젯이 달라져도 정상 웹을 오류로 보지 않는다.
                 renderers[0].grabFramebuffer()
-            # FBO 렌더와 native 부모 창의 합성은 다른 경계다. 준비된 웹을
-            # 올리고 repaint한 뒤 합성을 기다려야 이전 재생 표면을 걷을 수 있다.
+            # 준비된 웹을 올리고 repaint한 뒤 같은 호출에서 덮개를 걷는다.
+            # 두 native 페이지가 섞인 중간 상태에서 합성을 기다리지 않는다.
             self.raise_()
             self.view.raise_()
             self.view.repaint()
-            self.window.composition_waiter()
         finally:
-            # 렌더·합성 준비 실패에도 덮개 아래 오류를 가둬 두지 않는다.
+            # 렌더 준비 실패에도 덮개 아래 오류를 가둬 두지 않는다.
             self.fail_return(token)
 
     def close_return_tab(self):

@@ -267,38 +267,6 @@ def test_web_root_is_restored_before_playback_cover_is_removed(window, tmp_path)
     assert javascript(window, "document.activeElement.id") == 'library-grid'
 
 
-def test_composition_finishes_before_cover_and_player_surface_are_hidden(window):
-    window.player_factory = SlowPlayer
-    window.play(window.core.videos()[0].id)
-    player = window.player
-    observed = []
-
-    def compose():
-        assert window.playback_page.isVisible()
-        assert QWidget.find(player.surface_id).isVisible()
-        assert not player.started.is_set()
-        assert window.web_host.return_pending
-        observed.append('composed')
-
-    class HideEvents(QObject):
-        def eventFilter(self, watched, event):
-            if event.type() == QEvent.Type.Hide:
-                observed.append('hidden')
-            return False
-
-    events = HideEvents()
-    window.playback_page.installEventFilter(events)
-    window.composition_waiter = compose
-    try:
-        window.back_to_list()
-        wait_for(lambda: not window.web_host.return_pending)
-        assert observed[0] == 'composed' and 'hidden' in observed[1:]
-        wait_for(player.started.is_set)
-    finally:
-        player.release.set()
-        window.player_shutdown.finish()
-
-
 def test_rejected_web_return_releases_cover(window):
     wait_for(lambda: window.web_host._frontend_ready and 'library' in window.web_host._ready_pages)
     intercept_return_ready(window, reject=True)
@@ -310,14 +278,10 @@ def test_rejected_web_return_releases_cover(window):
     assert javascript(window, "document.body.textContent.includes('return rejected')")
 
 
-@pytest.mark.parametrize('phase', ['render', 'composition'])
-def test_python_frame_preparation_failure_releases_cover(window, monkeypatch, phase):
+def test_python_frame_preparation_failure_releases_cover(window, monkeypatch):
     def fail(*args):
         raise RuntimeError('return preparation failed')
-    if phase == 'render':
-        monkeypatch.setattr(window.web_host.view, 'findChildren', fail)
-    else:
-        window.composition_waiter = fail
+    monkeypatch.setattr(window.web_host.view, 'findChildren', fail)
     window.back_to_list()
     wait_for(lambda: not window.web_host.return_pending)
     assert not window.playback_page.isVisible()

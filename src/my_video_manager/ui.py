@@ -18,7 +18,6 @@ from .tray import TrayControls
 from .web_dialogs_entries import ReviewDialog
 from .playback_page import PlaybackPage
 from .player_shutdown import PlayerShutdown
-from .window_composition import wait_for_composition
 from .qt_keys import key_name
 from .theme import apply_theme
 
@@ -38,15 +37,13 @@ class TransitionHold:
 
 class MainWindow(QMainWindow):
     def __init__(self, core: AppCore, *, player_factory=MpvPlayer, folder_watch_options=None,
-                 update_check_options=None, native_dialogs_factory=native_dialog_escape,
-                 composition_waiter=wait_for_composition):
+                 update_check_options=None, native_dialogs_factory=native_dialog_escape):
         apply_theme(QApplication.instance())
         super().__init__()
         self.core = core
         self.player = None
         self._player_surface = None
         self.player_shutdown = PlayerShutdown(self)
-        self.composition_waiter = composition_waiter
         self.player_factory = player_factory
         self.playback_list = ()
         self._composing_widget = None
