@@ -5,6 +5,7 @@ import { VideoCard } from "@/components/video-card"
 import { VideoMenu } from "@/components/video-menu"
 import type { VideoData } from "@/bridge-types"
 import type { Action } from "@/bridge"
+import { menuKeyRow, type KeyGuideRow } from "@/lib/key-guide"
 
 export function openKeyboardMenu(event: KeyboardEvent, element: HTMLElement | null) {
   if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return false
@@ -15,6 +16,13 @@ export function openKeyboardMenu(event: KeyboardEvent, element: HTMLElement | nu
   }
   return true
 }
+
+// 아래 keyDown과 같은 키. 키 안내 '지금 화면'에 보인다.
+export const gridKeyRows: readonly KeyGuideRow[] = [
+  { keys: ["← → ↑ ↓"], label: "영상 선택" },
+  { keys: ["Enter"], label: "선택한 영상 재생 (더블클릭과 같음)" },
+  menuKeyRow,
+]
 
 const gridVariants = cva("scroll-stable h-full min-w-0 flex-1 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring", {
   variants: { cardSize: { small: "library-grid-small", medium: "library-grid-medium", large: "library-grid-large" } },

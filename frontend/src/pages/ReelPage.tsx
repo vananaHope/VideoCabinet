@@ -6,8 +6,15 @@ import { Button } from "@/components/ui/button"
 import { NoticeStack } from "@/components/ui/notice"
 import { SelectField } from "@/components/ui/select"
 import { EmptyState, PageHeader } from "@/components/page-parts"
-import { ResultRow, listKey, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+import { ResultRow, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
 import { formatDateTime } from "@/lib/dates"
+import type { KeyGuideGroup } from "@/lib/key-guide"
+
+// 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
+export const keyGuide: readonly KeyGuideGroup[] = [
+  { title: "하이라이트 목록", rows: listKeyRows },
+  { title: "화면", rows: [{ keys: ["Esc"], label: "라이브러리로 돌아가기" }] },
+]
 
 export default function ReelPage() {
   const [bridge, setBridge] = useState<ReelBridge | null>(null)

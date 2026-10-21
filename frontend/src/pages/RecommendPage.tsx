@@ -6,6 +6,7 @@ import { NoticeStack } from "@/components/ui/notice"
 import { EmptyState, PageHeader } from "@/components/page-parts"
 import { RecommendationCard, RecommendationMenu } from "@/components/recommendation-card"
 import { openKeyboardMenu } from "@/components/library-grid"
+import { menuKeyRow, type KeyGuideGroup } from "@/lib/key-guide"
 
 type Cursor = { key: string; row: number; column: number; videoId: number }
 type Position = { row: number; column: number }
@@ -46,6 +47,17 @@ function reveal(videoId: number) {
   const bottom = row.bottom - outer.bottom + inset
   list.scrollTop += top < 0 ? top : bottom > 0 ? Math.min(bottom, top) : 0
 }
+
+// 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
+export const keyGuide: readonly KeyGuideGroup[] = [
+  { title: "추천 줄", rows: [
+    { keys: ["← →", "Home", "End"], label: "줄 안에서 영상 선택" },
+    { keys: ["↑ ↓"], label: "다른 추천 줄로 이동" },
+    { keys: ["Enter"], label: "선택한 영상 재생" },
+    { keys: ["Backspace"], label: "관심 없음 (모든 추천 줄에서 빼기)" },
+    menuKeyRow,
+  ] },
+]
 
 export default function RecommendPage() {
   const [bridge, setBridge] = useState<RecommendBridge | null>(null)

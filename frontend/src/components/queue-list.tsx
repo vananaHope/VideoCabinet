@@ -2,6 +2,7 @@ import { memo, useCallback, useSyncExternalStore, type KeyboardEvent, type React
 import { cva } from "class-variance-authority"
 import { StatusBadge } from "@/components/page-parts"
 import { InlineNotice } from "@/components/ui/notice"
+import type { KeyGuideRow } from "@/lib/key-guide"
 import { QueueStore } from "./queue-store"
 
 // 열 비율은 영상 2 : 상태 1 : 진행률 1 : 안내 2로 두어 긴 안내가 일찍 잘리지 않게 한다.
@@ -27,6 +28,13 @@ const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { sto
     <div role="gridcell" className={`${wide} text-muted-foreground`}>{row.message && <InlineNotice tone={tones[row.state as keyof typeof tones] ?? "info"} text={row.message} />}</div>
   </div>
 })
+
+// 아래 keyDown과 같은 키. 키 안내 '지금 화면'에 보인다.
+export const queueKeyRows: readonly KeyGuideRow[] = [
+  { keys: ["↑ ↓"], label: "항목 선택" },
+  { keys: ["Page Up", "Page Down"], label: "한 화면씩 이동" },
+  { keys: ["Home", "End"], label: "처음 / 끝 항목" },
+]
 
 export function QueueList({ store, ids, selected, onSelect, emptyState }: { store: QueueStore; ids: number[]; selected: number | null; onSelect: (id: number) => void; emptyState: ReactNode }) {
   function keyDown(event: KeyboardEvent) {

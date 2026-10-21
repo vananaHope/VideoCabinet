@@ -6,8 +6,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SelectField } from "@/components/ui/select"
 import { ConfirmDialog, EmptyState } from "@/components/page-parts"
+import type { KeyGuideRow } from "@/lib/key-guide"
 
 const ruleClass = cva("w-full border-b px-4 py-3 text-left text-sm", { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
+
+// 아래 keyDown과 같은 키. 키 안내 '지금 화면'에 보인다.
+export const queueRuleKeyRows: readonly KeyGuideRow[] = [
+  { keys: ["↑ ↓", "Home", "End"], label: "규칙 선택" },
+]
 
 export function QueueRules({ bridge, data, showError }: { bridge: QueueBridge | null; data: QueueRulesData; showError: (error: unknown) => void }) {
   const [selected, setSelected] = useState<number | null>(null)

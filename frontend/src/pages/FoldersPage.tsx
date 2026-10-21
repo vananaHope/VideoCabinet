@@ -6,6 +6,10 @@ import { InlineNotice, Notice, NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, EmptyState, PageHeader, StatusBadge, Tabs } from "@/components/page-parts"
 import { MinimumDuration } from "@/components/minimum-duration"
 import { ScanReport } from "@/components/scan-report"
+import type { KeyGuideGroup } from "@/lib/key-guide"
+
+// 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
+export const keyGuide: readonly KeyGuideGroup[] = []
 
 export default function FoldersPage() {
   const [bridge, setBridge] = useState<FoldersBridge | null>(null)

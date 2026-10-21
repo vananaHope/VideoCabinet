@@ -197,6 +197,10 @@ class WebShellHost(QWidget):
     def handle_key(self, event):
         return False  # 예약 키는 창, 나머지는 Chromium/React가 처리한다.
 
+    def open_key_guide(self):
+        """F1 예약 키. 키 안내 창은 웹이 띄우고 내용은 keyGuide 슬롯에서 읽는다."""
+        self.bridge.shellKeyGuideRequested.emit(self.active_tab)
+
     def focus_content(self):
         controller = self.controllers.get(self.active_tab)
         self.request_focus(controller.default_focus if controller else 'shell')

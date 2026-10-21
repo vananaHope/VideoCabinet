@@ -3,6 +3,9 @@
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QStyle, QSystemTrayIcon
 
+from .core import CommandType
+from .key_display import display_keys
+
 
 class TrayControls(QObject):
     def __init__(self, window):
@@ -16,10 +19,13 @@ class TrayControls(QObject):
         self.icon.setToolTip("영상 라이브러리 · 자막 대기열")
         menu = QMenu(window)
         menu.addAction("열기", self.open)
+        self.hide_action = menu.addAction("창 숨기기", self.hide_window)
         menu.addAction("무작위 재생", self.random_play)
         menu.addAction("대기열 보기", self.show_queue)
         menu.addSeparator()
         menu.addAction("완전 종료", self.quit)
+        menu.aboutToShow.connect(self.refresh_menu)
+        self.refresh_menu()
         self.icon.setContextMenu(menu)
         self.icon.activated.connect(self.activated)
         self.icon.messageClicked.connect(self.show_queue)
@@ -55,6 +61,17 @@ class TrayControls(QObject):
         if emergency:
             # 설정 메뉴처럼 창과 함께 닫힌 Qt 메뉴를 같은 자리에 다시 연다.
             self.window.reopen_emergency_popups()
+
+    def refresh_menu(self):
+        """메뉴를 열 때 지금 긴급 탈출 키와 창 상태를 반영한다."""
+        keys = next(row.keys for row in self.core.key_bindings() if row.command.kind == CommandType.EMERGENCY_HIDE)
+        self.hide_action.setText(f"창 숨기기 · {display_keys(keys)}" if keys else "창 숨기기")
+        self.hide_action.setEnabled(self.window.isVisible())
+
+    def hide_window(self):
+        """트레이의 창 숨기기. 긴급 탈출 키와 같은 결과를 낸다."""
+        if self.window.isVisible():
+            self.window.emergency_hide()
 
     def activated(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
