@@ -438,6 +438,28 @@ def open_playback_menu(window, menu):
     return popup
 
 
+def while_button_menu_open(button, menu, during):
+    """단추의 InstantPopup 메뉴는 exec 안에서 열린다. 열린 동안 during(menu)를 하고, 남아 있으면 닫는다."""
+    timer = QTimer()
+    timer.setInterval(10)
+
+    def run():
+        if not menu.isVisible():
+            return
+        timer.stop()
+        try:
+            during(menu)
+        finally:
+            if menu.isVisible():
+                menu.close()
+
+    timer.timeout.connect(run)
+    timer.start()
+    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+    timer.stop()
+    QApplication.processEvents()
+
+
 def activated(window):
     """OS가 복귀한 창을 활성화한다. offscreen은 다시 보인 창의 활성화를 앱에 알리지 않으므로 같은 알림을 준다."""
     with warnings.catch_warnings():
@@ -452,17 +474,34 @@ def press_emergency_on(popup):
     QApplication.processEvents()
 
 
-@pytest.mark.parametrize("menu", ["settings", "playback"])
+@pytest.mark.parametrize("menu", ["settings", "playback", "speed"])
 def test_playback_popup_menu_hides_with_window_and_reopens_as_it_was(window, menu):
     _, player = play_to_twenty_seconds(window)
     key(window, Qt.Key.Key_Apostrophe)
     assert window.isFullScreen()
-    popup = open_playback_menu(window, menu)
-    assert QApplication.activePopupWidget() is popup
-    QTest.keyClick(popup, Qt.Key.Key_Down)
-    highlighted = popup.activeAction()
+    if menu == "speed":
+        # 속도 목록은 조작 줄 단추로만 연다. 전체 화면에서 열고 그대로 긴급 탈출한다.
+        page = window.playback_page
+        page.reveal_bar()
+        popup, seen = page.speed_menu, {}
+
+        def hide_while_open(opened):
+            seen["popup"] = QApplication.activePopupWidget()
+            seen["fullscreen_pos"] = opened.pos()
+            QTest.keyClick(opened, Qt.Key.Key_Down)
+            seen["highlighted"] = opened.activeAction()
+            press_emergency_on(opened)
+
+        while_button_menu_open(page.speed_button, popup, hide_while_open)
+        assert seen["popup"] is popup
+        highlighted = seen["highlighted"]
+    else:
+        popup = open_playback_menu(window, menu)
+        assert QApplication.activePopupWidget() is popup
+        QTest.keyClick(popup, Qt.Key.Key_Down)
+        highlighted = popup.activeAction()
+        press_emergency_on(popup)
     assert highlighted is not None
-    press_emergency_on(popup)
     assert not window.isVisible() and not window.isFullScreen()
     assert QApplication.activePopupWidget() is None and not popup.isVisible()
     assert player.paused and window.balloons == []
@@ -476,10 +515,16 @@ def test_playback_popup_menu_hides_with_window_and_reopens_as_it_was(window, men
     assert window.frameGeometry().contains(popup.pos())
     assert window.isActiveWindow() and window.has_emergency_focus()
     assert player.paused
+    reopened = popup.pos()
     # 다시 연 메뉴의 기존 키: Esc로 닫으면 영상 화면 초점으로 돌아간다.
     QTest.keyClick(popup, Qt.Key.Key_Escape)
     QApplication.processEvents()
     assert not popup.isVisible() and window.focusWidget() is window.surface
+    if menu == "speed":
+        # 전체 화면 당시 좌표가 아니라, 창 모드에서 단추로 새로 열 때와 같은 자리다.
+        fresh = {}
+        while_button_menu_open(page.speed_button, popup, lambda opened: fresh.update(pos=opened.pos()))
+        assert reopened == fresh["pos"] != seen["fullscreen_pos"]
 
 
 def test_popup_menu_is_not_reopened_when_returning_to_another_screen(window):

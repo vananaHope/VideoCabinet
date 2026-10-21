@@ -3,9 +3,11 @@
 python scripts/check_playback_controls.py --offscreen
 python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scripts/python.exe scripts/check_playback_controls.py --real
 
---offscreen은 가짜 플레이어로 1100×720 창의 조작 줄이 넘치지 않는지 보고 위젯 grab 이미지를 남긴다.
+--offscreen은 가짜 플레이어로 1100×720(가장 넓은 상태 포함)과 더 좁은 창의 조작 줄이 넘치지 않는지,
+하이라이트·속도 단추부터 짧게 줄이는지 보고 위젯 grab 이미지를 남긴다.
 --real은 데스크톱 잠금 안에서 합성 영상과 실제 mpv, Windows 마우스·키 입력으로 단추 클릭, Tab 이동,
-단추 초점에서의 재생 키, 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기를 확인한다.
+단추 초점에서의 재생 키, 하이라이트·구간 단추, 속도 목록 고르기와 목록 밖 속도 표시,
+재생 메뉴 '설정'(창 모드·전체 화면), 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기를 확인한다.
 실창에서는 화면 캡처를 하지 않는다. 데이터는 worktree 밖 임시 폴더에 만들고 지운다.
 """
 
@@ -132,12 +134,22 @@ def offscreen(app, directory, result):
     window.sync_position()
     page = window.playback_page
 
-    def check(name, language):
+    def check(name, language, compact=()):
+        """compact는 이 상태에서 짧게 줄어야 하는 단추. 줄이는 순서(하이라이트·속도 먼저)를 지켜야 한다."""
         settle()
         # 위치 갱신(0.1초)이 의도한 상태를 되돌렸으면 여기서 실패한다.
-        assert page.subtitle_language_button.text() == language, (name, page.subtitle_language_button.text())
+        assert page.subtitle_language_button.label == language, (name, page.subtitle_language_button.label)
         assert fits(page), name
-        assert not any(button.compact for button in page.compact_order), name
+        shortened = [button for button in page.compact_order if button.compact]
+        # 짧은 글자가 따로 없는 단추(창 모드의 ⛶)는 순서에서 건너뛴다.
+        order = [button for button in page.compact_order if button.compact or button.compact_saving() > 0]
+        assert shortened == order[:len(shortened)], (name, [b.accessibleName() for b in shortened])
+        assert set(compact) <= set(shortened), (name, [b.accessibleName() for b in shortened])
+        if not compact:
+            assert not shortened, (name, [b.accessibleName() for b in shortened])
+        # 아이콘·값만 남은 단추도 기능 이름(툴팁·접근성 이름)은 그대로다.
+        assert all(button.toolTip() and button.accessibleName() for button in page.control_buttons), name
+        result.setdefault('compact', {})[name] = [button.accessibleName() for button in shortened]
         image = args.output / f'playback-{name}.png'
         assert window.grab().save(str(image))
         result['passed'].append(name)
@@ -146,17 +158,25 @@ def offscreen(app, directory, result):
     window.core.toggle_subtitle_language()
     assert core.playback_subtitle_language == 'original'
     check('plain', '원어 자막')
-    # 열린 구간·자막 꺼짐·일시정지·배속과 다듬은 자막이 함께 보이는 가장 넓은 창 모드 줄.
+    # 열린 구간('구간 끝내기')·목록 밖 긴 속도·자막 꺼짐·일시정지와 다듬은 자막이 함께 보이는 가장 넓은 창 모드 줄.
+    # 1100 폭에서는 하이라이트 단추가 아이콘만 남아야 들어간다.
     window.core.toggle_subtitle_language()
     assert core.playback_subtitle_language == 'translated'
     core.playback.report(10)
     window.core.execute_highlight_command(Command(CommandType.RANGE_HIGHLIGHT))
-    window.player.options = (1.75, False)
+    window.player.options = (99.75, False)
     window.player.paused = True
     window.sync_position()
-    check('widest', '다듬은 자막')
+    check('widest', '다듬은 자막', compact=(page.point_button, page.range_button))
     assert page.open_range_label.isVisible() and page.pause_button.text() == '▶'
-    assert page.subtitles_button.text() == '자막 꺼짐' and page.speed_label.text() == '1.75×'
+    assert page.range_button.isChecked() and page.range_button.accessibleName() == '구간 하이라이트 끝내기'
+    assert page.range_button.label == '】 구간 끝내기' and page.range_button.text() == '】'
+    assert page.subtitles_button.text() == '자막 꺼짐' and page.speed_button.label == '속도 99.75×'
+    # 1100보다 좁은 화면(전체 화면 등)에서는 속도 단추가 값만 남고, 그다음에 자막·전체 화면 단추를 줄인다.
+    window.resize(1040, 720)
+    check('narrow', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
+    assert page.speed_button.text() == '99.75×'
+    window.resize(1100, 720)
     page.key_guide_button.click()
     settle()
     assert page.help_panel.isVisible()
@@ -233,6 +253,33 @@ def real(app, directory, result):
         assert window.isActiveWindow(), f'{name}: 앱 창이 활성 창이 아님'
         result['passed'].append(name)
 
+    def choose(button, menu, text):
+        """단추로 연 메뉴에서 항목을 Windows 마우스로 고른다.
+
+        InstantPopup 메뉴는 exec 안에서 열려 click()의 대기가 메뉴가 닫힐 때까지 끝나지 않으므로,
+        메뉴가 보이면 타이머에서 항목을 누른다.
+        """
+        def run():
+            if not menu.isVisible():
+                return
+            timer.stop()
+            item = next(action for action in menu.actions() if action.text() == text)
+            ratio = menu.screen().devicePixelRatio()
+            center = menu.mapToGlobal(menu.actionGeometry(item).center())
+            user32.SetCursorPos(round(center.x() * ratio), round(center.y() * ratio))
+            user32.mouse_event(0x0002, 0, 0, 0, 0)
+            user32.mouse_event(0x0004, 0, 0, 0, 0)
+
+        timer = QTimer()
+        timer.setInterval(50)
+        timer.timeout.connect(run)
+        timer.start()
+        # 항목 클릭이 빗나가도 검사가 멈추지 않게 닫는다.
+        QTimer.singleShot(8000, lambda: menu.isVisible() and menu.close())
+        click(button)
+        timer.stop()
+        assert not menu.isVisible(), f'{text}: 메뉴가 닫히지 않음'
+
     window.surface.setFocus()
     click(page.pause_button)
     wait(lambda: window.player.paused, '⏸ 단추로 일시정지')
@@ -243,9 +290,10 @@ def real(app, directory, result):
     wait(lambda: not window.player.paused, 'Enter로 재개')
     passed('playback-key-after-click')
 
-    for _ in range(4):
+    # ⏮ ⏯ ⏭ ◆ 【 속도 다음이 자막 단추다.
+    for _ in range(7):
         press(0x09)
-    assert page.subtitles_button.hasFocus(), 'Tab 네 번 뒤 자막 단추 초점'
+    assert page.subtitles_button.hasFocus(), 'Tab 일곱 번 뒤 자막 단추 초점'
     before = core.playback.position
     press(0x27, extended=True)  # →
     wait(lambda: core.playback.position >= before + 4, '단추 초점에서 → 탐색')
@@ -277,8 +325,50 @@ def real(app, directory, result):
     assert not page.key_guide_button.isChecked()
     passed('key-guide-mouse-close')
 
+    window.surface.setFocus()
+    video_id = core.playback.session.video_id
+    click(page.point_button)
+    wait(lambda: len(core.highlights(video_id)) == 1, '◆ 단추로 지점 하이라이트')
+    assert window.surface.hasFocus(), '하이라이트 단추 클릭이 영상 초점을 가져감'
+    click(page.range_button)
+    wait(lambda: core.open_highlight_start is not None, '【 단추로 구간 시작')
+    assert page.range_button.isChecked() and page.range_button.label == '】 구간 끝내기'
+    settle(1200)
+    click(page.range_button)
+    wait(lambda: core.open_highlight_start is None, '】 단추로 구간 끝내기')
+    assert any(h.end is not None for h in core.highlights(video_id)), '구간 하이라이트 없음'
+    assert not page.range_button.isChecked() and page.range_button.label == '【 구간 시작'
+    passed('highlight-buttons-click')
+
+    choose(page.speed_button, page.speed_menu, '1.5×')
+    wait(lambda: window.player.playback_options()[0] == 1.5, '속도 목록에서 1.5×')
+    assert page.speed_button.label == '속도 1.5×'
+    for _ in range(3):
+        press(0x26, extended=True)  # ↑: 목록 밖 2.25×까지
+    wait(lambda: window.player.playback_options()[0] == 2.25, '↑ 키로 2.25×')
+    wait(lambda: page.speed_button.label == '속도 2.25×', '목록 밖 속도 표시')
+    choose(page.speed_button, page.speed_menu, '1×')
+    wait(lambda: window.player.playback_options()[0] == 1, '속도 목록에서 1×')
+    assert window.surface.hasFocus(), '속도 목록 뒤 영상 초점'
+    passed('speed-list-choose')
+
+    def settings_from_menu(name):
+        choose(page.menu_button, page.menu, '설정 · Alt+S')
+        wait(lambda: QApplication.activePopupWidget() is window.settings_menu, f'{name}: 재생 메뉴의 설정')
+        press(0x1B)  # Esc: 설정 메뉴만 닫는다.
+        wait(lambda: not window.settings_menu.isVisible(), f'{name}: 설정 메뉴 닫기')
+        assert core.playback.session is not None and window.surface.hasFocus(), f'{name}: 재생 세션·초점'
+        passed(name)
+
+    settings_from_menu('playback-menu-settings-window')
+
     click(page.fullscreen_button)
     wait(window.isFullScreen, '⛶ 단추로 전체 화면')
+    x, y = point(page.surface)
+    user32.SetCursorPos(x - 30, y - 30)
+    wait(page.bottom_bar.isVisible, '전체 화면 조작 줄 표시')
+    settings_from_menu('playback-menu-settings-fullscreen')
+    assert window.isFullScreen(), '설정 메뉴 뒤 전체 화면 유지'
     settle(300)
     page.hide_temporary_bar()
     assert not page.bottom_bar.isVisible()

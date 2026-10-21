@@ -240,11 +240,11 @@ class MainWindow(QMainWindow):
         for menu, offset, action in reversed(popups):
             if menu is self.settings_menu:
                 point = self.web_host.settings_menu_point()
-            elif menu is self.playback_page.menu:
-                button = self.playback_page.menu_button
-                point = button.mapToGlobal(button.rect().topRight())
             else:
-                point = self.mapToGlobal(offset)
+                # 조작 줄 단추에 딸린 메뉴(재생 메뉴·속도 목록)는 지금 단추 위치를 기준으로 다시 놓는다.
+                point = self.playback_page.menu_anchor_point(menu)
+                if point is None:
+                    point = self.mapToGlobal(offset)
             menu.popup(point)
             if action is not None and action in menu.actions():
                 menu.setActiveAction(action)
