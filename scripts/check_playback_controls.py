@@ -12,7 +12,6 @@ python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scri
 import argparse
 import ctypes
 import ctypes.wintypes
-from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import os
@@ -36,6 +35,8 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
+from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
+from my_video_manager.translation import TranslatedLine
 from my_video_manager.ui import MainWindow
 
 
@@ -45,6 +46,16 @@ class Media:
 
     def capture(self, path, destination, seconds):
         pass
+
+
+class Transcriber:
+    def transcribe(self, *args, **kwargs):
+        return TranscriberResult('ko', (TranscriptSegment(0, 55, '카드로 결재 할수 있어요.'),))
+
+
+class Translator:
+    def translate(self, lines, *args, **kwargs):
+        return tuple(TranslatedLine(line.id, line.text.replace('할수', '할 수')) for line in lines)
 
 
 class Player:
@@ -67,6 +78,9 @@ class Player:
 
     def playback_options(self):
         return self.options
+
+    def set_subtitle(self, path):
+        pass
 
     def execute(self, command):
         pass
@@ -98,20 +112,30 @@ def offscreen(app, directory, result):
     # Windows offscreen 플러그인은 시스템 글꼴을 자동 열거하지 않는 경우가 있다.
     for name in ('malgun.ttf', 'malgunbd.ttf', 'segoeui.ttf', 'seguisym.ttf', 'seguiemj.ttf'):
         QFontDatabase.addApplicationFont(str(Path(os.environ['WINDIR']) / 'Fonts' / name))
-    core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=directory / 'library.sqlite3')
+    core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=directory / 'library.sqlite3',
+                   transcriber=Transcriber(), translator=Translator())
     for index in (1, 2):
         path = directory / f'아주 긴 제목의 강의 영상 {index:02}강.mkv'
         path.write_bytes(bytes([index]))
         core.add_file(path)
+    video_id = core.videos()[0].id
+    # 다듬은 자막이 가장 긴 자막 종류 이름표다. 한국어 받아쓰기 → 자동 다듬기 요청 → 다듬기 완료를 코어로 만든다.
+    core.request_subtitles(video_id)
+    assert core.process_next_subtitle().state == 'completed'
+    assert core.process_next_translation().state == 'completed'
     window = MainWindow(core, player_factory=Player)
+    window.subtitles.timer.stop()
+    window.translations.timer.stop()
     window.resize(1100, 720)
     window.show()
-    window.play(core.videos()[0].id)
+    window.play(video_id)
     window.sync_position()
     page = window.playback_page
 
-    def check(name):
+    def check(name, language):
         settle()
+        # 위치 갱신(0.1초)이 의도한 상태를 되돌렸으면 여기서 실패한다.
+        assert page.subtitle_language_button.text() == language, (name, page.subtitle_language_button.text())
         assert fits(page), name
         assert not any(button.compact for button in page.compact_order), name
         image = args.output / f'playback-{name}.png'
@@ -119,19 +143,20 @@ def offscreen(app, directory, result):
         result['passed'].append(name)
         result['images'].append(str(image))
 
-    check('plain')
-    # 열린 구간·다듬은 자막·작업 표시가 함께 보이는 가장 넓은 창 모드 줄.
+    window.core.toggle_subtitle_language()
+    assert core.playback_subtitle_language == 'original'
+    check('plain', '원어 자막')
+    # 열린 구간·자막 꺼짐·일시정지·배속과 다듬은 자막이 함께 보이는 가장 넓은 창 모드 줄.
+    window.core.toggle_subtitle_language()
+    assert core.playback_subtitle_language == 'translated'
     core.playback.report(10)
     window.core.execute_highlight_command(Command(CommandType.RANGE_HIGHLIGHT))
-    window.sync_position()
-    page._details = replace(page._details, original_lines=3, spoken_language='ko',
-                            subtitle_state='transcribing', translation_state='translating')
     window.player.options = (1.75, False)
     window.player.paused = True
-    page.update_controls()
-    # 다듬은 자막이 가장 긴 자막 종류 이름표다. 번역 결과 없이 이름표만 그 상태로 둔다.
-    page.subtitle_language_button.set_label('다듬은 자막', '다듬은')
-    check('widest')
+    window.sync_position()
+    check('widest', '다듬은 자막')
+    assert page.open_range_label.isVisible() and page.pause_button.text() == '▶'
+    assert page.subtitles_button.text() == '자막 꺼짐' and page.speed_label.text() == '1.75×'
     page.key_guide_button.click()
     settle()
     assert page.help_panel.isVisible()
@@ -218,16 +243,23 @@ def real(app, directory, result):
     wait(lambda: not window.player.paused, 'Enter로 재개')
     passed('playback-key-after-click')
 
-    press(0x09)
-    press(0x09)
-    assert page.pause_button.hasFocus(), 'Tab 두 번 뒤 ⏯ 초점'
+    for _ in range(4):
+        press(0x09)
+    assert page.subtitles_button.hasFocus(), 'Tab 네 번 뒤 자막 단추 초점'
     before = core.playback.position
     press(0x27, extended=True)  # →
     wait(lambda: core.playback.position >= before + 4, '단추 초점에서 → 탐색')
-    press(0x20)  # Space: 초점 단추 누르기
-    wait(lambda: window.player.paused, 'Space로 초점 단추 누르기')
-    press(0x0D)  # Enter: 초점 단추 누르기
-    wait(lambda: not window.player.paused, 'Enter로 초점 단추 누르기')
+    # 머리 줄 '목록으로'와 같은 규칙: Enter는 초점과 관계없이 재생 명령, Space는 초점 단추 누르기.
+    press(0x0D)
+    wait(lambda: window.player.paused, '자막 단추 초점에서 Enter로 일시정지')
+    assert window.player.playback_options()[1], 'Enter가 자막 단추를 눌렀다'
+    press(0x20)
+    wait(lambda: not window.player.playback_options()[1], 'Space로 자막 단추 누르기')
+    assert window.player.paused, 'Space가 재생 명령으로 갔다'
+    press(0x20)
+    wait(lambda: window.player.playback_options()[1], 'Space로 자막 다시 켜기')
+    press(0x0D)
+    wait(lambda: not window.player.paused, 'Enter로 재개')
     passed('tab-focus-keys')
     window.surface.setFocus()
 

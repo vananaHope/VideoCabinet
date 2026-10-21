@@ -272,6 +272,8 @@ class PlaybackPage(QWidget):
                              (self.next_button, '다음 영상'), (self.subtitles_button, '자막 켜기/끄기'),
                              (self.fullscreen_button, '전체 화면 켜기/끄기')):
             button.setToolTip(f'{name} · {bindings[button.command.kind]}')
+        # Esc는 바꿀 수 없는 목록 복귀 키다. 이름은 모아보기 중 표시('모아보기 목록')를 따른다.
+        self.list_button.setToolTip(f'{self.list_button.label} · Esc')
         self.update_subtitle_language_tooltip()
         self.highlights_button.setText('하이라이트 패널 ' + ('접기' if self.highlights_expanded else '펴기'))
         self.highlights_button.setToolTip('하이라이트 패널 접기 / 펴기 · '
@@ -491,7 +493,8 @@ class PlaybackPage(QWidget):
         self.reel_label.setVisible(current is not None)
         self.back_button.setText("모아보기 목록 · Esc" if current else "목록으로 · Esc")
         self.list_button.set_label("모아보기 목록" if current else "목록으로")
-        self.list_button.setAccessibleName(self.list_button.text())
+        self.list_button.setAccessibleName(self.list_button.label)
+        self.list_button.setToolTip(f"{self.list_button.label} · Esc")
         if current:
             self.reel_label.setText(f"하이라이트 {current.index}/{current.total} · 반복 {'켜짐' if repeat else '꺼짐'}")
         if self._help_requested:
@@ -530,13 +533,9 @@ class PlaybackPage(QWidget):
         if (focus in (self.menu_button, self.back_button, self.highlights_button, *self.control_buttons)
                 and event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)):
             return False
-        if (focus in self.control_buttons and event.modifiers() == Qt.KeyboardModifier.NoModifier
-                and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter)):
-            if not event.isAutoRepeat():
-                focus.click()
-            return True
-        if (focus in (self.back_button, self.highlights_button) and event.key() == Qt.Key.Key_Space
-                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
+        # 초점 단추는 Space로만 누른다. Enter를 비롯한 다른 키는 아래에서 지금 키 배치의 재생 명령이 된다.
+        if (focus in (self.back_button, self.highlights_button, *self.control_buttons)
+                and event.key() == Qt.Key.Key_Space and event.modifiers() == Qt.KeyboardModifier.NoModifier):
             return False
         if (focus is self.menu_button
                 and event.modifiers() == Qt.KeyboardModifier.NoModifier

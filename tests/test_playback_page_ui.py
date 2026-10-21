@@ -149,6 +149,8 @@ def test_reel_next_item_preserves_fullscreen_and_shows_position(window):
     key(window, Qt.Key.Key_End)
     assert window.isFullScreen()
     assert "하이라이트 2/2" in window.playback_page.reel_label.text()
+    page = window.playback_page
+    assert (page.list_button.text(), page.list_button.toolTip()) == ("모아보기 목록", "모아보기 목록 · Esc")
     key(window, Qt.Key.Key_Backslash)
     assert "반복 켜짐" in window.playback_page.reel_label.text()
     key(window, Qt.Key.Key_F1)
@@ -630,6 +632,7 @@ def test_tooltips_show_current_keys_and_follow_saved_bindings(window):
     assert page.subtitle_language_button.toolTip() == "원어 / 번역 자막 전환 · . (마침표)"
     assert page.fullscreen_button.toolTip() == "전체 화면 켜기/끄기 · ' (작은따옴표)"
     assert page.key_guide_button.toolTip() == "키 안내 · F1"
+    assert page.list_button.toolTip() == "목록으로 · Esc"
     bindings = {row.command: row.keys for row in window.core.key_bindings()}
     bindings[Command(CommandType.TOGGLE_PAUSE)] = ("Space",)
     bindings[Command(CommandType.TOGGLE_SUBTITLES)] = ()
@@ -641,23 +644,33 @@ def test_tooltips_show_current_keys_and_follow_saved_bindings(window):
     assert page.subtitle_language_button.toolTip() == "원어 / 번역 자막 전환 · L"
 
 
-def test_focused_control_button_keeps_playback_keys_and_presses_with_space_enter(window):
-    page = window.playback_page
-    key(window, Qt.Key.Key_Tab)
-    assert page.previous_button.hasFocus()
-    key(window, Qt.Key.Key_Tab)
-    assert page.pause_button.hasFocus()
+def tab_to(window, button):
+    window.surface.setFocus()
+    for _ in range(10):
+        key(window, Qt.Key.Key_Tab)
+        if button.hasFocus():
+            return
+    raise AssertionError("Tab으로 단추에 가지 못함")
+
+
+def test_focused_control_button_keeps_playback_keys_and_presses_with_space(window):
+    # 머리 줄 '목록으로'와 같은 규칙: Space는 초점 단추를 누르고, Enter 등은 지금 키 배치의 재생 명령이다.
+    page, videos = window.playback_page, window.core.videos()
+    tab_to(window, page.next_button)
     key(window, Qt.Key.Key_Right)
     key(window, Qt.Key.Key_Down)
-    assert window.player.commands == [Command(CommandType.SEEK, 5), Command(CommandType.CHANGE_SPEED, -0.25)]
+    key(window, Qt.Key.Key_Return)
+    assert window.player.commands == [Command(CommandType.SEEK, 5), Command(CommandType.CHANGE_SPEED, -0.25),
+                                      Command(CommandType.TOGGLE_PAUSE)]
+    assert window.core.playback.session.video_id == videos[0].id
     key(window, Qt.Key.Key_Space)
+    assert window.core.playback.session.video_id == videos[1].id
+    tab_to(window, page.subtitles_button)
     key(window, Qt.Key.Key_Enter)
-    assert window.player.commands[2:] == [Command(CommandType.TOGGLE_PAUSE)] * 2
-    key(window, Qt.Key.Key_Tab)
-    key(window, Qt.Key.Key_Tab)
-    assert page.subtitles_button.hasFocus()
+    assert window.player.commands == [Command(CommandType.TOGGLE_PAUSE)]
+    assert page.subtitles_button.isChecked()
     key(window, Qt.Key.Key_Space)
-    assert window.player.commands[-1] == Command(CommandType.TOGGLE_SUBTITLES)
+    assert window.player.commands == [Command(CommandType.TOGGLE_PAUSE), Command(CommandType.TOGGLE_SUBTITLES)]
     assert not page.subtitles_button.isChecked()
 
 
@@ -683,6 +696,7 @@ def test_fullscreen_bar_turns_fullscreen_off_and_returns_to_list(window):
     assert not page.bottom_bar.isVisible()
     page.reveal_bar()
     assert page.list_button.isVisible()
+    assert page.list_button.toolTip() == "목록으로 · Esc"
     assert page.fullscreen_button.accessibleName() == "전체 화면"
     click(page.fullscreen_button)
     assert not window.isFullScreen() and not page.fullscreen_button.isChecked()
