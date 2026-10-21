@@ -12,6 +12,15 @@ from .theme import PLAYBACK_COLORS, playback_stylesheet, playback_font
 from .web_tabs import TABS
 
 
+# 하이라이트 모아보기 중 화면별 의미가 바뀌는 명령. 키 안내와 조작 줄 단추가 같은 이름을 쓴다.
+REEL_MEANINGS = {
+    CommandType.PREVIOUS_HIGHLIGHT: "이전 하이라이트 항목",
+    CommandType.NEXT_HIGHLIGHT: "다음 하이라이트 항목",
+    CommandType.PREVIOUS_VIDEO: "현재 영상 첫 항목 / 이전 영상",
+    CommandType.NEXT_VIDEO: "다음 영상 첫 하이라이트",
+}
+
+
 class PlaybackHelp(QWidget):
     close_requested = Signal()
 
@@ -40,12 +49,7 @@ class PlaybackHelp(QWidget):
 
     def refresh(self, core):
         reel = core.reel_playback is not None
-        meanings = {
-            CommandType.PREVIOUS_HIGHLIGHT: "이전 하이라이트 항목",
-            CommandType.NEXT_HIGHLIGHT: "다음 하이라이트 항목",
-            CommandType.PREVIOUS_VIDEO: "현재 영상 첫 항목 / 이전 영상",
-            CommandType.NEXT_VIDEO: "다음 영상 첫 하이라이트",
-        } if reel else {}
+        meanings = dict(REEL_MEANINGS) if reel else {}
         if core.playback.session:
             task = core.subtitle_task(core.playback.session.video_id)
             meanings[CommandType.TOGGLE_SUBTITLE_LANGUAGE] = f'원어 / {task.subtitle_label} 전환'

@@ -152,7 +152,8 @@ def test_reel_next_item_preserves_fullscreen_and_shows_position(window):
     assert window.isFullScreen()
     assert "하이라이트 2/2" in window.playback_page.reel_label.text()
     page = window.playback_page
-    assert (page.list_button.text(), page.list_button.toolTip()) == ("모아보기 목록", "모아보기 목록 · Esc")
+    # 좁은 화면에서는 '목록'으로 줄 수 있다. 줄이기 전 글자와 툴팁은 모아보기 이름이다.
+    assert (page.list_button.label, page.list_button.toolTip()) == ("모아보기 목록", "모아보기 목록 · Esc")
     key(window, Qt.Key.Key_Backslash)
     assert "반복 켜짐" in window.playback_page.reel_label.text()
     key(window, Qt.Key.Key_F1)
@@ -271,6 +272,8 @@ def test_settings_menu_shortcut_and_return_to_playback_focus(window, fullscreen)
 
 
 def test_open_range_start_is_visible_until_range_is_finished(window):
+    # 좁은 창에서는 열린 구간 표시도 줄인다(test_control_bar_shortens_labels_only_while_narrow).
+    window.resize(3000, 720)
     window.core.playback.report(10)
     key(window, Qt.Key.Key_Delete)
     page = window.playback_page
@@ -432,6 +435,9 @@ def test_highlight_click_exits_reel_preserves_revisit_and_starts_viewing(window)
     assert core.last_highlight_revisited_at(first) == revisit
     assert not window.playback_page.reel_label.isVisible()
     assert window.reel.shown is None
+    page = window.playback_page
+    assert all(button.isHidden() for button in page.reel_buttons)
+    assert page.next_button.toolTip() == "다음 영상 · Page Down"
 
 
 @pytest.mark.parametrize('transition', ['series', 'reel'])
@@ -858,3 +864,121 @@ def test_playback_menu_settings_opens_same_menu_as_alt_s(window, fullscreen):
     assert window.surface.hasFocus()
     assert window.isFullScreen() is fullscreen
     assert window.core.playback.session is not None
+
+
+def start_reel(window):
+    """첫 영상에 항목 둘, 둘째 영상에 항목 하나를 두고 처음부터 모아보기를 시작한다."""
+    add_highlight(window, 10)
+    add_highlight(window, 30)
+    key(window, Qt.Key.Key_PageDown)
+    window.sync_position()
+    add_highlight(window, 10)
+    window.reel.open()
+    window.reel.start()
+    window.sync_position()
+    assert (window.core.reel_playback.index, window.core.reel_playback.total) == (1, 3)
+
+
+def test_reel_buttons_show_only_in_reel_and_run_same_commands_as_keys(window):
+    page, core = window.playback_page, window.core
+    assert all(button.isHidden() for button in page.reel_buttons)
+    start_reel(window)
+    assert all(button.isVisible() for button in page.reel_buttons)
+    index = lambda: core.reel_playback.index
+    key(window, Qt.Key.Key_End)
+    assert index() == 2
+    click(page.reel_previous_button)
+    assert index() == 1
+    click(page.reel_next_button)
+    assert index() == 2
+    key(window, Qt.Key.Key_Home)
+    assert index() == 1
+    # 모아보기 중 ⏮ ⏭는 PgUp/PgDn처럼 영상의 첫 항목으로 옮긴다.
+    click(page.next_button)
+    assert index() == 3
+    key(window, Qt.Key.Key_PageUp)
+    assert index() == 1
+    key(window, Qt.Key.Key_PageDown)
+    click(page.previous_button)
+    assert index() == 1
+    assert window.surface.hasFocus()
+    # 반복 단추는 \ 키와 같은 명령이고, 키로 바꿔도 단추 상태가 함께 바뀐다.
+    click(page.reel_repeat_button)
+    assert core.reel_repeat
+    assert (page.reel_repeat_button.isChecked(), page.reel_repeat_button.label) == (True, "↻ 반복 켜짐")
+    key(window, Qt.Key.Key_Backslash)
+    assert not core.reel_repeat
+    assert (page.reel_repeat_button.isChecked(), page.reel_repeat_button.label) == (False, "↻ 반복 꺼짐")
+    key(window, Qt.Key.Key_Backslash)
+    assert page.reel_repeat_button.isChecked()
+    key(window, Qt.Key.Key_Escape)
+    assert core.reel_playback is None
+    window.play(core.videos()[0].id)
+    window.sync_position()
+    assert all(button.isHidden() for button in page.reel_buttons)
+    assert not page.reel_repeat_button.isChecked()
+
+
+def test_reel_button_names_match_key_guide_and_follow_saved_bindings(window):
+    page = window.playback_page
+    start_reel(window)
+    assert page.previous_button.toolTip() == "현재 영상 첫 항목 / 이전 영상 · Page Up"
+    assert page.next_button.accessibleName() == "다음 영상 첫 하이라이트"
+    assert page.reel_previous_button.toolTip() == "이전 하이라이트 항목 · Home"
+    assert page.reel_next_button.toolTip() == "다음 하이라이트 항목 · End"
+    assert page.reel_repeat_button.toolTip() == "모아보기 반복 켜기/끄기 · \\ (원화 기호)"
+    assert page.reel_repeat_button.accessibleName() == "모아보기 반복"
+    key(window, Qt.Key.Key_F1)
+    guide = page.help_panel.text.text()
+    assert all(button.accessibleName() in guide for button in (
+        page.previous_button, page.next_button, page.reel_previous_button, page.reel_next_button))
+    key(window, Qt.Key.Key_F1)
+    bindings = {row.command: row.keys for row in window.core.key_bindings()}
+    bindings[Command(CommandType.NEXT_HIGHLIGHT)] = ("N",)
+    bindings[Command(CommandType.TOGGLE_REEL_REPEAT)] = ()
+    window.core.save_key_bindings(bindings)
+    window.refresh_key_help()
+    assert page.reel_next_button.toolTip() == "다음 하이라이트 항목 · N"
+    assert page.reel_repeat_button.toolTip() == "모아보기 반복 켜기/끄기 · 키 미할당"
+    key(window, Qt.Key.Key_Escape)
+    window.play(window.core.videos()[0].id)
+    assert (page.previous_button.toolTip(), page.previous_button.accessibleName()) == ("이전 영상 · Page Up", "이전 영상")
+
+
+def test_reel_buttons_in_fullscreen_bar_and_tab_focus(window):
+    page, core = window.playback_page, window.core
+    start_reel(window)
+    key(window, Qt.Key.Key_Apostrophe)
+    page.reveal_bar()
+    assert all(button.isVisible() for button in page.reel_buttons)
+    click(page.reel_next_button)
+    assert window.isFullScreen() and core.reel_playback.index == 2
+    key(window, Qt.Key.Key_Escape)
+    assert not window.isFullScreen()
+    # #234와 같은 규칙: Tab으로 초점을 받고 Space로 누르며, Enter는 재생 명령이다.
+    tab_to(window, page.reel_repeat_button)
+    key(window, Qt.Key.Key_Space)
+    assert core.reel_repeat and page.reel_repeat_button.isChecked()
+    key(window, Qt.Key.Key_Return)
+    assert window.player.paused and core.reel_repeat
+
+
+def test_fullscreen_reel_bar_shortens_list_button_then_tightens_spacing(window):
+    # 1100 폭 전체 화면의 가장 넓은 줄은 scripts/check_playback_controls.py --offscreen이 실제 글꼴로 잰다.
+    page = window.playback_page
+    start_reel(window)
+    page.set_fullscreen(True)
+    page.bottom_bar.show()
+    row = page.controls.layout()
+    window.resize(3000, 720)
+    QApplication.processEvents()
+    assert page.list_button.text() == "모아보기 목록" and row.spacing() == 8
+    window.resize(600, 720)
+    QApplication.processEvents()
+    # 글자를 모두 줄인 뒤에도 넘치면 간격을 좁힌다. 줄어든 목록 단추도 이름·툴팁은 그대로다.
+    assert page.list_button.text() == "목록" and row.spacing() == 4
+    assert (page.list_button.accessibleName(), page.list_button.toolTip()) == ("모아보기 목록", "모아보기 목록 · Esc")
+    window.resize(3000, 720)
+    QApplication.processEvents()
+    assert page.list_button.text() == "모아보기 목록" and row.spacing() == 8
+    assert not any(button.compact for button in page.compact_order)

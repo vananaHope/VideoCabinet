@@ -4,10 +4,12 @@ python scripts/check_playback_controls.py --offscreen
 python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scripts/python.exe scripts/check_playback_controls.py --real
 
 --offscreen은 가짜 플레이어로 1100×720(가장 넓은 상태 포함)과 더 좁은 창의 조작 줄이 넘치지 않는지,
-하이라이트·속도 단추부터 짧게 줄이는지 보고 위젯 grab 이미지를 남긴다.
+하이라이트·속도 단추부터 짧게 줄이는지 보고 위젯 grab 이미지를 남긴다. 모아보기 단추가 더해진 가장 넓은 줄과
+그 전체 화면 구성(1280 폭)도 재고, 상태별 남은 폭(slack)과 더 줄여 확보할 수 있는 폭(reducible)을 결과 JSON에 남긴다.
 --real은 데스크톱 잠금 안에서 합성 영상과 실제 mpv, Windows 마우스·키 입력으로 단추 클릭, Tab 이동,
 단추 초점에서의 재생 키, 하이라이트·구간 단추, 속도 목록 고르기와 목록 밖 속도 표시,
-재생 메뉴 '설정'(창 모드·전체 화면), 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기를 확인한다.
+재생 메뉴 '설정'(창 모드·전체 화면), 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기,
+전체 화면 모아보기의 ⇤ ⇥ ↻ 반복·⏮ ⏭ 단추 클릭을 확인한다.
 실창에서는 화면 캡처를 하지 않는다. 데이터는 worktree 밖 임시 폴더에 만들고 지운다.
 """
 
@@ -81,6 +83,12 @@ class Player:
     def playback_options(self):
         return self.options
 
+    def apply_playback_options(self, options):
+        self.options = options
+
+    def seek_to(self, position, *, resume=False):
+        pass
+
     def set_subtitle(self, path):
         pass
 
@@ -103,11 +111,13 @@ def wait(predicate, label, seconds=10):
 
 
 def fits(page):
-    """조작 줄의 최소 폭이 줄 폭 안이고 보이는 단추가 모두 줄 안에 있다."""
+    """조작 줄의 최소 폭이 줄 폭 안이고, 보이는 단추·시간 표시가 모두 줄 안에서 눌리지(잘리지) 않는다."""
     row = page.controls.layout()
-    inside = all(widget.geometry().right() < page.controls.width()
-                 for widget in (*page.control_buttons, page.menu_button) if widget.isVisible())
-    return row.minimumSize().width() <= page.controls.width() and inside
+    widgets = [widget for widget in (*page.control_buttons, page.menu_button, page.position_label,
+                                     page.open_range_label) if widget.isVisible()]
+    inside = all(widget.geometry().right() < page.controls.width() for widget in widgets)
+    whole = all(widget.width() >= widget.sizeHint().width() for widget in widgets)
+    return row.minimumSize().width() <= page.controls.width() and inside and whole
 
 
 def offscreen(app, directory, result):
@@ -141,8 +151,9 @@ def offscreen(app, directory, result):
         assert page.subtitle_language_button.label == language, (name, page.subtitle_language_button.label)
         assert fits(page), name
         shortened = [button for button in page.compact_order if button.compact]
-        # 짧은 글자가 따로 없는 단추(창 모드의 ⛶)는 순서에서 건너뛴다.
-        order = [button for button in page.compact_order if button.compact or button.compact_saving() > 0]
+        # 짧은 글자가 따로 없는 단추(창 모드의 ⛶)와 숨은 단추(일반 재생의 모아보기 단추)는 순서에서 건너뛴다.
+        order = [button for button in page.compact_order
+                 if button.compact or (button.compact_saving() > 0 and not button.isHidden())]
         assert shortened == order[:len(shortened)], (name, [b.accessibleName() for b in shortened])
         assert set(compact) <= set(shortened), (name, [b.accessibleName() for b in shortened])
         if not compact:
@@ -150,6 +161,11 @@ def offscreen(app, directory, result):
         # 아이콘·값만 남은 단추도 기능 이름(툴팁·접근성 이름)은 그대로다.
         assert all(button.toolTip() and button.accessibleName() for button in page.control_buttons), name
         result.setdefault('compact', {})[name] = [button.accessibleName() for button in shortened]
+        # 줄인 뒤 줄에 남는 폭. 뒤 이슈가 단추를 더할 때 기준으로 쓴다.
+        result.setdefault('slack', {})[name] = page.controls.width() - page.controls.layout().minimumSize().width()
+        result.setdefault('spacing', {})[name] = page.controls.layout().spacing()
+        result.setdefault('reducible', {})[name] = sum(button.compact_saving() for button in page.compact_order
+                                                       if not button.compact and not button.isHidden())
         image = args.output / f'playback-{name}.png'
         assert window.grab().save(str(image))
         result['passed'].append(name)
@@ -172,6 +188,11 @@ def offscreen(app, directory, result):
     assert page.range_button.isChecked() and page.range_button.accessibleName() == '구간 하이라이트 끝내기'
     assert page.range_button.label == '】 구간 끝내기' and page.range_button.text() == '】'
     assert page.subtitles_button.text() == '자막 꺼짐' and page.speed_button.label == '속도 99.75×'
+    # 전체 화면 줄에는 '목록으로'와 '⛶ 전체 화면 끄기'가 더해진다. 최소 창 폭(1100)의 화면에서 그 구성을 잰다.
+    fullscreen_bar(page, True)
+    check('fullscreen-widest-1100', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
+    assert page.position_label.text() == '00:00:10.000 / 00:02:00.000'
+    fullscreen_bar(page, False)
     # 1100보다 좁은 화면(전체 화면 등)에서는 속도 단추가 값만 남고, 그다음에 자막·전체 화면 단추를 줄인다.
     window.resize(1040, 720)
     check('narrow', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
@@ -184,7 +205,55 @@ def offscreen(app, directory, result):
     page.help_panel.close_button.click()
     assert not page.help_panel.isVisible()
     result['passed'].append('key-guide-close-button')
+    reel(window, page, check)
     window.tray.quit()
+
+
+def fullscreen_bar(page, enabled):
+    """창 크기는 그대로 두고 전체 화면 조작 줄 구성(목록 단추·전체 화면 끄기)을 보인다."""
+    page.set_fullscreen(enabled)
+    if enabled:
+        page.bottom_bar.show()
+
+
+def reel(window, page, check):
+    """하이라이트 모아보기 중의 조작 줄. 모아보기 단추 셋이 더해진 가장 넓은 줄과 모아보기를 끝낸 줄."""
+    core = window.core
+    core.playback.report(20)
+    core.execute_highlight_command(Command(CommandType.RANGE_HIGHLIGHT))  # 열린 구간을 닫아 첫 항목으로 쓴다.
+    core.playback.report(30)
+    core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
+    window.reel.start()
+    assert core.reel_playback is not None and all(button.isVisible() for button in page.reel_buttons)
+    # 열린 구간('구간 끝내기')·목록 밖 긴 속도·자막 꺼짐·일시정지·다듬은 자막에 반복 켜짐까지 함께 보이는 줄.
+    # 한국어 영상은 다듬은 자막으로 시작한다.
+    assert core.playback_subtitle_language == 'translated'
+    core.playback.report(core.reel_playback.start + 1)
+    core.execute_highlight_command(Command(CommandType.RANGE_HIGHLIGHT))
+    window.player.options = (99.75, False)
+    window.player.paused = True
+    page.reel_repeat_button.click()
+    window.sync_position()
+    assert core.reel_repeat and page.reel_repeat_button.isChecked()
+    assert page.reel_repeat_button.label == '↻ 반복 켜짐'
+    # 1100 폭에서는 하이라이트·속도·반복 단추에 이어 자막 단추와 열린 구간 표시까지 줄여야 들어간다.
+    check('reel-widest', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button,
+                                              page.reel_repeat_button, page.open_range_label))
+    assert page.open_range_label.text() == '【 00:00:11' and page.reel_repeat_button.text() == '↻'
+    # 전체 화면 줄에는 '모아보기 목록'과 '⛶ 전체 화면 끄기'가 더해진다. 최소 창 폭(1100)과 흔한 가장 작은 화면 폭(1280)의
+    # 화면에서 그 구성을 잰다. 1100에서는 글자를 모두 줄이고 간격까지 좁혀야 시간 표시와 단추가 잘리지 않는다.
+    fullscreen_bar(page, True)
+    check('reel-fullscreen-bar-1100', '다듬은 자막', compact=[button for button in page.compact_order
+                                                         if button.compact_saving() and not button.isHidden()])
+    assert page.position_label.text() == '00:00:11.000 / 00:02:00.000'
+    assert page.list_button.text() == '목록' and page.list_button.toolTip() == '모아보기 목록 · Esc'
+    assert page.list_button.accessibleName() == '모아보기 목록'
+    window.resize(1280, 720)
+    check('reel-fullscreen-bar-1280', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
+    fullscreen_bar(page, False)
+    window.resize(1100, 720)
+    window.end_playback()
+    assert not any(button.isVisible() or not button.isHidden() for button in page.reel_buttons)
 
 
 def real(app, directory, result):
@@ -393,7 +462,61 @@ def real(app, directory, result):
     wait(lambda: core.playback.session is None, '목록으로 단추')
     assert not window.isFullScreen() and window.pages.currentWidget() is window.web_host
     passed('fullscreen-list-button')
+    real_reel(window, page, directory, click, press, passed)
     window.tray.quit()
+
+
+def real_reel(window, page, directory, click, press, passed):
+    """하이라이트 모아보기를 전체 화면에서 재생하며 모아보기 단추와 ⏮ ⏭를 Windows 마우스로 누른다."""
+    from my_video_manager.adapters import FFmpegMediaReader
+    core = window.core
+    source = directory / '실창 조작 줄 2.mp4'
+    subprocess.run([FFmpegMediaReader().ffmpeg, '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=24',
+                    '-t', '90', '-c:v', 'libx264', '-preset', 'ultrafast', '-y', str(source)], check=True)
+    core.add_file(source)
+    # 첫 영상(앞 검사의 하이라이트 포함)에 항목 둘을 더하고, 둘째 영상에 항목 하나를 둔다.
+    # 검사 중 자동으로 다음 항목에 넘어가지 않게 40초 구간으로 둔다.
+    videos = sorted(core.videos(), key=lambda v: v.title)
+    for video, starts in zip(videos, ((10, 60), (10,))):
+        core.switch_to(video.id)
+        for start in starts:
+            core.playback.report(start, seeked=True)
+            core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
+            highlight = next(h for h in core.highlights(video.id) if h.start == start)
+            core.update_highlight(highlight.id, start=start, end=start + 40, note='')
+    core.end_playback()
+    window.reel.start()
+    wait(lambda: core.reel_playback is not None and core.playback.position > 10.5, '모아보기 재생 시작')
+    index = lambda: core.reel_playback.index
+    second_video_first = 1 + sum(1 for entry in core.reel_entries() if entry.highlight.video_id == videos[0].id)
+    press(0xDE)  # ': 전체 화면
+    wait(window.isFullScreen, '모아보기 전체 화면')
+
+    offsets = iter(range(-60, 60, 7))
+
+    def press_button(button, done, label):
+        # 커서를 영상 위에서 움직여 숨은 조작 줄을 다시 보이게 한 뒤 누른다.
+        center = page.surface.mapToGlobal(page.surface.rect().center())
+        ratio = page.screen().devicePixelRatio()
+        ctypes.windll.user32.SetCursorPos(round((center.x() + next(offsets)) * ratio), round(center.y() * ratio))
+        wait(button.isVisible, f'{label}: 조작 줄 표시')
+        click(button)
+        wait(done, label)
+        assert window.isFullScreen() and window.surface.hasFocus(), f'{label}: 전체 화면·영상 초점'
+
+    press_button(page.reel_next_button, lambda: index() == 2, '⇥ 다음 항목')
+    press_button(page.reel_previous_button, lambda: index() == 1, '⇤ 이전 항목')
+    press_button(page.reel_repeat_button, lambda: core.reel_repeat and page.reel_repeat_button.isChecked(), '↻ 반복 켜기')
+    press(0xDC)  # \: 키로 끄면 단추도 꺼진다.
+    wait(lambda: not core.reel_repeat and not page.reel_repeat_button.isChecked(), '백슬래시 키로 반복 끄기')
+    press_button(page.next_button, lambda: index() == second_video_first, '⏭ 다음 영상 첫 하이라이트')
+    press_button(page.previous_button, lambda: index() == 1, '⏮ 이전 영상 첫 항목')
+    passed('reel-buttons-fullscreen-click')
+    press(0x1B)  # Esc: 전체 화면 끄기
+    press(0x1B)  # Esc: 모아보기 목록
+    wait(lambda: core.reel_playback is None, '모아보기 목록 복귀')
+    assert all(button.isHidden() for button in page.reel_buttons)
+    passed('reel-buttons-hidden-after-reel')
 
 
 def main():
