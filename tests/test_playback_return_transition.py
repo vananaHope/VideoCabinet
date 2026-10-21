@@ -217,16 +217,145 @@ def javascript(window, code):
     return values[0]
 
 
-def test_web_root_is_restored_before_playback_cover_is_removed(window):
+def intercept_return_ready(window, *, reject=False):
+    javascript(window, """(() => {
+        const transport = window.qt.webChannelTransport;
+        const send = transport.send.bind(transport);
+        window.returnReadyFrames = [];
+        transport.send = text => {
+            const message = JSON.parse(text);
+            if (message.object === 'shell' && message.method === 'returnReady') {
+                window.returnReadyFrames.push({
+                    root: getComputedStyle(document.getElementById('root')).visibility,
+                    scroll: document.getElementById('library-grid').scrollTop,
+                });
+                if (REJECT) {
+                    transport.onmessage({data: JSON.stringify({type: 10, id: message.id,
+                        data: JSON.stringify({error: 'return rejected'})})});
+                    return;
+                }
+            }
+            send(text);
+        };
+    })()""".replace('REJECT', str(reject).lower()))
+
+
+def test_web_root_is_restored_before_playback_cover_is_removed(window, tmp_path):
     host = window.web_host
     wait_for(lambda: host._frontend_ready and 'library' in host._ready_pages)
+    for index in range(50):
+        path = tmp_path / f'return-{index:02}.mkv'
+        path.write_bytes(f'return video {index}'.encode())
+        window.core.add_file(path)
+    window.show_library()
+    wait_for(lambda: not host.return_pending)
+    wait_for(lambda: javascript(window, "Number(document.getElementById('library-grid').getAttribute('aria-rowcount')) > 20"))
+    javascript(window, "document.getElementById('library-grid').scrollTop=1800")
+    javascript(window, "document.getElementById('library-grid').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))")
+    wait_for(lambda: window.player is not None)
+    # 페이지 변경 알림의 별도 복구가 순서 결함을 가리지 않게 복귀 경로 자체를 검사한다.
+    window.pages.currentChanged.disconnect(host.dialogs.sync_container)
+    intercept_return_ready(window)
     javascript(window, "window.mvmDialogRootStyle=[document.getElementById('root'), null]; document.getElementById('root').style.visibility='hidden'")
     window.back_to_list()
     assert window.playback_page.isVisible()
     assert not window.playback_page.isEnabled()
     wait_for(lambda: not window.playback_page.isVisible())
+    assert json.loads(javascript(window, 'JSON.stringify(window.returnReadyFrames)')) == [
+        {'root': 'visible', 'scroll': 1800}]
     assert javascript(window, "getComputedStyle(document.getElementById('root')).visibility") == 'visible'
     assert javascript(window, "document.activeElement.id") == 'library-grid'
+
+
+def test_composition_finishes_before_cover_and_player_surface_are_hidden(window):
+    window.player_factory = SlowPlayer
+    window.play(window.core.videos()[0].id)
+    player = window.player
+    observed = []
+
+    def compose():
+        assert window.playback_page.isVisible()
+        assert QWidget.find(player.surface_id).isVisible()
+        assert not player.started.is_set()
+        assert window.web_host.return_pending
+        observed.append('composed')
+
+    class HideEvents(QObject):
+        def eventFilter(self, watched, event):
+            if event.type() == QEvent.Type.Hide:
+                observed.append('hidden')
+            return False
+
+    events = HideEvents()
+    window.playback_page.installEventFilter(events)
+    window.composition_waiter = compose
+    try:
+        window.back_to_list()
+        wait_for(lambda: not window.web_host.return_pending)
+        assert observed[0] == 'composed' and 'hidden' in observed[1:]
+        wait_for(player.started.is_set)
+    finally:
+        player.release.set()
+        window.player_shutdown.finish()
+
+
+def test_rejected_web_return_releases_cover(window):
+    wait_for(lambda: window.web_host._frontend_ready and 'library' in window.web_host._ready_pages)
+    intercept_return_ready(window, reject=True)
+    window.back_to_list()
+    wait_for(lambda: not window.web_host.return_pending)
+    assert javascript(window, 'window.returnReadyFrames.length') == 1
+    assert not window.playback_page.isVisible()
+    assert window.playback_page.isEnabled()
+    assert javascript(window, "document.body.textContent.includes('return rejected')")
+
+
+@pytest.mark.parametrize('phase', ['render', 'composition'])
+def test_python_frame_preparation_failure_releases_cover(window, monkeypatch, phase):
+    def fail(*args):
+        raise RuntimeError('return preparation failed')
+    if phase == 'render':
+        monkeypatch.setattr(window.web_host.view, 'findChildren', fail)
+    else:
+        window.composition_waiter = fail
+    window.back_to_list()
+    wait_for(lambda: not window.web_host.return_pending)
+    assert not window.playback_page.isVisible()
+    assert window.playback_page.isEnabled()
+    wait_for(lambda: javascript(window, "document.body.textContent.includes('return preparation failed')"))
+
+
+def test_python_page_preparation_failure_releases_cover(window, monkeypatch):
+    def fail():
+        raise RuntimeError('page preparation failed')
+    monkeypatch.setattr(window.library_page, 'return_from_playback', fail)
+    with pytest.raises(RuntimeError, match='page preparation failed'):
+        window.back_to_list()
+    assert not window.web_host.return_pending
+    assert not window.playback_page.isVisible()
+
+
+def test_missing_internal_renderer_returns_without_load_error(window, monkeypatch):
+    monkeypatch.setattr(window.web_host.view, 'findChildren', lambda *args: [])
+    window.back_to_list()
+    wait_for(lambda: not window.web_host.return_pending)
+    assert window.web_host.isVisible()
+    assert not window.web_host.load_error.isVisible()
+    assert not window.playback_page.isVisible()
+
+
+def test_page_without_bridge_can_finish_return(window, monkeypatch):
+    from my_video_manager.web_page import WebPageController
+    host = window.web_host
+    wait_for(lambda: host._frontend_ready and 'library' in host._ready_pages)
+    page = WebPageController(host)
+    page.tab = 'library'
+    monkeypatch.setitem(host.controllers, 'library', page)
+    monkeypatch.setitem(host.routes, 'library', page)
+    host._ready_pages.remove('library')
+    window.back_to_list()
+    wait_for(lambda: not host.return_pending)
+    assert not window.playback_page.isVisible()
 
 
 def test_late_web_return_ack_does_not_hide_new_playback(window):

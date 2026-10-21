@@ -32,6 +32,9 @@ class Player:
     def play(self, path, start, *, subtitle):
         pass
 
+    def prepare_close(self):
+        pass
+
     def close(self):
         pass
 

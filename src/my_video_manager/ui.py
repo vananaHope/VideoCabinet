@@ -17,6 +17,8 @@ from .native_dialogs import native_dialog_escape
 from .tray import TrayControls
 from .web_dialogs_entries import ReviewDialog
 from .playback_page import PlaybackPage
+from .player_shutdown import PlayerShutdown
+from .window_composition import wait_for_composition
 from .qt_keys import key_name
 from .theme import apply_theme
 
@@ -36,14 +38,15 @@ class TransitionHold:
 
 class MainWindow(QMainWindow):
     def __init__(self, core: AppCore, *, player_factory=MpvPlayer, folder_watch_options=None,
-                 update_check_options=None, native_dialogs_factory=native_dialog_escape):
+                 update_check_options=None, native_dialogs_factory=native_dialog_escape,
+                 composition_waiter=wait_for_composition):
         apply_theme(QApplication.instance())
         super().__init__()
         self.core = core
         self.player = None
         self._player_surface = None
-        from .player_shutdown import PlayerShutdown
         self.player_shutdown = PlayerShutdown(self)
+        self.composition_waiter = composition_waiter
         self.player_factory = player_factory
         self.playback_list = ()
         self._composing_widget = None
@@ -352,6 +355,7 @@ class MainWindow(QMainWindow):
             layout = QVBoxLayout(self.surface)
             layout.setContentsMargins(0, 0, 0, 0)
         surface = QWidget(self.surface)
+        # 기본 QWidget이 처리하지 않은 마우스 이벤트는 ignore되어 부모 surface로 전파된다.
         surface.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         surface.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
         self.surface.layout().addWidget(surface)
@@ -378,7 +382,8 @@ class MainWindow(QMainWindow):
                 if prepare is not None:
                     prepare()
                 else:
-                    # 동기 어댑터도 기존 경계에서 보고를 확정한다.
+                    # prepare_close 없는 기존 주입 어댑터와의 호환 경로.
+                    # 제품 및 공용 테스트 플레이어는 위 비동기 종료 경로를 쓴다.
                     player.close()
                 if report:
                     self.sync_position()

@@ -35,7 +35,10 @@ export default function App() {
       // 페이지 데이터와 초점/스크롤 복원이 DOM에 반영되고 한 프레임을
       // 그린 뒤에만 Qt의 이전 재생 표면을 걷는다. 시간 지연으로 추측하지 않는다.
       const prepareReturn = (token: number) => requestAnimationFrame(() => requestAnimationFrame(() => {
-        request(reply => api.returnReady(token, reply)).catch(error => setError(String(error)))
+        request(reply => api.returnReady(token, reply)).catch(error => {
+          setError(String(error))
+          request(reply => api.returnFailed(token, reply)).catch(failure => setError(String(failure)))
+        })
       }))
       api.shellPrepareReturn.connect(prepareReturn)
       disconnect = () => { api.shellChanged.disconnect(changed); api.shellFocusRequested.disconnect(focus); api.shellStatusChanged.disconnect(setStatus); api.shellKeyGuideRequested.disconnect(openKeyGuide); api.shellPrepareReturn.disconnect(prepareReturn) }

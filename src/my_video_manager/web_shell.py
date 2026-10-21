@@ -232,34 +232,35 @@ class WebShellHost(QWidget):
             raise
 
     def prepare_return(self):
+        controller = self.controllers.get(self.active_tab)
+        ready = controller is None or controller.bridge is None or self.active_tab in self._ready_pages
         if (self.return_pending and self._return_focus_ready and self._frontend_ready
-                and self.active_tab in self._ready_pages):
+                and ready):
             self.bridge.shellPrepareReturn.emit(self._return_token)
+
+    def fail_return(self, token):
+        if token == self._return_token:
+            self.cancel_return()
 
     def finish_return(self, token):
         # 새 재생·탭 이동·창 닫기 뒤 도착한 웹 응답은 현재 화면을 덮지 않는다.
         if token != self._return_token or self.window.pages.currentWidget() is not self:
             return
-        renderers = self.view.findChildren(QQuickWidget)
-        if not renderers:
-            self.load_finished(False)
-            return
-        # Chromium rAF와 Qt의 native 합성 완료는 다른 경계다. 특히 모달에서
-        # 돌아온 뷰는 rAF 뒤에도 이전 backing store를 가질 수 있다.
-        # 덮개에 가려진 QWidget은 일반 update가 생략될 수 있으므로
-        # 공개 렌더 API로 프레임을 완성한다. 반환 이미지는 저장하지 않는다.
-        renderers[0].grabFramebuffer()
-        self._return_token = None
-        # 대화상자에 옮겼던 QWebEngineView는 native 자식이 될 수 있다.
-        # 덮개부터 숨기면 부모의 빈 backing store가 먼저 노출되므로,
-        # 준비된 웹 native 표면을 먼저 위로 올린다.
-        self.raise_()
-        self.view.raise_()
-        self.view.repaint()
-        self.window.pages.layout().setStackingMode(QStackedLayout.StackingMode.StackOne)
-        self.window.playback_page.hide()
-        self.window.playback_page.setEnabled(True)
-        self.window.player_shutdown.release()
+        try:
+            renderers = self.view.findChildren(QQuickWidget)
+            if renderers:
+                # 가려진 위젯은 update가 생략될 수 있어 프레임을 명시적으로
+                # 렌더한다. Qt 내부 위임 위젯이 달라져도 정상 웹을 오류로 보지 않는다.
+                renderers[0].grabFramebuffer()
+            # FBO 렌더와 native 부모 창의 합성은 다른 경계다. 준비된 웹을
+            # 올리고 repaint한 뒤 합성을 기다려야 이전 재생 표면을 걷을 수 있다.
+            self.raise_()
+            self.view.raise_()
+            self.view.repaint()
+            self.window.composition_waiter()
+        finally:
+            # 렌더·합성 준비 실패에도 덮개 아래 오류를 가둬 두지 않는다.
+            self.fail_return(token)
 
     def close_return_tab(self):
         """재생 중 창을 닫아 트레이로 숨길 때 둘 탭. 출발한 페이지가 원하면 그 탭, 아니면 라이브러리."""

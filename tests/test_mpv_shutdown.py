@@ -47,3 +47,20 @@ def test_prepare_close_freezes_positions_before_native_shutdown(monkeypatch):
     assert native.terminated
     assert player.take_positions() == ()
     assert not player.take_eof()
+
+
+def test_pause_failure_still_terminates_and_discards_late_reports(monkeypatch):
+    class FailedPause(NativePlayer):
+        def __setattr__(self, name, value):
+            if name == 'pause' and value:
+                raise RuntimeError('native core stopped')
+            super().__setattr__(name, value)
+
+    native = FailedPause()
+    monkeypatch.setitem(sys.modules, 'mpv', SimpleNamespace(MPV=lambda **kwargs: native))
+    player = MpvPlayer(1)
+    player.prepare_close()
+    player.close()
+    assert native.terminated
+    assert player.take_positions() == ()
+    assert not player.take_eof()

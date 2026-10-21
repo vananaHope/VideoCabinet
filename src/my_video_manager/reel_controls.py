@@ -23,12 +23,12 @@ class ReelControls:
         options = None
         if self.window.player:
             options = self.window.player.playback_options()
-            # 코어는 이미 새 항목으로 전환했다. 이전 엔진에 남은 보고는 새 항목에 보내지 않는다.
             if current is None:
                 # 완료 복귀도 일반 목록 복귀와 같은 준비·종료 경계를 쓴다.
                 self.shown = current
                 self.open()
                 return
+            # 코어는 이미 새 항목으로 전환했다. 이전 엔진에 남은 보고는 새 항목에 보내지 않는다.
             self.window.stop_player(report=False)
         self.shown = current
         if current is None:

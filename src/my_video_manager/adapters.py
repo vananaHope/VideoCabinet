@@ -278,8 +278,13 @@ class MpvPlayer:
         with self._callback_lock:
             if self._closing:
                 return
-            self._player.pause = True
             self._closing = True
+            try:
+                self._player.pause = True
+            except Exception:
+                # 이미 죽은 native 코어는 pause도 거부할 수 있다. 보고 경계는
+                # 닫은 채 두고 close의 terminate로 자원 해제를 계속한다.
+                pass
 
     def close(self) -> None:
         # 콜백의 native handle 접근을 끝낸 뒤 핸들을 해제한다.

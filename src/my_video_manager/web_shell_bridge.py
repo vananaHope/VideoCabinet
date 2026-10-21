@@ -32,7 +32,15 @@ class ShellBridge(QObject):
 
     @SHELL.slot('returnReady')
     def returnReady(self, token):
-        self.host.finish_return(token)
+        try:
+            self.host.finish_return(token)
+        except Exception as error:
+            return encode({'error': str(error)})
+        return encode({'ok': True})
+
+    @SHELL.slot('returnFailed')
+    def returnFailed(self, token):
+        self.host.fail_return(token)
         return encode({'ok': True})
 
     @SHELL.slot('shellSnapshot')

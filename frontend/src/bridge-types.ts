@@ -59,6 +59,7 @@ export interface ShellBridge {
   shellSnapshot: (reply: Reply) => void
   navigate: (tab: Tab, reply: Reply) => void
   returnReady: (token: number, reply: Reply) => void
+  returnFailed: (token: number, reply: Reply) => void
   updateSnapshot: (reply: Reply) => void
   updateChoice: (name: UpdateChoice, version: string, reply: Reply) => void
   updateAction: (name: UpdateAction, reply: Reply) => void
@@ -77,6 +78,7 @@ export function publicShellBridge(raw: ShellBridge): ShellBridge {
     shellSnapshot: raw.shellSnapshot.bind(raw),
     navigate: raw.navigate.bind(raw),
     returnReady: raw.returnReady.bind(raw),
+    returnFailed: raw.returnFailed.bind(raw),
     updateSnapshot: raw.updateSnapshot.bind(raw),
     updateChoice: raw.updateChoice.bind(raw),
     updateAction: raw.updateAction.bind(raw),

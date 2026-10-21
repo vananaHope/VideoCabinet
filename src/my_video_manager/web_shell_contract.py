@@ -8,6 +8,7 @@ SHELL = BridgeContract(
     name='shell', interface='ShellBridge',
     slots={'ready': (), 'shellSnapshot': (), 'navigate': (Argument('tab', str, 'Tab'),),
            'returnReady': (Argument('token', int, 'number'),),
+           'returnFailed': (Argument('token', int, 'number'),),
            'updateSnapshot': (),
            'updateChoice': (Argument('name', str, 'UpdateChoice'), Argument('version', str, 'string')),
            'updateAction': (Argument('name', str, 'UpdateAction'),), 'keyGuide': ()},
