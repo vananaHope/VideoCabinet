@@ -830,7 +830,8 @@ def test_speed_button_list_and_keys_beyond_list(window):
     assert window.player.commands == [Command(CommandType.CHANGE_SPEED, 0.5)]
     assert window.player.options[0] == 1.5
     assert (page.speed_button.label, page.speed_button.accessibleName()) == ("속도 1.5×", "재생 속도 1.5×")
-    assert window.surface.hasFocus()
+    # 메뉴가 닫힌 뒤 다음 이벤트 차례에 영상 초점으로 돌아간다.
+    wait_for(window.surface.hasFocus)
     assert with_menu(page.speed_button, page.speed_menu)['checked'] == ["1.5×"]
     # ↑ 키는 목록 끝(2×)을 넘어 갈 수 있고, 단추는 그 값을 그대로 보여 준다.
     for _ in range(5):

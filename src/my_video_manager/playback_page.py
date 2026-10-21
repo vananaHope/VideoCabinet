@@ -1,6 +1,6 @@
 """영상 중심 재생 페이지. 창 상태는 셸, 도메인 상태는 AppCore가 소유한다."""
 
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox,
@@ -17,6 +17,20 @@ from .theme import playback_stylesheet, playback_font
 
 # 속도 단추 목록. ↑/↓ 키는 이 목록과 관계없이 MIN~MAX_PLAYBACK_SPEED를 0.25씩 움직인다.
 SPEED_CHOICES = (0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)
+
+
+def tool_button_menu_point(button, menu):
+    """QToolButton이 자기 메뉴를 여는 자리(Qt positionMenu와 같은 규칙, 왼쪽에서 오른쪽 배치).
+
+    아래에 들어갈 자리가 있으면 단추 아래, 없으면 단추 위에 열고, 가로는 화면 안으로 맞춘다.
+    """
+    size, rect = menu.sizeHint(), button.rect()
+    screen = button.screen().availableGeometry()
+    if button.mapToGlobal(QPoint(0, rect.bottom())).y() + size.height() <= screen.bottom():
+        point = button.mapToGlobal(rect.bottomLeft())
+    else:
+        point = button.mapToGlobal(rect.topLeft() - QPoint(0, size.height()))
+    return QPoint(max(screen.left(), min(point.x(), screen.right() - size.width())), point.y() + 1)
 
 
 class ControlButton(QToolButton):
@@ -255,6 +269,18 @@ class PlaybackPage(QWidget):
         """속도 목록의 값. ↑/↓ 키와 같은 속도 바꾸기 명령으로 지금 속도와의 차이만큼 바꾼다."""
         if self.shell.player:
             self.press(Command(CommandType.CHANGE_SPEED, speed - self.current_speed()))
+
+    def menu_anchor_point(self, menu):
+        """조작 줄 단추에 딸린 메뉴를 지금 단추 위치에서 열 전역 좌표. 이 페이지의 메뉴가 아니면 None.
+
+        긴급 탈출 뒤 메뉴를 다시 열 때 쓴다. 숨기기 전과 창 상태(전체 화면)가 달라도 새로 열 때와 같은 자리에 놓인다.
+        """
+        if menu is self.menu:
+            # 키보드로 여는 재생 메뉴(handle_key)와 같은 기준이다.
+            return self.menu_button.mapToGlobal(self.menu_button.rect().topRight())
+        if menu is self.speed_menu:
+            return tool_button_menu_point(self.speed_button, menu)
+        return None
 
     def fit_controls(self):
         """조작 줄이 넘치면 compact_order 순서대로 단추 글자를 짧게 바꾼다.
