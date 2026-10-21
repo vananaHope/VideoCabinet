@@ -7,7 +7,9 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 
 from .core import CommandType
 from .key_display import display_keys
+from .key_guide import SETTINGS_KEY, page_keys
 from .theme import PLAYBACK_COLORS, playback_stylesheet, playback_font
+from .web_tabs import TABS
 
 
 class PlaybackHelp(QWidget):
@@ -64,6 +66,7 @@ class PlaybackHelp(QWidget):
                           + "</b><br>F1 켜기 / 끄기 · Esc 안내 닫기"
                           + "<table>" + table + "</table><br>" + legend
                           + "<br>Tab 메뉴·목록 이동 · 목록에서 ↑↓ 선택, Enter 이동"
+                          + f"<br>{SETTINGS_KEY} 설정 메뉴 · {page_keys(TABS)} 재생을 끝내고 페이지 이동"
                           + "<br>Esc: 안내 닫기 → 전체 화면 끄기 → 목록 복귀")
 
     def place_over(self, surface):
