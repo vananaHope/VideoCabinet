@@ -7,6 +7,7 @@ from PySide6.QtCore import QEvent, Qt
 
 from my_video_manager.core import AppCore
 from my_video_manager.playback_page import SPEED_CHOICES
+from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.ui import MainWindow
 from test_playback_page_ui import Player, app, click, key, window
 from test_translation import Media, Transcriber, Translator, finish, source
@@ -21,18 +22,32 @@ def test_status_lasts_one_and_a_half_seconds(window):
     assert window.player.statuses == [("⏸ 일시정지", 1.5)]
 
 
+def operate(window, method, pressed, button):
+    """키 또는 조작 줄 단추로 같은 조작을 한 번 한다."""
+    if method == "key":
+        key(window, pressed)
+    else:
+        click(getattr(window.playback_page, button))
+
+
+def shown(*texts):
+    return [(text, 1.5) for text in texts]
+
+
+@pytest.mark.parametrize("method", ["key", "button"])
 @pytest.mark.parametrize(("pressed", "button", "expected"), [
     (Qt.Key.Key_Return, "pause_button", ["⏸ 일시정지", "▶ 재생"]),
     (Qt.Key.Key_Slash, "subtitles_button", ["자막 꺼짐", "자막 켜짐"]),
     (Qt.Key.Key_Insert, "point_button", ["◆ 지점 하이라이트 추가"] * 2),
     (Qt.Key.Key_Delete, "range_button", ["【 구간 시작", "】 구간 끝"]),
 ])
-def test_key_and_button_show_same_playback_status(window, pressed, button, expected):
+def test_each_input_shows_both_state_changes(window, method, pressed, button, expected):
     window.player.positions = [(10, True)]
-    key(window, pressed)
+    operate(window, method, pressed, button)
+    assert window.player.statuses == shown(expected[0])
     window.player.positions = [(20, False)]
-    click(getattr(window.playback_page, button))
-    assert statuses(window) == expected
+    operate(window, method, pressed, button)
+    assert window.player.statuses == shown(*expected)
 
 
 def test_speed_key_and_speed_list_show_new_speed(window):
@@ -79,11 +94,17 @@ class SubtitlePlayer(Player):
         self.subtitle = path
 
 
+class KoreanTranscriber(Transcriber):
+    result = TranscriberResult("ko", tuple(TranscriptSegment(i, i + 1, f"줄 {i}") for i in range(3)))
+
+
 @pytest.fixture
-def translated_window(tmp_path, app):
+def translated_window(request, tmp_path, app):
+    """번역(외국어)이나 다듬은 자막(한국어)까지 만든 영상의 재생 창. 한국어는 다듬은 자막으로 시작한다."""
+    transcriber = Transcriber() if request.param == "en" else KoreanTranscriber()
     core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc),
                    database=tmp_path / "data/library.sqlite3",
-                   transcriber=Transcriber(), translator=Translator())
+                   transcriber=transcriber, translator=Translator())
     path = tmp_path / "lecture.mkv"
     path.write_text("lecture")
     core.add_file(path)
@@ -104,11 +125,17 @@ def translated_window(tmp_path, app):
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def test_subtitle_language_key_and_button_show_chosen_language(translated_window):
+@pytest.mark.parametrize("method", ["key", "button"])
+@pytest.mark.parametrize(("translated_window", "expected"), [
+    ("en", ["번역 자막", "원어 자막"]),
+    ("ko", ["원어 자막", "다듬은 자막"]),
+], indirect=["translated_window"])
+def test_each_input_shows_both_subtitle_languages(translated_window, expected, method):
     window = translated_window
     window.statusBar().clearMessage()
-    key(window, Qt.Key.Key_Period)
-    click(window.playback_page.subtitle_language_button)
-    assert statuses(window) == ["번역 자막", "원어 자막"]
+    operate(window, method, Qt.Key.Key_Period, "subtitle_language_button")
+    assert window.player.statuses == shown(expected[0])
+    operate(window, method, Qt.Key.Key_Period, "subtitle_language_button")
+    assert window.player.statuses == shown(*expected)
     # 바뀐 자막 종류는 재생 상태 표시로만 보이고 안내 줄에는 남지 않는다.
     assert not window.playback_page.message_label.isVisible()
