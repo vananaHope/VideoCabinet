@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QWidget
 
 from test_playback_page_ui import app, window, Player, mouse, PRESS, RELEASE, wait_past_click_interval
 from qt_wait import wait_for
+from my_video_manager.core import Command, CommandType
 from my_video_manager.random_continuous_play import RandomPlayScope
 
 
@@ -31,6 +32,35 @@ class SlowPlayer(Player):
         self.positions.append((110, False))
         self.closed = True
         self.finished.set()
+
+
+@pytest.mark.parametrize('return_during_command', [False, True])
+def test_return_does_not_send_status_to_asynchronously_closing_player(window, return_during_command):
+    class ReturningPlayer(SlowPlayer):
+        def execute(self, command):
+            super().execute(command)
+            if return_during_command:
+                window.back_to_list()
+
+    window.player_factory = ReturningPlayer
+    window.play_video(window.core.videos()[0].id, start=0)
+    old = window.player
+    command = Command(CommandType.TOGGLE_PAUSE)
+    try:
+        if return_during_command:
+            assert window.playback_page.run_command(command)
+        else:
+            window.back_to_list()
+        wait_for(old.started.is_set)
+        assert old.prepared and not old.finished.is_set()
+        assert window.core.playback.session is None
+        assert not window.playback_page.run_command(command)
+        assert old.commands == ([command] if return_during_command else [])
+        # show_status가 기록만 하는 가짜이므로 잘못된 호출을 어댑터 가드가 가려 주지 않는다.
+        assert old.statuses == []
+    finally:
+        old.release.set()
+        window.player_shutdown.finish()
 
 
 def test_return_does_not_wait_for_player_shutdown_and_saves_once(window):
