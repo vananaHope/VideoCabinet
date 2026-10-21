@@ -432,7 +432,7 @@ class AppCore:
     def play_review_line(self, video_id, line_id, *,
                          playback_video_ids: Iterable[int] | None = None) -> ReviewPlayback:
         """같은 일반 영상이면 탐색하고, 새 재생이면 전달받은 목록으로 시청을 시작한다."""
-        start = self.review_line_position(video_id, line_id)
+        start = min(self.review_line_position(video_id, line_id), self.video(video_id).duration)
         session = self.playback.session
         if session and session.video_id == video_id and session.record_viewing and self.reel_playback is None:
             return ReviewPlayback(video_id, start, "seek")
@@ -1171,7 +1171,7 @@ class AppCore:
         if playback_video_ids is not None or random_scope is not None:
             self._random_continuous = RandomContinuousPlay(source_ids=source if source is not None else (video_id,))
         if random_scope is not None:
-            self._random_continuous.enable(video_id, random_scope, random_start=True)
+            self._random_continuous.enable(video_id, random_scope)
         else:
             self._random_continuous.record(video_id)
         return start

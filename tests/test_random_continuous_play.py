@@ -305,3 +305,21 @@ def test_subtitle_language_resets_for_each_random_video_and_restart_is_off(tmp_p
     reopened = AppCore(media=FakeMedia(), clock=lambda: datetime.now(timezone.utc), database=core.database)
     assert not reopened.random_continuous_enabled
     assert reopened.random_continuous_scope is None
+
+
+def test_enabling_counts_current_video_before_completing_cycle(core):
+    a, b, c, d = ids(core)
+    core.switch_to(a, playback_video_ids=(a, b, c, d))
+    core.set_random_continuous_enabled(True)
+    assert [move(core) for _ in range(4)] == [b, c, d, a]
+
+
+def test_enabling_with_only_current_video_starts_a_new_viewing(core):
+    a = ids(core)[0]
+    core.switch_to(a, playback_video_ids=(a,))
+    core.set_random_continuous_enabled(True)
+    session = core.playback.session
+    assert move(core) == a
+    assert core.playback.session is not session
+    assert len(core.viewings(a)) == 2
+    assert core.viewings(a)[0].ended_at is not None

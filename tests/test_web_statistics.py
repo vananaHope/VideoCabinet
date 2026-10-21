@@ -210,3 +210,30 @@ shiboken6.delete(app)
                                  'QTWEBENGINE_CHROMIUM_FLAGS': '--disable-gpu'}, timeout=CHILD_READY_TIMEOUT)
     assert result.returncode == 0, result.stderr
     assert 'Traceback' not in result.stderr and 'Signal source has been deleted' not in result.stderr
+
+
+def test_statistics_playback_uses_top_video_order_for_navigation_and_random_scope(window_factory, core):
+    from test_library_return_ui import Player
+    videos = core.videos()
+    for video, seconds in zip(videos[:2], (40, 60)):
+        core.switch_to(video.id)
+        core.playback.report(seconds)
+        core.end_playback()
+    window = window_factory()
+    window.player_factory = Player
+    window.playback_list = (videos[2].id, videos[0].id)
+    window.navigate_web_tab('statistics')
+    page = window.web_host.controllers['statistics']
+    wait_for(lambda: state(page)['result'] is not None and not state(page)['loading'])
+    source = tuple(v['video_id'] for v in state(page)['result']['period']['top_videos'])
+    assert source == (videos[1].id, videos[0].id)
+    assert json.loads(page.bridge.playVideo(source[0])) == {'ok': True}
+    wait_for(lambda: core.playback.session is not None)
+    assert window.playback_list == core.playback_video_ids == source
+    assert not core.random_continuous_enabled
+    assert core.execute_video_command(core.command_for_key('PgDn'), window.playback_list) == source[1]
+    core.set_random_continuous_enabled(True)
+    assert core.random_continuous_scope.video_ids == source
+    assert core.execute_video_command(core.command_for_key('PgDn'), window.playback_list) == source[1]
+    window.back_to_list()
+    assert window.web_host.active_tab == 'statistics'

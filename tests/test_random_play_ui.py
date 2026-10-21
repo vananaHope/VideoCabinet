@@ -184,6 +184,9 @@ def test_library_whole_random_uses_random_key_scope_and_playlist(window):
     all_ids = tuple(video.id for video in window.core.videos())
     assert window.core.playback.session.video_id == reply["videoId"]
     assert reply["videoId"] in all_ids and window.playback_list == all_ids
+    assert window.core.playback_video_ids == all_ids
+    assert window.core.random_continuous_enabled
+    assert window.core.random_continuous_scope.kind == "all"
     key(window, Qt.Key.Key_Escape)
     assert window.pages.currentWidget() is window.web_host
 

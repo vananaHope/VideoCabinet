@@ -31,9 +31,9 @@ class RandomContinuousPlay:
     index: int = 0
     notice: str | None = None
 
-    def enable(self, video_id: int, scope: RandomPlayScope, *, random_start: bool = False):
+    def enable(self, video_id: int, scope: RandomPlayScope):
         self.enabled, self.scope = True, scope
-        self.seen = {video_id} if random_start else set()
+        self.seen = {video_id}
         self.history, self.index = [video_id], 0
         self.notice = None
 

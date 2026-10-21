@@ -26,7 +26,7 @@ def test_random_entries_enable_their_scope(window, entry):
     elif entry == 'all_scope':
         window.library_page.bridge.filter('no matching video', 0)
         assert window.library_page.visible_video_ids() == ()
-        assert json.loads(window.library_page.bridge.random_play(lambda: {}))['videoId'] in source
+        assert json.loads(window.library_page.bridge.randomPlayAll())['videoId'] in source
     else:
         tag = core.add_video_tag(source[0], 'test')
         assert json.loads(window.library_page.bridge.randomPlayTags(json.dumps([tag.id])))['videoId'] == source[0]
@@ -34,6 +34,8 @@ def test_random_entries_enable_their_scope(window, entry):
     assert core.random_continuous_enabled
     expected = {'key': 'all', 'tray': 'all', 'list': 'list', 'tags': 'tags', 'all_scope': 'all'}[entry]
     assert core.random_continuous_scope.kind == expected
+    if expected == 'all':
+        assert window.playback_list == core.playback_video_ids == tuple(v.id for v in core.videos())
     if entry == 'tags':
         assert core.random_continuous_scope.tag_ids == (tag.id,)
     if entry == 'list':
@@ -121,7 +123,8 @@ def test_review_jump_preserves_matching_core_and_window_start_list(review_window
     assert core.random_continuous_scope == RandomPlayScope('list', expected)
 
 
-def test_tag_pgdn_does_not_escape_to_library_or_series(window, tmp_path):
+@pytest.mark.parametrize('control', ['key', 'button'])
+def test_tag_pgdn_does_not_escape_to_library_or_series(window, tmp_path, control):
     core = window.core
     first, other = core.videos()
     path = tmp_path / 'tag-only.mkv'
@@ -132,11 +135,19 @@ def test_tag_pgdn_does_not_escape_to_library_or_series(window, tmp_path):
     tag = core.add_video_tag(first.id, 'pair')
     core.add_video_tag(tagged.id, 'pair')
     window.play(first.id, random_scope=RandomPlayScope('tags', tag_ids=(tag.id,)))
-    key(window, Qt.Key.Key_PageDown)
+    def navigate(forward):
+        if control == 'key':
+            key(window, Qt.Key.Key_PageDown if forward else Qt.Key.Key_PageUp)
+        else:
+            button = window.playback_page.next_button if forward else window.playback_page.previous_button
+            QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+            QApplication.processEvents()
+
+    navigate(True)
     assert core.playback.session.video_id == tagged.id
-    key(window, Qt.Key.Key_PageUp)
+    navigate(False)
     assert core.playback.session.video_id == first.id
-    key(window, Qt.Key.Key_PageDown)
+    navigate(True)
     assert core.playback.session.video_id == tagged.id
     assert not core.viewings(other.id)
 
