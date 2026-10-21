@@ -230,6 +230,7 @@ def test_statistics_playback_uses_top_video_order_for_navigation_and_random_scop
     assert json.loads(page.bridge.playVideo(source[0])) == {'ok': True}
     wait_for(lambda: core.playback.session is not None)
     assert window.playback_list == core.playback_video_ids == source
+    assert core.playback_source_name == '통계'
     assert not core.random_continuous_enabled
     assert core.execute_video_command(core.command_for_key('PgDn'), window.playback_list) == source[1]
     core.set_random_continuous_enabled(True)

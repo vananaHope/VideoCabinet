@@ -58,7 +58,7 @@ class SearchBridge(QObject):
 
     def perform_play(self, result):
         try:
-            self.page.window.playback_list = tuple(dict.fromkeys(r.video_id for r in self.page.results))
+            self.page.window.set_playback_list(tuple(dict.fromkeys(r.video_id for r in self.page.results)), "검색 결과")
             self.page.window.play_video(result.video_id, start=result.start)
         finally:
             self.busy = False

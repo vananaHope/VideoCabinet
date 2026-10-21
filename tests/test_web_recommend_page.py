@@ -99,6 +99,7 @@ def test_play_uses_row_order_and_returns_to_recommend_tab_with_card_focus(recomm
     wait_for(lambda: window.pages.currentWidget() is window.playback_page)
     assert not page.bridge.busy
     assert window.playback_list == tuple(ids)
+    assert window.core.playback_source_name == '추천'
     requests = []
     page.focus_requested.connect(requests.append)
     window.back_to_list()

@@ -323,3 +323,52 @@ def test_enabling_with_only_current_video_starts_a_new_viewing(core):
     assert core.playback.session is not session
     assert len(core.viewings(a)) == 2
     assert core.viewings(a)[0].ended_at is not None
+
+
+def test_scope_label_names_each_scope_short():
+    from my_video_manager.random_continuous_play import scope_label
+    assert scope_label(RandomPlayScope()) == ('전체', '전체', '영상 전체')
+    listed = RandomPlayScope('list', tuple(range(1, 129)))
+    assert scope_label(listed, source_name='현재 결과') == ('현재 결과 128편', '128편', '현재 결과 128편')
+    assert scope_label(listed).text == '재생 목록 128편'
+    tags = RandomPlayScope('tags', tag_ids=(1, 2))
+    assert scope_label(tags, tag_names=('음악', '영화')) == ('태그: 음악 외 1', '태그 2', '태그: 음악, 영화')
+    assert scope_label(tags, tag_names=('음악',)).text == '태그: 음악'
+    # 긴 첫 태그 이름은 줄이고, 설명에는 앞의 다섯 개를 줄이지 않고 싣는다.
+    names = ('아주 긴 태그 이름', *(f'태그{index}' for index in range(9)))
+    label = scope_label(tags, tag_names=names)
+    assert label.text == '태그: 아주 긴 태그… 외 9' and label.compact == '태그 10'
+    assert label.description == '태그: 아주 긴 태그 이름, 태그0, 태그1, 태그2, 태그3 외 5'
+    assert scope_label(tags).text == '태그 없음'
+
+
+def test_scope_label_follows_entry_source_name_and_current_tags(core):
+    a, b, c, d = ids(core)
+    assert core.random_continuous_scope_label() is None
+    core.switch_to(a, playback_video_ids=(a, b, c), playback_source_name='검색 결과')
+    assert core.playback_source_name == '검색 결과' and core.random_continuous_scope_label() is None
+    core.set_random_continuous_enabled(True)
+    assert core.random_continuous_scope_label().text == '검색 결과 3편'
+    music = core.add_video_tag(a, '음악')
+    movie = core.add_video_tag(b, '영화')
+    core.set_random_continuous_scope(RandomPlayScope('tags', tag_ids=(music.id, movie.id)))
+    assert core.random_continuous_scope_label().text == '태그: 음악 외 1'
+    core.delete_tag(music.id)
+    assert core.random_continuous_scope_label().text == '태그: 영화'
+    # 목록 없이 영상만 옮기면 출처 이름이 유지되고, 새 목록은 새 이름(없으면 None)을 쓴다.
+    core.switch_to(b)
+    assert core.playback_source_name == '검색 결과'
+    core.switch_to(c, playback_video_ids=(c,))
+    assert core.playback_source_name is None
+
+
+def test_scope_video_count_uses_candidate_rule(core):
+    a, b, c, d = ids(core)
+    red = core.add_video_tag(a, 'red')
+    core.exclude_video(b)
+    assert core.random_scope_video_count(RandomPlayScope()) == 3
+    assert core.random_scope_video_count(RandomPlayScope('list', (a, b))) == 1
+    assert core.random_scope_video_count(RandomPlayScope('list', (b,))) == 0
+    assert core.random_scope_video_count(RandomPlayScope('tags', tag_ids=(red.id,))) == 1
+    with pytest.raises(ValueError):
+        core.random_scope_video_count({'kind': 'all'})
