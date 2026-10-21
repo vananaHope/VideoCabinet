@@ -11,7 +11,8 @@ function timestamp(value: number) {
   return `${Math.floor(ms / 3600000).toString().padStart(2, "0")}:${Math.floor(ms / 60000 % 60).toString().padStart(2, "0")}:${(ms / 1000 % 60).toFixed(3).padStart(6, "0")}`
 }
 export type HighlightSnapshot = { videoId: number; revision: number; items: HighlightData[] }
-export function HighlightPanel({ videoId, snapshot, revision, onAction }: { videoId: number; snapshot: HighlightSnapshot | null; revision: number; onAction: (videoId: number, highlightId: number, edit: boolean) => void }) {
+/** emptyDescription은 하이라이트가 없을 때의 안내이며 현재 키 배치의 하이라이트 키를 담는다. */
+export function HighlightPanel({ videoId, snapshot, revision, emptyDescription, onAction }: { videoId: number; snapshot: HighlightSnapshot | null; revision: number; emptyDescription: string; onAction: (videoId: number, highlightId: number, edit: boolean) => void }) {
   const [selected, setSelected] = useState<number | null>(null)
   const list = useRef<HTMLDivElement>(null)
   const scrollTop = useRef(0)
@@ -39,7 +40,7 @@ export function HighlightPanel({ videoId, snapshot, revision, onAction }: { vide
   return <div className="flex min-h-0 flex-1 flex-col gap-2">
     <p className="text-xs text-muted-foreground">↑/↓ 선택 · Enter 재생 · F2 편집</p>
     <div ref={list} id="detail-scroll" role="listbox" aria-label="영상 하이라이트" aria-busy={busy} aria-activedescendant={active == null ? undefined : `highlight-${active}`} tabIndex={0} onKeyDown={keyDown} onScroll={event => { if (highlights !== null) scrollTop.current = event.currentTarget.scrollTop }} className="min-h-0 flex-1 space-y-1 overflow-y-auto rounded-md p-1">
-      {highlights === null ? <p className="text-xs text-muted-foreground">하이라이트를 불러오는 중…</p> : !entries.length ? <EmptyState title="하이라이트 없음" description="재생 중 Insert 또는 Delete로 기억할 장면을 남기세요." /> : entries.map(h => <div key={h.id} id={`highlight-${h.id}`} role="option" aria-selected={h.id === active} className={item({ selected: h.id === active })}>
+      {highlights === null ? <p className="text-xs text-muted-foreground">하이라이트를 불러오는 중…</p> : !entries.length ? <EmptyState title="하이라이트 없음" description={emptyDescription} /> : entries.map(h => <div key={h.id} id={`highlight-${h.id}`} role="option" aria-selected={h.id === active} className={item({ selected: h.id === active })}>
         <button type="button" tabIndex={-1} disabled={busy} className="flex min-w-0 flex-1 items-center gap-1 text-left" onClick={() => { if (busy) return; setSelected(h.id); list.current?.focus({ preventScroll: true }); onAction(videoId, h.id, false) }}>
           <span className="shrink-0 text-xs font-medium text-highlight tabular-nums" title={`${timestamp(h.start)}${h.end === null ? " · 지점" : ` – ${timestamp(h.end)}`}`}>{timestamp(h.start).slice(0, 8)}{h.end !== null && <span aria-label="구간">~</span>}</span>
           <span className="min-w-0 flex-1 truncate text-xs" title={h.note}>{h.note || "메모 없음"}</span>

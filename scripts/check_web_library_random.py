@@ -205,14 +205,14 @@ def check_keyboard():
     key(Qt.Key.Key_Return)
     wait(lambda: js("!!document.querySelector('[role=menu]')"))
     items = json.loads(js("JSON.stringify([...document.querySelectorAll('[role=menuitem]')].map(i => i.textContent))"))
-    assert items == ['현재 결과에서', '태그에서…'], items
+    assert items == ['현재 결과에서', '영상 전체에서Ctrl+Shift+R', '태그에서…'], items
     capture('menu-open')
     key(Qt.Key.Key_Escape)
     wait(lambda: not js("!!document.querySelector('[role=menu]')"))
     assert js(ACTIVE) == '무작위 재생 범위'
     key(Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
     assert js(ACTIVE) == '무작위 재생'
-    metrics['checks'].append('Tab 버튼→▾, ▾ Enter 메뉴(현재 결과에서·태그에서…)·Esc 닫기 후 ▾ 초점 복원, Shift+Tab 버튼')
+    metrics['checks'].append('Tab 버튼→▾, ▾ Enter 메뉴(현재 결과에서·영상 전체에서·태그에서…)·Esc 닫기 후 ▾ 초점 복원, Shift+Tab 버튼')
     if args.count and not args.verify:
         js(TRIGGER + '.focus()')
         key(Qt.Key.Key_Return)

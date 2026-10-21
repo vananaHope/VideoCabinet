@@ -177,6 +177,17 @@ def test_tray_random_restores_hidden_window_and_ignores_filter(window):
     assert window.pages.currentWidget() is window.web_host
 
 
+def test_library_whole_random_uses_random_key_scope_and_playlist(window):
+    window.library_page.bridge.filter("no matching video", 0)
+    reply = json.loads(window.library_page.bridge.randomPlayAll())
+    wait_for(lambda: window.pages.currentWidget() is window.playback_page)
+    all_ids = tuple(video.id for video in window.core.videos())
+    assert window.core.playback.session.video_id == reply["videoId"]
+    assert reply["videoId"] in all_ids and window.playback_list == all_ids
+    key(window, Qt.Key.Key_Escape)
+    assert window.pages.currentWidget() is window.web_host
+
+
 def assert_shell_keys_blocked(window, target):
     page, tab, session = window.pages.currentWidget(), window.web_host.active_tab, window.core.playback.session
     keys = [(Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier) for index in range(8)]
