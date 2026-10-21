@@ -5,9 +5,16 @@ import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select"
 import { NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, EmptyState, PageHeader, Tabs } from "@/components/page-parts"
-import { QueueList } from "@/components/queue-list"
+import { QueueList, queueKeyRows } from "@/components/queue-list"
 import { QueueStore } from "@/components/queue-store"
-import { QueueRules } from "@/components/queue-rules"
+import { QueueRules, queueRuleKeyRows } from "@/components/queue-rules"
+import type { KeyGuideGroup } from "@/lib/key-guide"
+
+// 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
+export const keyGuide: readonly KeyGuideGroup[] = [
+  { title: "처리 상태 목록", rows: queueKeyRows },
+  { title: "자동 자막 규칙 목록", rows: queueRuleKeyRows },
+]
 
 export default function QueuePage() {
   const [store] = useState(() => new QueueStore())

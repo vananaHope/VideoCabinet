@@ -3,7 +3,14 @@ import { connectBridge, request } from "@/bridge"
 import type { SearchBridge, SearchData } from "@/bridge-types"
 import { EmptyState, PageHeader, StatusBadge } from "@/components/page-parts"
 import { NoticeStack } from "@/components/ui/notice"
-import { MatchedText, ResultRow, SearchInput, listKey, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+import { MatchedText, ResultRow, SearchInput, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+import type { KeyGuideGroup } from "@/lib/key-guide"
+
+// 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
+export const keyGuide: readonly KeyGuideGroup[] = [
+  { title: "검색 칸", rows: [{ keys: ["↓", "Enter"], label: "결과 목록으로 이동" }] },
+  { title: "검색 결과", rows: listKeyRows },
+]
 
 export default function SearchPage() {
   const [bridge, setBridge] = useState<SearchBridge | null>(null)

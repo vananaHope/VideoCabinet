@@ -2,6 +2,15 @@ import { useMemo, type KeyboardEvent, type CSSProperties } from "react"
 import { ChevronDown, ChevronRight, Folder } from "lucide-react"
 import { cva } from "class-variance-authority"
 import type { LibraryFolder } from "@/bridge-types"
+import type { KeyGuideRow } from "@/lib/key-guide"
+
+// 아래 keyDown과 같은 키. 키 안내 '지금 화면'에 보인다.
+export const folderKeyRows: readonly KeyGuideRow[] = [
+  { keys: ["↑ ↓"], label: "폴더 선택" },
+  { keys: ["←"], label: "접기 · 상위 폴더로" },
+  { keys: ["→"], label: "펴기 · 하위 폴더로" },
+  { keys: ["Enter", "Tab"], label: "영상 격자로 이동" },
+]
 
 const row = cva("folder-tree-row flex w-full min-w-0 items-center gap-1 rounded-md py-2 pr-2 text-left text-xs", {
   variants: { selected: { true: "bg-accent text-accent-foreground", false: "text-muted-foreground hover:bg-muted" } },

@@ -557,6 +557,14 @@ class MainWindow(QMainWindow):
                     or event.isAutoRepeat()):
                 self.random_play()
             return True
+        if (self.pages.currentWidget() is self.web_host and event.key() == Qt.Key.Key_F1
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
+            # 대화상자가 열려 있으면 웹에 넘긴다. 열린 키 안내는 F1로 닫히고 다른 대화상자에는 F1 동작이 없다.
+            if self.web_host.dialogs.blocks_shell_actions:
+                return super().eventFilter(watched, event)
+            if not (self._composing_widget is not None or event.isAutoRepeat()):
+                self.web_host.open_key_guide()
+            return True
         if (event.modifiers() == Qt.KeyboardModifier.ControlModifier
                 and Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_8):
             if self.web_host.dialogs.blocks_shell_actions:

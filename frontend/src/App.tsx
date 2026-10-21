@@ -3,6 +3,7 @@ import { pages } from "@/pages"
 import { connectBridge, request, type ShellBridge } from "@/bridge"
 import { tabs, type Tab, type ShellData } from "@/bridge-types"
 import { Tabs } from "@/components/page-parts"
+import { KeyGuideButton, KeyGuideDialog } from "@/components/key-guide"
 import DialogsLayer from "@/dialogs/DialogsLayer"
 import ShellModals from "@/dialogs/ShellModals"
 import SubtitlePreparation from "@/components/subtitle-preparation"
@@ -15,6 +16,7 @@ export default function App() {
   const [tab, setTab] = useState("library")
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
+  const [keyGuide, setKeyGuide] = useState(false)
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}
@@ -27,7 +29,10 @@ export default function App() {
         if (target === 'shell') requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('nav [aria-current="page"]')?.focus())
       }
       api.shellFocusRequested.connect(focus)
-      disconnect = () => { api.shellChanged.disconnect(changed); api.shellFocusRequested.disconnect(focus); api.shellStatusChanged.disconnect(setStatus) }
+      // F1 예약 키. 대화상자·IME 조합 중에는 셸이 보내지 않는다.
+      const openKeyGuide = () => setKeyGuide(true)
+      api.shellKeyGuideRequested.connect(openKeyGuide)
+      disconnect = () => { api.shellChanged.disconnect(changed); api.shellFocusRequested.disconnect(focus); api.shellStatusChanged.disconnect(setStatus); api.shellKeyGuideRequested.disconnect(openKeyGuide) }
       const state = await request<ShellData>(reply => api.shellSnapshot(reply))
       if (!disposed) { setBridge(api); setTab(state.tab); setStatus(state.status) }
     }).catch(error => setError(String(error)))
@@ -43,6 +48,7 @@ export default function App() {
     <header className="flex shrink-0 items-center gap-4 border-b bg-background px-4 py-3">
       <span className="shrink-0 text-sm font-semibold">영상 라이브러리</span>
       <Tabs label="페이지 이동" value={tab} items={tabs.map(([value, label], index) => ({ value, label, shortcut: `Ctrl+${index + 1}` }))} onChange={navigate} variant="navigation" />
+      <KeyGuideButton onClick={() => setKeyGuide(true)} />
     </header>
     {/* 셸 안내는 탭 아래 한곳에 쌓는다. 자막 기능 준비가 먼저, 그 아래 연결 오류와 작업 알림, 마지막에 새 버전 알림이 온다.
         모두 펼쳐도 창 높이의 1/4까지만 쓰고 안에서 스크롤해 페이지 목록 자리를 남긴다. */}
@@ -58,6 +64,7 @@ export default function App() {
         기본 창에서는 각 페이지가 높이에 맞춰 내부 목록만 스크롤하므로 바깥 스크롤이 생기지 않는다. */}
     {Object.entries(pages).map(([name, Page]) => Page && <div key={name} data-page={name} hidden={tab !== name} className="min-h-0 flex-1 overflow-y-auto"><Page /></div>)}
     <DialogsLayer />
+    {bridge && <KeyGuideDialog bridge={bridge} tab={tab} open={keyGuide} onOpenChange={setKeyGuide} />}
     <ShellModals />
   </div>
 }

@@ -10,8 +10,15 @@ import { KeyBindingsEditor } from "@/components/key-bindings-editor"
 import { BackupSettings } from "@/components/backup-settings"
 import { UpdateSettings } from "@/components/update-settings"
 import { RecommendationPeriods } from "@/components/recommendation-periods"
+import type { KeyGuideGroup } from "@/lib/key-guide"
 
 const categories = [['general', '일반'], ['keys', '키 배치'], ['recommend', '추천'], ['translation', '번역'], ['transcription', '받아쓰기'], ['backup', '백업'], ['update', '업데이트']] as const
+
+// 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
+export const keyGuide: readonly KeyGuideGroup[] = [
+  { title: "키 배치", rows: [{ keys: ["Esc"], label: "새 키 입력 취소" }] },
+  { title: "추천 기간", rows: [{ keys: ["Esc"], label: "입력 칸의 저장하지 않은 값 되돌리기" }] },
+]
 
 export default function SettingsPage() {
   const [bridge, setBridge] = useState<SettingsBridge | null>(null)

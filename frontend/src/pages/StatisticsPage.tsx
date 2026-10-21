@@ -9,6 +9,7 @@ import { DailyChart, duration, type Metric } from "@/components/statistics/Daily
 import { ActivityChart } from "@/components/statistics/ActivityChart"
 import { Inventory } from "@/components/statistics/Inventory"
 import { formatDate } from "@/lib/dates"
+import type { KeyGuideGroup } from "@/lib/key-guide"
 
 const periods = [7, 30, 90, 365].map(days => ({ value: String(days), label: `${days}일` }))
 const metrics = [{ value: "watched_seconds", label: "시청 시간" }, { value: "viewing_count", label: "시청 횟수" }]
@@ -17,6 +18,9 @@ const change = (value: number | null) => value === null ? "이전 기록 없음"
 function StatisticsCard({ label, value, description }: { label: string; value: string; description: string }) {
   return <section className="min-w-0 space-y-2 rounded-xl border bg-card p-4"><h2 className="text-sm text-muted-foreground">{label}</h2><p className="break-words text-xl font-semibold tabular-nums">{value}</p><p className="text-xs text-muted-foreground">{description}</p></section>
 }
+
+// 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
+export const keyGuide: readonly KeyGuideGroup[] = []
 
 export default function StatisticsPage() {
   const [state, setState] = useState<StatisticsData>({ days: 30, loading: false, message: "", result: null })

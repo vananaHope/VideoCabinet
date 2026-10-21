@@ -2,16 +2,29 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { LibraryChoice, LibraryFilters, LibraryFilterChips } from "@/components/library-filters"
-import { LibraryFolders } from "@/components/library-folders"
+import { LibraryFolders, folderKeyRows } from "@/components/library-folders"
 import { Button } from "@/components/ui/button"
 import { NoticeStack } from "@/components/ui/notice"
-import { LibraryGrid } from "@/components/library-grid"
+import { LibraryGrid, gridKeyRows } from "@/components/library-grid"
 import type { HighlightSnapshot } from "@/components/highlight-panel"
 import { DetailPanel } from "@/components/detail-panel"
 import { RandomPlayButton } from "@/components/random-play-button"
 import { RandomTagDialog } from "@/components/random-tag-dialog"
 import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
 import type { LibraryData, DetailsData, HighlightData, LibraryKeyBindingsData, LibraryViewOptions, TagCandidatesData } from "@/bridge-types"
+import type { KeyGuideGroup } from "@/lib/key-guide"
+
+// 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
+export const keyGuide: readonly KeyGuideGroup[] = [
+  { title: "영상 격자", rows: gridKeyRows },
+  { title: "폴더 패널 (열었을 때)", rows: folderKeyRows },
+  { title: "상세 패널", rows: [
+    { keys: ["↑ ↓", "Home", "End"], label: "하이라이트 선택" },
+    { keys: ["Enter"], label: "선택한 하이라이트부터 재생" },
+    { keys: ["F2"], label: "하이라이트 편집" },
+    { keys: ["Enter", "메뉴 키"], label: "태그 칩 메뉴 (이 태그에서 무작위 재생)" },
+  ] },
+]
 
 export default function LibraryPage() {
   const [bridge, setBridge] = useState<LibraryBridge | null>(null)

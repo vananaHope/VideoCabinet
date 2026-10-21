@@ -7,6 +7,16 @@ export interface ShellData {
   status: string
 }
 
+export interface KeyGuideEntryData {
+  keys: Array<string>
+  label: string
+  detail: string
+}
+
+export interface KeyGuideData {
+  app: Array<KeyGuideEntryData>
+}
+
 export interface UpdateNoticeData {
   version: string
   kind: string
@@ -51,11 +61,13 @@ export interface ShellBridge {
   updateSnapshot: (reply: Reply) => void
   updateChoice: (name: UpdateChoice, version: string, reply: Reply) => void
   updateAction: (name: UpdateAction, reply: Reply) => void
+  keyGuide: (reply: Reply) => void
   shellChanged: Signal<string>
   shellStatusChanged: Signal<string>
   shellFocusRequested: Signal<string>
   shellUpdateChanged: Signal<string>
   shellUpdateInstallChanged: Signal<string>
+  shellKeyGuideRequested: Signal<string>
 }
 export function publicShellBridge(raw: ShellBridge): ShellBridge {
   return Object.freeze({
@@ -65,11 +77,13 @@ export function publicShellBridge(raw: ShellBridge): ShellBridge {
     updateSnapshot: raw.updateSnapshot.bind(raw),
     updateChoice: raw.updateChoice.bind(raw),
     updateAction: raw.updateAction.bind(raw),
+    keyGuide: raw.keyGuide.bind(raw),
     shellChanged: Object.freeze({ connect: raw.shellChanged.connect.bind(raw.shellChanged), disconnect: raw.shellChanged.disconnect.bind(raw.shellChanged) }),
     shellStatusChanged: Object.freeze({ connect: raw.shellStatusChanged.connect.bind(raw.shellStatusChanged), disconnect: raw.shellStatusChanged.disconnect.bind(raw.shellStatusChanged) }),
     shellFocusRequested: Object.freeze({ connect: raw.shellFocusRequested.connect.bind(raw.shellFocusRequested), disconnect: raw.shellFocusRequested.disconnect.bind(raw.shellFocusRequested) }),
     shellUpdateChanged: Object.freeze({ connect: raw.shellUpdateChanged.connect.bind(raw.shellUpdateChanged), disconnect: raw.shellUpdateChanged.disconnect.bind(raw.shellUpdateChanged) }),
     shellUpdateInstallChanged: Object.freeze({ connect: raw.shellUpdateInstallChanged.connect.bind(raw.shellUpdateInstallChanged), disconnect: raw.shellUpdateInstallChanged.disconnect.bind(raw.shellUpdateInstallChanged) }),
+    shellKeyGuideRequested: Object.freeze({ connect: raw.shellKeyGuideRequested.connect.bind(raw.shellKeyGuideRequested), disconnect: raw.shellKeyGuideRequested.disconnect.bind(raw.shellKeyGuideRequested) }),
   })
 }
 
