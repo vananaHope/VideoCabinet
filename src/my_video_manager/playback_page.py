@@ -24,6 +24,8 @@ from .video_click import VideoClick, VideoClickJudge
 SPEED_CHOICES = (0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)
 # 조작 줄 위젯 사이 간격. 글자를 모두 줄여도 넘치면(최소 창의 전체 화면 모아보기 줄) 좁은 간격을 쓴다.
 CONTROL_SPACING, TIGHT_CONTROL_SPACING = 8, 4
+# 재생 상태 표시가 영상 위에 머무는 시간(초).
+STATUS_SECONDS = 1.5
 
 
 def tool_button_menu_point(button, menu):
@@ -768,6 +770,7 @@ class PlaybackPage(QWidget):
             return True
         if not window.player:
             return False
+        changed = False
         try:
             if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):
                 if not repeated:
@@ -789,13 +792,43 @@ class PlaybackPage(QWidget):
                 window.reel.sync()
                 window.refresh_highlights()
                 window.sync_position()
+                changed = True
             elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
                 if not repeated:
-                    window.translations.toggle()
+                    changed = window.translations.toggle()
             elif command.kind == CommandType.SEEK:
                 self.seek(command=command)
             else:
                 window.player.execute(command)
+                changed = True
+            # 바꾸지 못했거나 실패한 조작은 재생 상태 표시 없이 지금처럼 안내·경고로만 알린다.
+            status = self.playback_status(command) if changed else None
+            show_status = getattr(window.player, "show_status", None)
+            if status and show_status:
+                show_status(status, STATUS_SECONDS)
         except Exception as error:
             QMessageBox.warning(window, "재생 조작 실패", str(error))
         return True
+
+    def playback_status(self, command):
+        """명령으로 바뀐 지금 상태를 재생 상태 표시 문구로 읽는다. 표시하지 않는 명령이면 None."""
+        player, core = self.shell.player, self.core
+        if command.kind == CommandType.TOGGLE_PAUSE:
+            return "▶ 재생" if not getattr(player, "paused", False) else "⏸ 일시정지"
+        options = getattr(player, "playback_options", None)
+        speed, visible = options() if options else (1, True)
+        if command.kind == CommandType.CHANGE_SPEED:
+            return f"{speed:g}×"
+        if command.kind == CommandType.TOGGLE_SUBTITLES:
+            return "자막 켜짐" if visible else "자막 꺼짐"
+        if command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
+            if core.playback_subtitle_language == "translated":
+                return core.subtitle_task(core.playback.session.video_id).subtitle_label
+            return "원어 자막"
+        if command.kind == CommandType.POINT_HIGHLIGHT:
+            return "◆ 지점 하이라이트 추가"
+        if command.kind == CommandType.RANGE_HIGHLIGHT:
+            return "【 구간 시작" if core.open_highlight_start is not None else "】 구간 끝"
+        if command.kind == CommandType.TOGGLE_REEL_REPEAT and core.reel_playback is not None:
+            return f"모아보기 반복 {'켜짐' if core.reel_repeat else '꺼짐'}"
+        return None

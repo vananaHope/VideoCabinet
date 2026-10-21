@@ -33,6 +33,7 @@ class Player:
         self.seeks = []
         self.positions = []
         self.paused = False
+        self.statuses = []
 
     def play(self, path, start, *, subtitle):
         pass
@@ -57,6 +58,9 @@ class Player:
 
     def seek_to(self, position, *, resume=False):
         self.seeks.append((position, resume))
+
+    def show_status(self, text, duration):
+        self.statuses.append((text, duration))
 
     def execute(self, command):
         self.commands.append(command)
