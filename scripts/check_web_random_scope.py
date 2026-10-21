@@ -12,7 +12,8 @@ MVM_REAL_WINDOW_TESTS=1 python ~/.agent-orchestra/bin/desktop_lock.py run --owne
 - 영상 전체를 고르면 지금 영상은 그대로이고 범위만 바뀜(다음 영상부터 적용)
 --real은 desktop_lock 안에서 실제 mpv로 무작위 재생 키로 시작 → 🔀 켜짐·범위 이름 → 범위 고르기 창
 (창 모드·전체 화면) → 영상 끝에서 새 범위의 영상으로 넘어가는지, 🔀를 끄면 영상 끝에서 멈추는지 본다.
-화면 캡처는 하지 않으며 2분 30초 뒤 스스로 끝낸다.
+이어서 범위 창 열고 닫기 → 목록으로 → 목록에서 직접 재생(🔀 꺼짐·범위 이름 없음) → 무작위 재생 키를 다시 본다.
+화면 캡처는 하지 않으며 4분 뒤 스스로 끝낸다.
 """
 import argparse
 from datetime import datetime, timezone
@@ -289,7 +290,7 @@ def real(root):
     import threading
     from my_video_manager.adapters import FFmpegMediaReader, MpvPlayer
     # 멈춰도 데스크톱 잠금을 오래 잡지 않게 스스로 끝낸다.
-    watchdog = threading.Timer(150, lambda: os._exit(3))
+    watchdog = threading.Timer(240, lambda: os._exit(3))
     watchdog.daemon = True
     watchdog.start()
     media = FFmpegMediaReader()
@@ -368,8 +369,51 @@ def real(root):
         window.set_playback_fullscreen(False)
         QTest.keyClick(window.surface, Qt.Key.Key_Escape)
         wait(lambda: core.playback.session is None)
+        real_return(window)
     finally:
         close(window)
+
+
+def real_return(window):
+    """무작위 재생 → 범위 창 열고 닫기 → 목록으로 → 직접 재생 → 무작위 재생. 이전 범위·켜짐이 남지 않는다."""
+    core, page, dialogs = window.core, window.playback_page, window.web_host.dialogs
+    wait(lambda: window.pages.currentWidget() is window.web_host and not window.web_host.return_pending)
+    window.activateWindow()
+    wait(window.isActiveWindow)
+    QTest.keyClick(window.web_host.view, Qt.Key.Key_R,
+                   Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    wait(lambda: core.playback.session is not None and core.playback.position > 0)
+    wait(lambda: page.random_button.isChecked() and page.random_scope_button.text() == '전체')
+
+    def cancel():
+        wait(lambda: dialogs.container is not None and dialogs.container.isVisible())
+        js(window, "Array.from(document.querySelectorAll('[role=dialog] button')).find(e => e.textContent === '취소').click()")
+        wait(lambda: not dialogs.active)
+    scope_dialog(window, cancel)
+    assert dialogs.container is None and core.random_continuous_enabled
+    page.back_button.click()
+    wait(lambda: core.playback.session is None and window.pages.currentWidget() is window.web_host
+         and not window.web_host.return_pending)
+    assert not dialogs.active and dialogs.container is None
+    evidence['checks'].append('복귀: 무작위 재생 → 범위 창 열고 닫기 → 목록으로, 대화상자 컨테이너 없음')
+    video_id = window.library_page.visible_video_ids()[0]
+    assert json.loads(window.library_page.bridge.action('play', video_id)) == {'ok': True}
+    wait(lambda: core.playback.session is not None and core.playback.position > 0)
+    window.sync_position()
+    assert not core.random_continuous_enabled and not page.random_button.isChecked()
+    assert not page.random_scope_button.isVisible()
+    evidence['checks'].append('복귀 뒤 목록에서 직접 재생: 🔀 꺼짐·범위 이름 없음')
+    page.back_button.click()
+    wait(lambda: core.playback.session is None and not window.web_host.return_pending)
+    window.activateWindow()
+    wait(window.isActiveWindow)
+    QTest.keyClick(window.web_host.view, Qt.Key.Key_R,
+                   Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+    wait(lambda: core.playback.session is not None and core.playback.position > 0)
+    wait(lambda: page.random_button.isChecked() and page.random_scope_button.text() == '전체')
+    evidence['checks'].append('다시 Ctrl+Shift+R: 🔀 켜짐·범위 이름 전체')
+    page.back_button.click()
+    wait(lambda: core.playback.session is None)
 
 
 with tempfile.TemporaryDirectory(prefix='check-', dir=args.output) as temporary:
