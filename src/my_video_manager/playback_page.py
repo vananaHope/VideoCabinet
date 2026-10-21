@@ -1,5 +1,6 @@
 """영상 중심 재생 페이지. 창 상태는 셸, 도메인 상태는 AppCore가 소유한다."""
 
+import math
 import time
 from types import SimpleNamespace
 
@@ -267,13 +268,14 @@ class PlaybackPage(QWidget):
         # 한 번 클릭은 재생/일시정지, 두 번 클릭은 전체 화면. 한 번 클릭은 판정 시간이 지나야 실행한다.
         self.click_timer = QTimer(self)
         self.click_timer.setSingleShot(True)
+        # 기본 CoarseTimer는 판정 시간보다 몇 ms 일찍 깨울 수 있다. 판정기도 일찍 깨면 다시 기다린다.
+        self.click_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.clicks = VideoClickJudge(
             QApplication.styleHints().mouseDoubleClickInterval() / 1000, clock=time.perf_counter,
-            timer=SimpleNamespace(start=lambda seconds: self.click_timer.start(round(seconds * 1000)),
+            timer=SimpleNamespace(start=lambda seconds: self.click_timer.start(math.ceil(seconds * 1000)),
                                   stop=self.click_timer.stop),
             on_click=self.video_clicked)
         self.click_timer.timeout.connect(self.clicks.expire)
-        self._click_player = None
         self._surface_button_down = False
         # 메뉴 등 팝업이 마지막으로 받은 누름의 시각. Qt는 팝업 밖 누름으로 팝업을 닫은 뒤
         # 같은 시각을 단 누름을 아래 위젯에 다시 보내므로(replay), 그 누름은 클릭으로 세지 않는다.
@@ -519,12 +521,20 @@ class PlaybackPage(QWidget):
             self.close_help()
             return
         self.focus_content()
-        # 판정 시간 사이에 엔진이 바뀌면(다음 영상, 목록 복귀) 그 클릭은 실행하지 않는다.
-        self._click_player = player
-        self.clicks.press(time.perf_counter())
+        # 클릭은 누름을 받은 엔진에 속한다. 엔진이 바뀌면(다음 영상, 목록 복귀 뒤 재생) 이전 누름과 잇지 않고,
+        # 판정 시간 사이에 엔진이 바뀐 클릭은 실행하지 않는다.
+        self.clicks.press(time.perf_counter(), player)
 
-    def video_clicked(self, click):
-        player, self._click_player = self._click_player, None
+    def reset_clicks(self):
+        """대기 중인 한 번 클릭과 누름 상태를 버린다. 창을 숨기거나 최소화하거나 목록으로 돌아갈 때 부른다.
+
+        숨긴 사이 남은 클릭이 복원 뒤 실행되면 긴급 탈출로 멈춘 재생을 다시 틀 수 있다.
+        """
+        self.clicks.cancel()
+        self._surface_button_down = False
+        self._popup_press_timestamp = None
+
+    def video_clicked(self, click, player):
         if not self._accepts_click(player) or QApplication.activePopupWidget() is not None:
             return  # 판정 시간 사이에 영상이 바뀌었거나 목록·메뉴·창으로 옮겨 갔다.
         self.press(Command(CommandType.TOGGLE_FULLSCREEN if click == VideoClick.DOUBLE
@@ -551,6 +561,9 @@ class PlaybackPage(QWidget):
             self.fit_controls()
         if watched is self.surface and kind == QEvent.Type.Resize and self._help_requested:
             QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))
+        if ((watched is self or watched is self.shell) and kind == QEvent.Type.Hide
+                or watched is self.shell and kind == QEvent.Type.WindowStateChange and self.shell.isMinimized()):
+            self.reset_clicks()
         if watched is self.shell:
             if kind in (QEvent.Type.Move, QEvent.Type.Resize) and self._help_requested:
                 QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))

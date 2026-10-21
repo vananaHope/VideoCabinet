@@ -1111,3 +1111,26 @@ def test_double_click_event_orders_count_each_physical_press_once(window, kinds)
     assert window.isFullScreen()
     wait_past_click_interval(window)
     assert window.player.commands == [] and window.isFullScreen()
+
+
+def test_presses_on_different_videos_are_not_joined_into_double_click(window):
+    first = window.player
+    click_video(window)
+    key(window, Qt.Key.Key_PageDown)
+    second = window.player
+    click_video(window)  # 판정 시간 안이지만 다른 영상의 누름이다.
+    assert not window.isFullScreen()
+    wait_for(lambda: second.paused)
+    assert second.commands == [Command(CommandType.TOGGLE_PAUSE)]
+    assert first.commands == [] and not window.isFullScreen()
+
+
+def test_press_after_returning_to_list_and_replaying_starts_fresh(window):
+    click_video(window)
+    window.back_to_list()
+    window.play(window.core.videos()[0].id)
+    replayed = window.player
+    click_video(window)
+    assert not window.isFullScreen()
+    wait_for(lambda: replayed.paused)
+    assert replayed.commands == [Command(CommandType.TOGGLE_PAUSE)]
