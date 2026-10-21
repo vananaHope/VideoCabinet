@@ -1134,3 +1134,54 @@ def test_press_after_returning_to_list_and_replaying_starts_fresh(window):
     assert not window.isFullScreen()
     wait_for(lambda: replayed.paused)
     assert replayed.commands == [Command(CommandType.TOGGLE_PAUSE)]
+
+
+def while_menu_open(button, menu, action):
+    """InstantPopup 단추의 메뉴가 exec 안에서 열려 있는 동안 action을 한 번 실행한다."""
+    timer = QTimer()
+    timer.setInterval(10)
+
+    def run():
+        if menu.isVisible():
+            timer.stop()
+            try:
+                action()
+            finally:
+                if menu.isVisible():
+                    menu.close()
+
+    timer.timeout.connect(run)
+    timer.start()
+    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+    timer.stop()
+    QApplication.processEvents()
+
+
+def test_video_click_only_closes_speed_list_then_next_click_works(window):
+    page, player = window.playback_page, window.player
+    label = page.speed_button.label
+    while_menu_open(page.speed_button, page.speed_menu, lambda: click_video(window))
+    assert not page.speed_menu.isVisible()
+    # Qt가 목록 밖 누름으로 목록을 닫은 뒤 같은 시각의 누름을 표면에 다시 보내는 경우
+    while_menu_open(page.speed_button, page.speed_menu,
+                    lambda: mouse(window, PRESS, widget=page.speed_menu, timestamp=910000))
+    mouse(window, PRESS, RELEASE, timestamp=910000)
+    wait_past_click_interval(window)
+    assert player.commands == [] and page.speed_button.label == label and not window.isFullScreen()
+    click_video(window)
+    wait_for(lambda: player.paused)
+    assert player.commands == [Command(CommandType.TOGGLE_PAUSE)]
+
+
+def test_video_click_only_closes_settings_menu_from_playback_menu_then_next_click_works(window):
+    page, player = window.playback_page, window.player
+    with_menu(page.menu_button, page.menu, "설정 · Alt+S")
+    wait_for(lambda: QApplication.activePopupWidget() is window.settings_menu)
+    click_video(window)
+    assert not window.settings_menu.isVisible()
+    wait_past_click_interval(window)
+    assert player.commands == [] and not window.isFullScreen()
+    assert window.core.playback.session is not None
+    click_video(window)
+    wait_for(lambda: player.paused)
+    assert player.commands == [Command(CommandType.TOGGLE_PAUSE)]
