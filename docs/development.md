@@ -821,6 +821,35 @@ v4는 번역 작업의 용어집과 최근 사용 순서를 저장하는 테이�
 검수 기록과 구간 요청은 별도 테이블을 쓰며 기존 테이블 구조·DB 버전은 바꾸지 않습니다.
 
 
+## 무작위 이어 재생 코어 연결
+
+`random_continuous_play.py`의 `RandomPlayScope(kind, video_ids=(), tag_ids=())`는 불변 범위 값입니다.
+`kind`는 `all` / `list` / `tags`이고 태그는 OR입니다. 화면은 내부 상태 대신 다음 `AppCore` 공개 API를 씁니다.
+
+- `random_continuous_enabled`, `random_continuous_scope`: 켜짐 여부와 현재 범위(꺼짐은 `None`).
+- `playback_video_ids`: 재생을 시작한 목록의 ID 스냅숏. 목록 범위 선택은 이 값을 사용합니다.
+- `set_random_continuous_enabled(bool)`: 일반 재생 중에만 켤 수 있습니다. 켜면 시작 목록 범위와 현재 영상부터 새 기록을 만듭니다.
+- `set_random_continuous_scope(RandomPlayScope(...))`: 현재 영상·이동 기록·나온 영상 집합은 유지하고 다음 선택에 적용합니다.
+- `execute_video_command(command, visible_video_ids)`: PgUp/PgDn 공용 경로. 반환한 ID는 기존 `switch_to`/`MainWindow.play_video`로 재생합니다.
+- `advance_random_if_due(session, eof=True)`: 모든 위치 리스너가 보고를 받은 뒤 호출합니다. 지난 세션의 EOF는 무시합니다.
+- `take_random_continuous_notice()`: 이동 경계·후보 없음 안내를 한 번 가져옵니다.
+- `end_playback()`: 시청을 닫고 이어 재생 범위·기록·시작 목록을 버립니다.
+
+새 목록 재생은 `switch_to(..., playback_video_ids=시작목록)`로 꺼진 상태에서 시작합니다.
+무작위 진입점은 `pick_random_video(...)`로 첫 영상을 고른 뒤 `random_scope=...`도 전달합니다.
+진행 중 이전·다음 이동은 두 인자를 생략해 상태를 유지합니다. 난수는 `AppCore(random_choice=...)`로 주입합니다.
+무작위 EOF는 `MainWindow`가 이벤트 루프 다음 차례에 엔진·세션을 다시 확인하고 적용하므로,
+같은 입력 안에서 먼저 위치를 읽는 PgDn·목록 복귀·탐색과 겹쳐도 중복 전환하지 않습니다.
+
+```powershell
+.venv/Scripts/python scripts/check_web_random_continuous.py --offscreen
+$env:MVM_REAL_WINDOW_TESTS = '1'
+python C:/Users/Rho/.agent-orchestra/bin/desktop_lock.py run --owner issue-235 -- .venv/Scripts/python scripts/check_web_random_continuous.py --library 'C:/Users/Rho/orca/projects/my-video-manager/.local/테스트 라이브러리'
+```
+
+offscreen은 1100×720 위젯 이미지만 `.local/issue-235/`에 저장합니다. 실창 검사는 지정 라이브러리를 읽어
+짧은 서로 다른 영상 두 편의 실제 mpv 끝 → 다음, PgUp/PgDn, Esc 복귀와 마지막 영상 선택을 검사하며 화면을 캡처하지 않습니다.
+
 ## 직접 확인할 항목
 
 자동 테스트는 실제 mpv 화면을 포함하지 않습니다. 변경 후 아래를 실제 창에서 확인합니다.

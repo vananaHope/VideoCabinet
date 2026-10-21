@@ -36,6 +36,7 @@ from .external_subtitles import ExternalSubtitleFile, ExternalSubtitleFileSummar
 from .resolution import ResolutionBackfill, ResolutionResult
 from .library_views import build_index, default_options, normalize_options
 from .thumbnails import ThumbnailBackfill
+from .random_continuous_play import RandomContinuousPlay, RandomPlayScope
 
 
 class CommandType(str, Enum):
@@ -131,6 +132,7 @@ class AppCore:
         translation_transport=None,
         reel_settings: ReelSettings | None = None,
         update_installation=None,
+        random_choice: Callable[[tuple[int, ...]], int] | None = None,
     ):
         self.database = (Path(database) if database is not None else default_data_directory() / "library.sqlite3").resolve()
         self.database.parent.mkdir(parents=True, exist_ok=True)
@@ -138,6 +140,8 @@ class AppCore:
         self._thumbnails.mkdir(exist_ok=True)
         self._media = media
         self._clock = clock
+        self._random_choice = random_choice
+        self._random_continuous = RandomContinuousPlay()
         # 업데이트 확인의 설치 정보 어댑터. None이면 실행 중인 앱 버전과 런타임 지문을 읽는다.
         self.update_installation = update_installation
         self._installed_update = None
@@ -483,7 +487,9 @@ class AppCore:
 
     def start_reel(self, tag_id: int | None = None,
                       highlight_id: int | None = None) -> ReelPlayback | None:
-        return self._reel.start(tag_id, highlight_id)
+        current = self._reel.start(tag_id, highlight_id)
+        self._random_continuous = RandomContinuousPlay()
+        return current
 
     @property
     def reel_playback(self) -> ReelPlayback | None:
@@ -937,7 +943,71 @@ class AppCore:
             return None
         if self.playback.session is None:
             return None
-        return self.adjacent_video(self.playback.session.video_id, visible_video_ids, forward=forward)
+        state = self._random_continuous
+        if state.enabled:
+            from .random_play import is_candidate
+            scope = state.scope
+            videos = self.videos()
+            candidates = self._random_video_candidates(
+                video_ids=scope.video_ids if scope.kind == "list" else None,
+                tag_ids=scope.tag_ids if scope.kind == "tags" else None, videos=videos)
+            target, picked = state.move(forward=forward, candidates=candidates,
+                                        playable={v.id for v in videos if is_candidate(v)},
+                                        choice=self._random_choice)
+            if picked:
+                with _RANDOM_HISTORY_LOCK:
+                    self._last_random_video_id = target
+            return target
+        order = state.source_ids if state.source_ids is not None else visible_video_ids
+        return self.adjacent_video(self.playback.session.video_id, order, forward=forward)
+
+    @property
+    def random_continuous_enabled(self) -> bool:
+        return self._random_continuous.enabled
+
+    @property
+    def random_continuous_scope(self) -> RandomPlayScope | None:
+        """현재 범위의 불변 값. 꺼져 있으면 None이다."""
+        return self._random_continuous.scope
+
+    @property
+    def playback_video_ids(self) -> tuple[int, ...]:
+        """재생을 시작한 목록의 스냅숏. 범위 선택 화면에서도 이 목록을 쓴다."""
+        return self._random_continuous.source_ids or ()
+
+    def set_random_continuous_enabled(self, enabled: bool) -> None:
+        state = self._random_continuous
+        if not enabled:
+            state.disable()
+        elif not state.enabled:
+            session = self.playback.session
+            if session is None or not session.record_viewing or self.reel_playback is not None:
+                raise ValueError("일반 영상을 재생하는 동안에만 무작위 이어 재생을 켤 수 있습니다.")
+            source = state.source_ids if state.source_ids is not None else (session.video_id,)
+            state.enable(session.video_id, RandomPlayScope("list", source))
+
+    def set_random_continuous_scope(self, scope: RandomPlayScope) -> None:
+        """지금 영상·이동 기록·나온 영상은 유지하고 다음 선택 범위만 바꾼다."""
+        if not self.random_continuous_enabled:
+            raise ValueError("무작위 이어 재생을 먼저 켜세요.")
+        if not isinstance(scope, RandomPlayScope):
+            raise ValueError("무작위 재생 범위가 올바르지 않습니다.")
+        self._random_continuous.scope = scope
+
+    def take_random_continuous_notice(self) -> str | None:
+        notice, self._random_continuous.notice = self._random_continuous.notice, None
+        return notice
+
+    def advance_random_if_due(self, session, *, eof: bool = False) -> int | None:
+        """위치 보고 뒤 호출한다. 지난 영상의 EOF는 새 세션에 적용하지 않는다."""
+        if eof and self.random_continuous_enabled and self.playback.session is session:
+            return self.execute_video_command(Command(CommandType.NEXT_VIDEO), self.playback_video_ids)
+        return None
+
+    def end_playback(self) -> None:
+        """목록 복귀·종료: 시청을 마감하고 일시적인 이어 재생 상태를 버린다."""
+        self.playback.end()
+        self._random_continuous = RandomContinuousPlay()
 
     def scan(self, *, folders: Iterable[Path] | None = None) -> ScanResult:
         """감시 폴더 전체 또는 지정한 하위 폴더를 검사한다. 범위 밖 입력은 건너뛴다.
@@ -963,6 +1033,7 @@ class AppCore:
 
     def _random_video_candidates(
         self, *, video_ids: Iterable[int] | None = None, tag_ids: Iterable[int] | None = None,
+        videos: tuple[Video, ...] | None = None,
     ) -> tuple[int, ...]:
         if video_ids is not None and tag_ids is not None:
             raise ValueError("영상 범위와 태그 범위 중 하나만 지정하세요.")
@@ -976,7 +1047,7 @@ class AppCore:
         from .random_play import is_candidate
 
         return tuple(
-            video.id for video in self.videos()
+            video.id for video in (self.videos() if videos is None else videos)
             if is_candidate(video) and (selected_ids is None or video.id in selected_ids)
         )
 
@@ -1020,7 +1091,8 @@ class AppCore:
         candidates = self._random_video_candidates(video_ids=video_ids, tag_ids=tag_ids)
         with _RANDOM_HISTORY_LOCK:
             selected = choose_video_id(
-                candidates, previous_video_id=self._last_random_video_id, choice=choice,
+                candidates, previous_video_id=self._last_random_video_id,
+                choice=self._random_choice if choice is None else choice,
             )
             if selected is not None:
                 self._last_random_video_id = selected
@@ -1074,8 +1146,17 @@ class AppCore:
         point = self.viewing_status(video_id).resume_point
         return max(0, point - self._viewings.settings.resume_rewind) if point is not None else 0
 
-    def switch_to(self, video_id: int, *, start: float | None = None) -> float:
-        """시청·열린 구간을 닫고 지정 장면 또는 이어볼 위치에서 시작한다."""
+    def switch_to(self, video_id: int, *, start: float | None = None,
+                  playback_video_ids: Iterable[int] | None = None,
+                  random_scope: RandomPlayScope | None = None) -> float:
+        """시청·열린 구간을 닫고 지정 장면 또는 이어볼 위치에서 시작한다.
+
+        새 목록에서 시작할 때 playback_video_ids를 넘긴다. random_scope도 넘기면
+        해당 범위의 무작위 이어 재생으로 시작한다. 둘 다 생략한 영상 이동은 현재 상태를 유지한다.
+        """
+        if random_scope is not None and not isinstance(random_scope, RandomPlayScope):
+            raise ValueError("무작위 재생 범위가 올바르지 않습니다.")
+        source = None if playback_video_ids is None else tuple(dict.fromkeys(playback_video_ids))
         self.playback_location(video_id)
         if start is not None:
             video = next(v for v in self.videos() if v.id == video_id)
@@ -1084,6 +1165,12 @@ class AppCore:
         self.playback.end()
         start = self.resume_start(video_id) if start is None else start
         self.playback.start(video_id, start)
+        if playback_video_ids is not None or random_scope is not None:
+            self._random_continuous = RandomContinuousPlay(source_ids=source if source is not None else (video_id,))
+        if random_scope is not None:
+            self._random_continuous.enable(video_id, random_scope, random_start=True)
+        else:
+            self._random_continuous.record(video_id)
         return start
 
 

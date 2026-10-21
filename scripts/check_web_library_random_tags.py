@@ -99,7 +99,7 @@ page, host = window.library_page, window.web_host
 played = []
 if not args.verify:
     # offscreen에서는 mpv 대신 재생 요청만 기록한다. 실제 재생 경로는 --verify가 확인한다.
-    window.play = played.append
+    window.play = lambda video_id, **kwargs: played.append(video_id)
 else:
     switch_to = core.switch_to
     starts = []
