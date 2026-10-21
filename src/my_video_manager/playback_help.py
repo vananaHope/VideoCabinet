@@ -58,6 +58,8 @@ class PlaybackHelp(QWidget):
             label = meanings.get(binding.command.kind, binding.label)
             if binding.command.kind == CommandType.TOGGLE_REEL_REPEAT and not reel:
                 label += " (모아보기)"
+            elif binding.command.kind == CommandType.TOGGLE_RANDOM_CONTINUOUS and reel:
+                label += " (일반 재생)"
             rows.append(f"<td style='padding:4px 12px 4px 0'><b>{escape(display_keys(binding.keys))}</b></td>"
                         f"<td style='padding-right:16px'>{escape(label)}</td>")
         split = (len(rows) + 1) // 2

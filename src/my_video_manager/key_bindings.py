@@ -17,6 +17,8 @@ _NAMED_KEYS = ("Enter", "Space", "Tab", "Backspace", "Left", "Right", "Up", "Dow
 _ALIASES = {key.casefold(): key for key in _NAMED_KEYS}
 _ALIASES.update(pageup="PgUp", pagedown="PgDn", pgdown="PgDn", esc="Esc", escape="Esc")
 _ALIASES["return"] = "Enter"
+# 재생 화면 밖에서도 동작하는 앱 수준 명령. 키 배치 목록에서는 재생 명령 뒤에 둔다.
+APP_COMMANDS = ("emergency_hide", "random_play")
 RESERVED_KEYS = {"Alt+S": "설정 메뉴를 여는 예약 키",
                  "F1": "키 안내를 여는 예약 키",
                  **{f"Ctrl+{i}": "페이지를 여는 예약 키" for i in range(1, 9)}}
@@ -66,6 +68,7 @@ def command_label(command: Command) -> str:
         "toggle_highlight_list": "하이라이트 패널 접기 / 펴기",
         "emergency_hide": "긴급 탈출(창 숨기기)",
         "random_play": "무작위 재생",
+        "toggle_random_continuous": "무작위 이어 재생 켜기 / 끄기",
     }.get(kind, kind)
 
 
@@ -84,7 +87,7 @@ def check_command_key(command: Command, key: str) -> None:
     앱 수준 명령은 웹 셸의 입력 중에도 받으므로 글자 입력과 겹치지 않게 Ctrl·Alt·Meta 조합만 허용한다.
     Shift만 붙은 키는 대문자 입력이라 수정자 없는 키로 본다.
     """
-    if command.kind.value in ("emergency_hide", "random_play") and not {"Ctrl", "Alt", "Meta"} & set(key.split("+")[:-1]):
+    if command.kind.value in APP_COMMANDS and not {"Ctrl", "Alt", "Meta"} & set(key.split("+")[:-1]):
         raise ValueError(f"{key}: ‘{command_label(command)}’은 Ctrl·Alt·Win 중 하나가 들어간 조합만 지정할 수 있습니다.")
 
 
@@ -113,6 +116,8 @@ class KeyBindings:
         for command in commands:
             if not any(existing.kind == command.kind for existing in self.defaults):
                 self.defaults[command] = ()
+        # 기본 키 없이 더해진 재생 명령도 앱 수준 명령 앞에 온다(정렬은 안정적이라 나머지 순서는 그대로다).
+        self.defaults = dict(sorted(self.defaults.items(), key=lambda item: item[0].kind.value in APP_COMMANDS))
         self.bindings = dict(self.defaults)
         stored = settings.get("keys.bindings", {})
         if isinstance(stored, dict):

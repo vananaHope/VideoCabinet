@@ -346,9 +346,10 @@ def test_display_multiple_or_unassigned_keys(keys, expected):
 def test_fullscreen_default_label_rebinding_and_reset(tmp_path):
     core = open_core(tmp_path)
     assert core.key_bindings()[0].command.kind == CommandType.TOGGLE_PAUSE
-    # 재생 명령 뒤에 재생 밖에서도 동작하는 긴급 탈출이 온다.
-    assert [row.command.kind for row in core.key_bindings()][-3:] == [
-        CommandType.TOGGLE_FULLSCREEN, CommandType.EMERGENCY_HIDE, CommandType.RANDOM_PLAY]
+    # 재생 명령(기본 키 없는 무작위 이어 재생 켜기/끄기 포함) 뒤에 재생 밖에서도 동작하는 긴급 탈출이 온다.
+    assert [row.command.kind for row in core.key_bindings()][-4:] == [
+        CommandType.TOGGLE_FULLSCREEN, CommandType.TOGGLE_RANDOM_CONTINUOUS,
+        CommandType.EMERGENCY_HIDE, CommandType.RANDOM_PLAY]
     command = Command(CommandType.TOGGLE_FULLSCREEN)
     row = next(row for row in core.key_bindings() if row.command == command)
     assert row.label == "전체 화면 켜기 / 끄기"

@@ -372,3 +372,23 @@ def test_scope_video_count_uses_candidate_rule(core):
     assert core.random_scope_video_count(RandomPlayScope('tags', tag_ids=(red.id,))) == 1
     with pytest.raises(ValueError):
         core.random_scope_video_count({'kind': 'all'})
+
+
+def test_random_continuous_command_has_no_default_key_and_reads_old_settings(tmp_path):
+    from my_video_manager.core import Command, CommandType
+    database = tmp_path / 'data/library.sqlite3'
+    core = AppCore(media=FakeMedia(), clock=lambda: datetime.now(timezone.utc), database=database)
+    # 이 명령이 생기기 전에 저장한 키 배치(변경분만 저장)에는 이 명령의 항목이 없다.
+    core.settings.set('keys.bindings', {'toggle_pause:0': ['Space']})
+    reopened = AppCore(media=FakeMedia(), clock=lambda: datetime.now(timezone.utc), database=database)
+    rows = {row.command: row for row in reopened.key_bindings()}
+    toggle = rows[Command(CommandType.TOGGLE_RANDOM_CONTINUOUS)]
+    assert toggle.keys == toggle.default_keys == ()
+    assert toggle.label == '무작위 이어 재생 켜기 / 끄기'
+    from my_video_manager.key_display import display_keys
+    assert display_keys(toggle.keys) == '키 미할당'  # 다른 미할당 명령과 같은 표시다.
+    assert rows[Command(CommandType.TOGGLE_PAUSE)].keys == ('Space',)
+    bindings = {command: row.keys for command, row in rows.items()}
+    bindings[Command(CommandType.TOGGLE_RANDOM_CONTINUOUS)] = ('R',)
+    reopened.save_key_bindings(bindings)
+    assert reopened.command_for_key('R') == Command(CommandType.TOGGLE_RANDOM_CONTINUOUS)

@@ -56,6 +56,8 @@ class CommandType(str, Enum):
     TOGGLE_HIGHLIGHT_LIST = "toggle_highlight_list"
     EMERGENCY_HIDE = "emergency_hide"
     RANDOM_PLAY = "random_play"
+    # 재생 화면 🔀 단추와 같은 명령. 기본 키는 없고 키 배치에서 지정할 수 있다.
+    TOGGLE_RANDOM_CONTINUOUS = "toggle_random_continuous"
 
 
 @dataclass(frozen=True)
