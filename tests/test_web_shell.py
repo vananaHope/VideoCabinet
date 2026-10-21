@@ -424,3 +424,24 @@ def test_shell_status_tone_uses_only_known_failure_prefixes(window_factory):
         wait_for(lambda: js(f"{notice}?.textContent ?? ''") == text)
         assert js(f"{notice}.dataset.tone") == tone, text
         assert js(f"{notice}.getAttribute('role')") == ('alert' if tone == 'error' else 'status'), text
+
+
+def test_web_screen_language_stays_korean_when_system_locale_is_english(window_factory):
+    """#232: Windows 표시 언어가 영어여도 웹 화면 언어는 한국어라 날짜 입력 칸이 연·월·일 순서다."""
+    from PySide6.QtCore import QLocale
+    QLocale.setDefault(QLocale(QLocale.Language.English, QLocale.Country.UnitedStates))
+    window = window_factory()
+    host = window.web_host
+
+    def js(source):
+        result = []
+        host.engine_page.runJavaScript(source, result.append)
+        wait_for(lambda: bool(result))
+        return result[0]
+
+    assert QLocale().name() == 'ko_KR'
+    wait_for(lambda: js('document.readyState') == 'complete')
+    assert js('navigator.language') == 'ko'
+    order = js("new Intl.DateTimeFormat(navigator.language).formatToParts(new Date(2026, 9, 21))"
+               ".filter(p => p.type !== 'literal').map(p => p.type).join(',')")
+    assert order == 'year,month,day'

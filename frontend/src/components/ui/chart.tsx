@@ -10,8 +10,8 @@ export function ChartContainer({ config, children, label }: { config: ChartConfi
   </div></ChartContext.Provider>
 }
 export const ChartTooltip = Tooltip
-export function ChartTooltipContent({ active, payload, label, format }: { active?: boolean; payload?: readonly { dataKey?: string | number; value?: unknown }[]; label?: ReactNode; format: (value: number) => string }) {
+export function ChartTooltipContent({ active, payload, label, format, formatLabel }: { active?: boolean; payload?: readonly { dataKey?: string | number; value?: unknown }[]; label?: ReactNode; format: (value: number) => string; formatLabel?: (label: string) => string }) {
   const config = useContext(ChartContext)
   if (!active || !payload?.length) return null
-  return <div className="grid gap-2 rounded-lg border bg-popover p-3 text-xs text-popover-foreground shadow-xl"><p className="font-medium">{label}</p>{payload.map((entry, index) => <p key={index} className="flex gap-4"><span className="text-muted-foreground">{config[String(entry.dataKey)]?.label}</span><span className="font-medium tabular-nums">{format(Number(entry.value))}</span></p>)}</div>
+  return <div className="grid gap-2 rounded-lg border bg-popover p-3 text-xs text-popover-foreground shadow-xl"><p className="font-medium">{formatLabel ? formatLabel(String(label)) : label}</p>{payload.map((entry, index) => <p key={index} className="flex gap-4"><span className="text-muted-foreground">{config[String(entry.dataKey)]?.label}</span><span className="font-medium tabular-nums">{format(Number(entry.value))}</span></p>)}</div>
 }

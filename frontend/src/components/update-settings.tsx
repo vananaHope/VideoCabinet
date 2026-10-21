@@ -4,11 +4,7 @@ import type { ShellUpdateData, UpdateAction, UpdateChoice, UpdateResultData, Upd
 import { Button } from "@/components/ui/button"
 import { NoticeStack, type NoticeItem } from "@/components/ui/notice"
 import { UpdateChoices, UpdateProgress, UpdateTitle, useShellUpdate } from "@/components/update-notice"
-
-function date(value: string) {
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? '시각 정보 없음' : parsed.toLocaleString('ko-KR')
-}
+import { formatDateTime } from "@/lib/dates"
 
 // 고른 뒤 사라지는 버튼 대신 포커스를 둘 자리. 건너뛰기와 건너뛰기 취소는 서로 자리를 바꾸고, 업데이트는 진행 안내의 취소로 간다.
 const focusAfter: Record<UpdateChoice, string> = {
@@ -80,7 +76,7 @@ export function UpdateSettings({ data, onCheck, onAutomatic, onChoose }: { data:
     if (shell) void run(async () => { shellUpdate.setData(await request<ShellUpdateData>(reply => shell.updateAction(name, reply))) })
   }
   const last = data.last
-  const checked = data.checking ? '확인 중…' : last ? `마지막 확인: ${date(last.checkedAt)}` : '아직 확인하지 않았습니다.'
+  const checked = data.checking ? '확인 중…' : last ? `마지막 확인: ${formatDateTime(last.checkedAt)}` : '아직 확인하지 않았습니다.'
   return <div className="space-y-6">
     <section className="space-y-3 rounded-xl border bg-card px-4 py-3" aria-labelledby="settings-update-heading">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">

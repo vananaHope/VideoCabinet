@@ -7,6 +7,7 @@ import { NoticeStack } from "@/components/ui/notice"
 import { SelectField } from "@/components/ui/select"
 import { EmptyState, PageHeader } from "@/components/page-parts"
 import { ResultRow, listKey, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+import { formatDateTime } from "@/lib/dates"
 
 export default function ReelPage() {
   const [bridge, setBridge] = useState<ReelBridge | null>(null)
@@ -74,7 +75,7 @@ export default function ReelPage() {
         <div className="relative flex aspect-video w-32 shrink-0 items-center justify-center self-start overflow-hidden rounded-md bg-muted"><Film aria-hidden="true" className="absolute size-8 text-muted-foreground" />{entry.thumbnail && <img src={entry.thumbnail} alt="" loading="lazy" onError={event => { event.currentTarget.hidden = true }} className="relative h-full w-full object-cover" />}</div>
         <div className="min-w-0 flex-1 space-y-1">
           <p className="wrap-anywhere font-semibold">{entry.title}</p>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs"><span className="text-highlight tabular-nums">{timestamp(entry.start)}{entry.end === null ? " · 지점" : ` — ${timestamp(entry.end)}`}</span><span className="text-muted-foreground">마지막 복습: {entry.lastRevisited ?? "아직 없음"}</span></div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs"><span className="text-highlight tabular-nums">{timestamp(entry.start)}{entry.end === null ? " · 지점" : ` — ${timestamp(entry.end)}`}</span><span className="text-muted-foreground">마지막 복습: {entry.lastRevisitedAt ? formatDateTime(entry.lastRevisitedAt) : "아직 없음"}</span></div>
           {!entry.playable && <p className="text-xs text-muted-foreground">{entry.missing ? "파일 없음 — 재생 불가" : "길이 0인 지점"} · 차례 재생에서 건너뜀</p>}
           {entry.note && <p className="line-clamp-3 whitespace-pre-wrap wrap-anywhere text-sm">{entry.note}</p>}
           {!!entry.tags.length && <div aria-label="하이라이트 태그" className="flex flex-wrap items-center gap-1"><span className="text-xs text-muted-foreground">태그:</span>{entry.tags.map(tag => <span key={tag.id} className="max-w-full rounded-md border border-border bg-secondary px-2 py-0.5 text-xs wrap-anywhere text-secondary-foreground">{tag.name}</span>)}</div>}

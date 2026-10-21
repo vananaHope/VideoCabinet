@@ -63,6 +63,24 @@ def connected(tmp_path):
     return core, http, cli, store, clock, reopen
 
 
+def test_model_policy_passes_contract_expiry_as_iso_date(connected):
+    # #232: 만료일은 표시용 문자열이 아니라 ISO 날짜로 넘기고 모양은 화면이 만든다.
+    core, clock = connected[0], connected[4]
+    def deepseek():
+        go = next(p for p in core.translation_settings()['providers'] if p['id'] == 'opencode_go')
+        return next(m for m in go['models'] if m['id'] == 'deepseek-v4.1-flash')
+    model = deepseek()
+    assert model['valid_until'] == '2026-10-31' and '2026' not in model['policy']
+    assert model['policy'] == '학습 미사용 · 보존 0일' and model['policy_warning'] == '' and not model['expired_warning']
+    clock[0] = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    model = deepseek()
+    assert model['valid_until'] == '2026-10-31' and model['expired_warning'] and model['warning']
+    assert model['policy_warning'].startswith('주의:')
+    glm = next(m for p in core.translation_settings()['providers'] if p['id'] == 'opencode_go'
+               for m in p['models'] if m['id'] == 'glm-5.3')
+    assert glm['valid_until'] is None
+
+
 def save(core, identifier='codex', model=None, effort=None, *, fallback=True, key_action='keep', key=''):
     selections = core.translation_settings()['selections']
     selected = next(s for s in selections if s['provider'] == identifier)

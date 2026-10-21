@@ -8,6 +8,7 @@ import { DailyChart, duration, type Metric } from "@/components/statistics/Daily
 
 import { ActivityChart } from "@/components/statistics/ActivityChart"
 import { Inventory } from "@/components/statistics/Inventory"
+import { formatDate } from "@/lib/dates"
 
 const periods = [7, 30, 90, 365].map(days => ({ value: String(days), label: `${days}일` }))
 const metrics = [{ value: "watched_seconds", label: "시청 시간" }, { value: "viewing_count", label: "시청 횟수" }]
@@ -53,8 +54,8 @@ export default function StatisticsPage() {
   const data = state.result?.period
   return <main ref={root} aria-label="통계" aria-busy={state.loading} className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
     <PageHeader title="시청 통계" description="오늘을 포함한 로컬 날짜 기준 · 틀어보기와 모아보기 복습 제외" actions={<Tabs label="통계 기간" value={String(state.days)} items={periods} onChange={choose} />} />
-    <div role="status" aria-live="polite" className="text-sm text-muted-foreground">{state.loading ? `${state.days}일 시청 기록을 계산하고 있어요…${data ? ` 현재 ${data.start_date} ~ ${data.end_date} 결과 표시 중` : ""}` : section === "inventory" ? "현재 라이브러리 현황 · 기간 선택과 무관" : data ? `${data.start_date} ~ ${data.end_date} · 1회 평균 ${duration(data.average_seconds)}` : "기간을 선택하면 시청 기록을 보여 드립니다."}</div>
-    {(error || state.message) && <Notice tone="error" action={<Button variant="outline" size="sm" onClick={() => choose(String(state.days))}>다시 시도</Button>}><p>{error || state.message}</p>{data && <p className="text-muted-foreground">표시 중인 결과: {data.start_date} ~ {data.end_date} ({data.days}일){data.days !== state.days && ` · 선택한 ${state.days}일 결과가 아닙니다`}</p>}</Notice>}
+    <div role="status" aria-live="polite" className="text-sm text-muted-foreground">{state.loading ? `${state.days}일 시청 기록을 계산하고 있어요…${data ? ` 현재 ${formatDate(data.start_date)} ~ ${formatDate(data.end_date)} 결과 표시 중` : ""}` : section === "inventory" ? "현재 라이브러리 현황 · 기간 선택과 무관" : data ? `${formatDate(data.start_date)} ~ ${formatDate(data.end_date)} · 1회 평균 ${duration(data.average_seconds)}` : "기간을 선택하면 시청 기록을 보여 드립니다."}</div>
+    {(error || state.message) && <Notice tone="error" action={<Button variant="outline" size="sm" onClick={() => choose(String(state.days))}>다시 시도</Button>}><p>{error || state.message}</p>{data && <p className="text-muted-foreground">표시 중인 결과: {formatDate(data.start_date)} ~ {formatDate(data.end_date)} ({data.days}일){data.days !== state.days && ` · 선택한 ${state.days}일 결과가 아닙니다`}</p>}</Notice>}
     <Tabs label="통계 구역" value={section} items={[{ value: "activity", label: "시청 활동" }, { value: "inventory", label: "라이브러리 현황" }]} onChange={setSection} />
     {data && state.result && section === "inventory" && <Inventory inventory={state.result.inventory} library={data.library} />}
     {data && state.result && section === "activity" && <div className="space-y-5">

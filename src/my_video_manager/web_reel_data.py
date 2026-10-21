@@ -13,7 +13,7 @@ class ReelEntryData(TypedDict):
     thumbnail: str | None
     start: float
     end: float | None
-    lastRevisited: str | None
+    lastRevisitedAt: str | None
     note: str
     tags: list[TagData]
     playable: bool
@@ -52,7 +52,7 @@ def entries_data(core, tag_id):
             id=h.id, videoId=h.video_id, title=entry.video_title,
             thumbnail=f'mvm-thumb://video/{h.video_id}' if videos[h.video_id].thumbnail else None,
             start=h.start, end=h.end,
-            lastRevisited=entry.last_revisited_at.astimezone().strftime('%Y-%m-%d %H:%M:%S') if entry.last_revisited_at else None,
+            lastRevisitedAt=entry.last_revisited_at.astimezone().isoformat() if entry.last_revisited_at else None,
             note=h.note.text if h.note else '',
             tags=[dict(id=t.id, name=t.name) for t in tags[h.video_id].get(h.id, ())],
             playable=entry.playable and h.start < entry.duration, missing=not entry.playable,

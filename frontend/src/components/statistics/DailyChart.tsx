@@ -1,6 +1,7 @@
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import type { DailyViewingStatistics } from "@/bridge-types"
+import { formatDate, formatShortDate } from "@/lib/dates"
 
 const chartConfig = {
   watched_seconds: { label: "시청 시간", color: "var(--primary-text)" },
@@ -33,9 +34,9 @@ export function DailyChart({ daily, metric }: { daily: DailyViewingStatistics[];
   return <div className="space-y-2"><p className="text-xs text-muted-foreground">단위: {unit} · 시작한 날짜 기준</p><ChartContainer config={chartConfig} label={`일별 ${chartConfig[metric].label}`}>
     <BarChart accessibilityLayer data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
       <CartesianGrid vertical={false} stroke="var(--border)" />
-      <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={32} interval="preserveStartEnd" tick={{ fill: "var(--muted-foreground)" }} tickFormatter={value => String(value).slice(5).replace("-", "/")} />
+      <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={32} interval="preserveStartEnd" tick={{ fill: "var(--muted-foreground)" }} tickFormatter={value => formatShortDate(String(value))} />
       <YAxis width={64} tickLine={false} axisLine={false} allowDecimals={false} tickCount={Math.min(5, Math.max(2, Math.ceil(maximum / divisor) + 1))} domain={[0, maximum === 0 ? 1 : "auto"]} tick={{ fill: "var(--muted-foreground)" }} tickFormatter={value => Number(value).toLocaleString("ko-KR")} />
-      <ChartTooltip cursor={{ fill: "var(--muted)" }} content={<ChartTooltipContent format={format} />} />
+      <ChartTooltip cursor={{ fill: "var(--muted)" }} content={<ChartTooltipContent format={format} formatLabel={formatDate} />} />
       <Bar dataKey={metric} fill={chartConfig[metric].color} radius={2} isAnimationActive={false} />
     </BarChart>
   </ChartContainer></div>
