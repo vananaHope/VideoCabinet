@@ -1,5 +1,9 @@
 """영상 중심 재생 페이지. 창 상태는 셸, 도메인 상태는 AppCore가 소유한다."""
 
+import math
+import time
+from types import SimpleNamespace
+
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
@@ -14,6 +18,7 @@ from .qt_keys import key_name
 from .playback_help import REEL_MEANINGS, PlaybackHelp
 from .translation_kind import translation_task
 from .theme import playback_stylesheet, playback_font
+from .video_click import VideoClick, VideoClickJudge
 
 # 속도 단추 목록. ↑/↓ 키는 이 목록과 관계없이 MIN~MAX_PLAYBACK_SPEED를 0.25씩 움직인다.
 SPEED_CHOICES = (0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)
@@ -260,6 +265,21 @@ class PlaybackPage(QWidget):
         self.pointer_timer.setInterval(150)
         self.pointer_timer.timeout.connect(self.check_pointer)
         self._pointer_position = QCursor.pos()
+        # 한 번 클릭은 재생/일시정지, 두 번 클릭은 전체 화면. 한 번 클릭은 판정 시간이 지나야 실행한다.
+        self.click_timer = QTimer(self)
+        self.click_timer.setSingleShot(True)
+        # 기본 CoarseTimer는 판정 시간보다 몇 ms 일찍 깨울 수 있다. 판정기도 일찍 깨면 다시 기다린다.
+        self.click_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self.clicks = VideoClickJudge(
+            QApplication.styleHints().mouseDoubleClickInterval() / 1000, clock=time.perf_counter,
+            timer=SimpleNamespace(start=lambda seconds: self.click_timer.start(math.ceil(seconds * 1000)),
+                                  stop=self.click_timer.stop),
+            on_click=self.video_clicked)
+        self.click_timer.timeout.connect(self.clicks.expire)
+        self._surface_button_down = False
+        # 메뉴 등 팝업이 마지막으로 받은 누름의 시각. Qt는 팝업 밖 누름으로 팝업을 닫은 뒤
+        # 같은 시각을 단 누름을 아래 위젯에 다시 보내므로(replay), 그 누름은 클릭으로 세지 않는다.
+        self._popup_press_timestamp = None
         self.details_timer = QTimer(self)
         self.details_timer.setInterval(1000)
         self.details_timer.timeout.connect(self.refresh_details)
@@ -484,13 +504,66 @@ class PlaybackPage(QWidget):
             elif not self._error:
                 self.bottom_bar.hide()
 
+    def _accepts_click(self, player):
+        return (player is not None and player is self.shell.player and self.isVisible()
+                and QApplication.activeModalWidget() is None)
+
+    def press_video(self, timestamp):
+        """영상을 누름. 키 안내·메뉴가 열려 있었으면 그것만 닫고, 아니면 클릭 판정에 넘긴다."""
+        player = self.shell.player
+        if not self._accepts_click(player):
+            return
+        if (QApplication.activePopupWidget() is not None or timestamp == self._popup_press_timestamp
+                or self._help_requested):
+            self.clicks.cancel()
+            while (popup := QApplication.activePopupWidget()) is not None and popup.close():
+                pass
+            self.close_help()
+            return
+        self.focus_content()
+        # 클릭은 누름을 받은 엔진에 속한다. 엔진이 바뀌면(다음 영상, 목록 복귀 뒤 재생) 이전 누름과 잇지 않고,
+        # 판정 시간 사이에 엔진이 바뀐 클릭은 실행하지 않는다.
+        self.clicks.press(time.perf_counter(), player)
+
+    def reset_clicks(self):
+        """대기 중인 한 번 클릭과 누름 상태를 버린다. 창을 숨기거나 최소화하거나 목록으로 돌아갈 때 부른다.
+
+        숨긴 사이 남은 클릭이 복원 뒤 실행되면 긴급 탈출로 멈춘 재생을 다시 틀 수 있다.
+        """
+        self.clicks.cancel()
+        self._surface_button_down = False
+        self._popup_press_timestamp = None
+
+    def video_clicked(self, click, player):
+        if not self._accepts_click(player) or QApplication.activePopupWidget() is not None:
+            return  # 판정 시간 사이에 영상이 바뀌었거나 목록·메뉴·창으로 옮겨 갔다.
+        self.press(Command(CommandType.TOGGLE_FULLSCREEN if click == VideoClick.DOUBLE
+                           else CommandType.TOGGLE_PAUSE))
+
     def eventFilter(self, watched, event):
         kind = event.type()
+        if (kind == QEvent.Type.MouseButtonPress and isinstance(watched, QWidget)
+                and watched.windowType() == Qt.WindowType.Popup):
+            self._popup_press_timestamp = event.timestamp()
+        if watched is self.surface and kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick,
+                                                QEvent.Type.MouseButtonRelease):
+            # mpv는 wid로 넣은 자기 창을 비활성(WS_DISABLED)으로 만들어 마우스 입력을 부모인 표면에 넘긴다.
+            # Windows는 두 번째 누름을 DblClick으로만 보내고, 다른 플랫폼은 Press 뒤에 DblClick을 더 보낸다.
+            # Press 뒤 떼기 전에 온 DblClick은 같은 누름이라 세지 않고, 한 번/두 번은 판정기가 시각으로 가른다.
+            if event.button() == Qt.MouseButton.LeftButton:
+                if kind == QEvent.Type.MouseButtonRelease:
+                    self._surface_button_down = False
+                elif kind == QEvent.Type.MouseButtonPress or not self._surface_button_down:
+                    self._surface_button_down = True
+                    self.press_video(event.timestamp())
         if watched is self.controls and kind in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
             # 창 크기뿐 아니라 단추 글자·표시가 바뀌어도 다시 맞춘다.
             self.fit_controls()
         if watched is self.surface and kind == QEvent.Type.Resize and self._help_requested:
             QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))
+        if ((watched is self or watched is self.shell) and kind == QEvent.Type.Hide
+                or watched is self.shell and kind == QEvent.Type.WindowStateChange and self.shell.isMinimized()):
+            self.reset_clicks()
         if watched is self.shell:
             if kind in (QEvent.Type.Move, QEvent.Type.Resize) and self._help_requested:
                 QTimer.singleShot(0, lambda: self.help_panel.place_over(self.surface))

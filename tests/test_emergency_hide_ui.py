@@ -6,7 +6,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QPointF, Qt, QTimer
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
@@ -465,3 +466,55 @@ def test_seek_back_after_held_eof_and_immediate_resume_stays_in_item(window):
     assert window.core.reel_playback.entry.highlight.id == last.id
     assert window.pages.currentWidget() is window.playback_page
     assert player.position == 115 and not player.paused
+
+
+def click_video(window):
+    """영상 표면을 한 번 누른다. 실제 mpv 창은 마우스 입력을 표면에 넘긴다."""
+    center = QPointF(window.surface.rect().center())
+    for kind, held in ((QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
+                       (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton)):
+        QApplication.sendEvent(window.surface, QMouseEvent(
+            kind, center, QPointF(window.surface.mapToGlobal(center.toPoint())),
+            Qt.MouseButton.LeftButton, held, Qt.KeyboardModifier.NoModifier))
+    QApplication.processEvents()
+
+
+def wait_past_click_interval(window):
+    loop = QEventLoop()
+    QTimer.singleShot(round(window.playback_page.clicks.interval * 1000) + 200, loop.quit)
+    loop.exec()
+
+
+@pytest.mark.parametrize("restore_before_interval", [True, False])
+def test_pending_video_click_never_resumes_after_emergency_hide(window, restore_before_interval):
+    video, player = play_to_twenty_seconds(window)
+    click_video(window)  # 판정 시간이 지나기 전에 긴급 탈출한다.
+    emergency_key(window)
+    assert not window.isVisible() and player.paused
+    if restore_before_interval:
+        window.tray.open()
+        QApplication.processEvents()
+        assert window.isVisible()
+        wait_past_click_interval(window)
+    else:
+        wait_past_click_interval(window)
+        window.tray.open()
+        QApplication.processEvents()
+    wait_past_click_interval(window)
+    assert player.paused  # 사용자가 재개하기 전에는 다시 재생하지 않는다.
+    click_video(window)  # 복원 뒤 새 클릭은 정상으로 재개한다.
+    wait_for(lambda: not player.paused)
+
+
+def test_pending_video_click_is_dropped_when_window_is_minimized(window):
+    video, player = play_to_twenty_seconds(window)
+    click_video(window)
+    window.showMinimized()
+    QApplication.processEvents()
+    window.showNormal()
+    window.activateWindow()
+    QApplication.processEvents()
+    wait_past_click_interval(window)
+    assert not player.paused
+    click_video(window)
+    wait_for(lambda: player.paused)
