@@ -77,6 +77,11 @@ class DialogModel:
             self.confirm(f"'{video.title}'을 제외할까요?\n실제 파일과 기록은 남으며 제외 목록에서 되돌릴 수 있습니다.",
                          exclude, title='영상 제외', destructive=True)
 
+    @property
+    def expired(self):
+        """대화상자가 기대는 상태가 사라졌는지. 범위 고르기는 무작위 이어 재생이 끝나면(목록 복귀 등) 쓸모가 없다."""
+        return self.kind == 'random-scope' and not self.core.random_continuous_enabled
+
     def usage(self):
         if self.tag_usage is None:
             self.tag_usage = tag_usage_data(self.core.tag_usage())

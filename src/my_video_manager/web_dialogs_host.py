@@ -75,8 +75,12 @@ class WebDialogs(QObject):
         self.timer = QTimer(self)
         self.timer.setInterval(500)
         self.timer.timeout.connect(self.publish)
+        # 대화상자 루프가 도는 동안만 확인한다. 열기 직후(루프 시작 전)에 닫아 루프가 멈추지 않게 한다.
+        self.timer.timeout.connect(self.close_expired)
         self.window.pages.currentChanged.connect(self.sync_container)
         self.window.pages.currentChanged.connect(self.reset_web_modal)
+        self.window.pages.currentChanged.connect(lambda *_: self.loop is not None and self.loop.isRunning()
+                                                 and self.close_expired())
         self.host.view.loadStarted.connect(self.reset_web_modal)
         self.host.bridge.shellChanged.connect(self.reset_web_modal)
 
@@ -98,6 +102,11 @@ class WebDialogs(QObject):
 
     def snapshot(self):
         return {'dialog': self.stack[-1].snapshot() if self.stack else None}
+
+    def close_expired(self, *_):
+        """기대는 상태가 사라진 대화상자(재생이 끝난 뒤의 범위 고르기)를 닫는다. 위 대화상자부터 닫는다."""
+        while self.stack and self.stack[-1].expired:
+            self.pop()
 
     def publish(self):
         self.sync_shortcut()

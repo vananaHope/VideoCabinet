@@ -428,3 +428,48 @@ def test_scope_dialog_rejects_scope_without_candidates(window):
     with pytest.raises(AssertionError, match='태그를 하나 이상'):
         choose_scope(window, choice='tags', members=[])
     assert core.random_continuous_scope == RandomPlayScope()
+
+
+@pytest.mark.parametrize('when', ['after_cancel', 'while_open'])
+def test_list_return_leaves_no_scope_dialog_name_or_on_state_for_next_direct_play(window, when):
+    wait_for(lambda: window.loaded)
+    core, page, dialogs = window.core, window.playback_page, window.web_host.dialogs
+    first, other = core.videos()
+    tag = core.add_video_tag(other.id, '이전 범위')
+    window.play(first.id, random_scope=RandomPlayScope('tags', tag_ids=(tag.id,)))
+    window.sync_position()
+    assert page.random_scope_button.label == '태그: 이전 범위'
+    errors = []
+
+    def run():
+        try:
+            assert json.loads(dialogs.bridge.snapshot())['dialog']['kind'] == 'random-scope'
+            if when == 'after_cancel':
+                dialogs.pop()
+            else:
+                # 범위 창이 열린 채 재생이 끝나 목록으로 돌아가면 창이 목록 위에 남지 않는다.
+                window.back_to_list()
+                wait_for(lambda: not dialogs.active)
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            while dialogs.active:
+                dialogs.pop()
+    QTimer.singleShot(0, run)
+    page.random_scope_button.click()
+    replies = []
+    window.web_host.engine_page.runJavaScript('1', replies.append)
+    wait_for(lambda: replies)
+    if errors:
+        raise errors[0]
+    if when == 'after_cancel':
+        assert core.random_continuous_scope == RandomPlayScope('tags', tag_ids=(tag.id,))
+        window.back_to_list()
+    wait_for(lambda: core.playback.session is None and window.pages.currentWidget() is window.web_host)
+    assert not dialogs.active and dialogs.container is None
+    window.play(other.id)
+    window.sync_position()
+    assert not core.random_continuous_enabled and not page.random_button.isChecked()
+    assert page.random_scope_button.isHidden()
+    page.random_button.click()
+    assert page.random_scope_button.label == f'현재 결과 {len(window.playback_list)}편'
