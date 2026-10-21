@@ -212,6 +212,20 @@ def test_whole_library_random_play_ignores_current_results_and_uses_whole_playli
     assert page.played_all == [reply['videoId']] and not bridge.busy
 
 
+def test_empty_random_scope_passes_all_videos_scope_to_playback(bridge):
+    from my_video_manager.random_continuous_play import RandomPlayScope
+
+    bridge, page, app = bridge
+    json.loads(bridge.filter('없는 제목', 0))
+    assert page.visible_ids == []
+    reply = json.loads(bridge.random_play(lambda: {}))
+    assert reply['videoId'] in page.video_ids
+    app.processEvents()
+    assert page.played == [reply['videoId']]
+    assert page.played_scopes == [RandomPlayScope()]
+    assert not bridge.busy
+
+
 def test_random_play_is_not_locked_during_scan(bridge):
     bridge, page, app = bridge
     page.worker = object()

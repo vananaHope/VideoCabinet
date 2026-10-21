@@ -112,9 +112,12 @@ class LibraryBridge(QObject):
             from .random_continuous_play import RandomPlayScope
             selected_scope = scope()
             video_id = self.page.core.pick_random_video(**selected_scope)
-            random_scope = (RandomPlayScope("tags", tag_ids=tuple(selected_scope['tag_ids']))
-                            if 'tag_ids' in selected_scope else
-                            RandomPlayScope("list", video_ids=tuple(selected_scope['video_ids'])))
+            if 'tag_ids' in selected_scope:
+                random_scope = RandomPlayScope("tags", tag_ids=tuple(selected_scope['tag_ids']))
+            elif 'video_ids' in selected_scope:
+                random_scope = RandomPlayScope("list", video_ids=tuple(selected_scope['video_ids']))
+            else:
+                random_scope = RandomPlayScope()
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
         if video_id is None:

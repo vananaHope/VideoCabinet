@@ -307,7 +307,8 @@ class MainWindow(QMainWindow):
             self._return_page = self.pages.currentWidget()
         try:
             self.stop_player()
-            source = self.playback_list if from_list or new_playback or random_scope is not None else None
+            begins_playback = from_list or new_playback or self.core.playback.session is None
+            source = self.playback_list if begins_playback or random_scope is not None else None
             self.load_player(video_id, self.core.switch_to(
                 video_id, start=start, playback_video_ids=source, random_scope=random_scope))
         except Exception as error:
@@ -505,7 +506,8 @@ class MainWindow(QMainWindow):
         if self.pages.currentWidget() is not self.playback_page:
             self._return_page = self.pages.currentWidget()
         self.sync_position()
-        target = self.core.play_review_line(video_id, line_id)
+        source = self.library_page.visible_video_ids()
+        target = self.core.play_review_line(video_id, line_id, playback_video_ids=source)
         try:
             if self.player and target.action == "seek":
                 self.player.seek_to(target.start, resume=True)
@@ -517,7 +519,7 @@ class MainWindow(QMainWindow):
                     self.player = None
                 self.reel.shown = None
                 self.reel.update_label()
-                self.playback_list = self.library_page.visible_video_ids()
+                self.playback_list = source
                 self.load_player(video_id, target.start)
         except Exception:
             self.end_playback()

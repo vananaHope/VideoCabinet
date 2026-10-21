@@ -429,12 +429,15 @@ class AppCore:
         self.playback_location(video_id)
         return line.original.start
 
-    def play_review_line(self, video_id, line_id) -> ReviewPlayback:
+    def play_review_line(self, video_id, line_id, *,
+                         playback_video_ids: Iterable[int] | None = None) -> ReviewPlayback:
+        """같은 일반 영상이면 탐색하고, 새 재생이면 전달받은 목록으로 시청을 시작한다."""
         start = self.review_line_position(video_id, line_id)
         session = self.playback.session
         if session and session.video_id == video_id and session.record_viewing and self.reel_playback is None:
             return ReviewPlayback(video_id, start, "seek")
-        self.playback.start(video_id, start, record_viewing=True)
+        self.switch_to(video_id, start=start,
+                       playback_video_ids=(video_id,) if playback_video_ids is None else playback_video_ids)
         return ReviewPlayback(video_id, start, "play")
 
     def set_translation_cli(self, cli: str) -> None:

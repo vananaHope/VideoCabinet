@@ -7,12 +7,12 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from my_video_manager.random_continuous_play import RandomPlayScope
-from test_emergency_hide_ui import app, window, key, emergency_key  # noqa: F401
+from test_emergency_hide_ui import app, window, key, emergency_key, open_window  # noqa: F401
 from test_random_play_ui import random_key, tray_action
 from qt_wait import wait_for
 
 
-@pytest.mark.parametrize('entry', ['key', 'tray', 'list', 'tags'])
+@pytest.mark.parametrize('entry', ['key', 'tray', 'list', 'tags', 'all_scope'])
 def test_random_entries_enable_their_scope(window, entry):
     wait_for(lambda: window.loaded)
     core = window.core
@@ -23,12 +23,16 @@ def test_random_entries_enable_their_scope(window, entry):
         tray_action(window).trigger()
     elif entry == 'list':
         assert json.loads(window.library_page.bridge.randomPlay())['videoId'] in source
+    elif entry == 'all_scope':
+        window.library_page.bridge.filter('no matching video', 0)
+        assert window.library_page.visible_video_ids() == ()
+        assert json.loads(window.library_page.bridge.random_play(lambda: {}))['videoId'] in source
     else:
         tag = core.add_video_tag(source[0], 'test')
         assert json.loads(window.library_page.bridge.randomPlayTags(json.dumps([tag.id])))['videoId'] == source[0]
     wait_for(lambda: core.playback.session is not None)
     assert core.random_continuous_enabled
-    expected = {'key': 'all', 'tray': 'all', 'list': 'list', 'tags': 'tags'}[entry]
+    expected = {'key': 'all', 'tray': 'all', 'list': 'list', 'tags': 'tags', 'all_scope': 'all'}[entry]
     assert core.random_continuous_scope.kind == expected
     if entry == 'tags':
         assert core.random_continuous_scope.tag_ids == (tag.id,)
@@ -42,6 +46,79 @@ def test_direct_entry_starts_off_and_enable_uses_source_list(window):
     assert not window.core.random_continuous_enabled
     window.core.set_random_continuous_enabled(True)
     assert window.core.random_continuous_scope.video_ids == window.playback_list
+
+
+def test_reel_highlight_jump_keeps_starting_library_list(window):
+    wait_for(lambda: window.loaded)
+    core = window.core
+    source = window.library_page.visible_video_ids()
+    assert len(source) > 1
+    window.play(source[0])
+    window.player.advance(10)
+    window.sync_position()
+    core.execute_highlight_command(core.command_for_key('Insert'))
+    highlight = core.highlights(source[0])[0]
+    core.start_reel(highlight_id=highlight.id)
+    window.reel.sync()
+
+    window.playback_page.jump_highlight(highlight)
+
+    assert core.reel_playback is None
+    assert core.playback.session.record_viewing
+    assert not core.random_continuous_enabled
+    assert window.playback_list == core.playback_video_ids == source
+    core.set_random_continuous_enabled(True)
+    assert core.random_continuous_scope == RandomPlayScope('list', source)
+    key(window, Qt.Key.Key_PageDown)
+    assert core.playback.session.video_id == source[1]
+
+
+@pytest.fixture
+def review_window(tmp_path, app, monkeypatch):
+    from test_review import Transcriber
+    yield from open_window(tmp_path, app, monkeypatch, transcriber=Transcriber())
+
+
+@pytest.mark.parametrize('origin', ['library', 'reel', 'other_video', 'same_video'])
+def test_review_jump_preserves_matching_core_and_window_start_list(review_window, origin):
+    window, core = review_window, review_window.core
+    wait_for(lambda: window.loaded)
+    source = window.library_page.visible_video_ids()
+    assert len(source) > 1
+    video_id = source[0]
+    core.request_subtitles(video_id)
+    assert core.process_next_subtitle().state == 'completed'
+    line = core.transcript(video_id).lines[1]
+    if origin == 'reel':
+        window.play(video_id)
+        core.execute_highlight_command(core.command_for_key('Insert'))
+        core.start_reel()
+        window.reel.sync()
+    elif origin in ('other_video', 'same_video'):
+        # 현재 라이브러리 결과와 다른 출발 목록을 만들어 탐색/새 시청을 구별한다.
+        window.playback_list = (source[1], video_id)
+        window.play_video(source[1] if origin == 'other_video' else video_id)
+        core.set_random_continuous_enabled(True)
+    session = core.playback.session
+    old_source = window.playback_list
+    count = len(core.viewings(video_id))
+
+    window.review_jump(video_id, line.id)
+
+    expected = old_source if origin == 'same_video' else source
+    assert window.playback_list == core.playback_video_ids == expected
+    assert core.playback.session.video_id == video_id
+    assert core.reel_playback is None
+    if origin == 'same_video':
+        assert core.playback.session is session
+        assert core.random_continuous_enabled
+        assert len(core.viewings(video_id)) == count
+    else:
+        assert core.playback.session is not session
+        assert not core.random_continuous_enabled
+        assert len(core.viewings(video_id)) == count + 1
+    core.set_random_continuous_enabled(True)
+    assert core.random_continuous_scope == RandomPlayScope('list', expected)
 
 
 def test_tag_pgdn_does_not_escape_to_library_or_series(window, tmp_path):

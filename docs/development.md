@@ -844,7 +844,7 @@ v4는 번역 작업의 용어집과 최근 사용 순서를 저장하는 테이�
 ```powershell
 .venv/Scripts/python scripts/check_web_random_continuous.py --offscreen
 $env:MVM_REAL_WINDOW_TESTS = '1'
-python C:/Users/Rho/.agent-orchestra/bin/desktop_lock.py run --owner issue-235 -- .venv/Scripts/python scripts/check_web_random_continuous.py --library 'C:/Users/Rho/orca/projects/my-video-manager/.local/테스트 라이브러리'
+python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-235 -- .venv/Scripts/python scripts/check_web_random_continuous.py --library '<테스트 라이브러리 경로>'
 ```
 
 offscreen은 1100×720 위젯 이미지만 `.local/issue-235/`에 저장합니다. 실창 검사는 지정 라이브러리를 읽어
