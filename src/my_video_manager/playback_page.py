@@ -549,7 +549,8 @@ class PlaybackPage(QWidget):
             self._popup_press_timestamp = event.timestamp()
         if watched is self.surface and kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick,
                                                 QEvent.Type.MouseButtonRelease):
-            # mpv는 wid로 넣은 자기 창을 비활성(WS_DISABLED)으로 만들어 마우스 입력을 부모인 표면에 넘긴다.
+            # 비활성(WS_DISABLED) mpv 창의 입력은 엔진별 native QWidget에 도착하고,
+            # 기본 QWidget의 ignore 전파로 부모 surface의 이 필터까지 온다.
             # Windows는 두 번째 누름을 DblClick으로만 보내고, 다른 플랫폼은 Press 뒤에 DblClick을 더 보낸다.
             # Press 뒤 떼기 전에 온 DblClick은 같은 누름이라 세지 않고, 한 번/두 번은 판정기가 시각으로 가른다.
             if event.button() == Qt.MouseButton.LeftButton:

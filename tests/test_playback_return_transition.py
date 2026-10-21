@@ -7,7 +7,7 @@ import pytest
 from PySide6.QtCore import QTimer, QObject, QEvent
 from PySide6.QtWidgets import QWidget
 
-from test_playback_page_ui import app, window, Player
+from test_playback_page_ui import app, window, Player, mouse, PRESS, RELEASE, wait_past_click_interval
 from qt_wait import wait_for
 from my_video_manager.random_continuous_play import RandomPlayScope
 
@@ -94,6 +94,35 @@ def test_new_playback_isolated_from_closing_engine(window):
     finally:
         old.release.set()
         wait_for(old.finished.is_set)
+
+
+def test_native_child_click_keeps_its_owner_while_engine_closes(window):
+    window.player_factory = SlowPlayer
+    first, second = window.core.videos()
+    window.play_video(first.id, start=0)
+    old = window.player
+    old_surface = QWidget.find(old.surface_id)
+    # 실제 native 자식에 전달한다. 기본 ignore 전파가 끊기면 이 단언부터 실패한다.
+    mouse(window, PRESS, RELEASE, widget=old_surface)
+    wait_for(lambda: old.paused)
+    mouse(window, PRESS, RELEASE, widget=old_surface)
+    try:
+        window.player_factory = Player
+        window.play_video(second.id, start=0)
+        new = window.player
+        wait_for(old.started.is_set)
+        assert old_surface.isHidden()  # 종료 중인 표면은 새 재생 위에 입력 영역으로 남지 않는다.
+        wait_past_click_interval(window)
+        assert not old.finished.is_set()
+        assert old.paused  # 이전 누름은 닫는 엔진에도 명령을 보내지 않는다.
+        assert new.commands == []
+        assert not window.isFullScreen()
+        mouse(window, PRESS, RELEASE, widget=window._player_surface)
+        wait_for(lambda: new.paused)
+        assert len(new.commands) == 1
+    finally:
+        old.release.set()
+        window.player_shutdown.finish()
 
 
 @pytest.mark.parametrize('eof_timing', ['queued', 'closing'])
