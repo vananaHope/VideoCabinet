@@ -233,8 +233,11 @@ class MpvPlayer:
         """재생 상태 표시. 영상 위에 글자를 duration초 보이고 저절로 지운다.
 
         client API 명령은 ${...} 속성 확장을 하지 않으므로 문구가 그대로 보인다.
+        종료가 시작된 뒤에는 해제된 핸들에 닿지 않도록 표시를 생략한다.
         """
-        self._player.command("show-text", text, round(duration * 1000))
+        with self._callback_lock:
+            if not self._closing:
+                self._player.command("show-text", text, round(duration * 1000))
 
     def pause(self) -> None:
         """토글과 달리 이미 멈춘 재생은 그대로 둔다."""
