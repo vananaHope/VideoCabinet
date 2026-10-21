@@ -1,9 +1,9 @@
-"""네이티브 mpv 영상 위에 표시하는 비활성 키 안내 툴 창."""
+"""네이티브 mpv 영상 위에 표시하는 키 안내 툴 창. 활성 창과 초점은 가져가지 않는다."""
 
 from html import escape
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 
 from .core import CommandType
 from .key_display import display_keys
@@ -11,21 +11,30 @@ from .theme import PLAYBACK_COLORS, playback_stylesheet, playback_font
 
 
 class PlaybackHelp(QWidget):
+    close_requested = Signal()
+
     def __init__(self, parent):
+        # 마우스로 닫을 수 있게 입력은 받되, 누르더라도 앱 창의 활성 상태와 재생 키 초점은 그대로 둔다.
         super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint
-                         | Qt.WindowType.WindowDoesNotAcceptFocus
-                         | Qt.WindowType.WindowTransparentForInput)
+                         | Qt.WindowType.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setWindowOpacity(0.94)
         self.setObjectName("playbackHelp")
         self.setStyleSheet(playback_stylesheet())
         self.setFont(playback_font())
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 14, 20, 14)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 14, 12, 14)
         self.text = QLabel()
         self.text.setTextFormat(Qt.TextFormat.RichText)
         self.text.setWordWrap(True)
-        layout.addWidget(self.text)
+        layout.addWidget(self.text, 1)
+        self.close_button = QToolButton()
+        self.close_button.setText("✕ 닫기")
+        self.close_button.setAccessibleName("키 안내 닫기")
+        self.close_button.setToolTip("키 안내 닫기 · F1 / Esc")
+        self.close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.close_button.clicked.connect(self.close_requested)
+        layout.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
 
     def refresh(self, core):
         reel = core.reel_playback is not None

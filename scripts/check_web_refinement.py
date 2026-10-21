@@ -262,7 +262,7 @@ with tempfile.TemporaryDirectory(prefix='mvm-73-ui-') as temporary:
         QTest.keyClick(window.surface, Qt.Key.Key_Period)
         wait(lambda: core.playback_subtitle_language == 'translated')
         window.playback_page.refresh_details()
-        assert '다듬은' in window.playback_page.subtitle_label.text()
+        assert '다듬은' in window.playback_page.subtitle_language_button.text()
         QTest.keyClick(window.surface, Qt.Key.Key_F1)
         capture('playback-refined-help')
         QTest.keyClick(window.surface, Qt.Key.Key_Escape)

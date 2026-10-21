@@ -42,7 +42,10 @@ def playback_stylesheet():
         border: 1px solid {c['border']}; border-radius: {radius}px;
         padding: {spacing}px {spacing * 2}px; }}
     QPushButton:hover, QToolButton:hover {{ border-color: {c['muted-foreground']}; }}
-    QPushButton:checked {{ background: {c['secondary']}; color: {c['primary-text']}; }}
+    /* 재생 기호(⏮ ⏸ ⏭ 등)가 컬러 이모지로 그려지지 않게 단색 기호 글꼴을 쓴다. */
+    QToolButton[playbackRole="symbol"] {{ font-family: "Segoe UI Symbol";
+        font-size: {playback_pixels('typography', 'text-base')}px; }}
+    QPushButton:checked, QToolButton:checked {{ background: {c['secondary']}; color: {c['primary-text']}; }}
     QPushButton:focus, QToolButton:focus, QAbstractItemView:focus {{ border: 2px solid {c['ring']}; }}
     QListWidget {{ background: {c['card']}; border: 2px solid transparent; outline: none; }}
     QMenu {{ background: {c['popover']}; color: {c['popover-foreground']}; border: 1px solid {c['border']}; }}
