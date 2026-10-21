@@ -45,7 +45,7 @@ class RecommendBridge(QObject):
             if ids is None:
                 raise ValueError('현재 추천에 없는 영상입니다.')
             # 재생 중 이전·다음 영상은 같은 추천 줄 안에서 고른다.
-            page.window.playback_list = ids
+            page.window.set_playback_list(ids, "추천")
             page.window.play_video(video_id)
         except (ValueError, OSError, RuntimeError) as error:
             self.error.emit(str(error))

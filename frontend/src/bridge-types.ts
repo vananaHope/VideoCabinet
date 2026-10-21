@@ -690,6 +690,7 @@ export interface DialogData {
   description: string
   rows: Array<DialogRow>
   tags: Array<TagUsageData>
+  tag_candidates: Array<TagCandidatesData>
   available: Array<DialogRow>
   choices: Array<DialogRow>
   values: DialogValues

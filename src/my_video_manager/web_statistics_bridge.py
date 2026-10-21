@@ -42,7 +42,7 @@ class StatisticsBridge(QObject):
         source = tuple(video['video_id'] for video in result['period']['top_videos'])
 
         def play():
-            self.page.window.playback_list = source
+            self.page.window.set_playback_list(source, "통계")
             self.page.window.play_video(video_id)
 
         # 기존 Python 재생 진입점이 복귀 탭과 mpv 수명주기를 함께 보존한다.

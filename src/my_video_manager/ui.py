@@ -276,9 +276,24 @@ class MainWindow(QMainWindow):
     def scan(self, checked=False, *, operation=None):
         self.library_page.scan(checked, operation=operation)
 
+    @property
+    def playback_list(self):
+        """다음에 시작할 재생의 목록. 출처 이름(playback_list_name)은 set_playback_list로 함께 정한다."""
+        return self._playback_list
+
+    @playback_list.setter
+    def playback_list(self, video_ids):
+        # 이름 없이 목록만 바꾸면 이전 목록의 이름이 새 목록에 남지 않게 지운다.
+        self._playback_list, self.playback_list_name = video_ids, None
+
+    def set_playback_list(self, video_ids, name=None):
+        """재생을 시작할 목록과 출처 이름(예: 현재 결과). 이름은 무작위 이어 재생 범위 표시에 쓴다."""
+        self.playback_list = video_ids
+        self.playback_list_name = name
+
     def play(self, video_id, *, random_scope=None):
-        self.playback_list = (random_scope.video_ids if random_scope is not None and random_scope.kind == "list"
-                              else self.library_page.visible_video_ids())
+        self.set_playback_list(random_scope.video_ids if random_scope is not None and random_scope.kind == "list"
+                               else self.library_page.visible_video_ids(), "현재 결과")
         self.play_video(video_id, random_scope=random_scope, new_playback=True)
 
     def random_play(self):
@@ -298,7 +313,7 @@ class MainWindow(QMainWindow):
 
     def play_random_video(self, video_id):
         """영상 전체 범위에서 고른 영상을 재생한다. 라이브러리 ▾ '영상 전체에서'도 같은 재생 목록을 쓴다."""
-        self.playback_list = tuple(video.id for video in self.core.videos())
+        self.set_playback_list(tuple(video.id for video in self.core.videos()), "영상 전체")
         self.play_video(video_id, random_scope=RandomPlayScope())
 
     def show_search(self):
@@ -316,7 +331,8 @@ class MainWindow(QMainWindow):
             begins_playback = from_list or new_playback or self.core.playback.session is None
             source = self.playback_list if begins_playback or random_scope is not None else None
             self.load_player(video_id, self.core.switch_to(
-                video_id, start=start, playback_video_ids=source, random_scope=random_scope))
+                video_id, start=start, playback_video_ids=source, random_scope=random_scope,
+                playback_source_name=self.playback_list_name if source is not None else None))
         except Exception as error:
             self.end_playback()
             self.pages.setCurrentWidget(self._return_page)
@@ -548,7 +564,8 @@ class MainWindow(QMainWindow):
             self._return_page = self.pages.currentWidget()
         self.sync_position()
         source = self.library_page.visible_video_ids()
-        target = self.core.play_review_line(video_id, line_id, playback_video_ids=source)
+        target = self.core.play_review_line(video_id, line_id, playback_video_ids=source,
+                                            playback_source_name="현재 결과")
         try:
             if self.player and target.action == "seek":
                 self.player.seek_to(target.start, resume=True)
@@ -557,7 +574,7 @@ class MainWindow(QMainWindow):
                 self.stop_player(report=False)
                 self.reel.shown = None
                 self.reel.update_label()
-                self.playback_list = source
+                self.set_playback_list(source, "현재 결과")
                 self.load_player(video_id, target.start)
         except Exception:
             self.end_playback()

@@ -173,7 +173,7 @@ class LibraryBridge(QObject):
                 HighlightEditor(page.core, highlight, page.core.video(video_id).duration, page).exec()
                 page.refresh_details(video_id)
             else:
-                page.window.playback_list = page.visible_video_ids()
+                page.window.set_playback_list(page.visible_video_ids(), "현재 결과")
                 page.window.play_video(video_id, start=highlight.start)
         except (ValueError, OSError, RuntimeError) as error:
             self.libraryError.emit(str(error))

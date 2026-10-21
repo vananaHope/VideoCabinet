@@ -5,7 +5,7 @@ python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scri
 
 --offscreen은 가짜 플레이어로 1100×720(가장 넓은 상태 포함)과 더 좁은 창의 조작 줄이 넘치지 않는지,
 하이라이트·속도 단추부터 짧게 줄이는지 보고 위젯 grab 이미지를 남긴다. 모아보기 단추가 더해진 가장 넓은 줄과
-그 전체 화면 구성(1280 폭)도 재고, 상태별 남은 폭(slack)과 더 줄여 확보할 수 있는 폭(reducible)을 결과 JSON에 남긴다.
+그 전체 화면 구성(1280 폭), 무작위 이어 재생을 켜고 가장 긴 범위 이름을 보인 줄(창 모드·전체 화면)도 재고, 상태별 남은 폭(slack)과 더 줄여 확보할 수 있는 폭(reducible)을 결과 JSON에 남긴다.
 --real은 데스크톱 잠금 안에서 합성 영상과 실제 mpv, Windows 마우스·키 입력으로 단추 클릭, Tab 이동,
 단추 초점에서의 재생 키, 하이라이트·구간 단추, 속도 목록 고르기와 목록 밖 속도 표시,
 재생 메뉴 '설정'(창 모드·전체 화면), 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기,
@@ -39,6 +39,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
+from my_video_manager.random_continuous_play import RandomPlayScope
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.translation import TranslatedLine
 from my_video_manager.ui import MainWindow
@@ -193,6 +194,7 @@ def offscreen(app, directory, result):
     check('fullscreen-widest-1100', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
     assert page.position_label.text() == '00:00:10.000 / 00:02:00.000'
     fullscreen_bar(page, False)
+    random_scope(window, page, check)
     # 1100보다 좁은 화면(전체 화면 등)에서는 속도 단추가 값만 남고, 그다음에 자막·전체 화면 단추를 줄인다.
     window.resize(1040, 720)
     check('narrow', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))
@@ -207,6 +209,30 @@ def offscreen(app, directory, result):
     result['passed'].append('key-guide-close-button')
     reel(window, page, check)
     window.tray.quit()
+
+
+def random_scope(window, page, check):
+    """무작위 이어 재생을 켜고 가장 긴 범위 이름(긴 태그 이름 + 외 n)을 보인 가장 넓은 줄. 끝나면 끈다."""
+    core = window.core
+    assert page.random_button.isVisible() and not page.random_scope_button.isVisible()
+    page.random_button.click()
+    assert core.random_continuous_enabled and page.random_button.isChecked()
+    assert core.random_continuous_scope.kind == 'list' and page.random_scope_button.isVisible()
+    # 직접 고른 재생은 라이브러리 현재 결과에서 시작한다.
+    assert page.random_scope_button.label == '현재 결과 2편', page.random_scope_button.label
+    video_ids = tuple(video.id for video in core.videos())
+    tags = [core.add_video_tag(video_ids[0], '아주긴태그이름이들어간음악영상모음'),
+            *(core.add_video_tag(video_ids[1], f'태그 {index}') for index in range(99))]
+    core.set_random_continuous_scope(RandomPlayScope('tags', tag_ids=tuple(tag.id for tag in tags)))
+    window.sync_position()
+    assert page.random_scope_button.label == '태그: 아주긴태그이름… 외 99', page.random_scope_button.label
+    check('random-widest', '다듬은 자막', compact=(page.point_button, page.range_button))
+    fullscreen_bar(page, True)
+    check('random-fullscreen-widest-1100', '다듬은 자막',
+          compact=(page.point_button, page.range_button, page.speed_button, page.random_scope_button))
+    fullscreen_bar(page, False)
+    page.random_button.click()
+    assert not core.random_continuous_enabled and not page.random_scope_button.isVisible()
 
 
 def fullscreen_bar(page, enabled):
@@ -225,6 +251,7 @@ def reel(window, page, check):
     core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
     window.reel.start()
     assert core.reel_playback is not None and all(button.isVisible() for button in page.reel_buttons)
+    assert not page.random_button.isVisible() and not page.random_scope_button.isVisible()
     # 열린 구간('구간 끝내기')·목록 밖 긴 속도·자막 꺼짐·일시정지·다듬은 자막에 반복 켜짐까지 함께 보이는 줄.
     # 한국어 영상은 다듬은 자막으로 시작한다.
     assert core.playback_subtitle_language == 'translated'
@@ -359,10 +386,10 @@ def real(app, directory, result):
     wait(lambda: not window.player.paused, 'Enter로 재개')
     passed('playback-key-after-click')
 
-    # ⏮ ⏯ ⏭ ◆ 【 속도 다음이 자막 단추다.
-    for _ in range(7):
+    # ⏮ ⏯ ⏭ 🔀 ◆ 【 속도 다음이 자막 단추다. 직접 고른 재생은 이어 재생이 꺼져 있어 범위 이름 단추가 없다.
+    for _ in range(8):
         press(0x09)
-    assert page.subtitles_button.hasFocus(), 'Tab 일곱 번 뒤 자막 단추 초점'
+    assert page.subtitles_button.hasFocus(), 'Tab 여덟 번 뒤 자막 단추 초점'
     before = core.playback.position
     press(0x27, extended=True)  # →
     wait(lambda: core.playback.position >= before + 4, '단추 초점에서 → 탐색')

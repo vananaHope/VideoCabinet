@@ -36,7 +36,7 @@ from .external_subtitles import ExternalSubtitleFile, ExternalSubtitleFileSummar
 from .resolution import ResolutionBackfill, ResolutionResult
 from .library_views import build_index, default_options, normalize_options
 from .thumbnails import ThumbnailBackfill
-from .random_continuous_play import RandomContinuousPlay, RandomPlayScope
+from .random_continuous_play import RandomContinuousPlay, RandomPlayScope, ScopeLabel
 
 
 class CommandType(str, Enum):
@@ -56,6 +56,8 @@ class CommandType(str, Enum):
     TOGGLE_HIGHLIGHT_LIST = "toggle_highlight_list"
     EMERGENCY_HIDE = "emergency_hide"
     RANDOM_PLAY = "random_play"
+    # 재생 화면 🔀 단추와 같은 명령. 기본 키는 없고 키 배치에서 지정할 수 있다.
+    TOGGLE_RANDOM_CONTINUOUS = "toggle_random_continuous"
 
 
 @dataclass(frozen=True)
@@ -430,14 +432,16 @@ class AppCore:
         return line.original.start
 
     def play_review_line(self, video_id, line_id, *,
-                         playback_video_ids: Iterable[int] | None = None) -> ReviewPlayback:
-        """같은 일반 영상이면 탐색하고, 새 재생이면 전달받은 목록으로 시청을 시작한다."""
+                         playback_video_ids: Iterable[int] | None = None,
+                         playback_source_name: str | None = None) -> ReviewPlayback:
+        """같은 일반 영상이면 탐색하고, 새 재생이면 전달받은 목록(과 그 출처 이름)으로 시청을 시작한다."""
         start = min(self.review_line_position(video_id, line_id), self.video(video_id).duration)
         session = self.playback.session
         if session and session.video_id == video_id and session.record_viewing and self.reel_playback is None:
             return ReviewPlayback(video_id, start, "seek")
         self.switch_to(video_id, start=start,
-                       playback_video_ids=(video_id,) if playback_video_ids is None else playback_video_ids)
+                       playback_video_ids=(video_id,) if playback_video_ids is None else playback_video_ids,
+                       playback_source_name=playback_source_name if playback_video_ids is not None else None)
         return ReviewPlayback(video_id, start, "play")
 
     def set_translation_cli(self, cli: str) -> None:
@@ -978,6 +982,28 @@ class AppCore:
         """재생을 시작한 목록의 스냅숏. 범위 선택 화면에서도 이 목록을 쓴다."""
         return self._random_continuous.source_ids or ()
 
+    @property
+    def playback_source_name(self) -> str | None:
+        """재생을 시작한 목록의 출처 이름(예: 현재 결과, 검색 결과). 진입점이 넘기지 않았으면 None."""
+        return self._random_continuous.source_name
+
+    def random_continuous_scope_label(self) -> ScopeLabel | None:
+        """조작 줄에 보일 범위 이름(짧은 이름·툴팁 설명 포함). 꺼져 있으면 None이다. 지워진 태그는 이름에서 뺀다."""
+        scope = self.random_continuous_scope
+        if scope is None:
+            return None
+        from .random_continuous_play import scope_label
+        names = {tag.id: tag.name for tag in self.tags()} if scope.kind == "tags" else {}
+        return scope_label(scope, source_name=self.playback_source_name,
+                           tag_names=tuple(names[tag_id] for tag_id in scope.tag_ids if tag_id in names))
+
+    def random_scope_video_count(self, scope: RandomPlayScope) -> int:
+        """범위의 무작위 재생 후보 수. 범위 고르기 화면이 후보 0인 범위를 막는 데 쓴다."""
+        if not isinstance(scope, RandomPlayScope):
+            raise ValueError("무작위 재생 범위가 올바르지 않습니다.")
+        return self.random_video_count(video_ids=scope.video_ids if scope.kind == "list" else None,
+                                       tag_ids=scope.tag_ids if scope.kind == "tags" else None)
+
     def set_random_continuous_enabled(self, enabled: bool) -> None:
         state = self._random_continuous
         if not enabled:
@@ -1151,11 +1177,13 @@ class AppCore:
 
     def switch_to(self, video_id: int, *, start: float | None = None,
                   playback_video_ids: Iterable[int] | None = None,
-                  random_scope: RandomPlayScope | None = None) -> float:
+                  random_scope: RandomPlayScope | None = None,
+                  playback_source_name: str | None = None) -> float:
         """시청·열린 구간을 닫고 지정 장면 또는 이어볼 위치에서 시작한다.
 
         새 목록에서 시작할 때 playback_video_ids를 넘긴다. random_scope도 넘기면
         해당 범위의 무작위 이어 재생으로 시작한다. 둘 다 생략한 영상 이동은 현재 상태를 유지한다.
+        playback_source_name은 새 목록의 출처 이름이며 범위 이름에 쓴다.
         """
         if random_scope is not None and not isinstance(random_scope, RandomPlayScope):
             raise ValueError("무작위 재생 범위가 올바르지 않습니다.")
@@ -1169,7 +1197,8 @@ class AppCore:
         start = self.resume_start(video_id) if start is None else start
         self.playback.start(video_id, start)
         if playback_video_ids is not None or random_scope is not None:
-            self._random_continuous = RandomContinuousPlay(source_ids=source if source is not None else (video_id,))
+            self._random_continuous = RandomContinuousPlay(source_ids=source if source is not None else (video_id,),
+                                                           source_name=playback_source_name)
         if random_scope is not None:
             self._random_continuous.enable(video_id, random_scope)
         else:

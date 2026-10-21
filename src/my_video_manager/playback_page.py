@@ -163,6 +163,14 @@ class PlaybackPage(QWidget):
         self.pause_button = self._command_button("⏸", "일시정지", CommandType.TOGGLE_PAUSE)
         self.next_button = self._command_button("⏭", "다음 영상", CommandType.NEXT_VIDEO)
         self.position_label = QLabel("00:00:00.000 / 00:00:00.000")
+        # 무작위 이어 재생 켜기/끄기와, 켜져 있을 때 옆에 보이는 범위 이름 단추. 모아보기 중에는 숨긴다.
+        self.random_button = self._command_button("🔀", "무작위 이어 재생", CommandType.TOGGLE_RANDOM_CONTINUOUS)
+        self.random_button.setCheckable(True)
+        self.random_scope_button = ControlButton("", "무작위 이어 재생 범위")
+        self.random_scope_button.setToolTip("무작위 이어 재생 범위 바꾸기")
+        self.random_scope_button.clicked.connect(self.choose_random_scope)
+        self.random_scope_button.hide()
+        self._random_scope_shown = None
         # 하이라이트 모아보기 중에만 보인다(show_reel).
         self.reel_previous_button = self._command_button(
             "⇤", REEL_MEANINGS[CommandType.PREVIOUS_HIGHLIGHT], CommandType.PREVIOUS_HIGHLIGHT)
@@ -206,11 +214,11 @@ class PlaybackPage(QWidget):
         self.key_guide_button.clicked.connect(self.toggle_help)
         self.fullscreen_button = self._command_button("⛶", "전체 화면", CommandType.TOGGLE_FULLSCREEN)
         self.fullscreen_button.setCheckable(True)
-        for button in (self.previous_button, self.pause_button, self.next_button, *self.reel_buttons,
+        for button in (self.previous_button, self.pause_button, self.next_button, self.random_button, *self.reel_buttons,
                        self.point_button, self.range_button, self.key_guide_button, self.fullscreen_button):
             button.setProperty('playbackRole', 'symbol')
         for widget in (self.list_button, self.previous_button, self.pause_button, self.next_button,
-                       self.position_label, *self.reel_buttons, self.point_button, self.range_button,
+                       self.position_label, self.random_button, self.random_scope_button, *self.reel_buttons, self.point_button, self.range_button,
                        self.open_range_label, self.speed_button, self.subtitles_button,
                        self.subtitle_language_button):
             row.addWidget(widget)
@@ -219,14 +227,15 @@ class PlaybackPage(QWidget):
         row.addWidget(self.fullscreen_button)
         # 단추·Tab 순서와 같다. 이 단추에 초점이 있어도 재생 키는 그대로 동작한다.
         self.control_buttons = (self.list_button, self.previous_button, self.pause_button, self.next_button,
-                                *self.reel_buttons, self.point_button, self.range_button, self.speed_button,
+                                self.random_button, self.random_scope_button, *self.reel_buttons, self.point_button, self.range_button, self.speed_button,
                                 self.subtitles_button, self.subtitle_language_button,
                                 self.key_guide_button, self.fullscreen_button)
-        # 창이 좁을 때 이 순서대로 짧은 글자로 바꾼다. 하이라이트·속도 단추가 먼저 아이콘·값만 남긴다.
+        # 창이 좁을 때 이 순서대로 짧은 글자로 바꾼다. 하이라이트·속도 단추가 먼저 아이콘·값만 남기고, 다음에 범위 이름을 줄인다.
         # 모아보기 단추가 더해진 가장 넓은 줄은 열린 구간 표시·메뉴 단추와 전체 화면의 목록 단추까지 줄여야 들어간다.
         self.menu_button = ControlButton("메뉴 ⋯", "재생 작업 메뉴")
         self.menu_button.set_label("메뉴 ⋯", "⋯")
-        self.compact_order = [self.point_button, self.range_button, self.speed_button, self.reel_repeat_button,
+        self.compact_order = [self.point_button, self.range_button, self.speed_button, self.random_scope_button,
+                              self.reel_repeat_button,
                               self.fullscreen_button, self.subtitle_language_button, self.subtitles_button,
                               self.open_range_label, self.menu_button, self.list_button]
         self.menu_button.setToolTip("재생 작업 메뉴 · 키 안내는 F1")
@@ -304,6 +313,12 @@ class PlaybackPage(QWidget):
         """조작 줄 단추. 키와 같은 명령을 실행하고 바뀐 상태를 바로 보여 준다."""
         self.run_command(command)
         self.update_controls()
+
+    def choose_random_scope(self):
+        """범위 이름 단추. 범위 고르기 창(웹 대화상자)을 열고, 고른 범위는 다음 영상부터 쓴다."""
+        from .web_dialogs_entries import RandomScopeChooser
+        if self.core.random_continuous_enabled:
+            self.run_action(lambda: RandomScopeChooser(self.core, self.shell).exec())
 
     def current_speed(self):
         options = getattr(self.shell.player, "playback_options", None)
@@ -389,6 +404,11 @@ class PlaybackPage(QWidget):
                              (self.fullscreen_button, '전체 화면 켜기/끄기')):
             button.setToolTip(f'{name} · {bindings[button.command.kind]}')
         self.update_reel_buttons()
+        # 기본 키가 없는 명령이라 키가 없으면 툴팁은 기능 이름만 보인다.
+        random_keys = next(row.keys for row in self.core.key_bindings()
+                           if row.command.kind == CommandType.TOGGLE_RANDOM_CONTINUOUS)
+        self.random_button.setToolTip('무작위 이어 재생 켜기/끄기'
+                                      + (f' · {display_keys(random_keys)}' if random_keys else ''))
         self.point_button.setToolTip(f'지점 하이라이트 추가 · {bindings[CommandType.POINT_HIGHLIGHT]}')
         self.update_range_button()
         # 속도는 올리기·내리기 두 명령이라 명령 종류 하나로 묶은 bindings 대신 명령마다 읽는다.
@@ -441,7 +461,7 @@ class PlaybackPage(QWidget):
             if self.core.reel_playback is not None:
                 # 검수 이동과 같이 기존 복습을 닫고 새 일반 시청으로 전환한다.
                 window.end_playback()
-                window.playback_list = window.library_page.visible_video_ids()
+                window.set_playback_list(window.library_page.visible_video_ids(), "현재 결과")
                 window.play_video(highlight.video_id, start=highlight.start)
             elif window.player:
                 window.player.seek_to(highlight.start, resume=True)
@@ -594,6 +614,7 @@ class PlaybackPage(QWidget):
             return
         video_id = self.core.playback.session.video_id
         self._details = self.core.library_details(video_id)
+        self._random_scope_shown = None  # 태그 이름이 바뀌었을 수 있어 범위 이름을 다시 읽는다.
         self.refresh_highlights()
         self.update_controls()
 
@@ -621,6 +642,21 @@ class PlaybackPage(QWidget):
             button.setToolTip(f'{button.accessibleName()} · {self._keys[button.command.kind]}')
         self.reel_repeat_button.setToolTip(f'모아보기 반복 켜기/끄기 · {self._keys[CommandType.TOGGLE_REEL_REPEAT]}')
 
+    def update_random_buttons(self):
+        """모아보기가 아니면 🔀를 보이고 켜짐을 눌림 상태로 표시한다. 켜져 있으면 옆에 범위 이름 단추를 보인다."""
+        enabled = self.core.random_continuous_enabled and not self._reel
+        self.random_button.setVisible(not self._reel)
+        self.random_button.setChecked(enabled)
+        self.random_scope_button.setVisible(enabled)
+        shown = (self.core.random_continuous_scope, self.core.playback_source_name) if enabled else None
+        if shown is None or shown == self._random_scope_shown:
+            return
+        self._random_scope_shown = shown
+        label = self.core.random_continuous_scope_label()
+        self.random_scope_button.set_label(label.text, label.compact)
+        self.random_scope_button.setAccessibleName(f"무작위 이어 재생 범위 {label.description}")
+        self.random_scope_button.setToolTip(f"무작위 이어 재생 범위 바꾸기 · 지금 {label.description}")
+
     def show_reel_repeat(self, repeat):
         self.reel_repeat_button.setChecked(repeat)
         self.reel_repeat_button.set_label(f"↻ 반복 {'켜짐' if repeat else '꺼짐'}", "↻")
@@ -628,6 +664,7 @@ class PlaybackPage(QWidget):
     def update_controls(self):
         """조작 줄의 재생·자막 상태를 플레이어와 코어에서 읽어 보여 준다."""
         self.update_range_button()
+        self.update_random_buttons()
         # 명령이 실행되지 않은 단추 누름이 눌림 상태만 바꿔 두지 않게 코어 상태로 되돌린다.
         self.show_reel_repeat(self._reel and self.core.reel_repeat)
         player = self.shell.player
@@ -706,6 +743,7 @@ class PlaybackPage(QWidget):
             self.reel_label.setText(f"하이라이트 {current.index}/{current.total} · 반복 {'켜짐' if repeat else '꺼짐'}")
         self.show_reel_repeat(bool(current and repeat))
         self.update_reel_buttons()
+        self.update_random_buttons()
         if self._help_requested:
             self.refresh_key_help()
 
@@ -797,6 +835,11 @@ class PlaybackPage(QWidget):
             elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
                 if not repeated:
                     changed = window.translations.toggle()
+            elif command.kind == CommandType.TOGGLE_RANDOM_CONTINUOUS:
+                # 켜면 범위는 재생을 시작한 목록이고, 끄면 영상 끝에서 멈춘다. 모아보기 중에는 🔀가 숨어 키도 동작하지 않는다.
+                if not repeated and window.core.reel_playback is None:
+                    window.core.set_random_continuous_enabled(not window.core.random_continuous_enabled)
+                    changed = True
             elif command.kind == CommandType.SEEK:
                 self.seek(command=command)
             else:
@@ -832,4 +875,6 @@ class PlaybackPage(QWidget):
             return "【 구간 시작" if core.open_highlight_start is not None else "】 구간 끝"
         if command.kind == CommandType.TOGGLE_REEL_REPEAT and core.reel_playback is not None:
             return f"모아보기 반복 {'켜짐' if core.reel_repeat else '꺼짐'}"
+        if command.kind == CommandType.TOGGLE_RANDOM_CONTINUOUS:
+            return f"🔀 무작위 이어 재생 {'켜짐' if core.random_continuous_enabled else '꺼짐'}"
         return None

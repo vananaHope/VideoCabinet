@@ -8,6 +8,26 @@ import type { TagCandidatesData, TagUsageData } from "@/bridge-types"
 
 type Candidates = { tags: TagUsageData[]; byTag: Map<number, readonly number[]> }
 
+/** 고른 태그 중 하나라도 붙은 후보 영상 수(태그별 후보의 합집합 크기). 후보 규칙은 코어가 태그별 후보로 정한다. */
+export function tagCandidateCount(byTag: ReadonlyMap<number, readonly number[]>, chosen: readonly number[]): number {
+  return new Set(chosen.flatMap(id => byTag.get(id) ?? [])).size
+}
+
+/** 무작위 재생 범위의 태그 고르기와 후보 수 안내. 태그 무작위 창과 무작위 이어 재생 범위 고르기 창이 함께 쓴다.
+ * count가 null이면 아직 세는 중이다. */
+export function RandomTagFields({ tags, selected, onChange, count, error = "" }: {
+  tags: TagUsageData[]; selected: readonly number[]; onChange: (ids: number[]) => void; count: number | null; error?: string
+}) {
+  return <>
+    <TagPicker tags={tags} label="태그" mode="multiple" chips selected={selected} onChange={onChange} />
+    <p role="status" className="text-sm text-muted-foreground empty:hidden">{error ? `후보를 세지 못했습니다. ${error}`
+      : !tags.length ? ""
+      : !selected.length ? "태그를 하나 이상 고르세요."
+      : count === null ? "후보를 세는 중…"
+      : count ? `후보 ${count}개` : "후보 0개 · 고른 태그에 재생할 수 있는 영상이 없습니다."}</p>
+  </>
+}
+
 /** 무작위 재생 범위를 태그로 고르는 창. 고른 태그 중 하나라도 붙은 영상(OR)이 후보다. */
 export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onReturnFocus }: {
   open: boolean; onOpenChange: (open: boolean) => void; tags: TagUsageData[]
@@ -38,7 +58,7 @@ export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onRetu
   const chosen = useMemo(() => selected.filter(id => tags.some(tag => tag.id === id)), [selected, tags])
   const count = useMemo(() => {
     if (!candidates || candidates.tags !== tags) return null
-    return new Set(chosen.flatMap(id => candidates.byTag.get(id) ?? [])).size
+    return tagCandidateCount(candidates.byTag, chosen)
   }, [candidates, chosen, tags])
   const playable = chosen.length > 0 && !error && !!count
 
@@ -58,12 +78,7 @@ export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onRetu
         <Dialog.Title className="text-lg font-semibold">태그에서 무작위 재생</Dialog.Title>
         <Dialog.Description className="text-sm text-muted-foreground">고른 태그 중 하나라도 붙은 영상에서 하나를 골라 재생합니다. 후보 수는 파일 없음·제외 영상을 뺀 수라 태그 옆 숫자(붙은 영상 수)보다 적을 수 있습니다.</Dialog.Description>
       </header>
-      <TagPicker tags={tags} label="태그" mode="multiple" chips selected={chosen} onChange={setSelected} />
-      <p role="status" className="text-sm text-muted-foreground empty:hidden">{error ? `후보를 세지 못했습니다. ${error}`
-        : !tags.length ? ""
-        : !chosen.length ? "태그를 하나 이상 고르세요."
-        : count === null ? "후보를 세는 중…"
-        : count ? `후보 ${count}개` : "후보 0개 · 고른 태그에 재생할 수 있는 영상이 없습니다."}</p>
+      <RandomTagFields tags={tags} selected={chosen} onChange={setSelected} count={count} error={error} />
       <div className="flex justify-end gap-2">
         <Dialog.Close asChild><Button variant="outline">취소</Button></Dialog.Close>
         <Button disabled={!playable} onClick={play}><Dices aria-hidden="true" />재생</Button>

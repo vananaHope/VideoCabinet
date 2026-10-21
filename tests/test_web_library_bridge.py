@@ -334,12 +334,15 @@ def test_highlight_play_uses_existing_entry_at_exact_time_and_preserves_playlist
     video_id = page.selected_id
     hid = add_highlight(page.core, video_id)
     page.window.play_video = lambda vid, **kwargs: page.played.append((vid, kwargs))
+    page.window.set_playback_list = lambda ids, name=None: vars(page.window).update(
+        playback_list=ids, playback_list_name=name)
     assert json.loads(bridge.playHighlight(video_id, hid)) == {'ok': True}
     assert not page.played
     assert 'error' in json.loads(bridge.playHighlight(video_id, hid))
     app.processEvents()
     assert page.played == [(video_id, {'start': 12.125})]
     assert page.window.playback_list == tuple(page.visible_ids)
+    assert page.window.playback_list_name == '현재 결과'
     assert not bridge.busy
 
 

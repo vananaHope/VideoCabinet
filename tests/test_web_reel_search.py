@@ -203,6 +203,7 @@ def test_search_scene_return_keeps_query_results_selection_and_playlist(window_f
     QApplication.processEvents()
     assert core.playback.position == 12.125
     assert window.playback_list == tuple(dict.fromkeys(r['videoId'] for r in data['results']))
+    assert core.playback_source_name == '검색 결과'
     window.back_to_list()
     assert window.pages.currentWidget() is window.web_host and window.web_host.active_tab == 'search'
     assert snapshot(page) == expected

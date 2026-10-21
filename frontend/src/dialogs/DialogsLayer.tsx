@@ -8,6 +8,7 @@ import { ConfirmDialog } from '@/components/page-parts'
 import { TagPicker } from '@/components/tag-picker'
 import { Choice, DialogFrame, DialogList, TextArea } from './dialog-parts'
 import { TranslationForm } from './TranslationForm'
+import { RandomScopeForm, randomScopeReady } from './RandomScopeForm'
 
 type FormValues = Omit<DialogValues, 'start' | 'end'> & { start: number | string; end: number | string }
 type Draft = { form: FormValues; selected: string; member: string; available: string; scroll: number[] }
@@ -73,7 +74,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   }
   const button = (label: string, action: string, disabled = false, variant: 'default' | 'outline' | 'destructive' = 'outline') =>
     <Button key={action} variant={variant} disabled={busy || disabled} onClick={() => void act(action, action === 'close' ? { accepted: !editable } : {})}>{label}</Button>
-  const editable = ['series', 'tag-rename', 'highlight', 'subtitles', 'line', 'range', 'translation', 'video-rename'].includes(kind)
+  const editable = ['series', 'tag-rename', 'highlight', 'subtitles', 'line', 'range', 'translation', 'video-rename', 'random-scope'].includes(kind)
   const disabledEdit = data.locked || !currentSelected
   const members = form.members.map(id => data.available.find(row => row.id === id)).filter(row => row !== undefined)
   const others = data.available.filter(row => !form.members.includes(row.id))
@@ -87,8 +88,9 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   return <DialogFrame title={data.title} description={data.description} onClose={() => { if (!data.confirmation) void act('close') }} composing={composing} onSize={onSize} wide={['review', 'series', 'highlights'].includes(kind)}>
     <div ref={content} data-dialog-body={kind} className="flex min-h-0 flex-col gap-4" onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
       onKeyDown={event => {
+        // 태그 고르기 검색 칸처럼 Enter를 먼저 쓴 입력(defaultPrevented)에서는 저장하지 않는다.
         if (editable && event.target instanceof HTMLInputElement && event.target.type !== 'checkbox'
-          && event.key === 'Enter' && !composing.current && !event.nativeEvent.isComposing && event.keyCode !== 229
+          && event.key === 'Enter' && !event.defaultPrevented && !composing.current && !event.nativeEvent.isComposing && event.keyCode !== 229
           && !data.locked && !data.confirmation) { event.preventDefault(); void act('save') }
       }}>
       {kind === 'tags' && <TagPicker mode="immediate" label="태그" tags={data.tags} exclude={data.rows.map(row => Number(row.id))} listAll
@@ -120,6 +122,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {kind === 'subtitles' && <label className="block space-y-2 text-sm">원어<Input aria-label="원어" list="spoken-languages" value={form.choice} onChange={event => update({ choice: event.target.value })} /><datalist id="spoken-languages">{data.choices.map(row => <option key={row.id} value={row.title} />)}</datalist></label>}
       {kind === 'translation' && data.translation && <TranslationForm data={data.translation} form={form} update={update} act={act} busy={busy}
         request={{ pending: data.network_busy, information: data.information, warning: data.warning }} />}
+      {kind === 'random-scope' && <RandomScopeForm data={data} values={form} update={update} />}
       {kind === 'video-rename' && <Input aria-label="영상 제목" value={form.name} onChange={event => update({ name: event.target.value })} />}
       {/* 대화상자 안내는 입력 아래 한곳에 쌓는다: 요청 실패(오류) → 확인할 점(경고) → 결과·설명(정보). 대화상자가 스크롤되므로 접지 않는다.
           번역 설정의 경고·정보는 키 확인·목록 조회 결과뿐이라 키 입력 아래에 보인다. */}
@@ -136,7 +139,8 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {kind === 'highlights' && <div className="mr-auto flex flex-wrap gap-2">{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</div>}
       {kind === 'review' && <div className="mr-auto flex flex-wrap gap-2">{data.task_kind === 'refinement' && button(data.task_label, 'refine', data.locked)}{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button(`${data.short_label} SRT 저장`, 'export-translation', !data.rows.length)}</div>}
       {button(editable ? '취소' : '닫기', 'close')}
-      {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'translation' ? '확인' : '저장', 'save', data.locked || data.network_busy || kind === 'range' && !!data.warning, kind === 'range' ? 'destructive' : 'default')}
+      {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'translation' || kind === 'random-scope' ? '확인' : '저장', 'save',
+        data.locked || data.network_busy || kind === 'range' && !!data.warning || kind === 'random-scope' && !randomScopeReady(data, form), kind === 'range' ? 'destructive' : 'default')}
     </footer>
     {data.keep_reviewed && <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.confirm_title} description={data.confirmation}
       confirmLabel={`새 원어로 다시 ${data.task_label}`} cancelLabel="사용자 수정본 유지" onCancel={() => void act('keep-reviewed')}

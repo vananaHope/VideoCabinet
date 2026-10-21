@@ -153,3 +153,43 @@ def test_each_input_shows_both_subtitle_languages(translated_window, expected, m
     assert window.player.statuses == shown(*expected)
     # 바뀐 자막 종류는 재생 상태 표시로만 보이고 안내 줄에는 남지 않는다.
     assert not window.playback_page.message_label.isVisible()
+
+
+def assign_random_key(window, pressed="R"):
+    """기본 키가 없는 무작위 이어 재생 켜기/끄기에 키를 지정한다."""
+    from my_video_manager.core import Command, CommandType
+    bindings = {row.command: row.keys for row in window.core.key_bindings()}
+    bindings[Command(CommandType.TOGGLE_RANDOM_CONTINUOUS)] = (pressed,)
+    window.core.save_key_bindings(bindings)
+    window.refresh_key_help()
+
+
+@pytest.mark.parametrize("method", ["key", "button"])
+def test_each_input_toggles_random_continuous_with_status(window, method):
+    assign_random_key(window)
+    page = window.playback_page
+    assert page.random_button.toolTip() == "무작위 이어 재생 켜기/끄기 · R"
+    operate(window, method, Qt.Key.Key_R, "random_button")
+    window.sync_position()
+    assert window.core.random_continuous_enabled and page.random_button.isChecked()
+    assert not page.random_scope_button.isHidden()
+    operate(window, method, Qt.Key.Key_R, "random_button")
+    window.sync_position()
+    assert not window.core.random_continuous_enabled and not page.random_button.isChecked()
+    assert window.player.statuses == shown("🔀 무작위 이어 재생 켜짐", "🔀 무작위 이어 재생 꺼짐")
+
+
+def test_random_continuous_key_does_nothing_during_reel(window):
+    assign_random_key(window)
+    core = window.core
+    for video in core.videos():
+        core.switch_to(video.id)
+        core.playback.report(10)
+        core.execute_highlight_command(core.command_for_key("Insert"))
+    window.reel.open()
+    window.reel.start()
+    window.sync_position()
+    key(window, Qt.Key.Key_R)
+    assert core.reel_playback is not None and not core.random_continuous_enabled
+    assert window.playback_page.random_button.isHidden()
+    assert statuses(window) == []
