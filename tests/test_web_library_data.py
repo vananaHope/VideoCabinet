@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
-from my_video_manager.web_library_data import snapshot_data, filter_ids, details_data, thumbnail_video_id
+from my_video_manager.web_library_data import snapshot_data, filter_ids, details_data, key_bindings_data, thumbnail_video_id
 from my_video_manager.external_subtitles import LANGUAGES
 from my_video_manager.web_external_subtitle_data import language_label
 
@@ -195,3 +195,18 @@ def test_highlight_tags_are_scoped_sorted_and_complete(core):
     assert not {h['id'] for h in entries} & {h.id for h in core.highlights(other.id)}
     assert [t['name'] for t in entries[0]['tags']] == ['Alpha', 'Zulu']
     assert all(h['tags'] == [] for h in entries[1:])
+
+
+def test_key_bindings_follow_current_bindings_including_multiple_and_unassigned_keys(core):
+    data = key_bindings_data(core.key_bindings())
+    assert data == {'randomPlay': 'Ctrl+Shift+R', 'highlightGuidance': '재생 중 Insert 또는 Delete로 기억할 장면을 남기세요.'}
+
+    def save(**changes):
+        core.save_key_bindings({row.command: changes.get(row.command.kind.value, row.keys) for row in core.key_bindings()})
+
+    save(random_play=('Ctrl+Alt+R', 'Alt+Shift+F12'), point_highlight=(), range_highlight=('N', 'Shift+N'))
+    data = key_bindings_data(core.key_bindings())
+    assert data == {'randomPlay': 'Ctrl+Alt+R / Alt+Shift+F12', 'highlightGuidance': '재생 중 N / Shift+N로 기억할 장면을 남기세요.'}
+    save(random_play=(), range_highlight=())
+    data = key_bindings_data(core.key_bindings())
+    assert data['randomPlay'] == '' and 'Insert' not in data['highlightGuidance'] and '키 배치에서' in data['highlightGuidance']

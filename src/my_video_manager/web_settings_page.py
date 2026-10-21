@@ -57,6 +57,7 @@ class SettingsBridge(QObject):
             self.page.core.save_key_bindings({commands[key]: keys for key, keys in proposed.items()})
             window = self.page.window
             window.refresh_key_help()
+            window.library_page.refresh_key_bindings()
             window.reel.update_label()
             window.reel.refresh_guidance()
             self.page.refresh()

@@ -190,6 +190,11 @@ export interface HighlightData {
   tags: Array<TagData>
 }
 
+export interface LibraryKeyBindingsData {
+  randomPlay: string
+  highlightGuidance: string
+}
+
 export interface LibraryData {
   videos: Array<VideoData>
   tags: Array<TagUsageData>
@@ -199,6 +204,7 @@ export interface LibraryData {
   options: LibraryViewOptions
   folders: Array<LibraryFolder>
   chips: Array<LibraryChip>
+  keyBindings: LibraryKeyBindingsData
 }
 
 export type Action = "play" | "tags" | "subtitles" | "review" | "series" | "rename" | "reconnect" | "exclude"
@@ -218,6 +224,7 @@ export interface LibraryBridge {
   playHighlight: (videoId: number, highlightId: number, reply: Reply) => void
   editHighlight: (videoId: number, highlightId: number, reply: Reply) => void
   randomPlay: (reply: Reply) => void
+  randomPlayAll: (reply: Reply) => void
   randomTagCandidates: (reply: Reply) => void
   randomPlayTags: (tagIds: string, reply: Reply) => void
   thumbnailsChanged: Signal<string>
@@ -225,6 +232,7 @@ export interface LibraryBridge {
   libraryDetailsChanged: Signal<number>
   libraryFocusRequested: Signal<string>
   libraryError: Signal<string>
+  libraryKeyBindingsChanged: Signal<string>
 }
 export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
   return Object.freeze({
@@ -239,6 +247,7 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
     playHighlight: raw.playHighlight.bind(raw),
     editHighlight: raw.editHighlight.bind(raw),
     randomPlay: raw.randomPlay.bind(raw),
+    randomPlayAll: raw.randomPlayAll.bind(raw),
     randomTagCandidates: raw.randomTagCandidates.bind(raw),
     randomPlayTags: raw.randomPlayTags.bind(raw),
     thumbnailsChanged: Object.freeze({ connect: raw.thumbnailsChanged.connect.bind(raw.thumbnailsChanged), disconnect: raw.thumbnailsChanged.disconnect.bind(raw.thumbnailsChanged) }),
@@ -246,6 +255,7 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
     libraryDetailsChanged: Object.freeze({ connect: raw.libraryDetailsChanged.connect.bind(raw.libraryDetailsChanged), disconnect: raw.libraryDetailsChanged.disconnect.bind(raw.libraryDetailsChanged) }),
     libraryFocusRequested: Object.freeze({ connect: raw.libraryFocusRequested.connect.bind(raw.libraryFocusRequested), disconnect: raw.libraryFocusRequested.disconnect.bind(raw.libraryFocusRequested) }),
     libraryError: Object.freeze({ connect: raw.libraryError.connect.bind(raw.libraryError), disconnect: raw.libraryError.disconnect.bind(raw.libraryError) }),
+    libraryKeyBindingsChanged: Object.freeze({ connect: raw.libraryKeyBindingsChanged.connect.bind(raw.libraryKeyBindingsChanged), disconnect: raw.libraryKeyBindingsChanged.disconnect.bind(raw.libraryKeyBindingsChanged) }),
   })
 }
 

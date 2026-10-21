@@ -287,6 +287,10 @@ class MainWindow(QMainWindow):
             if self.isFullScreen():
                 self.playback_page.show_notice(NO_CANDIDATE_MESSAGE, reveal=True)
             return
+        self.play_random_video(video_id)
+
+    def play_random_video(self, video_id):
+        """영상 전체 범위에서 고른 영상을 재생한다. 라이브러리 ▾ '영상 전체에서'도 같은 재생 목록을 쓴다."""
         self.playback_list = tuple(video.id for video in self.core.videos())
         self.play_video(video_id)
 

@@ -11,7 +11,7 @@ import { DetailPanel } from "@/components/detail-panel"
 import { RandomPlayButton } from "@/components/random-play-button"
 import { RandomTagDialog } from "@/components/random-tag-dialog"
 import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
-import type { LibraryData, DetailsData, HighlightData, LibraryViewOptions, TagCandidatesData } from "@/bridge-types"
+import type { LibraryData, DetailsData, HighlightData, LibraryKeyBindingsData, LibraryViewOptions, TagCandidatesData } from "@/bridge-types"
 
 export default function LibraryPage() {
   const [bridge, setBridge] = useState<LibraryBridge | null>(null)
@@ -47,6 +47,7 @@ export default function LibraryPage() {
         setData(previous => previous && { ...previous, videos: previous.videos.map(video => ids.has(video.id) ? { ...video, thumbnail: `mvm-thumb://video/${video.id}?v=640` } : video) })
       }
       const detailsChanged = () => setDetailRevision(n => n + 1)
+      const keyBindingsChanged = (json: string) => { const keyBindings: LibraryKeyBindingsData = JSON.parse(json); setData(previous => previous && { ...previous, keyBindings }) }
       const shellChanged = (json: string) => {
         if (JSON.parse(json).tab !== 'library' && !savedScroll.current) {
           layoutPaused.current = true
@@ -81,8 +82,9 @@ export default function LibraryPage() {
       api.libraryDetailsChanged.connect(detailsChanged)
       api.libraryFocusRequested.connect(focus)
       api.libraryError.connect(showError)
+      api.libraryKeyBindingsChanged.connect(keyBindingsChanged)
       shell.shellChanged.connect(shellChanged)
-      disconnect = () => { api.thumbnailsChanged.disconnect(thumbnailsChanged); api.libraryChanged.disconnect(changed); api.libraryDetailsChanged.disconnect(detailsChanged); api.libraryFocusRequested.disconnect(focus); api.libraryError.disconnect(showError); shell.shellChanged.disconnect(shellChanged) }
+      disconnect = () => { api.thumbnailsChanged.disconnect(thumbnailsChanged); api.libraryChanged.disconnect(changed); api.libraryDetailsChanged.disconnect(detailsChanged); api.libraryFocusRequested.disconnect(focus); api.libraryError.disconnect(showError); api.libraryKeyBindingsChanged.disconnect(keyBindingsChanged); shell.shellChanged.disconnect(shellChanged) }
       const initial = await getSnapshot(api)
       if (disposed) return
       setBridge(api)
@@ -162,12 +164,13 @@ export default function LibraryPage() {
   const loadTagCandidates = useCallback(() => bridge
     ? request<{ tags: TagCandidatesData[] }>(reply => bridge.randomTagCandidates(reply)).then(result => result.tags)
     : Promise.resolve([]), [bridge])
-  // tagIds가 없으면 현재 결과에서, 있으면 그 태그 중 하나라도 붙은 영상에서 고른다. 재생·복귀·안내는 같은 경로다.
-  function randomPlay(tagIds?: number[]) {
+  // 범위가 없으면 현재 결과에서, "all"이면 검색 조건과 상관없이 영상 전체에서, 태그 목록이면 그 태그 중 하나라도 붙은 영상에서 고른다.
+  // 재생·복귀·안내는 같은 경로다.
+  function randomPlay(range?: number[] | "all") {
     if (!bridge) return
     const scope = resultScope
     holdLayout()
-    request<{ videoId: number | null; message?: string }>(reply => tagIds ? bridge.randomPlayTags(JSON.stringify(tagIds), reply) : bridge.randomPlay(reply)).then(({ videoId, message }) => {
+    request<{ videoId: number | null; message?: string }>(reply => range === "all" ? bridge.randomPlayAll(reply) : range ? bridge.randomPlayTags(JSON.stringify(range), reply) : bridge.randomPlay(reply)).then(({ videoId, message }) => {
       if (videoId === null) {
         releaseLayout()
         setRandomNotice({ message: message ?? "", scope })
@@ -206,6 +209,7 @@ export default function LibraryPage() {
         <p aria-label="라이브러리 등록·표시 개수" className="shrink-0 text-xs text-muted-foreground">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
         <RandomPlayButton menuRef={randomMenu} scopes={[
           { key: "results", label: "현재 결과에서", onSelect: () => randomPlay() },
+          { key: "all", label: "영상 전체에서", onSelect: () => randomPlay("all"), shortcut: data.keyBindings.randomPlay },
           { key: "tags", label: "태그에서…", onSelect: () => setTagDialogOpen(true), opensDialog: true },
         ]} />
         <RandomTagDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} tags={data.tags} load={loadTagCandidates}
@@ -224,7 +228,7 @@ export default function LibraryPage() {
         title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>}
       {foldersOpen && <LibraryFolders collapsedIds={data.options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
       <LibraryGrid cardSize={data?.options.card_size ?? 'medium'} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} />
-      <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} onRandomTag={tagId => randomPlay([tagId])} />
+      <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} highlightGuidance={data?.keyBindings.highlightGuidance ?? ""} onRandomTag={tagId => randomPlay([tagId])} />
     </div>
   </main>
 }

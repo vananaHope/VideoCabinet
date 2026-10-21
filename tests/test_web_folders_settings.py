@@ -208,7 +208,13 @@ def test_key_save_updates_playback_f1_empty_reel_and_restart(window_factory, cor
     proposed = draft(bridge)
     proposed['point_highlight:0'] = ['N']
     proposed['toggle_pause:0'] = ['P']
+    proposed['random_play:0'] = ['Ctrl+Alt+R']
+    library_keys = []
+    bridges(window)['library'].libraryKeyBindingsChanged.connect(lambda value: library_keys.append(json.loads(value)))
     assert 'error' not in json.loads(bridge.saveKeys(json.dumps(proposed)))
+    expected = {'randomPlay': 'Ctrl+Alt+R', 'highlightGuidance': '재생 중 N 또는 Delete로 기억할 장면을 남기세요.'}
+    assert library_keys == [expected]
+    assert json.loads(bridges(window)['library'].snapshot())['keyBindings'] == expected
     assert 'N로 지점' in window.web_host.controllers['reel'].payload()['emptyDescription']
     assert 'N로 지점' in json.loads(bridges(window)['reel'].snapshot())['emptyDescription']
     assert core.command_for_key('N').kind == CommandType.POINT_HIGHLIGHT

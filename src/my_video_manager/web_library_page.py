@@ -3,7 +3,7 @@
 from PySide6.QtCore import Signal
 from .library_operations import LibraryOperations
 from .library_controls import LibraryControls
-from .web_library_data import snapshot_data, tag_usage_data
+from .web_library_data import key_bindings_data, snapshot_data, tag_usage_data
 from .library_views import filter_chips
 from .web_library_bridge import LibraryBridge
 from .web_json import encode
@@ -39,7 +39,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
 
     def payload(self):
         return dict(videos=self.cards, tags=self.tags, scanning=self.worker is not None, folders=self.index.folders if self.index else [],
-                    **self.view_payload())
+                    keyBindings=key_bindings_data(self.core.key_bindings()), **self.view_payload())
 
     def view_payload(self):
         return dict(visibleIds=self.visible_ids, selectedId=self.selected_id, options=self.options,
@@ -100,6 +100,10 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         if self.selected_id is not None and (changed_video_id is None or changed_video_id == self.selected_id):
             self.bridge.libraryDetailsChanged.emit(self.selected_id)
         self.flush_thumbnails()
+
+    def refresh_key_bindings(self):
+        # 키 배치를 저장하면 영상 목록을 다시 보내지 않고 키 표시만 바꾼다.
+        self.bridge.libraryKeyBindingsChanged.emit(encode(key_bindings_data(self.core.key_bindings())))
 
     def refresh_thumbnails(self, video_ids):
         for card in self.cards:

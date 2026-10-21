@@ -15,6 +15,7 @@ class LibraryBridge(QObject):
     libraryDetailsChanged = LIBRARY.signal('libraryDetailsChanged')
     libraryFocusRequested = LIBRARY.signal('libraryFocusRequested')
     libraryError = LIBRARY.signal('libraryError')
+    libraryKeyBindingsChanged = LIBRARY.signal('libraryKeyBindingsChanged')
 
     def __init__(self, page):
         super().__init__(page)
@@ -77,6 +78,11 @@ class LibraryBridge(QObject):
         # 범위는 페이지의 현재 결과다. 조건이 없으면 현재 결과가 곧 영상 전체다.
         return self.random_play(lambda: {'video_ids': self.page.visible_video_ids()})
 
+    @LIBRARY.slot('randomPlayAll')
+    def randomPlayAll(self):
+        # 검색 조건과 상관없이 영상 전체에서 고른다. 무작위 재생 키·트레이와 같은 범위와 재생 목록이다.
+        return self.random_play(lambda: {}, action='play_all')
+
     @LIBRARY.slot('randomTagCandidates')
     def randomTagCandidates(self):
         # 태그 고르기 창이 열릴 때 한 번 받아 후보 수(합집합 크기)를 화면에서 센다.
@@ -98,7 +104,7 @@ class LibraryBridge(QObject):
             return {'tag_ids': ids}
         return self.random_play(scope)
 
-    def random_play(self, scope):
+    def random_play(self, scope, action='play'):
         # 재생은 상태를 바꾸지 않는 작업이라 검사 중에도 막지 않는다.
         if self.busy:
             return encode({'error': '진행 중인 작업이 끝난 뒤 다시 시도하세요.'})
@@ -110,7 +116,7 @@ class LibraryBridge(QObject):
             return encode({'videoId': None, 'message': NO_CANDIDATE_MESSAGE})
         self.busy = True
         self.page.selected_id = video_id
-        QTimer.singleShot(0, lambda: self.perform('play', video_id))
+        QTimer.singleShot(0, lambda: self.perform(action, video_id))
         return encode({'videoId': video_id})
 
     @LIBRARY.slot('highlights')
@@ -174,6 +180,8 @@ class LibraryBridge(QObject):
             page.selected_id = video_id
             if action == 'play':
                 page.window.play(video_id)
+            elif action == 'play_all':
+                page.window.play_random_video(video_id)
             else:
                 callbacks = {
                     'tags': page.edit_video_tags, 'subtitles': page.request_subtitles,

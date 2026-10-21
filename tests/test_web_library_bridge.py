@@ -26,7 +26,8 @@ class Page(QWidget):
         self.query, self.tag_id = '', None
         self.worker = None
         self.played = []
-        self.window = SimpleNamespace(play=self.played.append)
+        self.played_all = []
+        self.window = SimpleNamespace(play=self.played.append, play_random_video=self.played_all.append)
 
     def is_active(self):
         return self.isVisible()
@@ -187,6 +188,22 @@ def test_random_play_without_candidates_is_info_not_error(bridge):
     assert json.loads(bridge.randomPlay())['videoId'] is None
     app.processEvents()
     assert page.played == [] and not bridge.busy
+
+
+def test_whole_library_random_play_ignores_current_results_and_uses_whole_playlist(bridge):
+    bridge, page, app = bridge
+    json.loads(bridge.filter('없는 제목', 0))
+    assert page.visible_ids == []
+    reply = json.loads(bridge.randomPlayAll())
+    assert reply['videoId'] in page.video_ids and page.selected_id == reply['videoId']
+    assert 'error' in json.loads(bridge.randomPlayAll())
+    app.processEvents()
+    assert page.played_all == [reply['videoId']] and page.played == [] and not bridge.busy
+    for video_id in page.video_ids:
+        page.core.exclude_video(video_id)
+    assert json.loads(bridge.randomPlayAll()) == {'videoId': None, 'message': '재생할 영상이 없습니다.'}
+    app.processEvents()
+    assert page.played_all == [reply['videoId']] and not bridge.busy
 
 
 def test_random_play_is_not_locked_during_scan(bridge):

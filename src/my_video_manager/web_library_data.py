@@ -6,6 +6,8 @@ from urllib.parse import urlsplit
 
 from .web_external_subtitle_data import subtitle_file_data
 from .translation_kind import translation_task
+from .core import CommandType
+from .key_display import display_keys
 from .library_views import LibraryViewOptions, LibraryFolder, LibraryChip, matches_title_tags
 
 
@@ -88,6 +90,12 @@ class DetailsData(TypedDict):
     externalSubtitles: list[ExternalSubtitleFileData]
 
 
+class LibraryKeyBindingsData(TypedDict):
+    """라이브러리 화면에 보이는 현재 키 배치. randomPlay는 키가 없으면 빈 문자열이다."""
+    randomPlay: str
+    highlightGuidance: str
+
+
 class LibraryData(TypedDict):
     videos: list[VideoData]
     tags: list[TagUsageData]
@@ -97,6 +105,7 @@ class LibraryData(TypedDict):
     options: LibraryViewOptions
     folders: list[LibraryFolder]
     chips: list[LibraryChip]
+    keyBindings: LibraryKeyBindingsData
 
 
 def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:
@@ -131,6 +140,15 @@ def tag_usage_data(usage) -> list[TagUsageData]:
 
 def tag_candidates_data(candidates) -> list[TagCandidatesData]:
     return [TagCandidatesData(id=tag_id, videoIds=sorted(ids)) for tag_id, ids in sorted(candidates.items())]
+
+
+def key_bindings_data(bindings) -> LibraryKeyBindingsData:
+    """무작위 재생 ▾ 메뉴·툴팁과 상세 하이라이트 빈 화면에 쓸 키를 현재 키 배치에서 만든다."""
+    keys = {row.command.kind: display_keys(row.keys) if row.keys else '' for row in bindings}
+    marks = [key for key in (keys.get(CommandType.POINT_HIGHLIGHT), keys.get(CommandType.RANGE_HIGHLIGHT)) if key]
+    guidance = (f'재생 중 {" 또는 ".join(marks)}로 기억할 장면을 남기세요.' if marks
+                else '키 배치에서 하이라이트 키를 정하면 재생 중 기억할 장면을 남길 수 있습니다.')
+    return LibraryKeyBindingsData(randomPlay=keys.get(CommandType.RANDOM_PLAY, ''), highlightGuidance=guidance)
 
 
 def highlights_data(core, video_id) -> list[HighlightData]:
