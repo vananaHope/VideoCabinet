@@ -134,7 +134,7 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
         assert ('모델 목록 조회' in js(window, 'document.querySelector("[aria-label=\'OpenCode Go 키\']").textContent')) == (provider == 'opencode_go')
         text = js(window, 'document.querySelector("[role=dialog]").textContent')
         if provider == 'opencode_go':
-            assert '2026-10-31' in text and 'OpenCode 서버' in text
+            assert '무보존 계약 만료: 2026. 10. 31.' in text and 'OpenCode 서버' in text
             assert ('주의:' in text) == expired
         assert ('등록됨 (****1234)' in text) == key
         if expired:

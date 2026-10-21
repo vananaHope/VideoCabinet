@@ -13,6 +13,8 @@ class TranslationModelData(TypedDict):
     label: str
     efforts: list[str]
     policy: str
+    valid_until: str | None
+    policy_warning: str
     warning: bool
     training_warning: bool
     expired_warning: bool

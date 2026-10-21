@@ -5,7 +5,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QUrl, Signal, Qt
+from PySide6.QtCore import QLocale, QPoint, QUrl, Signal, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtWebChannel import QWebChannel
@@ -19,6 +19,15 @@ from .web_contract import CONTRACTS, TABS
 from .web_tokens import web_tokens
 from .web_update_data import shell_update_data, update_install_data
 from .web_thumbnail import ThumbnailHandler, register_thumbnail_scheme
+
+
+def use_korean_locale():
+    """화면 언어를 한국어로 고정한다(#232).
+
+    웹 엔진은 처음 뜰 때의 QLocale로 화면 언어를 정하고, 날짜 입력 칸은 그 언어의 연·월·일 순서를 따른다.
+    Windows 표시 언어가 영어면 `mm/dd/yyyy`가 되므로 웹 엔진보다 먼저 정한다.
+    """
+    QLocale.setDefault(QLocale(QLocale.Language.Korean, QLocale.Country.SouthKorea))
 
 
 class ShellWebEnginePage(QWebEnginePage):
@@ -70,6 +79,7 @@ class WebShellHost(QWidget):
         self._pending_focus = None
         self.bridge = ShellBridge(self)
         register_thumbnail_scheme()
+        use_korean_locale()
         self.view = QWebEngineView(self)
         self.view.setAccessibleName('웹 셸')
         self.setFocusProxy(self.view)

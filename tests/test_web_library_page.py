@@ -96,7 +96,7 @@ def test_view_channel_composes_filters_persists_and_refreshes_presence(window_fa
                'card_size': 'large', 'sort': 'added', 'descending': True}
     result = json.loads(page.bridge.view(json.dumps(options)))
     assert result['visibleIds'] == [video.id]
-    assert result['chips'] == [{'key': f'tag:{tag.id}', 'label': tag.name, 'reset': {**options, 'tags': []}}]
+    assert result['chips'] == [{'key': f'tag:{tag.id}', 'label': tag.name, 'range': None, 'reset': {**options, 'tags': []}}]
     assert core.library_view_options() == options
     assert 'error' in json.loads(page.bridge.view('{broken'))
     assert 'error' in json.loads(page.bridge.view(json.dumps({'sort': 'invalid'})))

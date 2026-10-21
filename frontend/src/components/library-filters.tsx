@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { TagPicker } from "@/components/tag-picker"
 import { tagPickerKeepsEscape } from "@/lib/tag-search"
 import { libraryChoices, libraryFilterDefaults, type LibraryViewOptions, type TagUsageData, type LibraryChip } from "@/bridge-types"
+import { formatDate } from "@/lib/dates"
 
 type Change = (value: Partial<LibraryViewOptions>) => void
 export function LibraryChoice({ name, label, options, onChange }: { name: keyof typeof libraryChoices; label: string; options: LibraryViewOptions; onChange: Change }) {
@@ -46,10 +47,15 @@ export function LibraryFilters({ options, tags, onChange }: { options: LibraryVi
   </Popover.Root>
 }
 
+/** 칩 글자. 직접 지정한 날짜 범위는 날짜 모양을 화면에서 만든다. */
+function chipText({ label, range }: LibraryChip) {
+  return range ? `${label}: ${range.start ? formatDate(range.start) : "처음"} ~ ${range.end ? formatDate(range.end) : "끝 없음"}` : label
+}
+
 export function LibraryFilterChips({ chips, options, onChange }: { chips: LibraryChip[]; options: LibraryViewOptions; onChange: Change }) {
   if (!chips.length) return null
   return <div aria-label="적용한 검색 조건" className="flex shrink-0 items-center gap-2 overflow-x-auto pb-1">
-    {chips.map(chip => <Button key={chip.key} variant="secondary" size="xs" title={chip.label} aria-label={`${chip.label} 지우기`} onClick={() => onChange(chip.reset)}><span className="max-w-60 truncate">{chip.label}</span><X /></Button>)}
+    {chips.map(chip => { const text = chipText(chip); return <Button key={chip.key} variant="secondary" size="xs" title={text} aria-label={`${text} 지우기`} onClick={() => onChange(chip.reset)}><span className="max-w-60 truncate">{text}</span><X /></Button> })}
     <Button variant="ghost" size="xs" onClick={() => onChange(clearLibraryFilters(options))}>모두 지우기</Button>
   </div>
 }

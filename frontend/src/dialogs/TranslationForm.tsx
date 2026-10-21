@@ -1,15 +1,18 @@
 import { RotateCcw } from 'lucide-react'
 import { useState } from 'react'
-import type { DialogValues, TranslationSettingsData } from '@/bridge-types'
+import type { DialogValues, TranslationModelData, TranslationSettingsData } from '@/bridge-types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Notice, NoticeStack } from '@/components/ui/notice'
+import { formatDate } from '@/lib/dates'
 import { Choice } from './dialog-parts'
 
 const rows = (items: { id: string; label: string }[]) => items.map(item => ({ id: item.id, title: item.label, detail: '', status: '', start: 0, end: null }))
 // OpenCode Go는 키로 직접 번역하므로 목록 조회만 쓰고, 이어받기는 구독 CLI 방식에만 있다.
 const DIRECT_PROVIDER = 'opencode_go'
 const keyDraft = (form: Pick<DialogValues, 'key' | 'key_action'>) => `${form.key_action}:${form.key}`
+const policyText = (model: TranslationModelData) => [model.policy,
+  model.valid_until && `무보존 계약 만료: ${formatDate(model.valid_until)} (매월 갱신 확인 필요)`, model.policy_warning].filter(Boolean).join(' · ')
 
 export function TranslationForm({ data, form, update, act, busy, request }: {
   data: TranslationSettingsData; form: Pick<DialogValues, 'choice' | 'selections' | 'fallback' | 'key' | 'key_action'>;
@@ -67,7 +70,7 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
           title={(model.training_warning || model.expired_warning) && <>
             {model.training_warning && <p>학습 사용 주의</p>}
             {model.expired_warning && <p>무보존 계약 만료 · 갱신 확인 필요</p>}
-          </>}>{model.policy}</Notice>}
+          </>}>{policyText(model)}</Notice>}
         {selected.expensive_efforts.includes(current.effort) && <Notice tone="warning" role="note" clamp={false}>{selected.effort_notice}</Notice>}
         {notice && <Notice tone="warning" clamp={false}>{notice}</Notice>}
       </div>

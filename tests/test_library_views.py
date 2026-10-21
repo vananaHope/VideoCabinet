@@ -165,7 +165,7 @@ def test_date_chips_and_reset_follow_python_defaults():
     assert filter_chips(options, {}) == []
     options['added_from'] = '2026-01-01'
     chip, = filter_chips(options, {})
-    assert chip['label'].endswith('끝 없음')
+    assert chip['label'] == '추가일' and chip['range'] == {'start': '2026-01-01', 'end': None}
     assert chip['reset']['added_preset'] == chip['reset']['added_from'] == ''
     assert 'collapsed_folders' not in FILTER_DEFAULTS
     options = {**default_options(), 'external': True, 'tags': [1, 2]}
@@ -286,11 +286,11 @@ def test_modified_date_chip_resets_condition_and_is_in_filter_defaults(dated_lib
     options = {**default_options(), 'modified_preset': '7'}
     chip, = filter_chips(options, {})
     assert chip['key'] == 'modified_preset'
-    assert chip['label'] == '수정한 날짜: 최근 7일'
+    assert chip['label'] == '수정한 날짜: 최근 7일' and chip['range'] is None
     assert core.library_view_ids(chip['reset']) == core.library_view_ids(default_options())
     assert FILTER_DEFAULTS['modified_preset'] == FILTER_DEFAULTS['modified_from'] == FILTER_DEFAULTS['modified_to'] == ''
 
     custom = {**default_options(), 'modified_preset': 'custom', 'modified_from': '2026-10-01'}
     chip, = filter_chips(custom, {})
-    assert chip['label'] == '수정한 날짜: 2026-10-01 ~ 끝 없음'
+    assert chip['label'] == '수정한 날짜' and chip['range'] == {'start': '2026-10-01', 'end': None}
     assert chip['reset']['modified_preset'] == chip['reset']['modified_from'] == ''

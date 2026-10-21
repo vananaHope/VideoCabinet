@@ -3,7 +3,7 @@
 from types import MappingProxyType
 
 from . import web_library_data
-from .library_views import CHOICES, FILTER_DEFAULTS, LibraryViewOptions, LibraryFolder, LibraryChip
+from .library_views import CHOICES, FILTER_DEFAULTS, LibraryViewOptions, LibraryFolder, LibraryChipRange, LibraryChip
 from .web_contract_types import Argument, BridgeContract, Constant, TypeAlias
 
 MENU_ACTIONS = MappingProxyType({
@@ -32,7 +32,7 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
     Constant('libraryChoices', CHOICES),
     Constant('libraryFilterDefaults', FILTER_DEFAULTS),
 ), data_types=(web_library_data.TagData, web_library_data.TagUsageData, web_library_data.TagCandidatesData, web_library_data.VideoData,
-               LibraryViewOptions, LibraryFolder, LibraryChip,
+               LibraryViewOptions, LibraryFolder, LibraryChipRange, LibraryChip,
                web_library_data.ExternalSubtitleTrackData, web_library_data.ExternalSubtitleFileData,
                web_library_data.DetailsData, web_library_data.HighlightData, web_library_data.LibraryKeyBindingsData,
                web_library_data.LibraryData))

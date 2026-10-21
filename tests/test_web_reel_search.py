@@ -1,4 +1,5 @@
 """웹 공개 브리지로 재생·복습과 검색 상태 보존을 검증한다."""
+from datetime import datetime
 import json
 from types import SimpleNamespace
 
@@ -137,7 +138,8 @@ def test_reel_reuses_playback_auto_advance_repeat_and_records_only_revisit(windo
     window.reel.sync()
     assert window.pages.currentWidget() is window.web_host
     assert window.web_host.active_tab == 'reel'
-    assert all(e['lastRevisited'] for e in snapshot(page)['entries'])
+    # #232: 마지막 복습은 시간대가 붙은 ISO 시각으로 넘기고 모양은 화면이 만든다.
+    assert all(datetime.fromisoformat(e['lastRevisitedAt']).tzinfo for e in snapshot(page)['entries'])
     assert snapshot(page)['status'] == '모아보기를 마쳤습니다. 다시 재생할 하이라이트를 고르세요.'
     assert core.viewings(video.id) == ()
     page.bridge.play(second.id)

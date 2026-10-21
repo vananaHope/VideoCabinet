@@ -146,9 +146,15 @@ export interface LibraryFolder {
   depth: number
 }
 
+export interface LibraryChipRange {
+  start: string | null
+  end: string | null
+}
+
 export interface LibraryChip {
   key: string
   label: string
+  range: LibraryChipRange | null
   reset: LibraryViewOptions
 }
 
@@ -404,7 +410,7 @@ export interface ReelEntryData {
   thumbnail: string | null
   start: number
   end: number | null
-  lastRevisited: string | null
+  lastRevisitedAt: string | null
   note: string
   tags: Array<TagData>
   playable: boolean
@@ -604,6 +610,8 @@ export interface TranslationModelData {
   label: string
   efforts: Array<string>
   policy: string
+  valid_until: string | null
+  policy_warning: string
   warning: boolean
   training_warning: boolean
   expired_warning: boolean

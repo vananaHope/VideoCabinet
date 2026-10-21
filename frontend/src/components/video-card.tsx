@@ -4,6 +4,7 @@ import { Film } from "lucide-react"
 import { StatusBadge } from "@/components/page-parts"
 import { VideoTags } from "@/components/video-tags"
 import type { VideoData } from "@/bridge-types"
+import { formatDate } from "@/lib/dates"
 
 const cardVariants = cva("group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring", {
   variants: { variant: { default: "border-border bg-card hover:border-input", selected: "border-ring bg-card ring-1 ring-ring" } },
@@ -30,12 +31,8 @@ export function Thumbnail({ video, variant }: { video: VideoData } & VariantProp
 }
 
 type Props = Omit<ComponentProps<"button">, "className"> & VariantProps<typeof cardVariants> & { video: VideoData; cardSize?: string }
-const dateFormatter = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" })
-export function calendarDate(value: string) {
-  return dateFormatter.format(new Date(value))
-}
 function lastViewed(value: string | null) {
-  return value ? calendarDate(value) : "기록 없음"
+  return value ? formatDate(value) : "기록 없음"
 }
 function VideoStatistics({ video }: { video: VideoData }) {
   const glanceOnly = video.viewingCount === 0 && video.lastViewedAt !== null

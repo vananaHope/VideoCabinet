@@ -97,31 +97,40 @@ class LibraryFolder(TypedDict):
     depth: int
 
 
+class LibraryChipRange(TypedDict):
+    """직접 지정한 날짜 범위. ISO 날짜이고 비어 있는 끝은 None이다. 표시 모양은 화면이 정한다."""
+    start: str | None
+    end: str | None
+
+
 class LibraryChip(TypedDict):
     key: str
     label: str
+    range: LibraryChipRange | None
     reset: LibraryViewOptions
 
 
 def filter_chips(options, tags) -> list[LibraryChip]:
     chips = []
     if options['query']:
-        chips.append(dict(key='query', label='제목: ' + options['query']))
+        chips.append(dict(key='query', label='제목: ' + options['query'], range=None))
     for key in ('viewing', 'original', 'translated'):
         if options[key]:
-            chips.append(dict(key=key, label=dict(CHOICES[key])[options[key]]))
+            chips.append(dict(key=key, label=dict(CHOICES[key])[options[key]], range=None))
     for key, label in (('external', '외부 자막 있음'), ('highlights', '하이라이트 있음'), ('missing', '파일 없음')):
         if options[key]:
-            chips.append(dict(key=key, label=label))
+            chips.append(dict(key=key, label=label, range=None))
     for prefix, label in (('added', '추가일'), ('modified', '수정한 날짜'), ('viewed', '마지막 시청')):
         preset = options[prefix + '_preset']
-        if preset and (preset != 'custom' or options[prefix + '_from'] or options[prefix + '_to']):
-            text = (f"{options[prefix + '_from'] or '처음'} ~ {options[prefix + '_to'] or '끝 없음'}"
-                    if preset == 'custom' else dict(CHOICES[prefix + '_preset'])[preset])
-            chips.append(dict(key=prefix + '_preset', label=f'{label}: {text}'))
+        start, end = options[prefix + '_from'], options[prefix + '_to']
+        if preset == 'custom' and (start or end):
+            # 직접 지정 범위는 이름만 넣고 날짜는 범위로 넘긴다. 화면이 '이름: 날짜 ~ 날짜'로 보인다.
+            chips.append(dict(key=prefix + '_preset', label=label, range=dict(start=start or None, end=end or None)))
+        elif preset and preset != 'custom':
+            chips.append(dict(key=prefix + '_preset', label=f"{label}: {dict(CHOICES[prefix + '_preset'])[preset]}", range=None))
     for tag_id in options['tags']:
         if tag_id in tags:
-            chips.append(dict(key=f'tag:{tag_id}', label=tags[tag_id]))
+            chips.append(dict(key=f'tag:{tag_id}', label=tags[tag_id], range=None))
     for chip in chips:
         key = chip['key']
         reset = dict(options)

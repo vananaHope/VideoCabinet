@@ -71,12 +71,12 @@ class TranslationOptions:
         if policy:
             messages.append('학습 사용' if policy.training else '학습 미사용' if policy.training is False else '학습 사용 여부 미확인')
             messages.append(f'보존 {policy.retention_days}일' if policy.retention_days is not None else '보존 기간 미확인')
-            if policy.valid_until:
-                messages.append(f'무보존 계약 만료: {policy.valid_until.isoformat()} (매월 갱신 확인 필요)')
-            if choice.needs_warning(self.clock().date()):
-                messages.append('주의: 학습 사용·미확인 또는 만료 정책을 확인하세요.')
+        warning = choice.needs_warning(self.clock().date())
+        # 만료일은 ISO 날짜로 넘기고 화면이 정책 문구와 주의 사이에 날짜 모양으로 넣는다.
         return dict(id=choice.model_id, label=choice.label, efforts=list(choice.reasoning_efforts or ()),
-                    policy=' · '.join(messages), warning=choice.needs_warning(self.clock().date()),
+                    policy=' · '.join(messages),
+                    valid_until=policy.valid_until.isoformat() if policy and policy.valid_until else None,
+                    policy_warning='주의: 학습 사용·미확인 또는 만료 정책을 확인하세요.' if warning else '', warning=warning,
                     training_warning=bool(policy and policy.training is True),
                     expired_warning=bool(policy and policy.valid_until and self.clock().date() > policy.valid_until))
 

@@ -98,10 +98,8 @@ def test_detail_info_shows_modified_date_or_why_it_is_missing():
         video: {...base, ...values}, details: null, highlights: null, revision: 0, tab: 'info',
         onTabChange() {}, scanning: false, onAction() {}, onHighlight() {}, onRandomTag() {},
       }));
-      const moment = '2026-09-01T12:00:00+00:00';
-      const expected = new Intl.DateTimeFormat('ko-KR', {year: 'numeric', month: '2-digit', day: '2-digit'})
-        .format(new Date(moment));
-      assert(render({modifiedAt: moment}).includes(`수정한 날짜: ${expected}`));
+      process.env.TZ = 'Asia/Seoul';
+      assert(render({modifiedAt: '2026-09-01T18:00:00+00:00'}).includes('수정한 날짜: 2026. 09. 02.'));
       assert(render({missing: true, locationCount: 0}).includes('수정한 날짜: 파일 없음'));
       assert(render({}).includes('수정한 날짜: 알 수 없음'));
     """)
