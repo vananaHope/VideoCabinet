@@ -5,7 +5,7 @@
 """
 import argparse
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -147,7 +147,8 @@ def key(value, modifiers=Qt.KeyboardModifier.NoModifier):
 
 def content_ready(days):
     wait(lambda: page.result is not None and page.result['period']['days'] == days and not page.loading)
-    wait(lambda: bool(js(f"document.querySelector('main[aria-label=통계]')?.textContent.includes('{page.result['period']['start_date']}')")))
+    start = date.fromisoformat(page.result['period']['start_date'])
+    wait(lambda: bool(js(f"document.querySelector('main[aria-label=통계]')?.textContent.includes('{start.year}. {start.month:02d}. {start.day:02d}.')")))
     settle(150)
 
 

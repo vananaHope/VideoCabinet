@@ -604,6 +604,26 @@ union은 서로 다른 항목을 추가할 때 쓰는 규칙입니다.
 생성 파일은 직접 수정하지 않습니다. 페이지 객체로 나뉘어 `library` 신호 접두어는 기술적으로
 필수가 아니지만 기존 호출부와 병렬 작업의 호환성을 위해 유지합니다.
 
+### 날짜 표시 (#232)
+
+화면의 날짜 모양은 `frontend/src/lib/dates.ts` 한 곳에서만 만듭니다. 날짜 `2026. 10. 21.`, 날짜와 시각
+`2026. 10. 21. 15:04`(24시간제), 차트 축 같은 짧은 날짜 `10. 21.`이며 컴퓨터 시간대를 따릅니다.
+날짜만 있는 값(`2026-10-21`)은 시간대와 상관없이 그 달력 날짜로 보입니다. 브리지는 화면에 보일 날짜를
+ISO 문자열(필터 칩은 `range` 구조)로 넘기고 Python에서 표시용 날짜 문자열을 만들지 않습니다.
+시각만 보이는 곳(자동 재시도 `15:04`)과 파일 이름은 예외입니다.
+웹 셸은 웹 엔진보다 먼저 `QLocale`을 한국어로 고정하므로 Windows 표시 언어가 영어여도 날짜 입력 칸이
+연·월·일 순서입니다. 구분 기호는 Windows의 한국어 간단한 날짜 형식(예: `yyyy-MM-dd`)을 따릅니다.
+
+```powershell
+.venv/Scripts/python.exe scripts/check_web_dates.py --offscreen
+.venv/Scripts/python.exe scripts/check_web_dates.py --offscreen --videos 0
+python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-232 -- .venv/Scripts/python.exe scripts/check_web_dates.py --verify
+```
+
+영어(미국) `QLocale`에서 시작해 `.local/screens-232/`에 1100×720 화면(카드·상세·필터 칩과 날짜 입력 칸·모아보기·
+통계 30일/365일·축 눈금·툴팁·설정의 백업·업데이트·번역 정책 만료 전/뒤)을 남기고, 보이는 글자에 ISO 날짜·`월/일/연`·
+`오전/오후` 모양이 없는지 봅니다. `--verify`는 실창에서 날짜 입력 칸에 연·월·일 순서로 타자해 값이 그대로 들어가는지 확인합니다.
+
 ### 웹 대화상자 (#53)
 
 태그 편집·모든 태그 관리, 시리즈, 하이라이트 목록·편집,

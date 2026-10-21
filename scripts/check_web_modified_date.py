@@ -222,6 +222,11 @@ def local_day(value):
     return datetime.fromisoformat(value).astimezone().date()
 
 
+def shown(value):
+    """화면의 날짜 모양(#232)."""
+    return f'{value.year}. {value.month:02d}. {value.day:02d}.'
+
+
 def cards():
     return {card['id']: card for card in page.cards}
 
@@ -283,11 +288,11 @@ def check_sort():
 
 def check_chips():
     today = date.today()
-    start, end = (today - timedelta(days=30)).isoformat(), today.isoformat()
+    start, end = today - timedelta(days=30), today
     tags = [t.id for t in core.tags()]
-    view(added_preset='30', modified_preset='custom', modified_from=start, modified_to=end, viewed_preset='7', viewing='unwatched' if args.videos > 50 else '', tags=tags)
+    view(added_preset='30', modified_preset='custom', modified_from=start.isoformat(), modified_to=end.isoformat(), viewed_preset='7', viewing='unwatched' if args.videos > 50 else '', tags=tags)
     chips = json.loads(js(f"JSON.stringify([...document.querySelectorAll('{CHIPS} button')].map(b => b.title || b.textContent))"))
-    label = f'수정한 날짜: {start} ~ {end}'
+    label = f'수정한 날짜: {shown(start)} ~ {shown(end)}'
     assert {'추가일: 최근 30일', label, '마지막 시청: 최근 7일'} <= set(chips), chips
     assert page_overflow() <= 0
     truncated = json.loads(js(f"JSON.stringify([...document.querySelectorAll('{CHIPS} button span')].filter(e => e.scrollWidth > e.clientWidth).map(e => e.textContent))"))
@@ -333,7 +338,7 @@ def check_details():
     assert any(ch.isdigit() for ch in items['known']), items
     if 'two_locations' in items:
         expected = core.video(special['two_locations']).modified_at.astimezone().date()
-        assert items['two_locations'] == f'수정한 날짜: {expected.year}. {expected.month:02d}. {expected.day:02d}.', (items, expected)
+        assert items['two_locations'] == f'수정한 날짜: {shown(expected)}', (items, expected)
     metrics['details'] = items
     metrics['checks'].append('상세 정보 수정한 날짜: 날짜 표시(위치 둘이면 가장 이른 날)·파일 없음·알 수 없음')
 
@@ -354,7 +359,7 @@ def check_rescan():
     assert video_id in page.visible_ids, page.visible_ids
     select(video_id)
     expected = newer.astimezone().date()
-    wait(lambda: detail_line() == f'수정한 날짜: {expected.year}. {expected.month:02d}. {expected.day:02d}.')
+    wait(lambda: detail_line() == f'수정한 날짜: {shown(expected)}')
     capture('rescan-refreshed')
     # 모르던 수정 시각도 검사로 채워진다.
     assert cards()[special['unknown']]['modifiedAt'] is not None
@@ -363,12 +368,12 @@ def check_rescan():
 
 
 def enter_date(value):
-    """날짜 입력의 칸을 페이지 로캘 순서대로 채운다.
+    """날짜 입력의 칸을 연·월·일 순서로 채운다. 화면 언어는 Windows 로캘과 상관없이 한국어다(#232).
 
     월·일은 두 자리를 치면 다음 칸으로 넘어가고, 연도는 더 긴 값을 받으므로 오른쪽 화살표로 넘어간다.
     """
-    order = json.loads(js("JSON.stringify(new Intl.DateTimeFormat(navigator.language).formatToParts(new Date())"
-                          ".filter(p => ['year', 'month', 'day'].includes(p.type)).map(p => p.type))"))
+    assert js('navigator.language') == 'ko'
+    order = ['year', 'month', 'day']
     metrics['date_input_order'] = order
     texts = {'year': f'{value.year}', 'month': f'{value.month:02d}', 'day': f'{value.day:02d}'}
     for i, part in enumerate(order):
@@ -420,7 +425,7 @@ def check_keyboard():
     key(Qt.Key.Key_Escape)
     wait(lambda: not js(f"!!document.querySelector('{PANEL}')"))
     assert active_label() == '필터', active_label()
-    label = f'수정한 날짜: {start.isoformat()} ~ {today.isoformat()} 지우기'
+    label = f'수정한 날짜: {shown(start)} ~ {shown(today)} 지우기'
     for _ in range(6):
         if active_label() == label:
             break
