@@ -31,9 +31,9 @@ function PeriodRow({ period, onSave, onReset }: { period: RecommendationPeriodDa
     catch (error) { if (edits.current === version) setError(error instanceof Error ? error.message : String(error)) }
     finally { setSaving(false) }
   }
-  // 저장 요청을 보낸 뒤에는 그 값이 저장될 수 있어 버리지 않는다. 응답이 오면 다시 버릴 수 있다.
+  // Esc와 되돌리기가 같이 쓴다. 저장 응답을 기다리는 중에 버려도 그 응답이 초안을 지우거나 오류를 띄우지 않는다.
   function discard() {
-    if (!changed || saving) return false
+    if (!changed) return false
     edits.current += 1
     setDraft(null)
     setError("")
@@ -42,7 +42,8 @@ function PeriodRow({ period, onSave, onReset }: { period: RecommendationPeriodDa
   return <form noValidate className="space-y-1 rounded-xl border bg-card px-4 py-3" onSubmit={event => { event.preventDefault(); if (changed) void run(() => onSave(period.criterion, text)) }}>
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2"><label htmlFor={id} className="font-semibold">{period.label}</label>{changed && <><StatusBadge variant="info">저장 안 됨</StatusBadge><Button type="button" size="xs" variant="ghost" aria-label={`${period.label} 되돌리기`} title="저장 전 입력을 버리고 저장된 값으로 돌아갑니다 (Esc)" aria-disabled={saving || undefined} onClick={() => { if (discard()) input.current?.focus() }}>되돌리기</Button></>}</div>
+        {/* 되돌리기 단추가 나타나도 행 높이가 바뀌지 않게 줄 높이를 단추에 맞춘다. */}
+        <div className="flex min-h-6 items-center gap-2"><label htmlFor={id} className="font-semibold">{period.label}</label>{changed && <><StatusBadge variant="info">저장 안 됨</StatusBadge><Button type="button" size="xs" variant="ghost" aria-label={`${period.label} 되돌리기`} title="저장 전 입력을 버리고 저장된 값으로 돌아갑니다 (Esc)" onClick={() => { if (discard()) input.current?.focus() }}>되돌리기</Button></>}</div>
         <p id={`${id}-description`} className="text-sm text-muted-foreground">{period.description}</p>
       </div>
       <div className="flex items-center gap-2">

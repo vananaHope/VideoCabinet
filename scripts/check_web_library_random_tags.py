@@ -198,7 +198,7 @@ def open_dialog_by_keyboard():
     key(Qt.Key.Key_Return)
     wait(lambda: js("!!document.querySelector('[role=menu]')"))
     items = json.loads(js("JSON.stringify([...document.querySelectorAll('[role=menuitem]')].map(i => i.textContent))"))
-    assert items == ['현재 결과에서', '태그에서…'], items
+    assert items == ['현재 결과에서', '영상 전체에서Ctrl+Shift+R', '태그에서…'], items
     # 메뉴는 열릴 때 첫 항목이나 메뉴 자체에 초점을 둔다. ↓로 '태그에서…'까지 간다(마지막 항목에서 멈춤).
     for _ in range(3):
         if js("document.activeElement.textContent") == '태그에서…':
