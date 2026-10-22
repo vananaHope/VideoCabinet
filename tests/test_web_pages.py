@@ -160,6 +160,7 @@ def test_virtual_page_lifecycle_and_playback_return(window_factory, example_page
     # 재생 중 다른 영상으로 이어져도 최초 복귀 탭을 보존한다.
     window.play_video(core.videos()[1].id)
     window.back_to_list()
+    wait_for(lambda: not host.return_pending)
     assert window.pages.currentWidget() is host and host.active_tab == 'example'
     assert page.is_active()
     assert page.events == [('deactivated', False), ('activated', True)]
