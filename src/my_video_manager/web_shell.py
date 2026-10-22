@@ -5,9 +5,9 @@ import json
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import QLocale, QPoint, QUrl, Signal, Qt
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QStackedLayout
+from PySide6.QtCore import QLocale, QPoint, QUrl, Signal, Qt, QTimer
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QStackedLayout
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineUrlRequestInterceptor
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -20,6 +20,8 @@ from .web_contract import CONTRACTS, TABS
 from .web_tokens import web_tokens
 from .web_update_data import shell_update_data, update_install_data
 from .web_thumbnail import ThumbnailHandler, register_thumbnail_scheme
+from .web_return_frame import WebReturnFrame
+from .web_return_cover import WebReturnCover
 
 
 def use_korean_locale():
@@ -81,6 +83,12 @@ class WebShellHost(QWidget):
         self._return_generation = 0
         self._return_token = None
         self._return_focus_ready = False
+        self._return_frame = None
+        self._return_cover = None
+        self._return_deadline = QTimer(self)
+        self._return_deadline.setSingleShot(True)
+        self._return_deadline.setInterval(3000)
+        self._return_deadline.timeout.connect(lambda: self.fail_return(self._return_token))
         self.bridge = ShellBridge(self)
         register_thumbnail_scheme()
         use_korean_locale()
@@ -189,6 +197,13 @@ class WebShellHost(QWidget):
         return self._return_token is not None
 
     def cancel_return(self):
+        self._return_deadline.stop()
+        if self._return_cover is not None:
+            self._return_cover.cancel()
+            self._return_cover = None
+        if self._return_frame is not None:
+            self._return_frame.cancel()
+            self._return_frame = None
         self._return_generation += 1
         self._return_token = None
         self.window.playback_page.setEnabled(True)
@@ -204,8 +219,18 @@ class WebShellHost(QWidget):
         self._return_generation += 1
         self._return_token = self._return_generation if cover else None
         self._return_focus_ready = False
+        if self._return_cover is not None:
+            self._return_cover.cancel()
+            self._return_cover = None
+        if self._return_frame is not None:
+            self._return_frame.cancel()
+            self._return_frame = None
+        if cover:
+            self._return_deadline.start()
         try:
             self.window.end_playback()
+            self.window.set_playback_fullscreen(False)
+            self.window.playback_page.close_help()
             self.set_tab(tab)
             self.dialogs.restore_page()
             if cover:
@@ -213,11 +238,12 @@ class WebShellHost(QWidget):
                 # 일시정지된 마지막 프레임도 지워진다. 준비 동안 두 페이지를
                 # 모두 표시하고 기존 재생 페이지를 위에 둔다.
                 self.window.pages.layout().setStackingMode(QStackedLayout.StackingMode.StackAll)
-            self.window.pages.setCurrentWidget(self)
             if cover:
-                self.window.playback_page.show()
-                self.window.playback_page.raise_()
+                # 준비 중 currentWidget을 웹으로 바꾸면 QStackedLayout이 웹을
+                # 먼저 올린다. 재생 화면을 다시 올려도 그 사이 present는 되돌릴 수 없다.
                 self.window.playback_page.setEnabled(False)
+            else:
+                self.window.pages.setCurrentWidget(self)
             route = self.routes[tab]
             if returning:
                 route.return_from_playback()
@@ -228,7 +254,7 @@ class WebShellHost(QWidget):
             self.apply_pending_focus()
             self.prepare_return()
         except Exception:
-            self.cancel_return()
+            self.fail_return(self._return_token)
             raise
 
     def prepare_return(self):
@@ -239,27 +265,54 @@ class WebShellHost(QWidget):
             self.bridge.shellPrepareReturn.emit(self._return_token)
 
     def fail_return(self, token):
-        if token == self._return_token:
+        if token is not None and token == self._return_token:
+            self.window.pages.setCurrentWidget(self)
             self.cancel_return()
 
     def finish_return(self, token):
         # 새 재생·탭 이동·창 닫기 뒤 도착한 웹 응답은 현재 화면을 덮지 않는다.
-        if token != self._return_token or self.window.pages.currentWidget() is not self:
+        if token != self._return_token or not self.return_pending:
             return
         try:
+            if self._return_frame is not None or self._return_cover is not None:
+                return
             renderers = self.view.findChildren(QQuickWidget)
             if renderers:
-                # 가려진 위젯은 update가 생략될 수 있어 프레임을 명시적으로
-                # 렌더한다. Qt 내부 위임 위젯이 달라져도 정상 웹을 오류로 보지 않는다.
-                renderers[0].grabFramebuffer()
-            # 준비된 웹을 올리고 repaint한 뒤 같은 호출에서 덮개를 걷는다.
-            # 두 native 페이지가 섞인 중간 상태에서 합성을 기다리지 않는다.
-            self.raise_()
-            self.view.raise_()
-            self.view.repaint()
-        finally:
-            # 렌더 준비 실패에도 덮개 아래 오류를 가둬 두지 않는다.
+                # reparent 직후 rAF가 끝나도 Chromium 텍스처가 아직 없는
+                # cleared FBO가 올 수 있다. 실제 내용을 받은 paint까지 기다린다.
+                self._return_frame = WebReturnFrame(self, renderers[0], lambda image: self.present_return(token, image))
+                self._return_frame.check()
+            else:
+                self.present_return(token)
+        except Exception:
             self.fail_return(token)
+            raise
+
+    def present_return(self, token, image=None):
+        if token != self._return_token or not self.return_pending:
+            return
+        # 완료 콜백을 호출한 준비 객체는 이미 해제 예약됐다.
+        self._return_frame = None
+        if (isinstance(image, QImage) and not image.isNull() and self.window.isVisible()
+                and QApplication.platformName() == 'windows'):
+            self._return_cover = WebReturnCover(self, image, lambda: self.commit_return(token),
+                                                lambda: self.fail_return(token))
+            self._return_cover.start()
+        else:
+            self.commit_return(token)
+            self.fail_return(token)
+
+    def commit_return(self, token):
+        if token != self._return_token or not self.return_pending:
+            return
+        self.window.pages.setCurrentWidget(self)
+        self.window.pages.layout().setStackingMode(QStackedLayout.StackingMode.StackOne)
+        self.window.playback_page.hide()
+        self.window.playback_page.setEnabled(True)
+        self.window.player_shutdown.release()
+        # native mpv와 웹을 함께 보이는 중간 상태로 flush하지 않는다.
+        # StackOne과 표면 숨김을 끝낸 완성된 주 창을 한 번에 그린다.
+        self.window.repaint()
 
     def close_return_tab(self):
         """재생 중 창을 닫아 트레이로 숨길 때 둘 탭. 출발한 페이지가 원하면 그 탭, 아니면 라이브러리."""
@@ -310,7 +363,7 @@ class WebShellHost(QWidget):
     def load_finished(self, ok):
         self.load_error.setVisible(not ok)
         if not ok and self.return_pending:
-            self.cancel_return()
+            self.fail_return(self._return_token)
 
     def frontend_ready(self):
         self._frontend_ready = True

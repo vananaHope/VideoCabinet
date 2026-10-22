@@ -334,6 +334,7 @@ def test_space_activates_focused_back_button(window):
     window.playback_page.back_button.setFocus()
     key(window, Qt.Key.Key_Space)
     assert window.core.playback.session is None
+    wait_for(lambda: not window.web_host.return_pending)
     assert window.pages.currentWidget() is window.web_host
 
 
@@ -725,6 +726,7 @@ def test_fullscreen_bar_turns_fullscreen_off_and_returns_to_list(window):
     click(page.list_button)
     assert not window.isFullScreen()
     assert window.core.playback.session is None
+    wait_for(lambda: not window.web_host.return_pending)
     assert window.pages.currentWidget() is window.web_host
 
 
