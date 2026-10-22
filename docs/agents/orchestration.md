@@ -24,13 +24,13 @@
 ## 스펙과 먼저 읽을 문서
 
 - `gh issue view 1` : 전체 스펙. 특히 "Implementation Decisions", "Testing Decisions", "Out of Scope".
-- `AGENTS.md`, `CONTEXT.md`(용어집), `docs/adr/`, `README.md`(요약), `docs/development.md`(환경 준비·테스트·빌드 상세)
+- `AGENTS.md`, `GLOSSARY.md`(용어집), `docs/adr/`, `README.md`(요약), `docs/development.md`(환경 준비·테스트·빌드 상세)
 
 ## 구현 제약
 
 - 기술 스택은 ADR-0001 그대로(Python + PySide6 + mpv). 화면은 ADR-0004의 단일 웹 셸이고, 재생·트레이·공용 네이티브 경고만 Qt로 남긴다.
 - 도메인 규칙은 앱 코어에, 외부 세계(미디어 정보, 받아쓰기, 번역, 시계)는 주입 가능한 어댑터로 둔다.
-- 코드의 도메인 이름은 `CONTEXT.md` 용어의 영어 표기를 쓴다. 용어집에 없는 도메인 개념을 새로 만들어야 하면 완료 보고에 적는다.
+- 코드의 도메인 이름은 `GLOSSARY.md` 용어의 영어 표기를 쓴다. 용어집에 없는 도메인 개념을 새로 만들어야 하면 완료 보고에 적는다.
 - 테스트는 앱 코어의 공개 동작(또는 떼어낸 순수 함수)만 검증한다. 내부 테이블이나 private 함수에 묶지 않는다.
 - 브리지 계약을 바꾸면 `scripts/generate_web_types.py`로 타입을 생성한다.
 
