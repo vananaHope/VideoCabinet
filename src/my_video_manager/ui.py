@@ -326,10 +326,14 @@ class MainWindow(QMainWindow):
     def play_video(self, video_id, *, start=None, random_scope=None, new_playback=False):
         if self.tray.quitting:
             return
-        self.web_host.cancel_return()
-        from_list = self.pages.currentWidget() is not self.playback_page
+        page = self.logical_page()
+        from_list = page is not self.playback_page
         if from_list:
-            self._return_page = self.pages.currentWidget()
+            self._return_page = page
+            # 취소 뒤에는 재생 덮개만 currentWidget으로 남는다. 출발 탭을 먼저 기억한다.
+            if page is self.web_host:
+                self.web_host.remember_playback_tab()
+        self.web_host.cancel_return()
         try:
             self.stop_player()
             begins_playback = from_list or new_playback or self.core.playback.session is None
@@ -344,7 +348,7 @@ class MainWindow(QMainWindow):
 
     def load_player(self, video_id, start):
         location = self.core.playback_location(video_id)
-        if self.pages.currentWidget() is self.web_host:
+        if self.logical_page() is self.web_host:
             self.web_host.remember_playback_tab()
         self.pages.setCurrentIndex(1)
         if self.player is None:
@@ -564,8 +568,9 @@ class MainWindow(QMainWindow):
             ReviewDialog(self.core, video_id, self.review_jump, self.review_changed, self).exec()
 
     def review_jump(self, video_id, line_id):
-        if self.pages.currentWidget() is not self.playback_page:
-            self._return_page = self.pages.currentWidget()
+        page = self.logical_page()
+        if page is not self.playback_page:
+            self._return_page = page
         self.sync_position()
         source = self.library_page.visible_video_ids()
         target = self.core.play_review_line(video_id, line_id, playback_video_ids=source,

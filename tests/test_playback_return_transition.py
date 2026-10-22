@@ -12,9 +12,21 @@ from PySide6.QtCore import Qt
 from PySide6.QtQuickWidgets import QQuickWidget
 
 from test_playback_page_ui import app, window, Player, mouse, PRESS, RELEASE, wait_past_click_interval
+from test_random_continuous_play_ui import review_window
 from qt_wait import wait_for
 from my_video_manager.core import Command, CommandType
 from my_video_manager.random_continuous_play import RandomPlayScope
+
+
+def patch_method_for(monkeypatch, target, name, replacement):
+    """Qt 소유 인스턴스를 undo에서 만지지 않고 대상의 클래스 메서드를 바꾼다."""
+    cls = type(target)
+    original = getattr(cls, name)
+    def method(self, *args, **kwargs):
+        if self is target:
+            return replacement(*args, **kwargs)
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(cls, name, method)
 
 
 class SlowPlayer(Player):
@@ -334,7 +346,7 @@ def test_return_keeps_playback_current_until_web_frame_is_ready(window, monkeypa
     host = window.web_host
     wait_for(lambda: host._frontend_ready and 'library' in host._ready_pages)
     tokens = []
-    monkeypatch.setattr(host, 'finish_return', tokens.append)
+    patch_method_for(monkeypatch, host, 'finish_return', tokens.append)
     window.back_to_list()
     wait_for(lambda: bool(tokens))
     assert window.pages.currentWidget() is window.playback_page
@@ -349,7 +361,7 @@ def return_frame(window, monkeypatch):
     image = QImage(32, 32, QImage.Format.Format_RGB32)
     image.fill(QColor('black'))
     reads = []
-    monkeypatch.setattr(renderer, 'grabFramebuffer', lambda: reads.append(True) or image.copy())
+    patch_method_for(monkeypatch, renderer, 'grabFramebuffer', lambda: reads.append(True) or image.copy())
     return renderer, image, reads
 
 
@@ -404,6 +416,45 @@ def test_new_playback_cancels_wait_for_frame_content(window, monkeypatch):
     assert not window.web_host.return_pending
 
 
+def test_new_playback_during_return_remembers_selected_tab(window, monkeypatch):
+    host = window.web_host
+    wait_for(lambda: host._frontend_ready and 'library' in host._ready_pages)
+    replies = []
+    with monkeypatch.context() as pending:
+        patch_method_for(pending, host, 'finish_return', replies.append)
+        window.back_to_list()
+        wait_for(lambda: bool(replies))
+        QTest.keyClick(window.focusWidget() or window, Qt.Key.Key_4, Qt.KeyboardModifier.ControlModifier)
+        assert host.active_tab == 'search' and host.return_pending
+        window.play_video(window.core.videos()[1].id)
+        assert window.core.playback.session is not None
+    window.back_to_list()
+    wait_for(lambda: not host.return_pending)
+    assert host.active_tab == 'search'
+
+
+def test_review_playback_during_return_remembers_selected_tab(review_window, monkeypatch):
+    window, core = review_window, review_window.core
+    wait_for(lambda: window.loaded)
+    video_id = core.videos()[0].id
+    core.request_subtitles(video_id)
+    assert core.process_next_subtitle().state == 'completed'
+    line = core.transcript(video_id).lines[1]
+    window.play_video(video_id)
+    host, replies = window.web_host, []
+    with monkeypatch.context() as pending:
+        patch_method_for(pending, host, 'finish_return', replies.append)
+        window.back_to_list()
+        wait_for(lambda: bool(replies))
+        QTest.keyClick(window.focusWidget() or window, Qt.Key.Key_4, Qt.KeyboardModifier.ControlModifier)
+        assert host.active_tab == 'search' and host.return_pending
+        window.review_jump(video_id, line.id)
+        assert core.playback.session.video_id == video_id
+    window.back_to_list()
+    wait_for(lambda: not host.return_pending)
+    assert host.active_tab == 'search'
+
+
 def visible_return_covers():
     return [item for item in QGuiApplication.allWindows()
             if item.objectName() == 'playback-return-cover' and item.isVisible()]
@@ -422,12 +473,12 @@ def test_pending_return_keys_target_web_page(window, monkeypatch, phase, key):
         monkeypatch.setattr(WebReturnCover, 'commit', lambda self: arrived.append(True))
     else:
         wait_for(lambda: host._frontend_ready and 'library' in host._ready_pages)
-        monkeypatch.setattr(host, 'finish_return', arrived.append)
+        patch_method_for(monkeypatch, host, 'finish_return', arrived.append)
     window.back_to_list()
     wait_for(lambda: bool(arrived))
     shell_help, playback_settings = [], []
-    monkeypatch.setattr(host, 'open_key_guide', lambda: shell_help.append(True))
-    monkeypatch.setattr(host, 'popup_settings_menu', lambda: playback_settings.append(True))
+    patch_method_for(monkeypatch, host, 'open_key_guide', lambda: shell_help.append(True))
+    patch_method_for(monkeypatch, host, 'popup_settings_menu', lambda: playback_settings.append(True))
     panel_expanded = page.highlights_expanded
     keys = {'fullscreen': Qt.Key.Key_Apostrophe, 'help': Qt.Key.Key_F1,
             'highlights': Qt.Key.Key_Semicolon, 'settings': Qt.Key.Key_S,
@@ -503,7 +554,7 @@ def prepare_raster_return(window, monkeypatch):
             finish(token)
         else:
             window.web_host.present_return(token, image)
-    monkeypatch.setattr(window.web_host, 'finish_return', ready)
+    patch_method_for(monkeypatch, window.web_host, 'finish_return', ready)
 
 
 def test_return_raster_mouse_click_reaches_visible_web_tab(window, monkeypatch):
@@ -539,7 +590,7 @@ def test_raster_waits_for_new_web_frame_after_switch(window, monkeypatch, reply)
             delayed.append(token)
         else:
             finish(token)
-    monkeypatch.setattr(host, 'finish_return', hold_present)
+    patch_method_for(monkeypatch, host, 'finish_return', hold_present)
     window.back_to_list()
     wait_for(lambda: bool(delayed))
     assert tokens[-1] != tokens[0]
@@ -600,7 +651,7 @@ def test_return_raster_cover_cannot_outlive_user_action(window, monkeypatch, act
 
 def test_missing_web_return_reply_has_bounded_fallback(window, monkeypatch):
     tokens = []
-    monkeypatch.setattr(window.web_host, 'finish_return', tokens.append)
+    patch_method_for(monkeypatch, window.web_host, 'finish_return', tokens.append)
     window.back_to_list()
     wait_for(lambda: bool(tokens))
     assert window.playback_page.isVisible()
@@ -640,7 +691,7 @@ def test_rejected_web_return_releases_cover(window):
 def test_python_frame_preparation_failure_releases_cover(window, monkeypatch):
     def fail(*args):
         raise RuntimeError('return preparation failed')
-    monkeypatch.setattr(window.web_host.view, 'findChildren', fail)
+    patch_method_for(monkeypatch, window.web_host.view, 'findChildren', fail)
     window.back_to_list()
     wait_for(lambda: not window.web_host.return_pending)
     assert not window.playback_page.isVisible()
@@ -651,7 +702,7 @@ def test_python_frame_preparation_failure_releases_cover(window, monkeypatch):
 def test_python_page_preparation_failure_releases_cover(window, monkeypatch):
     def fail():
         raise RuntimeError('page preparation failed')
-    monkeypatch.setattr(window.library_page, 'return_from_playback', fail)
+    patch_method_for(monkeypatch, window.library_page, 'return_from_playback', fail)
     with pytest.raises(RuntimeError, match='page preparation failed'):
         window.back_to_list()
     assert not window.web_host.return_pending
@@ -659,7 +710,7 @@ def test_python_page_preparation_failure_releases_cover(window, monkeypatch):
 
 
 def test_missing_internal_renderer_returns_without_load_error(window, monkeypatch):
-    monkeypatch.setattr(window.web_host.view, 'findChildren', lambda *args: [])
+    patch_method_for(monkeypatch, window.web_host.view, 'findChildren', lambda *args: [])
     window.back_to_list()
     wait_for(lambda: not window.web_host.return_pending)
     assert window.web_host.isVisible()
