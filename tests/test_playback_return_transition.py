@@ -497,8 +497,13 @@ def prepare_raster_return(window, monkeypatch):
     image.setPixelColor(3, 3, QColor('white'))
     wait_for(lambda: window.web_host._frontend_ready and 'library' in window.web_host._ready_pages)
     monkeypatch.setattr(web_shell, 'QApplication', SimpleNamespace(platformName=lambda: 'windows'))
-    monkeypatch.setattr(window.web_host, 'finish_return',
-                        lambda token: window.web_host.present_return(token, image))
+    finish = window.web_host.finish_return
+    def ready(token):
+        if window.web_host._return_cover is not None:
+            finish(token)
+        else:
+            window.web_host.present_return(token, image)
+    monkeypatch.setattr(window.web_host, 'finish_return', ready)
 
 
 def test_return_raster_mouse_click_reaches_visible_web_tab(window, monkeypatch):
@@ -520,6 +525,34 @@ def test_return_raster_mouse_click_reaches_visible_web_tab(window, monkeypatch):
     assert window.pages.currentWidget() is window.web_host
     assert not visible_return_covers()
     assert window.core.playback.session is None
+
+
+@pytest.mark.parametrize('reply', [True, False])
+def test_raster_waits_for_new_web_frame_after_switch(window, monkeypatch, reply):
+    prepare_raster_return(window, monkeypatch)
+    host = window.web_host
+    finish = host.finish_return
+    tokens, delayed = [], []
+    host.bridge.shellPrepareReturn.connect(tokens.append)
+    def hold_present(token):
+        if host._return_cover is not None and host._return_cover.submitted:
+            delayed.append(token)
+        else:
+            finish(token)
+    monkeypatch.setattr(host, 'finish_return', hold_present)
+    window.back_to_list()
+    wait_for(lambda: bool(delayed))
+    assert tokens[-1] != tokens[0]
+    assert window.pages.currentWidget() is host
+    assert visible_return_covers()
+    finish(tokens[0])
+    javascript(window, 'true')
+    assert host.return_pending and visible_return_covers()
+    if reply:
+        finish(delayed[-1])
+    wait_for(lambda: not host.return_pending)
+    assert not visible_return_covers()
+    assert not window.playback_page.isVisible()
 
 
 def test_frame_cancel_is_safe_after_deferred_delete(window, monkeypatch, app):

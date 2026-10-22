@@ -20,7 +20,7 @@ class RasterWindow(QWindow):
 
 
 class WebReturnCover(QObject):
-    """raster flush → 웹 교체 → 주 창 UpdateRequest 처리 완료 순서를 보장한다.
+    """raster flush → 웹 교체 → 다음 웹 프레임 → 주 창 갱신 순서를 보장한다.
 
     Qt의 처리 완료는 DWM의 per-window present 확인 신호가 아니다. 독립 raster
     표면이 그 사이 완성된 목록을 유지한다. expose/update가 없으면 상한으로 복귀한다.
@@ -34,6 +34,7 @@ class WebReturnCover(QObject):
         self.completed = completed
         self.painted = False
         self.submitted = False
+        self.web_frame_ready = False
         self.surface = RasterWindow(self)
         self.surface.setGeometry(self.window.rect())
         self.store = QBackingStore(self.surface)
@@ -85,7 +86,7 @@ class WebReturnCover(QObject):
             return False
         kind = event.type()
         if watched is self.window:
-            if self.submitted and kind == QEvent.Type.UpdateRequest:
+            if self.submitted and self.web_frame_ready and kind == QEvent.Type.UpdateRequest:
                 self.submitted = False
                 QTimer.singleShot(0, self.finish)
             elif kind in (QEvent.Type.Resize, QEvent.Type.Hide, QEvent.Type.Close):
@@ -95,6 +96,12 @@ class WebReturnCover(QObject):
                 # 새 입력은 정지 이미지를 보며 처리되지 않는다. 입력 자체는 소비하지 않는다.
                 self.finish()
         return False
+
+    def frame_ready(self):
+        if self.completed is None or not self.submitted:
+            return
+        self.web_frame_ready = True
+        self.window.update()
 
     def finish(self):
         completed = self.completed

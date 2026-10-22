@@ -276,7 +276,10 @@ class WebShellHost(QWidget):
         if token != self._return_token or not self.return_pending:
             return
         try:
-            if self._return_frame is not None or self._return_cover is not None:
+            if self._return_cover is not None:
+                self._return_cover.frame_ready()
+                return
+            if self._return_frame is not None:
                 return
             renderers = self.view.findChildren(QQuickWidget)
             if renderers:
@@ -303,7 +306,7 @@ class WebShellHost(QWidget):
             def completed():
                 if self._return_cover is cover:
                     self._return_cover = None
-                self.fail_return(token)
+                    self.fail_return(self._return_token)
             cover = WebReturnCover(self, image, lambda: self.commit_return(token), completed)
             self._return_cover = cover
             cover.start()
@@ -322,6 +325,12 @@ class WebShellHost(QWidget):
         # native mpv와 웹을 함께 보이는 중간 상태로 flush하지 않는다.
         # StackOne과 표면 숨김을 끝낸 완성된 주 창을 한 번에 그린다.
         self.window.repaint()
+        if self._return_cover is not None:
+            # 교체 전 rAF 응답과 교체 후 응답을 구분한다. 이전 응답이 중복 도착해도
+            # 새 native 표면의 첫 프레임을 기다리는 raster를 먼저 걷지 않는다.
+            self._return_generation += 1
+            self._return_token = self._return_generation
+            self.prepare_return()
 
     def close_return_tab(self):
         """재생 중 창을 닫아 트레이로 숨길 때 둘 탭. 출발한 페이지가 원하면 그 탭, 아니면 라이브러리."""
