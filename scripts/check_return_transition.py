@@ -222,7 +222,16 @@ def analyze(directory):
     import av
     import numpy as np
     from PySide6.QtCore import Qt
-    from PySide6.QtGui import QColor, QFont, QImage, QPainter
+    from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetrics, QImage, QPainter
+    font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+    if os.name == 'nt':
+        # Windows의 offscreen 플러그인은 설치된 글꼴을 자동으로 열거하지 않는다.
+        font_id = QFontDatabase.addApplicationFont(str(Path(os.environ['WINDIR']) / 'Fonts' / 'consola.ttf'))
+        if font_id >= 0:
+            font = QFont(QFontDatabase.applicationFontFamilies(font_id)[0])
+    font.setPointSize(10)
+    if not all(QFontMetrics(font).inFont(char) for char in '0123456789. videolibraryinspectmx'):
+        raise RuntimeError('contact sheet의 ASCII 라벨을 표시할 글꼴이 없습니다.')
     summary = {}
     phases = json.loads((directory / 'phases.json').read_text(encoding='utf-8'))
     for movie in directory.glob('*/window.mkv'):
@@ -250,7 +259,7 @@ def analyze(directory):
         sheet = QImage(1320, 240*((len(indices)+3)//4), QImage.Format.Format_RGB32)
         sheet.fill(QColor('#555555'))
         painter = QPainter(sheet)
-        painter.setFont(QFont('Arial', 10))
+        painter.setFont(font)
         for order, index in enumerate(indices):
             x, y = order % 4 * 330, order // 4 * 240
             painter.drawImage(x, y, pictures[index].scaled(330, 215, Qt.AspectRatioMode.KeepAspectRatio))

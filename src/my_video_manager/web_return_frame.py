@@ -59,6 +59,8 @@ class WebReturnFrame(QObject):
             completed(self.image)
 
     def cancel(self):
+        if self.completed is None:
+            return
         self.completed = None
         self.deadline.stop()
         try:

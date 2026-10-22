@@ -152,6 +152,7 @@ class TrayControls(QObject):
 
     def close_window(self, event):
         window = self.window
+        was_playing = window.logical_page() is window.playback_page
         try:
             if self.quitting:
                 if blocker := self.quit_blocker():
@@ -194,7 +195,6 @@ class TrayControls(QObject):
             QApplication.instance().quit()
         else:
             self._emergency_hidden = False
-            was_playing = window.pages.currentWidget() is window.playback_page
             # 숨긴 뒤 page_changed가 showNormal()로 창을 다시 띄우지 않게 한다.
             window.set_playback_fullscreen(False)
             window.hide()

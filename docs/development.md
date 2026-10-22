@@ -884,7 +884,7 @@ offscreen은 1100×720 위젯 이미지만 `.local/issue-235/`에 저장합니�
 - `scripts/check_return_transition.py`는 실제 mpv와 합성 자료를 만들고 FFmpeg 입력 단계에서 앱 클라이언트 좌표·크기만 잘라 60fps로 녹화합니다. TOPMOST와 활성 창을 검증하며 데스크톱 전체를 저장하지 않습니다. `gdigrab title=`은 GPU 자식 화면 갱신을 놓칠 수 있어 쓰지 않습니다. 아래 명령을 **desktop_lock** 안에서 실행하고, `--maximized` 및 `--kind plain/esc/sorted`를 바꿔 각 경로를 검사합니다. 한 잠금은 15분 안에 끝냅니다.
 
   ```powershell
-  python C:/Users/Rho/.agent-orchestra/bin/desktop_lock.py run --owner issue-250 -- .venv/Scripts/python.exe scripts/check_return_transition.py --kind dialog --count 10 --output .local/return-window
+  python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-250 -- .venv/Scripts/python.exe scripts/check_return_transition.py --kind dialog --count 10 --output .local/return-window
   .venv/Scripts/python.exe scripts/check_return_transition.py --analyze-only --output .local/return-window
   ```
 

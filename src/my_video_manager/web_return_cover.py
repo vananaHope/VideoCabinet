@@ -116,6 +116,8 @@ class WebReturnCover(QObject):
         self.deadline.stop()
         QApplication.instance().removeEventFilter(self)
         self.surface.hide()
-        self.store = None  # QBackingStore는 소유 native 창보다 먼저 파괴한다.
+        # QBackingStore는 QObject 자식이 아닌 Python 소유 객체다.
+        # 마지막 Python 참조를 먼저 버리고 그 뒤 native 창의 삭제를 예약한다.
+        self.store = None
         self.surface.deleteLater()
         self.deleteLater()

@@ -198,12 +198,7 @@ class WebShellHost(QWidget):
 
     def cancel_return(self):
         self._return_deadline.stop()
-        if self._return_cover is not None:
-            self._return_cover.cancel()
-            self._return_cover = None
-        if self._return_frame is not None:
-            self._return_frame.cancel()
-            self._return_frame = None
+        self.cancel_return_helpers()
         self._return_generation += 1
         self._return_token = None
         self.window.playback_page.setEnabled(True)
@@ -212,6 +207,18 @@ class WebShellHost(QWidget):
             self.window.playback_page.hide()
         self.window.player_shutdown.release()
 
+    def cancel_return_helpers(self):
+        # 완료/삭제 예약된 객체를 host가 붙잡지 않게 참조부터 비운다.
+        frame, self._return_frame = self._return_frame, None
+        cover, self._return_cover = self._return_cover, None
+        for helper in (frame, cover):
+            if helper is not None:
+                try:
+                    helper.cancel()
+                except RuntimeError:
+                    # Qt 부모/renderer 해제로 이미 삭제된 helper도 정리된 상태다.
+                    pass
+
     def show_page(self, tab, *, returning=False):
         """웹을 보이는 크기로 먼저 그린다. 준비 응답까지 이전 재생 표면이 앞을 덮는다."""
         cover = self.window.isVisible() and (self.return_pending or
@@ -219,12 +226,7 @@ class WebShellHost(QWidget):
         self._return_generation += 1
         self._return_token = self._return_generation if cover else None
         self._return_focus_ready = False
-        if self._return_cover is not None:
-            self._return_cover.cancel()
-            self._return_cover = None
-        if self._return_frame is not None:
-            self._return_frame.cancel()
-            self._return_frame = None
+        self.cancel_return_helpers()
         if cover:
             self._return_deadline.start()
         try:
@@ -280,8 +282,13 @@ class WebShellHost(QWidget):
             if renderers:
                 # reparent 직후 rAF가 끝나도 Chromium 텍스처가 아직 없는
                 # cleared FBO가 올 수 있다. 실제 내용을 받은 paint까지 기다린다.
-                self._return_frame = WebReturnFrame(self, renderers[0], lambda image: self.present_return(token, image))
-                self._return_frame.check()
+                def completed(image):
+                    if self._return_frame is frame:
+                        self._return_frame = None
+                    self.present_return(token, image)
+                frame = WebReturnFrame(self, renderers[0], completed)
+                self._return_frame = frame
+                frame.check()
             else:
                 self.present_return(token)
         except Exception:
@@ -291,13 +298,15 @@ class WebShellHost(QWidget):
     def present_return(self, token, image=None):
         if token != self._return_token or not self.return_pending:
             return
-        # 완료 콜백을 호출한 준비 객체는 이미 해제 예약됐다.
-        self._return_frame = None
         if (isinstance(image, QImage) and not image.isNull() and self.window.isVisible()
                 and QApplication.platformName() == 'windows'):
-            self._return_cover = WebReturnCover(self, image, lambda: self.commit_return(token),
-                                                lambda: self.fail_return(token))
-            self._return_cover.start()
+            def completed():
+                if self._return_cover is cover:
+                    self._return_cover = None
+                self.fail_return(token)
+            cover = WebReturnCover(self, image, lambda: self.commit_return(token), completed)
+            self._return_cover = cover
+            cover.start()
         else:
             self.commit_return(token)
             self.fail_return(token)
@@ -351,6 +360,7 @@ class WebShellHost(QWidget):
                 self.bridge.shellFocusRequested.emit('shell')
 
     def frontend_loading(self):
+        self.cancel_return_helpers()
         if self.return_pending:
             self._return_generation += 1
             self._return_token = self._return_generation

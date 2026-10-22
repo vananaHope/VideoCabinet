@@ -150,8 +150,12 @@ class MainWindow(QMainWindow):
             self.set_playback_fullscreen(False)
             self.playback_page.close_help()
 
+    def logical_page(self):
+        """복귀 준비의 재생 표면은 덮개일 뿐, 명령 대상은 이미 웹 페이지다."""
+        return self.web_host if self.web_host.return_pending else self.pages.currentWidget()
+
     def set_playback_fullscreen(self, enabled):
-        enabled = enabled and self.pages.currentWidget() is self.playback_page
+        enabled = enabled and self.logical_page() is self.playback_page
         if enabled and not self.isFullScreen():
             self._playback_was_maximized = self.isMaximized()
             self.showFullScreen()
@@ -177,7 +181,7 @@ class MainWindow(QMainWindow):
         if self.web_host.dialogs.blocks_shell_actions:
             return
         self.playback_page.close_help()
-        if self.pages.currentWidget() is self.playback_page:
+        if self.logical_page() is self.playback_page:
             self.web_host.popup_settings_menu()
         else:
             self.navigate_web_tab('settings')
@@ -612,7 +616,7 @@ class MainWindow(QMainWindow):
                     or event.isAutoRepeat()):
                 self.random_play()
             return True
-        if (self.pages.currentWidget() is self.web_host and event.key() == Qt.Key.Key_F1
+        if (self.logical_page() is self.web_host and event.key() == Qt.Key.Key_F1
                 and event.modifiers() == Qt.KeyboardModifier.NoModifier):
             # 대화상자가 열려 있으면 웹에 넘긴다. 열린 키 안내는 F1로 닫히고 다른 대화상자에는 F1 동작이 없다.
             if self.web_host.dialogs.blocks_shell_actions:
@@ -634,7 +638,7 @@ class MainWindow(QMainWindow):
             if not event.isAutoRepeat():
                 self.show_fullscreen_settings_menu()
             return True
-        handle_key = getattr(self.pages.currentWidget(), "handle_key", None)
+        handle_key = getattr(self.logical_page(), "handle_key", None)
         return handle_key(event) if callable(handle_key) else False
 
     def closeEvent(self, event):
