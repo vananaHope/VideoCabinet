@@ -36,6 +36,7 @@ def test_all_web_tabs_play_from_whole_library_and_return(window, tab):
     assert window.core.playback.session.video_id in {video.id for video in window.core.videos()}
     assert window.pages.currentWidget() is window.playback_page
     key(window, Qt.Key.Key_Escape)
+    wait_for(lambda: not window.web_host.return_pending)
     assert window.pages.currentWidget() is window.web_host
     assert window.web_host.active_tab == tab
     assert window.core.playback.session is None
@@ -174,6 +175,7 @@ def test_tray_random_restores_hidden_window_and_ignores_filter(window):
     assert window.pages.currentWidget() is window.playback_page
     assert window.core.playback.session.video_id in {video.id for video in window.core.videos()}
     key(window, Qt.Key.Key_Escape)
+    wait_for(lambda: not window.web_host.return_pending)
     assert window.pages.currentWidget() is window.web_host
 
 
@@ -188,6 +190,7 @@ def test_library_whole_random_uses_random_key_scope_and_playlist(window):
     assert window.core.random_continuous_enabled
     assert window.core.random_continuous_scope.kind == "all"
     key(window, Qt.Key.Key_Escape)
+    wait_for(lambda: not window.web_host.return_pending)
     assert window.pages.currentWidget() is window.web_host
 
 

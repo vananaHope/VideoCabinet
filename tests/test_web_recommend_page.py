@@ -103,6 +103,7 @@ def test_play_uses_row_order_and_returns_to_recommend_tab_with_card_focus(recomm
     requests = []
     page.focus_requested.connect(requests.append)
     window.back_to_list()
+    wait_for(lambda: not host.return_pending)
     assert host.active_tab == 'recommend' and window.pages.currentWidget() is host
     assert requests == ['recommendations']
 

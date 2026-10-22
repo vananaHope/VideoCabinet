@@ -235,6 +235,7 @@ class UpdateInstall(QObject):
     def _unseen(self):
         """창이 숨었거나(트레이·최소화) 재생 화면이라 셸 안내가 보이지 않는다."""
         window = self.window
+        # 명령 대상과 달리 실제 안내의 가시성이다. 복귀 중 재생 덮개도 안내를 가린다.
         return (not window.isVisible() or window.isMinimized()
                 or window.pages.currentWidget() is window.playback_page)
 

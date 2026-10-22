@@ -150,8 +150,12 @@ class MainWindow(QMainWindow):
             self.set_playback_fullscreen(False)
             self.playback_page.close_help()
 
+    def logical_page(self):
+        """복귀 준비의 재생 표면은 덮개일 뿐, 명령 대상은 이미 웹 페이지다."""
+        return self.web_host if self.web_host.return_pending else self.pages.currentWidget()
+
     def set_playback_fullscreen(self, enabled):
-        enabled = enabled and self.pages.currentWidget() is self.playback_page
+        enabled = enabled and self.logical_page() is self.playback_page
         if enabled and not self.isFullScreen():
             self._playback_was_maximized = self.isMaximized()
             self.showFullScreen()
@@ -177,7 +181,7 @@ class MainWindow(QMainWindow):
         if self.web_host.dialogs.blocks_shell_actions:
             return
         self.playback_page.close_help()
-        if self.pages.currentWidget() is self.playback_page:
+        if self.logical_page() is self.playback_page:
             self.web_host.popup_settings_menu()
         else:
             self.navigate_web_tab('settings')
@@ -322,10 +326,14 @@ class MainWindow(QMainWindow):
     def play_video(self, video_id, *, start=None, random_scope=None, new_playback=False):
         if self.tray.quitting:
             return
-        self.web_host.cancel_return()
-        from_list = self.pages.currentWidget() is not self.playback_page
+        page = self.logical_page()
+        from_list = page is not self.playback_page
         if from_list:
-            self._return_page = self.pages.currentWidget()
+            self._return_page = page
+            # 취소 뒤에는 재생 덮개만 currentWidget으로 남는다. 출발 탭을 먼저 기억한다.
+            if page is self.web_host:
+                self.web_host.remember_playback_tab()
+        self.web_host.cancel_return()
         try:
             self.stop_player()
             begins_playback = from_list or new_playback or self.core.playback.session is None
@@ -340,7 +348,7 @@ class MainWindow(QMainWindow):
 
     def load_player(self, video_id, start):
         location = self.core.playback_location(video_id)
-        if self.pages.currentWidget() is self.web_host:
+        if self.logical_page() is self.web_host:
             self.web_host.remember_playback_tab()
         self.pages.setCurrentIndex(1)
         if self.player is None:
@@ -560,8 +568,9 @@ class MainWindow(QMainWindow):
             ReviewDialog(self.core, video_id, self.review_jump, self.review_changed, self).exec()
 
     def review_jump(self, video_id, line_id):
-        if self.pages.currentWidget() is not self.playback_page:
-            self._return_page = self.pages.currentWidget()
+        page = self.logical_page()
+        if page is not self.playback_page:
+            self._return_page = page
         self.sync_position()
         source = self.library_page.visible_video_ids()
         target = self.core.play_review_line(video_id, line_id, playback_video_ids=source,
@@ -612,7 +621,7 @@ class MainWindow(QMainWindow):
                     or event.isAutoRepeat()):
                 self.random_play()
             return True
-        if (self.pages.currentWidget() is self.web_host and event.key() == Qt.Key.Key_F1
+        if (self.logical_page() is self.web_host and event.key() == Qt.Key.Key_F1
                 and event.modifiers() == Qt.KeyboardModifier.NoModifier):
             # 대화상자가 열려 있으면 웹에 넘긴다. 열린 키 안내는 F1로 닫히고 다른 대화상자에는 F1 동작이 없다.
             if self.web_host.dialogs.blocks_shell_actions:
@@ -634,7 +643,7 @@ class MainWindow(QMainWindow):
             if not event.isAutoRepeat():
                 self.show_fullscreen_settings_menu()
             return True
-        handle_key = getattr(self.pages.currentWidget(), "handle_key", None)
+        handle_key = getattr(self.logical_page(), "handle_key", None)
         return handle_key(event) if callable(handle_key) else False
 
     def closeEvent(self, event):

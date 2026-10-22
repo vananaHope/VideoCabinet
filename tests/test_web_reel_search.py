@@ -14,6 +14,7 @@ from my_video_manager.core import Command, CommandType
 from my_video_manager.search import SearchResponse, SearchResult
 from my_video_manager.web_search_data import matched_parts
 from my_video_manager.search_matching import match_spans
+from qt_wait import wait_for
 
 
 class ReelPlayer(Player):
@@ -136,6 +137,7 @@ def test_reel_reuses_playback_auto_advance_repeat_and_records_only_revisit(windo
     core.playback.report(35)
     core.advance_reel_if_due()
     window.reel.sync()
+    wait_for(lambda: not window.web_host.return_pending)
     assert window.pages.currentWidget() is window.web_host
     assert window.web_host.active_tab == 'reel'
     # #232: 마지막 복습은 시간대가 붙은 ISO 시각으로 넘기고 모양은 화면이 만든다.
@@ -205,6 +207,7 @@ def test_search_scene_return_keeps_query_results_selection_and_playlist(window_f
     assert window.playback_list == tuple(dict.fromkeys(r['videoId'] for r in data['results']))
     assert core.playback_source_name == '검색 결과'
     window.back_to_list()
+    wait_for(lambda: not window.web_host.return_pending)
     assert window.pages.currentWidget() is window.web_host and window.web_host.active_tab == 'search'
     assert snapshot(page) == expected
     window.navigate_web_tab('library')
@@ -326,6 +329,7 @@ def test_dismissed_reel_completion_reappears_after_next_web_play(window_factory,
         core.playback.report(15)
         core.advance_reel_if_due()
         window.reel.sync()
+        wait_for(lambda: not host.return_pending)
         assert window.pages.currentWidget() is host
 
     complete_from_web()

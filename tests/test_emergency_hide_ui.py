@@ -384,6 +384,7 @@ def test_reel_last_item_eof_waits_until_user_resumes(window, engine):
     resume(window)
     # 사용자가 재개하면 미룬 EOF로 모아보기를 마치고 목록으로 간다.
     assert core.reel_playback is None
+    wait_for(lambda: not window.web_host.return_pending)
     assert window.pages.currentWidget() is window.web_host and window.web_host.active_tab == 'reel'
 
 
@@ -455,6 +456,7 @@ def test_end_on_last_item_after_held_eof_finishes_the_reel(window):
     key(window, Qt.Key.Key_End)
     QTest.qWait(600)
     assert window.core.reel_playback is None
+    wait_for(lambda: not window.web_host.return_pending)
     assert window.pages.currentWidget() is window.web_host and window.web_host.active_tab == 'reel'
 
 

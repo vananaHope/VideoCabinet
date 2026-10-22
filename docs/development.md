@@ -880,6 +880,16 @@ offscreen은 1100×720 위젯 이미지만 `.local/issue-235/`에 저장합니�
 - 마우스 더블클릭과 방향키 + Enter로 영상을 열 수 있는지.
 - 재생 중 표의 모든 키, Esc로 목록 복귀, 다른 앱에 포커스를 옮긴 뒤 키 입력이 이 앱을 조작하지 않는지.
 - 창 모드에서 '목록으로'와 Esc로 돌아올 때 영상과 목록 사이에 빈 배경·이전 화면이 끼지 않는지. 하이라이트 목록·자막 등 재생 중 웹 대화상자를 열고 닫은 뒤에도 확인합니다.
+- 대화상자를 Esc로 닫고 **같은 호출에서 즉시** 목록으로 돌아오는 경로는 창 모드·최대화 각 10회 확인합니다. 닫은 뒤 안정화하고 복귀하는 검사로 대신하지 않습니다. 대화상자 없는 일반 복귀의 이전 재생 화면 재노출은 10회, 일반·Esc·마지막 시청 정렬의 공백·겹침은 각 5회 이상 확인합니다.
+- `scripts/check_return_transition.py`는 실제 mpv와 합성 자료를 만들고 FFmpeg 입력 단계에서 앱 클라이언트 좌표·크기만 잘라 60fps로 녹화합니다. TOPMOST와 활성 창을 검증하며 데스크톱 전체를 저장하지 않습니다. `gdigrab title=`은 GPU 자식 화면 갱신을 놓칠 수 있어 쓰지 않습니다. 아래 명령을 **desktop_lock** 안에서 실행하고, `--maximized` 및 `--kind plain/esc/sorted`를 바꿔 각 경로를 검사합니다. 한 잠금은 15분 안에 끝냅니다.
+
+  ```powershell
+  python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-250 -- .venv/Scripts/python.exe scripts/check_return_transition.py --kind dialog --count 10 --output .local/return-window
+  .venv/Scripts/python.exe scripts/check_return_transition.py --analyze-only --output .local/return-window
+  ```
+
+  프레임 번호를 60으로 나눈 값 대신 녹화의 실제 PTS를 씁니다. `capture.log`의 입력 `start` 시각과 `phases.json`의 `wall_time`으로 복귀 요청을 맞추고, `frame-analysis.json`·`contact.png`를 직접 대조합니다. 자홍색은 합성 영상, 청록색은 목록 썸네일이며 `inspect`는 사람이 확인할 후보입니다. 대화상자를 **여는 동안** 보인 프레임과 **복귀 요청 뒤**의 결함을 구분합니다. 계측 자료는 `.local`에 두고 커밋하지 않습니다.
+- 복귀 준비는 rAF 완료와 내용 있는 FBO, raster 덮개 flush, 웹 표면 교체 **후 새 토큰의 rAF 완료**, 그 뒤 주 창 UpdateRequest 처리 완료를 구분합니다. Qt UpdateRequest 완료는 DWM의 창별 present 확인 신호가 아니므로 실창 프레임 판정을 생략하지 않습니다. 덮개 도중 새 재생·키 입력·창 크기 변경·최대화·종료를 실행해 덮개가 남거나 초점을 가져가지 않는지도 확인합니다.
 - 라이브러리를 아래로 스크롤한 뒤 '마지막 시청' 정렬에서 영상을 재생하고 돌아왔을 때 맨 위가 잠깐 보이지 않고, 기존 규칙대로 선택·스크롤·키보드 초점이 복원되는지.
 - 복귀 직후 바로 다른 영상을 재생하거나 앱을 완전 종료해도 종료 중인 mpv가 새 영상·위치 보고에 섞이지 않고 시청이 한 번만 저장되는지. 모아보기 마지막 항목의 자동 복귀도 확인합니다.
 - 최대화 → 전체 화면 → 전체 화면 끄기 및 전체 화면 모아보기 완료 복귀에서 창 크기가 중간에 바뀌는지. 이 창 상태 전환은 웹 복귀 준비와 별도로 확인합니다.

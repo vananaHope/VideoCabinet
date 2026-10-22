@@ -239,6 +239,7 @@ def test_program_navigation_keeps_dialog_as_shell_overlay(window_factory, core, 
         identifier = state(dialogs)['id']
         navigate()
         QTest.qWait(300)
+        wait_for(lambda: not host.return_pending)
         assert window.pages.currentWidget() is host
         assert host.active_tab == target
         assert dialogs.container is None and host.view.parent() is host
