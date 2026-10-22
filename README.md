@@ -103,6 +103,6 @@ powershell -ExecutionPolicy Bypass -File scripts/setup.ps1 -Worktree
 |---|---|
 | [개발 문서](docs/development.md) | 환경 준비 상세, 테스트, 설치 파일 빌드, Release, 새 웹 페이지 추가, 웹 검증 스크립트, 직접 확인할 항목 |
 | [사용 설명서](docs/user-guide.md) | 기능별 상세 동작과 내부 API |
-| [CONTEXT.md](CONTEXT.md) | 도메인 용어 |
+| [GLOSSARY.md](GLOSSARY.md) | 도메인 용어 |
 | [docs/adr/](docs/adr/) | 설계 결정 기록 |
 | [AGENTS.md](AGENTS.md) | 작업 규칙(커밋·PR 메시지는 한국어) |
