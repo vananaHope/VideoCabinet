@@ -68,7 +68,10 @@
 
 ## 작업자 실패 알림
 
-- OpenCode가 인증·로그인 오류로 실패하면 "OpenCode 클라우드 로그인 갱신 필요(`OPENCODE_AUTH`)"라고 사용자에게 바로 알리고, 그 세션에서는 OpenCode를 건너뛴다. Codex 로그인 오류는 플러그인 기본("Codex 클라우드 로그인 갱신 필요")을 따른다.
+- OpenCode가 인증·로그인 오류로 실패하면 사용자에게 바로 알리고, 그 세션에서는 OpenCode를 건너뛴다. 안내는 환경에 맞춘다.
+  - 클라우드: "OpenCode 클라우드 로그인 갱신 필요(`OPENCODE_AUTH`)"
+  - 로컬: "OpenCode 로그인 필요(PC에서 `opencode auth login`)"
+- Codex 로그인 오류는 플러그인 기본("Codex 클라우드 로그인 갱신 필요")을 따른다.
 - 그 밖의 이유로 작업자가 실패해 다음 작업자로 넘겼으면 이슈 결과 보고에 한 줄로 적는다. 예: "OpenCode 실패(테스트 시간 초과) → Codex".
 
 ## Codex fast
