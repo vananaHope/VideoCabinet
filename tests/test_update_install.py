@@ -352,6 +352,7 @@ def installer_tokens(core):
     return [*INSTALLER_ARGUMENTS, f'/LOG={(core.database.parent / "updates").resolve() / "installer.log"}']
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows PowerShell 설치 도우미')
 @pytest.mark.parametrize('folder', ['data', 'data dir with space'])
 def test_handoff_starts_helper_with_silent_installer_and_relaunch(tmp_path, http, folder):
     core = make_core(tmp_path / folder)

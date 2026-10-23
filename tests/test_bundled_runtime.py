@@ -22,6 +22,7 @@ def test_ffmpeg_resolution_preserves_source_and_prefers_installed_copy(tmp_path,
     assert adapters.executable(name) == (str(expected) if frozen and bundled else "from-path.exe")
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows DLL 탐색(os.add_dll_directory)과 winget")
 def test_missing_bundle_falls_back_to_winget(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "app.exe"))
@@ -35,6 +36,7 @@ def test_missing_bundle_falls_back_to_winget(tmp_path, monkeypatch):
         adapters.executable("ffprobe")
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows DLL 탐색(os.add_dll_directory)과 winget")
 @pytest.mark.parametrize("frozen", [False, True])
 def test_mpv_directory_registration(tmp_path, monkeypatch, frozen):
     monkeypatch.setattr(sys, "frozen", frozen, raising=False)
@@ -54,6 +56,7 @@ def test_mpv_directory_registration(tmp_path, monkeypatch, frozen):
         adapters._prepare_mpv_runtime.cache_clear()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows DLL 탐색(os.add_dll_directory)과 winget")
 @pytest.mark.parametrize("frozen", [False, True])
 def test_cuda_loader_uses_source_packages_or_explicit_data_directory(tmp_path, monkeypatch, frozen):
     monkeypatch.setattr(sys, "frozen", frozen, raising=False)
@@ -112,6 +115,7 @@ def test_transcription_model_path_keeps_source_cache_and_uses_prepared_installat
         assert not any(call[0] == "prepare" for call in calls)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows DLL 탐색(os.add_dll_directory)과 winget")
 def test_missing_bundled_mpv_keeps_system_search(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "app.exe"))

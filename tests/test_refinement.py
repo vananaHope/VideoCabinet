@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
+import sys
 
 import pytest
 
@@ -374,6 +375,7 @@ def test_error_message_does_not_rewrite_external_detail(refinement):
 from test_translation_connection import connected
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
 def test_refinement_fallback_notice_and_progress_survive_restart(connected):
     core, http, cli, store, _, reopen = connected
     store.save('fake-key')

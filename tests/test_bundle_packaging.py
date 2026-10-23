@@ -353,6 +353,7 @@ def assert_no_build_machine_paths(directory):
         assert Path.home().as_posix() not in content, path
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows Python 설치 구조(LICENSE.txt)')
 def test_python_licenses_follow_analysis_files_not_installed_requirements(licenses, tmp_path, monkeypatch):
     from importlib.metadata import PathDistribution
 
@@ -475,6 +476,7 @@ def test_pyav_notice_matches_actual_dll_versions(bundle, monkeypatch, change):
         checker.check_bundle(directory)
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows Python 설치 구조(LICENSE.txt)')
 @pytest.mark.parametrize('name,version', [('ctranslate2', '4.8.3'), ('tokenizers', '0.23.3')])
 @pytest.mark.parametrize('change', ['valid', 'hash', 'version'])
 def test_python_supplement_is_exact_and_verified(licenses, tmp_path, monkeypatch, name, version, change):

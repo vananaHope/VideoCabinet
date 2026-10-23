@@ -999,6 +999,7 @@ def test_startup_cleans_only_old_internal_restore_artifacts(core):
     assert fresh.exists() and rejected.exists()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="열린 파일의 삭제를 막는 Windows 파일 잠금")
 def test_open_delete_journal_database_defers_restore_with_actionable_error(core, tmp_path):
     archive = core.create_backup(tmp_path / "backup.zip").path
     core.request_backup_restore(archive)
