@@ -440,6 +440,7 @@ def test_same_folders_with_failed_root_keeps_stabilization_in_progress(core, tmp
     service.stop()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ReadDirectoryChangesW 감시 동작을 전제한다")
 @pytest.mark.parametrize("present", [False, True])
 def test_root_removed_and_readded_during_reconnect_check_is_still_retried(tmp_path, monkeypatch, present):
     """reconnect가 끊긴 루트의 존재를 확인하는 동안 해제·재추가되어도 그 루트를 잃지 않는다."""

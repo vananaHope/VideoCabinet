@@ -1,6 +1,7 @@
 """공개 번역 작업과 실제 가짜 CLI/HTTP 어댑터로 품질·묶음 계약을 검증한다."""
 from datetime import datetime, timedelta, timezone
 import json
+import sys
 
 from wait_helpers import CHILD_READY_TIMEOUT
 
@@ -150,6 +151,7 @@ def test_shrinking_discards_stale_responses_and_stops_new_calls(quality, mode):
     assert all(e.completed_lines == 0 for e in core.translation_queue())
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
 @pytest.mark.parametrize('identifier,default', [('codex', 120), ('claude', 120), ('opencode_go', 100)])
 def test_real_adapters_shrink_recover_and_share_context_glossary(quality, tmp_path, server, identifier, default):
     create, _, _ = quality
@@ -203,6 +205,7 @@ else:
     assert len(core.translation(video).lines) == 500
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
 def test_minimum_size_exhaustion_precedes_fallback(quality, server):
     create, adapter, _ = quality
     calls = []
@@ -436,6 +439,7 @@ def test_context_union_is_bounded_deduplicated_and_excludes_targets(quality):
     assert not set(targets).intersection(l.id for l in context)
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
 @pytest.mark.parametrize('body', [b'[]', b'not json', b'{}', b'{"choices": []}'])
 def test_go_transport_format_errors_retry_three_times_without_shrinking(quality, server, body):
     create, _, _ = quality

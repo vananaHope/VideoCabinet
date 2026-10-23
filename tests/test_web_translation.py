@@ -4,6 +4,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import sys
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS', '--disable-gpu')
@@ -16,6 +17,9 @@ from PySide6.QtTest import QTest
 from test_translation_connection import connected, save
 from test_web_library_page import window_factory as base_window_factory
 from test_web_dialogs import within, wait_for, state, act
+
+# 모든 테스트가 Windows 사용자 암호화(DPAPI)를 쓰는 키 저장소에 기댄다.
+pytestmark = pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
 
 
 @pytest.fixture

@@ -1,6 +1,7 @@
 """#95: 시작 복원과 준비 진단의 공개 실패 경로."""
 import errno
 from pathlib import Path
+import sys
 from threading import Thread, Event
 
 import pytest
@@ -19,6 +20,7 @@ def test_stringified_nested_oserror_home_is_redacted():
     assert '~' in result and 'file.zip' in result
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows 드라이브 경로(Z:/)')
 def test_missing_drive_is_not_reported_as_deleted_file(monkeypatch):
     root = Path('Z:/')
     original = Path.exists

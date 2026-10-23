@@ -1,13 +1,16 @@
 """각 pytest 프로세스에서 Qt를 불러오기 전에 테스트 환경을 준비한다."""
 import os
 import logging
+import sys
 
 import pytest
 
 # xdist 작업자도 테스트 수집 전에 이 모듈을 읽는다. 일부 UI 모듈의
 # import 순서에 기대지 않고 offscreen과 GPU 비활성 기본값을 적용한다.
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS', '--disable-gpu')
+# 컨테이너처럼 root로 실행하면 Chromium은 sandbox를 끄지 않으면 시작하지 않는다.
+os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS',
+                      '--disable-gpu --no-sandbox' if getattr(os, 'geteuid', lambda: -1)() == 0 else '--disable-gpu')
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +26,23 @@ def restore_app_logger():
                 handler.close()
         logger.handlers[:] = handlers
         logger.setLevel(level)
+
+
+@pytest.fixture(autouse=True)
+def skip_web_shell_off_windows(monkeypatch):
+    """Windows가 아닌 offscreen 환경에서는 웹 셸을 만드는 테스트를 건너뛴다.
+
+    Linux 컨테이너에서는 QWebEngineView 내부 QQuick 객체의 hover 이벤트가 앱 전역
+    이벤트 필터로 들어오면서 PySide6가 세그폴트한다. 실제 확인은 Windows에서 한다.
+    """
+    if sys.platform == 'win32':
+        return
+    from my_video_manager import web_shell
+
+    def skip(*args, **kwargs):
+        pytest.skip('Windows가 아닌 offscreen 환경에서는 웹 셸이 PySide6 세그폴트를 일으킨다')
+
+    monkeypatch.setattr(web_shell.WebShellHost, '__init__', skip)
 
 
 @pytest.fixture(autouse=True)
