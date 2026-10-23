@@ -56,10 +56,10 @@
 
 | 등급 | 구현 목록(앞부터) | 검토 목록(앞부터) |
 | --- | --- | --- |
-| `light` | opencode@high → codex@high | codex@medium → 관리자 → claude@high |
-| `standard` | opencode@high → codex@high | codex@high → claude@high |
-| `hard` | codex@high → claude@high | claude@high → codex@high |
-| `UI` | claude | codex@high → claude |
+| `light` | opencode:opencode-go/deepseek-v4.1-flash@high → codex:gpt-6-astra@high | codex:gpt-6-astra@medium → 관리자 → claude@high |
+| `standard` | opencode:opencode-go/deepseek-v4.1-flash@high → codex:gpt-6-astra@high | codex:gpt-6-astra@high → claude@high |
+| `hard` | codex:gpt-6-astra@high → claude@high | claude@high → codex:gpt-6-astra@high |
+| `UI` | claude | codex:gpt-6-astra@high → claude |
 
 - OpenCode `standard` 크기 상한: 제품 코드 변경 300줄 안팎. 테스트·문서 줄과 파일 수는 세지 않는다.
 - 2차 의견: standard 이상
