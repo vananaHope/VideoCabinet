@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-27T00:00:00+09:00",
+  "title": "Design System: my-video-manager",
+  "extensions": {
+    "tokenSource": "src/my_video_manager/web_tokens.json (frontend/src/tokens.css는 scripts/generate_web_types.py가 생성)",
+    "colorMeta": {
+      "background": { "role": "neutral", "displayName": "Projection Black", "tonalRamp": ["#09090b", "#18181b", "#27272a", "#3f3f46", "#52525b", "#71717a", "#a1a1aa", "#e4e4e7"] },
+      "card": { "role": "neutral", "displayName": "Booth Charcoal" },
+      "secondary": { "role": "neutral", "displayName": "Aisle Graphite" },
+      "border": { "role": "neutral", "displayName": "Dim Rail" },
+      "input": { "role": "neutral", "displayName": "Steel Hairline" },
+      "muted-foreground": { "role": "neutral", "displayName": "Usher Gray" },
+      "foreground": { "role": "neutral", "displayName": "Screen White" },
+      "primary": { "role": "primary", "displayName": "Projector Indigo", "tonalRamp": ["#312e81", "#3730a3", "#4338ca", "#4f46e5", "#6366f1", "#818cf8", "#a5b4fc", "#c7d2fe"] },
+      "ring": { "role": "primary", "displayName": "Focus Beam" },
+      "primary-text": { "role": "primary", "displayName": "Soft Indigo Text" },
+      "highlight": { "role": "tertiary", "displayName": "Marker Yellow" },
+      "highlight-open": { "role": "tertiary", "displayName": "Open Range Amber" },
+      "highlight-range": { "role": "tertiary", "displayName": "Range Green" },
+      "status-success": { "role": "status", "displayName": "Mint" },
+      "status-info": { "role": "status", "displayName": "Sky" },
+      "status-warning": { "role": "status", "displayName": "Amber" },
+      "destructive": { "role": "status", "displayName": "Rose" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "통계의 큰 숫자(NumberCard)." },
+      "headline": { "displayName": "Headline", "purpose": "페이지 제목." },
+      "title": { "displayName": "Title", "purpose": "구역·대화상자·빈 상태 제목." },
+      "body": { "displayName": "Body", "purpose": "앱 기본 글자. 본문·단추·탭·설명." },
+      "label": { "displayName": "Label", "purpose": "배지·키 표시·카드 안 통계." }
+    },
+    "shadows": [
+      { "name": "floating-layer", "value": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)", "purpose": "대화상자·팝오버·키 안내(shadow-lg)." },
+      { "name": "menu", "value": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)", "purpose": "드롭다운·컨텍스트 메뉴·선택 목록(shadow-md)." },
+      { "name": "hairline", "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)", "purpose": "입력란·윤곽선 단추(shadow-xs)." }
+    ],
+    "motion": [
+      { "name": "color-transition", "value": "150ms cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Tailwind 기본 transition-colors. #258에서 전환 토큰을 web_tokens.json에 정의할 예정." }
+    ],
+    "breakpoints": [
+      { "name": "baseline-window", "value": "1100px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "주 동작. 화면에 하나 정도만.",
+      "html": "<button class=\"ds-btn-primary\">재생</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; height: 2.25rem; padding: 0.5rem 1rem; border: none; border-radius: 0.625rem; background: var(--primary, #4f46e5); color: var(--primary-foreground, #ffffff); font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; } .ds-btn-primary:hover { background: color-mix(in srgb, var(--primary, #4f46e5) 90%, transparent); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring, #818cf8); }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "보조 동작·취소.",
+      "html": "<button class=\"ds-btn-outline\">취소</button>",
+      "css": ".ds-btn-outline { display: inline-flex; align-items: center; justify-content: center; height: 2.25rem; padding: 0.5rem 1rem; border: 1px solid var(--input, #71717a); border-radius: 0.625rem; background: color-mix(in srgb, var(--input, #71717a) 30%, transparent); color: var(--foreground, #fafafa); font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); cursor: pointer; } .ds-btn-outline:hover { background: color-mix(in srgb, var(--input, #71717a) 50%, transparent); } .ds-btn-outline:focus-visible { outline: none; border-color: var(--ring, #818cf8); box-shadow: 0 0 0 2px var(--ring, #818cf8); }"
+    },
+    {
+      "name": "Search Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "검색어·이름 입력.",
+      "html": "<input class=\"ds-input\" placeholder=\"제목·태그로 찾기\" />",
+      "css": ".ds-input { height: 2.25rem; width: 16rem; padding: 0.25rem 0.75rem; border: 1px solid var(--input, #71717a); border-radius: 0.625rem; background: color-mix(in srgb, var(--input, #71717a) 30%, transparent); color: var(--foreground, #fafafa); font: 400 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; outline: none; } .ds-input::placeholder { color: var(--muted-foreground, #a1a1aa); } .ds-input:focus-visible { border-color: var(--ring, #818cf8); box-shadow: 0 0 0 2px var(--ring, #818cf8); }"
+    },
+    {
+      "name": "Navigation Tabs",
+      "kind": "nav",
+      "refersTo": "tab-navigation-selected",
+      "description": "머리글의 페이지 탭. 선택에도 강조색을 쓰지 않는다.",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-tab ds-nav-tab-selected\">라이브러리</button><button class=\"ds-nav-tab\">추천</button><button class=\"ds-nav-tab\">검색</button></nav>",
+      "css": ".ds-nav { display: flex; gap: 0.25rem; } .ds-nav-tab { padding: 0.5rem 0.75rem; border: none; border-radius: 0.625rem; background: transparent; color: var(--muted-foreground, #a1a1aa); font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-nav-tab:hover { background: var(--muted, #27272a); color: var(--foreground, #fafafa); } .ds-nav-tab-selected { background: var(--accent, #27272a); color: var(--accent-foreground, #fafafa); } .ds-nav-tab:focus-visible { outline: 2px solid var(--ring, #818cf8); outline-offset: 2px; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "status-badge-success",
+      "description": "시청 상태·자막·즐겨 보는 표시.",
+      "html": "<span class=\"ds-badge ds-badge-success\">다 봄</span> <span class=\"ds-badge ds-badge-info\">보다 만 42%</span> <span class=\"ds-badge ds-badge-highlight\">즐겨 보는</span> <span class=\"ds-badge ds-badge-outline\">자막 있음</span>",
+      "css": ".ds-badge { display: inline-flex; align-items: center; padding: 0.125rem 0.5rem; border-radius: 0.625rem; font: 500 0.75rem/1rem \"Malgun Gothic\", sans-serif; } .ds-badge-success { background: var(--status-success, #86efac); color: var(--status-success-foreground, #052e16); } .ds-badge-info { background: var(--status-info, #93c5fd); color: var(--status-info-foreground, #172554); } .ds-badge-highlight { background: var(--highlight, #fde047); color: var(--highlight-foreground, #422006); } .ds-badge-outline { background: transparent; color: var(--muted-foreground, #a1a1aa); box-shadow: inset 0 0 0 1px var(--input, #71717a); }"
+    },
+    {
+      "name": "Video Card",
+      "kind": "card",
+      "refersTo": "video-card",
+      "description": "라이브러리 격자의 영상 하나. 썸네일이 주인공이다.",
+      "html": "<button class=\"ds-video-card\"><span class=\"ds-video-thumb\"></span><span class=\"ds-video-body\"><span class=\"ds-video-title\">영상 제목</span><span class=\"ds-video-meta\">1:24:05</span></span></button>",
+      "css": ".ds-video-card { display: flex; flex-direction: column; width: 16rem; overflow: hidden; padding: 0; border: 1px solid var(--border, #3f3f46); border-radius: 0.75rem; background: var(--card, #18181b); color: var(--card-foreground, #fafafa); text-align: left; cursor: pointer; transition: border-color 150ms; } .ds-video-card:hover { border-color: var(--input, #71717a); } .ds-video-card:focus-visible { outline: none; border-color: var(--ring, #818cf8); box-shadow: 0 0 0 1px var(--ring, #818cf8); } .ds-video-thumb { display: block; aspect-ratio: 16 / 9; background: var(--muted, #27272a); } .ds-video-body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.5rem; } .ds-video-title { font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-video-meta { font: 400 0.75rem/1rem \"Malgun Gothic\", sans-serif; color: var(--muted-foreground, #a1a1aa); font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Notice",
+      "kind": "custom",
+      "refersTo": "notice",
+      "description": "앱 공용 안내. 오류 → 경고 → 성공 → 정보 위계.",
+      "html": "<div class=\"ds-notice ds-notice-warning\"><span class=\"ds-notice-icon\">!</span><span>자막 기능을 쓰려면 CUDA 라이브러리를 내려받아야 합니다.</span></div>",
+      "css": ".ds-notice { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid; border-radius: 0.75rem; color: var(--foreground, #fafafa); font: 400 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; } .ds-notice-warning { border-color: color-mix(in srgb, var(--status-warning, #fcd34d) 60%, transparent); background: color-mix(in srgb, var(--status-warning, #fcd34d) 10%, transparent); } .ds-notice-icon { color: var(--status-warning, #fcd34d); font-weight: 600; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Quiet Screening Room (조용한 상영실)",
+    "overview": "불이 꺼진 상영실처럼, 화면에서 가장 밝고 큰 것은 영상(썸네일·재생 화면)이다. 머리글·탭·단추·테두리 같은 틀은 회색조로 물러나서 영상을 고르는 눈을 방해하지 않는다. 색은 의미가 있을 때만 켜진다. 인디고는 지금 고른 것과 초점, 주 동작을 가리키는 빛줄기이고, 노랑·초록·호박색은 하이라이트, 상태 색은 안내에만 쓴다.\n\n밀도는 도구 쪽이다. 하루에도 여러 번 켜고 키보드로 빠르게 오가는 앱이라, 카드 하나에 길이·시청 상태·자막 여부·시리즈·시청 통계·태그가 촘촘히 들어간다. 그만큼 부품은 절제되고 단정해야 한다. 면은 얇은 테두리와 한두 단계의 명도 차이로만 나누고, 쉬는 면에는 그림자를 두지 않는다. 움직임은 짧고 차분하며, 움직임 줄이기 설정에서는 없다.",
+    "keyCharacteristics": [
+      "어두운 무채색(zinc 계열) 바탕 위에 인디고 하나만 강조색으로 쓴다.",
+      "썸네일이 주인공이다. 16:9 자리를 미리 잡고, 없으면 필름 아이콘이 자리를 지킨다.",
+      "쉬는 면은 평평하다. 그림자는 대화상자·메뉴·팝오버처럼 떠 있는 층에만 있다.",
+      "시간·횟수·날짜는 고정폭 숫자(`tabular-nums`)로 정렬한다.",
+      "모든 값은 테마 토큰에서 오고, `@shadcn/lint`가 이를 강제한다."
+    ],
+    "rules": [
+      { "name": "The One Beam Rule", "body": "강조색은 인디고 하나다. 선택·초점·주 동작이 아닌 곳에 인디고를 칠하지 않는다.", "section": "colors" },
+      { "name": "The Meaning-Only Color Rule", "body": "하이라이트 색과 상태 색은 그 의미에만 쓴다. 장식이나 구역 구분에 빌려 쓰지 않는다.", "section": "colors" },
+      { "name": "The Tabular Numbers Rule", "body": "길이·횟수·시간·날짜·통계 숫자는 `tabular-nums`로 쓴다. 목록에서 숫자 폭이 흔들리지 않게 한다.", "section": "typography" },
+      { "name": "The Body-Is-Small Rule", "body": "기본 크기는 0.875rem이다. 정보 밀도가 이 앱의 성격이므로, 본문을 키워 여백을 메우지 않는다.", "section": "typography" },
+      { "name": "The Reserved Space Rule", "body": "기다리는 내용(썸네일, 패널, 통계, 안내)은 도착하기 전에 자리를 확보한다. 데이터가 들어와도 배치가 튀지 않는다.", "section": "layout" },
+      { "name": "The Flat-At-Rest Rule", "body": "카드·목록 행·패널은 호버나 선택에도 그림자를 얻지 않는다. 호버는 테두리 밝기(`border` → `input`), 선택은 `ring` 테두리와 링으로 표시한다.", "section": "elevation" },
+      { "name": "The Token Source Rule", "body": "색·간격·둥글기·글자 크기를 바꿀 때는 `src/my_video_manager/web_tokens.json`을 고치고 `scripts/generate_web_types.py`로 `tokens.css`를 다시 만든다.", "section": "colors" }
+    ],
+    "dos": [
+      "**Do** 색·간격·둥글기·글자 크기를 바꿀 때는 `src/my_video_manager/web_tokens.json`을 고치고 `scripts/generate_web_types.py`로 `tokens.css`를 다시 만든다(**The Token Source Rule**).",
+      "**Do** 모든 색을 테마 토큰 유틸리티(`bg-card`, `text-muted-foreground`, `border-ring` 등)로 쓴다.",
+      "**Do** 특별한 모양이 필요하면 쓰는 곳에서 덮어쓰지 말고, `cva` variant를 가진 전용 컴포넌트를 만든다.",
+      "**Do** 선택과 키보드 초점은 `ring`(#818cf8)으로, 호버는 테두리·면 밝기로 구별한다.",
+      "**Do** 썸네일·카드·패널의 크기를 내용이 오기 전에 확보한다.",
+      "**Do** 1100×720 offscreen 스크린샷(`scripts/check_web_*.py --offscreen`)으로 결과를 확인한다."
+    ],
+    "donts": [
+      "**Don't** `frontend/src/tokens.css`를 직접 고치지 않는다. 생성물이라 다음 생성 때 덮어써진다.",
+      "**Don't** 원시 색 값, 임의 값(`w-[123px]`), 인라인 스타일, shadcn 기본 부품의 재스타일을 쓰지 않는다. `@shadcn/lint`가 오류로 막고, 인라인 비활성 주석도 쓰지 않는다.",
+      "**Don't** 쉬는 면(카드·행·패널)에 그림자를 주지 않는다. 그림자는 떠 있는 층에만 쓴다.",
+      "**Don't** 인디고를 장식이나 구역 구분에 쓰지 않는다. 하이라이트·상태 색도 그 의미에만 쓴다.",
+      "**Don't** 실행 중 네트워크에서 글꼴·이미지·스크립트를 불러오지 않는다. 앱은 오프라인으로 동작한다."
+    ]
+  }
+}
