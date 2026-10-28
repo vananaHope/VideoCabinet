@@ -330,7 +330,7 @@ from pathlib import Path
 Path(os.environ["MVM_TRANSCRIPTION_PROGRESS"]).write_text("40", encoding="ascii")
 while not Path(sys.argv[1]).exists():
     time.sleep(.02)
-print(json.dumps({"spoken_language": "ko", "segments": []}))
+print(json.dumps({"spoken_language": "ko", "model": "large-v3", "segments": []}))
 ''', encoding="utf-8")
     core = reopen(core, FasterWhisperTranscriber(
         tmp_path / "models", command=(sys.executable, str(child), str(observed_signal))))
@@ -358,11 +358,11 @@ print(json.dumps({"spoken_language": "ko", "segments": []}))
 def test_no_speech_completion_stays_with_notice_and_is_counted_separately(setup, language):
     core, adapter, (a, b) = setup
     core = translation_core(core, adapter, Translator())
-    adapter.result = TranscriberResult("nn", (), 0.61)
+    adapter.result = TranscriberResult("nn", (), 0.61, model="large-v3")
     core.request_subtitles(a.id, language)
     core.request_subtitles(b.id)
     assert core.process_next_subtitle().no_speech
-    adapter.result = TranscriberResult("en", (TranscriptSegment(0, 1, "Hello"),))
+    adapter.result = TranscriberResult("en", (TranscriptSegment(0, 1, "Hello"),), model="large-v3")
     assert not core.process_next_subtitle().no_speech
     while core.translation_ready():
         core.process_next_translation()

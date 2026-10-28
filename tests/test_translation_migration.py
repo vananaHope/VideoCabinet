@@ -51,6 +51,6 @@ def test_v4_ddl_failure_rolls_back_version_and_columns(setup, version):
         with pytest.raises(sqlite3.DatabaseError), db:
             migrate_library(db, before_upgrade=lambda db, target: seen.append((db.in_transaction, target)))
         db.set_authorizer(lambda *args: sqlite3.SQLITE_OK)
-        assert seen == [(False, 4)]
+        assert seen == [(False, LIBRARY_DB_VERSION)]
         assert db.execute('PRAGMA user_version').fetchone()[0] == version
         assert db.execute('SELECT type, name, sql FROM sqlite_master ORDER BY name').fetchall() == before

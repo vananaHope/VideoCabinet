@@ -141,7 +141,7 @@ class Media:
 
 class Transcriber:
     def transcribe(self, path, language, **kwargs):
-        return TranscriberResult("en", (TranscriptSegment(0, 3, "hello"),))
+        return TranscriberResult("en", (TranscriptSegment(0, 3, "hello"),), model="large-v3")
 
 
 class Translator:
@@ -275,6 +275,34 @@ def test_round_trip_all_public_user_data_and_unsaved_viewing(core, tmp_path, thu
     assert apply(core.database) is None
     reopened = open_core(core.database)
     assert public_records(reopened) == expected
+
+
+@pytest.mark.parametrize("no_speech", [False, True])
+def test_backup_restore_preserves_transcription_model(core, tmp_path, no_speech):
+    class ModelTranscriber:
+        model = "custom-model"
+
+        def transcribe(self, *args, **kwargs):
+            segments = () if no_speech else (TranscriptSegment(0, 1, "hello"),)
+            return TranscriberResult("en", segments, model=self.model)
+
+    transcriber = ModelTranscriber()
+    core = AppCore(database=core.database, media=Media(), clock=lambda: NOW, transcriber=transcriber)
+    video = core.videos()[0]
+    core.request_subtitles(video.id)
+    assert core.process_next_subtitle().state == "completed"
+    expected = core.transcript(video.id)
+    archive = core.create_backup(tmp_path / "model.zip").path
+    transcriber.model = "replacement-model"
+    core.request_subtitles(video.id)
+    assert core.process_next_subtitle().state == "completed"
+    assert core.transcript(video.id).model == "replacement-model"
+    core.request_backup_restore(archive)
+    assert apply(core.database).status == "applied"
+    restored = open_core(core.database).transcript(video.id)
+    assert restored == expected
+    assert restored.model == "custom-model"
+    assert restored.no_speech is no_speech
 
 
 def test_bundle_contains_only_requested_data_and_matching_hashes(core, tmp_path):

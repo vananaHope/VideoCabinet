@@ -51,7 +51,7 @@ class Media:
 class Transcriber:
     def transcribe(self, *a, **kw):
         return TranscriberResult('ko', (TranscriptSegment(0, 55, '카드로 결재 할수 있어요.'),
-                                       TranscriptSegment(55, 59, '한빛에서 결제 했어요.')))
+                                       TranscriptSegment(55, 59, '한빛에서 결제 했어요.')), model="large-v3")
 
 
 class Translator:

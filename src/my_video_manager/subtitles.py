@@ -1,6 +1,6 @@
 """원어 자막과 영속 자막 대기열. 외부 받아쓰기 중에는 DB를 잠그지 않는다."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from contextlib import nullcontext
 from datetime import datetime
 import math
@@ -24,6 +24,7 @@ class TranscriberResult:
     spoken_language: str
     segments: tuple[TranscriptSegment, ...]
     language_probability: float = 1.0
+    model: str = field(kw_only=True)
 
 
 class TranscriberCancelled(Exception):
@@ -69,6 +70,7 @@ class Transcript:
     language_specified: bool
     created_at: datetime
     lines: tuple[TranscriptLine, ...]
+    model: str
 
     @property
     def translation_eligible(self) -> bool:
@@ -146,7 +148,8 @@ class Subtitles:
                     id TEXT NOT NULL UNIQUE,
                     spoken_language TEXT NOT NULL,
                     language_specified INTEGER NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    model TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS transcript_lines (
                     id TEXT PRIMARY KEY,
@@ -244,7 +247,7 @@ class Subtitles:
                           for line in db.execute("SELECT * FROM transcript_lines WHERE transcript_id = ? ORDER BY ordinal",
                                                  (row["id"],)))
             return Transcript(video_id, row["id"], _transcript_language(row, len(lines)), bool(row["language_specified"]),
-                              datetime.fromisoformat(row["created_at"]), lines)
+                              datetime.fromisoformat(row["created_at"]), lines, row["model"])
 
     def summary(self, video_id: int, *, connection=None) -> TranscriptSummary:
         """선택 영상의 줄 개수만 인덱스로 센다. 본문과 다른 영상의 줄은 읽지 않는다."""
@@ -330,9 +333,11 @@ class Subtitles:
                                                   pending.requested_at, "completed", None)
                     transcript_id = uuid4().hex
                     db.execute("DELETE FROM transcripts WHERE video_id = ?", (pending.video_id,))
-                    db.execute("INSERT INTO transcripts VALUES (?, ?, ?, ?, ?)",
+                    db.execute("""INSERT INTO transcripts
+                               (video_id, id, spoken_language, language_specified, created_at, model)
+                               VALUES (?, ?, ?, ?, ?, ?)""",
                                (pending.video_id, transcript_id, language, pending.spoken_language is not None,
-                                self._clock().isoformat()))
+                                self._clock().isoformat(), result.model))
                     db.executemany("INSERT INTO transcript_lines VALUES (?, ?, ?, ?, ?, ?)",
                                    [(uuid4().hex, transcript_id, i, s.start, s.end, s.text.strip())
                                     for i, s in enumerate(result.segments)])

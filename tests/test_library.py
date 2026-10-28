@@ -36,7 +36,7 @@ class Media:
 
 class Transcriber:
     def transcribe(self, path, spoken_language, *, cancellation, progress=None):
-        return TranscriberResult("en", (TranscriptSegment(1, 3, "remember this"),))
+        return TranscriberResult("en", (TranscriptSegment(1, 3, "remember this"),), model="large-v3")
 
 
 def open_core(database, media=None):
@@ -725,6 +725,7 @@ def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, versi
     assert core.highlights(42)[0].note.text == "옛 메모"
     assert core.viewing_status(42).finished
     assert core.transcript(42).lines[0].id == "old-line"
+    assert core.transcript(42).model == "large-v3"
     assert core.series_for_video(42).name == "내 시리즈"
     assert core.video_tags(42)[0].name == "옛 태그"
     assert core.highlight_tags(7) == core.video_tags(42)
@@ -736,6 +737,64 @@ def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, versi
     assert core.watched_folders()[0].path == path.parent
     core.exclude_video(42)
     assert core.excluded_videos()[0].id == 42
+
+
+@pytest.mark.parametrize("version", [2, 3, 4])
+def test_migration_records_historical_model_for_all_transcripts(core, tmp_path, version):
+    from legacy_schema import replace_with_frozen
+    from my_video_manager.library import LIBRARY_DB_VERSION
+
+    class ModelTranscriber:
+        result = TranscriberResult("en", (TranscriptSegment(1, 2, "source"),), model="custom-model")
+
+        def transcribe(self, *args, **kwargs):
+            return self.result
+
+    adapter = ModelTranscriber()
+    core = AppCore(database=core.database, media=Media(), clock=lambda: NOW, transcriber=adapter)
+    first = video_file(tmp_path / "first", content=b"first")
+    second = video_file(tmp_path / "second", content=b"second")
+    core.add_file(first)
+    core.add_file(second)
+    a, b = core.videos()
+    core.request_subtitles(a.id)
+    assert core.process_next_subtitle().state == "completed"
+    line = core.transcript(a.id).lines[0]
+    core.edit_transcript_line(a.id, line.id, "reviewed source")
+    adapter.result = TranscriberResult("en", (), model="custom-model")
+    core.request_subtitles(b.id)
+    assert core.process_next_subtitle().state == "completed"
+    expected = {v.id: replace(core.transcript(v.id), model="large-v3") for v in (a, b)}
+    replace_with_frozen(core.database, version)
+
+    migrated = open_core(core.database)
+    assert {v.id: migrated.transcript(v.id) for v in (a, b)} == expected
+    assert migrated.reviewed_line_count(a.id) == 1
+    assert migrated.transcript(b.id).no_speech
+    backups = migrated.automatic_backups()
+    assert len(backups) == 1
+    assert migrated.inspect_backup(backups[0]).db_version == version
+    assert migrated.inspect_backup(migrated.create_backup(tmp_path / "migrated.zip").path).db_version == LIBRARY_DB_VERSION
+    assert {v.id: open_core(core.database).transcript(v.id) for v in (a, b)} == expected
+
+
+def test_v4_without_transcript_table_migrates_and_can_store_new_model(tmp_path):
+    from my_video_manager.library import LIBRARY_DB_VERSION
+
+    database = tmp_path / "library.sqlite3"
+    schema = Path(__file__).parent / "fixtures/library_v4_without_subtitles.sql"
+    with sqlite3.connect(database) as db:
+        db.executescript(schema.read_text(encoding="utf-8"))
+    core = open_core(database)
+    path = video_file(tmp_path / "videos")
+    core.add_file(path)
+    video, = core.videos()
+    core.request_subtitles(video.id)
+    assert core.process_next_subtitle().state == "completed"
+    transcript = core.transcript(video.id)
+    assert transcript.model == "large-v3"
+    assert open_core(database).transcript(video.id) == transcript
+    assert core.inspect_backup(core.create_backup(tmp_path / "current.zip").path).db_version == LIBRARY_DB_VERSION
 
 
 @pytest.mark.parametrize("state", ["completed", "queued", "held"])

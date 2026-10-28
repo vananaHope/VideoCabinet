@@ -225,7 +225,7 @@ def test_external_and_generated_subtitles_are_independent_and_searchable(library
 
     class Transcriber:
         def transcribe(self, path, spoken_language, *, cancellation, progress=None):
-            return TranscriberResult("ko", (TranscriptSegment(7, 9, "공통검색 원어"),))
+            return TranscriberResult("ko", (TranscriptSegment(7, 9, "공통검색 원어"),), model="large-v3")
 
     core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database,
                    transcriber=Transcriber())

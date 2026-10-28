@@ -157,7 +157,7 @@ def test_subtitle_badge_matches_statistics_including_empty_transcript(core):
 
     class EmptyTranscriber:
         def transcribe(self, *args, **kwargs):
-            return TranscriberResult('ko', ())
+            return TranscriberResult('ko', (), model="large-v3")
 
     core = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
                    database=core.database, transcriber=EmptyTranscriber())

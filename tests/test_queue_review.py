@@ -157,7 +157,7 @@ from my_video_manager.transcription import report_progress
 path = Path(os.environ["MVM_TRANSCRIPTION_PROGRESS"])
 (path.with_suffix(".tmp") if FAILURE == "write" else path).mkdir()
 report_progress(40)
-print(json.dumps({"spoken_language": "ko", "segments": []}))
+print(json.dumps({"spoken_language": "ko", "model": "large-v3", "segments": []}))
 """.replace("FAILURE", repr(failure)), encoding="utf-8")
     core = reopen(core, FasterWhisperTranscriber(tmp_path / "models", command=(sys.executable, str(child))))
     core.request_subtitles(a.id)

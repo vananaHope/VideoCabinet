@@ -109,7 +109,7 @@ class SubtitlePlayer(Player):
 
 
 class KoreanTranscriber(Transcriber):
-    result = TranscriberResult("ko", tuple(TranscriptSegment(i, i + 1, f"줄 {i}") for i in range(3)))
+    result = TranscriberResult("ko", tuple(TranscriptSegment(i, i + 1, f"줄 {i}") for i in range(3)), model="large-v3")
 
 
 @pytest.fixture

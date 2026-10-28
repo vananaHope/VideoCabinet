@@ -156,7 +156,7 @@ class Media:
 
 class Transcriber:
     def transcribe(self, path, spoken_language, *, cancellation, progress=None):
-        return TranscriberResult("ko", (TranscriptSegment(0, 2, "자막"),))
+        return TranscriberResult("ko", (TranscriptSegment(0, 2, "자막"),), model="large-v3")
 
 
 @pytest.fixture

@@ -24,7 +24,7 @@ class Transcriber:
         TranscriptSegment(12.25, 15, "체중이동을 연습하세요"),
         TranscriptSegment(42.5, 45, 'Hello WORLD: 100%_ "quoted"'),
         TranscriptSegment(60, 63, "체중 이동은 천천히"),
-    ))
+    ), model="large-v3")
 
     def transcribe(self, path, spoken_language, *, cancellation, progress=None):
         return self.result
@@ -124,7 +124,7 @@ def test_empty_or_unmatched_query_has_no_results(library, query):
 def test_subtitle_regeneration_removes_old_lines_and_reopen_preserves_results(library):
     core, video, adapter = library
     note(core, video.id, "저장된 메모")
-    adapter.result = TranscriberResult("en", (TranscriptSegment(5.5, 8, "Replacement line"),))
+    adapter.result = TranscriberResult("en", (TranscriptSegment(5.5, 8, "Replacement line"),), model="large-v3")
     core.request_subtitles(video.id)
     assert core.process_next_subtitle().state == "completed"
     assert core.search("체중").results == ()
@@ -260,7 +260,7 @@ def test_translation_generation_retranslation_and_transcript_replacement(library
     translator = Translator()
     core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database,
                    transcriber=transcriber, translator=translator)
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(20, 22, "Weight shift"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(20, 22, "Weight shift"),), model="large-v3")
     core.request_subtitles(video.id)
     core.process_next_subtitle()
     assert core.process_next_translation().state == "completed"
@@ -283,7 +283,7 @@ def test_translation_generation_retranslation_and_transcript_replacement(library
 def test_result_limit_and_truncation_for_short_and_fts_queries(library, count, query):
     core, video, transcriber = library
     transcriber.result = TranscriberResult("ko", tuple(
-        TranscriptSegment(i / 100, i / 100 + 1, f"체중이동 {i}") for i in range(count)))
+        TranscriptSegment(i / 100, i / 100 + 1, f"체중이동 {i}") for i in range(count)), model="large-v3")
     core.request_subtitles(video.id)
     assert core.process_next_subtitle().state == "completed"
     response = core.search(query)
@@ -297,7 +297,7 @@ def test_limit_is_shared_across_scopes(library):
     core.add_video_tag(video.id, "체중")
     note(core, video.id, "체중")
     transcriber.result = TranscriberResult("ko", tuple(
-        TranscriptSegment(i / 10, i / 10 + 1, "체중") for i in range(499)))
+        TranscriptSegment(i / 10, i / 10 + 1, "체중") for i in range(499)), model="large-v3")
     core.request_subtitles(video.id)
     core.process_next_subtitle()
     response = core.search("체중")
@@ -335,7 +335,7 @@ def test_missing_and_excluded_state_and_title_changes_follow_library(library):
 def test_subtitles_stay_in_video_and_time_order_after_line_edits(library, query):
     core, _, transcriber = library
     transcriber.result = TranscriberResult("en", tuple(
-        TranscriptSegment(start, start + 1, "공통 자막 원어") for start in (10, 20, 30)))
+        TranscriptSegment(start, start + 1, "공통 자막 원어") for start in (10, 20, 30)), model="large-v3")
     videos = core.videos()
     for video in reversed(videos):
         core.request_subtitles(video.id)
@@ -378,7 +378,7 @@ def test_bulk_preparation_preserves_existing_results_and_later_external_edits(li
     core, video, transcriber = library
     other = next(v for v in core.videos() if v.id != video.id)
     transcriber.result = TranscriberResult("ko", tuple(
-        TranscriptSegment(i / 200, i / 200 + 1, f"대량체중 {i}") for i in range(10005)))
+        TranscriptSegment(i / 200, i / 200 + 1, f"대량체중 {i}") for i in range(10005)), model="large-v3")
     core.request_subtitles(other.id)
     assert core.process_next_subtitle().state == "completed"
     assert len(core.search("대량체중").results) == 500

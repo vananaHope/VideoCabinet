@@ -65,7 +65,7 @@ class Media:
 class Transcriber:
     def transcribe(self, path, language, **kwargs):
         return TranscriberResult('en', tuple(TranscriptSegment(i, i + .75,
-            f'{i:03d} 긴 원어 자막과 줄바꿈\n' + 'Long subtitle text 한글 ' * 8) for i in range(80)))
+            f'{i:03d} 긴 원어 자막과 줄바꿈\n' + 'Long subtitle text 한글 ' * 8) for i in range(80)), model="large-v3")
 
 
 class Translator:

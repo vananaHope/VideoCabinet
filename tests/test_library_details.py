@@ -18,7 +18,7 @@ class Media:
 
 class Transcriber:
     def transcribe(self, *args, **kwargs):
-        return TranscriberResult("en", (TranscriptSegment(0, 5, "Hello"), TranscriptSegment(5, 10, "World")))
+        return TranscriberResult("en", (TranscriptSegment(0, 5, "Hello"), TranscriptSegment(5, 10, "World")), model="large-v3")
 
 
 class Translator:
@@ -93,7 +93,7 @@ def test_summary_includes_saved_partial_translation_while_held(tmp_path):
 def test_empty_transcript_summary_matches_public_language_semantics(tmp_path, language):
     class SilentTranscriber:
         def transcribe(self, *args, **kwargs):
-            return TranscriberResult("en", ())
+            return TranscriberResult("en", (), model="large-v3")
     core = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
                    database=tmp_path / "data/library.sqlite3", transcriber=SilentTranscriber(),
                    translator=Translator())
@@ -121,7 +121,7 @@ def test_spoken_transcripts_are_not_no_speech_and_unknown_language_reason(tmp_pa
 
         def transcribe(self, *args, **kwargs):
             result = super().transcribe(*args, **kwargs)
-            return TranscriberResult(result.spoken_language, result.segments, self.probability)
+            return TranscriberResult(result.spoken_language, result.segments, self.probability, model="large-v3")
     transcriber = Uncertain()
     core = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
                    database=tmp_path / "data/library.sqlite3", transcriber=transcriber, translator=Translator())

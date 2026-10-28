@@ -20,7 +20,7 @@ class Media:
 
 
 class Transcriber:
-    result = TranscriberResult("en", tuple(TranscriptSegment(i, i + 1, f"Line {i}") for i in range(5)))
+    result = TranscriberResult("en", tuple(TranscriptSegment(i, i + 1, f"Line {i}") for i in range(5)), model="large-v3")
 
     def transcribe(self, *args, **kwargs):
         return self.result
@@ -151,7 +151,7 @@ def test_automatic_translation_has_exact_ids_timing_and_atomic_visibility(setup)
 ])
 def test_ineligible_transcripts_never_call_translator(setup, language, probability, segments):
     core, transcriber, adapter, _, reopen = setup
-    transcriber.result = TranscriberResult(language, segments, probability)
+    transcriber.result = TranscriberResult(language, segments, probability, model="large-v3")
     video = core.videos()[0]
     transcript = source(core, video.id)
     assert not transcript.translation_eligible
@@ -390,7 +390,7 @@ def test_regenerating_while_translation_selected_falls_back_to_new_transcript(se
     finish(core)
     core.playback.start(video.id, 0)
     core.toggle_subtitle_language()
-    transcriber.result = TranscriberResult("ja", (TranscriptSegment(0, 1, "new source"),))
+    transcriber.result = TranscriberResult("ja", (TranscriptSegment(0, 1, "new source"),), model="large-v3")
     source(core, video.id)
     assert "new source" in core.playback_subtitle(video.id).read_text(encoding="utf-8")
     assert not core.toggle_subtitle_language()[0]
