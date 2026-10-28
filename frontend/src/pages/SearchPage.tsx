@@ -41,9 +41,14 @@ export default function SearchPage() {
     let disconnect = () => {}
     connectBridge().then(async ({ search: api }) => {
       if (disposed) return
+      // 첫 상태를 받기 전에는 화면의 검색어가 아직 정해지지 않았다. 웹 셸을 다시 불러오면 첫 응답보다 더 새 결과가
+      // 먼저 올 수 있으므로, 첫 응답이든 먼저 온 결과든 더 새 쪽이 검색어와 결과를 함께 정한다.
+      let started = false
+      const start = (initial: SearchData) => { started = true; setData(initial); setQuery(initial.query); draft.current = initial.query }
       const changed = (json: string) => {
         const next: SearchData = JSON.parse(json)
-        if (fresh(next) && !composing.current && next.query === draft.current) {
+        if (!started) { if (fresh(next)) start(next); return }
+        if (!composing.current && next.query === draft.current && fresh(next)) {
           // 새 검색 결과는 첫 항목을 고른 채 오므로 이전 결과를 내렸던 스크롤도 처음으로 돌린다.
           // 같은 검색어를 다시 찾은 결과는 코어가 고르던 결과를 지켜 보내므로 보던 자리를 그대로 둔다.
           if (awaiting.current) document.getElementById("search-results")?.scrollTo(0, 0)
@@ -59,7 +64,7 @@ export default function SearchPage() {
       disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError) }
       const initial = await request<SearchData>(reply => api.snapshot(reply))
       if (disposed) return
-      if (fresh(initial)) { setData(initial); setQuery(initial.query); draft.current = initial.query }
+      if (fresh(initial)) start(initial)
       setBridge(api)
     }).catch(showError)
     return () => { disposed = true; disconnect(); clearTimeout(timer.current) }

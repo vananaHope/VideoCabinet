@@ -8,6 +8,8 @@ import type { GenerationData } from "@/bridge-types"
  * 세대는 그 메시지가 담은 상태마다 비교한다. 한 페이지가 상태 일부만 담은 응답도 보내면(라이브러리의 보기 응답)
  * 담은 상태마다 가드를 따로 두어, 더 새 일부 응답 때문에 그보다 앞선 전체 상태의 나머지를 버리지 않게 한다.
  * 검색어 비교·검사 안내 revision·재생 복귀 토큰처럼 뜻이 있는 규칙은 각 페이지에 그대로 둔다.
+ * 가드는 부르면 그 세대를 반영한 것으로 기록하므로, 반영하기로 정한 메시지에만 마지막 조건으로 부른다.
+ * 뜻이 있는 규칙으로 버릴 메시지에 먼저 부르면 반영하지 않은 세대가 그보다 앞선 메시지를 막는다.
  */
 export function generationGuard() {
   let applied = 0
@@ -18,7 +20,7 @@ export function generationGuard() {
   }
 }
 
-/** 페이지가 사는 동안 유지되는 가드. 같은 상태를 담는 신호 연결과 요청 응답이 같은 것을 쓴다. 반영할 메시지면 true. */
+/** 페이지가 사는 동안 유지되는 가드. 같은 상태를 담는 신호 연결과 요청 응답이 같은 것을 쓴다. 반영할 메시지면 세대를 기록하고 true. */
 export function useGenerationGuard() {
   return useState(generationGuard)[0]
 }

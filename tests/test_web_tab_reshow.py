@@ -399,3 +399,51 @@ def test_newer_view_reply_does_not_discard_pending_library_data(open_window):
     wait_for(lambda: 'clip 000 renamed' in js(window, f'document.querySelector("{title}").textContent'))
     assert js(window, f'{QUERY}.value') == 'c'
     assert js(window, COUNT) == '등록 영상 60개 · 표시 60개'
+
+
+# 웹 셸을 다시 불러온 문서의 첫 search.snapshot 응답을 붙잡는다. RECORDER는 다시 불러오면 사라지므로 문서가 생길 때 넣는다.
+HOLD_SEARCH_SNAPSHOT = """(() => {
+  let channelClass;
+  Object.defineProperty(window, 'QWebChannel', { configurable: true, get: () => channelClass, set(Original) {
+    channelClass = function(transport, ready) {
+      return new Original(transport, channel => {
+        const search = channel.objects.search, snapshot = search.snapshot;
+        search.snapshot = reply => snapshot.call(search, json => { window.mvmReleaseSearchSnapshot = () => reply(json) });
+        ready(channel);
+      });
+    };
+  }});
+})()"""
+SEARCH_ROWS = 'document.querySelectorAll("#search-results [role=option]").length'
+
+
+def test_newer_search_push_before_first_reply_after_reload_keeps_query(open_window):
+    from PySide6.QtWebEngineCore import QWebEngineScript
+    window = open_window()
+    switch(window, 4, 'search', 'search-query')
+    QTest.keyClicks(view(window), 'clip 01')
+    wait_for(lambda: window.web_host.controllers['search'].query == 'clip 01')
+    wait_for(lambda: js(window, SEARCH_ROWS) > 0)
+    script = QWebEngineScript()
+    script.setName('hold-search-snapshot')
+    script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+    script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+    script.setSourceCode(HOLD_SEARCH_SNAPSHOT)
+    window.web_host.engine_page.scripts().insert(script)
+    window.web_host.view.reload()
+    wait_for(lambda: js(window, 'typeof window.mvmReleaseSearchSnapshot === "function"'))
+    js(window, RECORDER)
+    # 첫 응답이 늦는 동안 제목 변경을 다시 찾은 더 새 검색 결과가 먼저 도착한다.
+    window.core.rename_video(window.core.videos()[10].id, 'clip 010 renamed')
+    window.refresh()
+    window.navigate_web_tab('library')
+    window.navigate_web_tab('search')
+    wait_for(lambda: received(window).get('search', 0) >= 1)
+    js(window, """window.mvmReleaseSearchSnapshot(); window.mvmDrawn = false;
+      requestAnimationFrame(() => requestAnimationFrame(() => { window.mvmDrawn = true })); true""")
+    wait_for(lambda: js(window, 'window.mvmDrawn === true'))
+    # 늦은 첫 응답은 버려도 검색어는 남고, 결과는 더 새 쪽의 것이다.
+    expected = len(window.core.search('clip 01').results)
+    wait_for(lambda: js(window, SEARCH_ROWS) == expected)
+    assert js(window, 'document.getElementById("search-query").value') == 'clip 01'
+    assert 'clip 010 renamed' in js(window, 'document.getElementById("search-results").innerText')

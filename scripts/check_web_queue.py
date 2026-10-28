@@ -381,6 +381,23 @@ try:
     metrics['presentation_web_ms'] = {'median': median(samples), 'max': max(samples)}
     settle()
 
+    # 아래 합성 측정은 웹 가드의 세대를 Python보다 앞서게 하므로 실제 진행률 갱신은 그 전에 본다.
+    js("document.getElementById('queue-list').focus()")
+    keys(Qt.Key.Key_End)
+    scroll = js("document.getElementById('queue-list').scrollTop")
+    selection = js("document.getElementById('queue-list').getAttribute('aria-activedescendant')")
+    first_progress = f"document.getElementById('queue-row-{videos[0].id}').querySelector('[role=progressbar]').getAttribute('aria-valuenow')"
+    tick += 1
+    progress = str(round((tick % 90) / 100 * 100))
+    assert js(first_progress) != progress
+    page.refresh()
+    wait(lambda: js(first_progress) == progress)
+    settle()
+    assert js("document.getElementById('queue-list').scrollTop") == scroll
+    assert js("document.getElementById('queue-list').getAttribute('aria-activedescendant')") == selection
+    assert js('document.activeElement.id') == 'queue-list'
+    metrics['checks'].append('진행률 갱신 반영 뒤 선택·스크롤·포커스 유지')
+
     # 실제 QWebChannel 신호를 JS에서 40회 발행, React/DOM commit 비용만 잰다.
     # 타이밍 동안 Python 폴링 없이 titleChanged로 종료한다. DOM MutationObserver로 행 범위를 검증한다.
     loop = QEventLoop()
@@ -446,17 +463,6 @@ try:
     unchanged = len(payloads)
     page.refresh()
     assert len(payloads) == unchanged
-    js("document.getElementById('queue-list').focus()")
-    keys(Qt.Key.Key_End)
-    scroll = js("document.getElementById('queue-list').scrollTop")
-    selection = js("document.getElementById('queue-list').getAttribute('aria-activedescendant')")
-    tick += 1
-    page.refresh()
-    settle()
-    assert js("document.getElementById('queue-list').scrollTop") == scroll
-    assert js("document.getElementById('queue-list').getAttribute('aria-activedescendant')") == selection
-    assert js('document.activeElement.id') == 'queue-list'
-    metrics['checks'].append('진행률 갱신 중 선택·스크롤·포커스 유지')
     result_path = args.output / ('live-results.json' if args.verify else 'offscreen-results.json')
     result_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(metrics, ensure_ascii=False), flush=True)
