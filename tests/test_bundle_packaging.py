@@ -134,7 +134,9 @@ def bundle(packaging, tmp_path, monkeypatch):
         'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak',
         'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe', 'ffmpeg/LICENSE.txt', 'ffmpeg/README.txt',
         'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt', *checker.REQUIRED_LICENSES,
-        'my_video_manager/web/assets/PretendardVariable-AbCd1234.woff2',
+        'my_video_manager/web/assets/Pretendard-Regular.subset-AbCd1234.woff2', 'my_video_manager/web/assets/Pretendard-Medium.subset-AbCd1234.woff2',
+        'my_video_manager/web/assets/Pretendard-SemiBold.subset-AbCd1234.woff2', 'my_video_manager/web/assets/Pretendard-Regular-AbCd1234.woff2',
+        'my_video_manager/web/assets/Pretendard-Medium-AbCd1234.woff2', 'my_video_manager/web/assets/Pretendard-SemiBold-AbCd1234.woff2',
     ]
     for name in files:
         path = tmp_path / name
@@ -166,7 +168,8 @@ def test_bundle_logs_pinned_ffmpeg_version(bundle, capsys):
     'licenses/python/faster-whisper/metadata/LICENSE', 'licenses/python/tokenizers/LICENSE',
     'licenses/python/av/metadata/licenses/LICENSE.txt',
     'licenses/web/THIRD-PARTY-WEB.txt', 'licenses/web/node_modules/react/LICENSE', 'PySide6/QtWebEngineProcess.exe', 'PySide6/resources/v8_context_snapshot.bin',
-    'my_video_manager/web/assets/PretendardVariable-AbCd1234.woff2', 'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
+    'my_video_manager/web/assets/Pretendard-Medium.subset-AbCd1234.woff2', 'my_video_manager/web/assets/Pretendard-SemiBold-AbCd1234.woff2',
+    'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
     'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak'])
 def test_bundle_missing_required_runtime_fails(bundle, name):
     checker, directory = bundle

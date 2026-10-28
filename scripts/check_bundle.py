@@ -27,8 +27,9 @@ REQUIRED_LICENSES = (
     'licenses/web/node_modules/react-dom/LICENSE',
     'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
 )
-# 웹 셸의 번들 글꼴. Vite가 이름 뒤에 내용 해시를 붙인다.
-BUNDLED_FONTS = ('my_video_manager/web/assets/PretendardVariable-*.woff2',)
+# 웹 셸의 번들 글꼴: 굵기마다 첫 렌더용 부분 집합과 나머지 한글 음절용 전체 파일. Vite가 이름 뒤에 내용 해시를 붙인다.
+BUNDLED_FONTS = tuple(f'my_video_manager/web/assets/Pretendard-{weight}{kind}-*.woff2'
+                      for weight in ('Regular', 'Medium', 'SemiBold') for kind in ('.subset', ''))
 
 
 def check_licenses(directory):

@@ -1,4 +1,8 @@
-"""번들 글꼴: 웹 셸의 모든 탭·대화상자·키 안내가 앱에 묶은 Pretendard로 뜨고, Qt 화면은 맑은 고딕을 유지한다."""
+"""번들 글꼴: 웹 셸의 모든 탭·대화상자·키 안내가 앱에 묶은 Pretendard로 뜨고, Qt 화면은 맑은 고딕을 유지한다.
+
+첫 렌더용 글꼴(라틴·기호·자주 쓰는 한글 2,780자 부분 집합, font-display: block)은 첫 렌더 전에 읽고,
+나머지 한글 음절용 전체 파일(swap)은 그 음절이 화면에 나올 때만 읽는다.
+"""
 import json
 from pathlib import Path
 
@@ -16,9 +20,11 @@ from test_emergency_hide_ui import app, window
 from test_web_dialogs import within
 from test_web_key_guide import press_f1, wait_closed, wait_guide
 from test_web_library_data import core
+from test_web_library_loading import FIRST_ROW, open_window, stop_recording
 from test_web_library_page import window_factory
 
-BUNDLED = 'Pretendard Variable'
+BUNDLED = 'Pretendard'
+WEIGHTS = [400, 500, 600]
 WEB = Path(__file__).resolve().parents[1] / 'src/my_video_manager/web'
 
 # 보이는 글자를 가진 요소(입력란·단추 포함)의 계산된 첫 글꼴 이름과 번들 글꼴의 로드 상태.
@@ -28,7 +34,8 @@ FONT_STATE = """JSON.stringify((() => {
     && (e.matches('input, textarea, button') || [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())))
   const first = e => getComputedStyle(e).fontFamily.split(',')[0].trim().replace(/^"|"$/g, '')
   const faces = [...document.fonts].filter(f => f.family.replace(/^"|"$/g, '') === %s)
-  return { families: [...new Set(texts.map(first))], texts: texts.length, faces: faces.map(f => f.status) }
+  const status = display => Object.fromEntries(faces.filter(f => f.display === display).map(f => [f.weight, f.status]))
+  return { families: [...new Set(texts.map(first))], texts: texts.length, first: status('block'), rest: status('swap') }
 })())""" % json.dumps(BUNDLED)
 
 
@@ -39,7 +46,7 @@ def font_state(window):
 def assert_bundled(window):
     state = font_state(window)
     assert state['texts'] > 0 and state['families'] == [BUNDLED], state
-    assert state['faces'] == ['loaded'], state
+    assert state['first'] == {str(weight): 'loaded' for weight in WEIGHTS}, state
 
 
 def test_every_tab_dialog_and_key_guide_render_with_loaded_bundled_font(window):
@@ -73,15 +80,21 @@ def test_bundled_font_is_read_from_the_web_bundle_and_has_tabular_digits(window)
     wait_for(lambda: window.loaded)
     sources = json.loads(js(window, """JSON.stringify([...document.styleSheets].flatMap(sheet => [...sheet.cssRules]
       .filter(rule => rule instanceof CSSFontFaceRule)
-      .map(rule => ({ family: rule.style.getPropertyValue('font-family'),
+      .map(rule => ({ family: rule.style.getPropertyValue('font-family'), display: rule.style.getPropertyValue('font-display'),
+        weight: rule.style.getPropertyValue('font-weight'), range: rule.style.getPropertyValue('unicode-range'),
         urls: [...rule.style.getPropertyValue('src').matchAll(/url\\("?([^")]+)"?\\)/g)].map(m => new URL(m[1], sheet.href).href) }))))"""))
-    # 글꼴은 설치된 웹 번들 안의 파일 하나에서만 읽는다(외부 URL 없음). 그 파일로 로드가 끝났다.
-    assert [s['family'].strip('"') for s in sources] == [BUNDLED] and len(sources[0]['urls']) == 1
-    url = sources[0]['urls'][0]
-    assert url.startswith('file:///')
-    font_file = Path(QUrl(url).toLocalFile()).resolve()
-    assert font_file.is_relative_to(WEB.resolve()) and font_file.stat().st_size > 0
-    assert font_state(window)['faces'] == ['loaded']
+    # 글꼴은 설치된 웹 번들 안의 파일에서만 읽는다(외부 URL 없음). 굵기마다 첫 렌더용 하나와 나머지 음절용 하나다.
+    assert {s['family'].strip('"') for s in sources} == {BUNDLED}
+    assert sorted((s['display'], s['weight']) for s in sources) == sorted((d, str(w)) for d in ('block', 'swap') for w in WEIGHTS)
+    for source in sources:
+        assert len(source['urls']) == 1 and source['urls'][0].startswith('file:///'), source
+        font_file = Path(QUrl(source['urls'][0]).toLocalFile()).resolve()
+        assert font_file.is_relative_to(WEB.resolve()) and font_file.stat().st_size > 0
+        assert source['range'] == ('U+AC00-D7A3' if source['display'] == 'swap' else ''), source
+    # KS X 1001 안의 글자만 보이는 화면에서는 나머지 음절 파일을 읽지 않는다.
+    state = font_state(window)
+    assert state['first'] == {str(weight): 'loaded' for weight in WEIGHTS}, state
+    assert state['rest'] == {str(weight): 'unloaded' for weight in WEIGHTS}, state
 
     # 고정폭 표시(font-mono)와 tabular-nums는 숫자마다 같은 폭이다. 기본 숫자는 비례폭이라 대조가 된다.
     widths = json.loads(js(window, """JSON.stringify(Object.fromEntries(['font-mono', 'tabular-nums', ''].map(cls => {
@@ -139,6 +152,28 @@ def test_library_and_recommendation_cards_fit_their_rows_at_every_card_size(wind
       return { clipped: info.scrollHeight - info.clientHeight, overflow: card.scrollHeight - card.clientHeight,
         sticks: Math.max(...[...card.querySelectorAll('*')].map(e => e.getBoundingClientRect().bottom)) - box.bottom } }))"""))
     assert cards and all(c['clipped'] <= 0 and c['overflow'] <= 0 and c['sticks'] <= 0.5 for c in cards), cards
+    assert_bundled(window)
+
+
+# 부분 집합(한글 2,780자)에 없는 음절.
+RARE_TITLE = 'A 뷀궯 갂 강의'
+
+
+def test_rare_syllable_title_swaps_to_bundled_font_without_moving_cards(open_window, core):
+    """부분 집합 밖 음절(뷀·궯·갂)은 나머지 음절 파일이 도착하면 같은 글꼴로 바뀌고, 그 전후로 카드·툴바 경계가 같다."""
+    video = next(v for v in core.videos() if v.title == 'PYTHON 응용')
+    core.rename_video(video.id, RARE_TITLE)
+    window = open_window()
+    wait_for(lambda: js(window, FIRST_ROW) > 0)
+    # 카드 제목(500)의 드문 음절 때문에 그 굵기의 나머지 음절 파일만 읽는다.
+    wait_for(lambda: font_state(window)['rest'].get('500') == 'loaded')
+    settle(window)
+    frames = stop_recording(window)['frames']
+    final = frames[-1]
+    assert RARE_TITLE in final['text'] and not final['busy']
+    for frame in frames:
+        # 첫 프레임부터 글꼴이 바뀐 뒤까지 툴바·첫 줄 카드(드문 음절 제목 카드 포함)의 경계가 같다.
+        assert frame['controls'] == final['controls'] and frame['cells'] == final['cells'], frame
     assert_bundled(window)
 
 
