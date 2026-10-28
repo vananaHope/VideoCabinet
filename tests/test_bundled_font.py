@@ -1,22 +1,27 @@
-"""번들 글꼴: 웹 셸의 모든 탭·대화상자·키 안내가 앱에 묶은 Pretendard로 뜨고, Qt 화면은 맑은 고딕을 유지한다.
+"""번들 글꼴: 웹 셸의 모든 탭·대화상자·키 안내와 Qt 화면(재생·트레이 메뉴·공용 경고)이 앱에 묶은 Pretendard로 뜬다.
 
 첫 렌더용 글꼴(라틴·기호·자주 쓰는 한글 2,780자 부분 집합, font-display: block)은 첫 렌더 전에 읽고,
 부분 집합에 없는 글자용 전체 파일(swap)은 그 글자가 화면에 나올 때만 읽는다.
 """
 import json
+import logging
+import os
 from pathlib import Path
 
+import pytest
 from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QFontDatabase, QFontInfo
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
+from PySide6.QtWidgets import QAbstractButton, QApplication, QLabel, QMessageBox, QToolButton
 
+from my_video_manager import theme
 from my_video_manager.library_views import default_options
-from my_video_manager.theme import NATIVE_FONT
+from my_video_manager.theme import FALLBACK_FONT
 from my_video_manager.web_contract import TABS
 from my_video_manager.web_tokens import web_tokens
 from qt_wait import wait_for
 from test_emergency_hide_dialogs_ui import js, rename_dialog, settle, view
-from test_emergency_hide_ui import app, window
+from test_emergency_hide_ui import app, open_window as open_native_window, window
 from test_web_dialogs import within
 from test_web_key_guide import press_f1, wait_closed, wait_guide
 from test_web_library_data import core
@@ -59,7 +64,7 @@ def code_points(unicode_range):
 
 
 def test_every_tab_dialog_and_key_guide_render_with_loaded_bundled_font(window):
-    assert web_tokens()['typography']['font-sans'].startswith(f'"{BUNDLED}", "{NATIVE_FONT}"')
+    assert web_tokens()['typography']['font-sans'].startswith(f'"{BUNDLED}", "{FALLBACK_FONT}"')
     wait_for(lambda: window.loaded)
     host = window.web_host
     for tab, _ in TABS:
@@ -238,21 +243,81 @@ def test_rare_syllable_title_swaps_to_bundled_font_without_moving_cards(open_win
     assert_bundled(window)
 
 
-def test_native_playback_tray_and_alerts_keep_malgun_gothic(window):
-    # 토큰의 첫 글꼴(번들 글꼴)은 Qt에 등록되지 않았으므로, Qt가 요청하는 글꼴이 맑은 고딕인지 본다.
-    def family(widget):
+def native_fonts(window):
+    """앱 글꼴, 트레이 메뉴, 공용 경고, 재생 화면(제목·조작 줄·하이라이트 패널) 글자의 실제 글꼴 이름."""
+    def actual(widget):
         widget.ensurePolished()
-        return widget.font().family()
+        return QFontInfo(widget.font()).family()
 
-    assert QApplication.instance().font().family() == NATIVE_FONT
-    assert family(window.tray.icon.contextMenu()) == NATIVE_FONT
+    fonts = {'app': {QFontInfo(QApplication.instance().font()).family()}, 'tray': {actual(window.tray.icon.contextMenu())}}
     alert = QMessageBox(QMessageBox.Icon.Warning, '재생 실패', '파일을 열 수 없습니다.', parent=window)
     alert.show()
-    assert {family(label) for label in alert.findChildren(QLabel) if label.text()} == {NATIVE_FONT}
+    fonts['alert'] = {actual(label) for label in alert.findChildren(QLabel) if label.text()}
     alert.close()
 
     window.play(window.core.videos()[0].id)
     playback = window.pages.currentWidget()
-    assert playback is not window.web_host
-    labels = [label for label in playback.findChildren(QLabel) if label.text()]
-    assert labels and {family(label) for label in labels} == {NATIVE_FONT}
+    assert playback is window.playback_page
+    wait_for(lambda: playback.title_label.text())
+    for name, part in (('title', playback.header), ('bar', playback.bottom_bar), ('highlights', playback.highlights_panel)):
+        widgets = part.findChildren(QLabel) + part.findChildren(QAbstractButton)
+        fonts[name] = {actual(widget) for widget in widgets if widget.text() and widget.property('playbackRole') != 'symbol'}
+    return fonts
+
+
+def register_system_font(*names):
+    """offscreen에는 시스템 글꼴이 없어, 실제 글꼴 확인에 필요한 Windows 글꼴을 등록한다."""
+    for name in names:
+        assert QFontDatabase.addApplicationFont(str(Path(os.environ['WINDIR']) / 'Fonts' / name)) >= 0, name
+
+
+def test_native_playback_tray_and_alerts_use_bundled_font(window):
+    register_system_font('seguisym.ttf')
+    fonts = native_fonts(window)
+    assert all(fonts.values()) and fonts == dict.fromkeys(fonts, {BUNDLED}), fonts
+    # 제목 굵기(600)도 번들 글꼴의 해당 굵기 파일로 그린다.
+    title = window.playback_page.title_label
+    assert (QFontInfo(title.font()).family(), QFontInfo(title.font()).weight()) == (BUNDLED, 600)
+    # 재생 기호는 컬러 이모지가 아닌 단색 기호 글꼴로 그린다.
+    symbols = [button for button in window.playback_page.findChildren(QToolButton) if button.property('playbackRole') == 'symbol']
+    for button in symbols:
+        button.ensurePolished()
+    assert symbols and {QFontInfo(button.font()).family() for button in symbols} == {'Segoe UI Symbol'}
+
+
+@pytest.fixture
+def unregistered_font(app, monkeypatch):
+    """번들 글꼴을 아직 등록하지 않은 시작 상태(apply_theme만 적용). 끝나면 앱 글꼴과 스타일시트를 되돌린다."""
+    font, sheet = app.font(), app.styleSheet()
+    monkeypatch.setattr(theme, '_font_families', [FALLBACK_FONT])
+    app.setFont(theme.playback_font())
+    app.setStyleSheet(theme.playback_stylesheet())
+    yield
+    app.setFont(font)
+    app.setStyleSheet(sheet)
+
+
+@pytest.mark.parametrize('damage', ['missing', 'corrupt'])
+def test_failed_bundled_font_registration_falls_back_to_malgun_gothic_and_is_logged(
+        unregistered_font, damage, tmp_path, app, monkeypatch, caplog):
+    register_system_font('malgun.ttf', 'malgunbd.ttf')
+    fonts = tmp_path / 'qt-fonts'
+    fonts.mkdir()
+    for name in theme.QT_FONT_FILES:
+        (fonts / name).write_bytes((WEB / 'qt-fonts' / name).read_bytes())
+    broken = fonts / theme.QT_FONT_FILES[-1]
+    if damage == 'missing':
+        broken.unlink()
+    else:
+        broken.write_bytes(b'not a font' * 100)
+    monkeypatch.setattr(theme, 'QT_FONT_DIRECTORY', fonts)
+    caplog.set_level(logging.WARNING, logger='my_video_manager.theme')
+
+    for window in open_native_window(tmp_path, app, monkeypatch):
+        # 앱 창이 정상으로 뜨고 웹 셸도 읽힌다.
+        wait_for(lambda: window.loaded)
+        assert window.isVisible()
+        records = [r for r in caplog.records if r.name == 'my_video_manager.theme']
+        assert len(records) == 1 and records[0].levelno == logging.WARNING and str(broken) in records[0].getMessage()
+        fonts_used = native_fonts(window)
+        assert all(fonts_used.values()) and fonts_used == dict.fromkeys(fonts_used, {FALLBACK_FONT}), fonts_used

@@ -187,7 +187,7 @@ components:
 
 **Body Font:** Pretendard (with Malgun Gothic, sans-serif)
 
-**Character:** 앱에 번들한 한국어 글꼴 Pretendard(SIL OFL 1.1) 하나로 모든 위계를 만든다. 글꼴을 섞지 않고 크기와 굵기(400·500·600)로만 위계를 나눈다. 글꼴 파일은 npm 프로덕션 의존성 `pretendard`의 정적 woff2를 웹 번들에 넣는다. 굵기마다 첫 렌더용 부분 집합(라틴·기호·자주 쓰는 한글 2,780자, `font-display: block`)을 미리 읽고 첫 렌더 전에 기다려(상한 1초) 대체 글꼴이 보였다가 바뀌지 않게 한다. 나머지 한글 음절은 같은 글꼴의 전체 파일을 `unicode-range`(`swap`)로 두어 그 음절이 화면에 나올 때만 읽는다. 줄 높이와 카드 칸이 고정이라 바뀌어도 배치가 밀리지 않는다. 실행 중 네트워크에서 받지 않는다. 대체 글꼴은 맑은 고딕이다. 고정폭 표시(`font-mono`)도 같은 글꼴에 고정폭 숫자(`tnum`)를 켠다. Qt 화면(재생·트레이 메뉴·공용 경고)은 아직 맑은 고딕을 명시해 쓴다(#297에서 같은 글꼴로 맞춘다). 글꼴을 바꾸려면 `web_tokens.json`의 `font-sans`와 `index.css`의 `@font-face`를 함께 고친다.
+**Character:** 앱에 번들한 한국어 글꼴 Pretendard(SIL OFL 1.1) 하나로 모든 위계를 만든다. 글꼴을 섞지 않고 크기와 굵기(400·500·600)로만 위계를 나눈다. 글꼴 파일은 npm 프로덕션 의존성 `pretendard`의 정적 woff2를 웹 번들에 넣는다. 굵기마다 첫 렌더용 부분 집합(라틴·기호·자주 쓰는 한글 2,780자, `font-display: block`)을 미리 읽고 첫 렌더 전에 기다려(상한 1초) 대체 글꼴이 보였다가 바뀌지 않게 한다. 부분 집합에 없는 원본의 나머지 모든 글자(한글 음절·확장 라틴·기호 등)는 같은 글꼴의 전체 파일이 `unicode-range`(`swap`)로 맡아 그 글자가 화면에 나올 때만 읽고, 두 face의 `unicode-range`는 `npm run fonts`가 woff2 cmap에서 생성한 `fonts.css`에 둔다. 줄 높이와 카드 칸이 고정이라 바뀌어도 배치가 밀리지 않는다. 실행 중 네트워크에서 받지 않는다. 대체 글꼴은 맑은 고딕이다. 고정폭 표시(`font-mono`)도 같은 글꼴에 고정폭 숫자(`tnum`)를 켠다. Qt 화면(재생·트레이 메뉴·공용 경고)도 같은 글꼴을 쓴다. Qt는 woff2를 읽지 못해 웹 빌드가 같은 패키지의 정적 TrueType(토큰 굵기마다, otf는 Qt 힌팅에서 작은 글자 가로획이 사라져 쓰지 않는다)을 `web/qt-fonts/`에 두고, 앱이 창을 만들 때 Qt 글꼴 데이터베이스에 등록한다. 파일이 없거나 읽지 못하면 맑은 고딕으로 뜨고 앱 로그에 남긴다. 재생 기호(⏮ ⏸ ⏭ 등)만 컬러 이모지가 되지 않게 단색 기호 글꼴(Segoe UI Symbol)로 그린다. 글꼴을 바꾸려면 `web_tokens.json`의 `font-sans`·`bundled-font`를 고치고 `npm run fonts`로 `fonts.css`를 다시 만든다(`index.css`는 생성된 `fonts.css`를 import한다).
 
 ### Hierarchy
 - **Display** (600, 1.875rem): 통계의 큰 숫자(`NumberCard`). 페이지당 몇 개뿐이다.

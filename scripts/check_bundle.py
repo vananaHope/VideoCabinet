@@ -32,6 +32,9 @@ REQUIRED_LICENSES = (
 BUNDLED_FONT_FAMILY = web_tokens()['typography']['font-sans'].split(',')[0].strip().strip('"')
 BUNDLED_FONTS = tuple(f'my_video_manager/web/assets/{BUNDLED_FONT_FAMILY}-{stem}{kind}-*.woff2'
                       for stem in web_tokens()['bundled-font']['weights'].values() for kind in ('.subset', ''))
+# 재생 화면·트레이 메뉴·공용 경고용 같은 글꼴의 정적 TrueType. Qt는 woff2를 읽지 못한다. 이름에 해시가 없다(theme.QT_FONT_FILES).
+QT_FONTS = tuple(f'my_video_manager/web/qt-fonts/{BUNDLED_FONT_FAMILY}-{stem}.ttf'
+                 for stem in web_tokens()['bundled-font']['weights'].values())
 
 
 def check_licenses(directory):
@@ -90,7 +93,7 @@ def check_bundle(directory: Path):
         'PySide6/plugins/platforms/qwindows.dll', 'PySide6/opengl32sw.dll',
         'ffmpeg/source.json', 'ffmpeg/LICENSE.txt', 'ffmpeg/README.txt',
         'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt',
-    ) + REQUIRED_LICENSES
+    ) + REQUIRED_LICENSES + QT_FONTS
     missing = [name for name in required if not (directory / name).is_file()
                or not (directory / name).stat().st_size]
     missing += [pattern for pattern in BUNDLED_FONTS
