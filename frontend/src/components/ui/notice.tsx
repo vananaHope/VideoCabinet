@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react"
+import { ChevronDown, ChevronUp, CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
@@ -116,9 +116,15 @@ export type NoticeItem = {
 /**
  * 높이 정책. 목록이 있는 페이지는 yield를 쓴다. 안내 묶음은 목록이 최소 높이를 지키고 남은 자리까지만 차지하고,
  * 넘치면 묶음 안에서 스크롤한다. 그래도 안내 한 줄 높이는 남겨 오류가 통째로 가려지지 않게 한다.
+ * band는 목록을 밀지 않는 띠다. relative인 목록 영역 위쪽에 떠서 겹치고, 영역 높이의 절반까지만 쓰고 안에서 스크롤한다.
+ * 안내가 생기고 사라져도 목록의 자리·열 수·스크롤은 그대로다. 오른쪽은 목록 스크롤바 자리를 비운다.
  */
 const stackVariants = cva("flex min-w-0 flex-col gap-2", {
-  variants: { layout: { auto: "", yield: "min-h-10 shrink overflow-y-auto" } },
+  variants: { layout: {
+    auto: "",
+    yield: "min-h-10 shrink overflow-y-auto",
+    band: "absolute inset-x-2 top-2 z-10 max-h-1/2 overflow-y-auto rounded-xl border bg-popover p-2 shadow-lg",
+  } },
   defaultVariants: { layout: "auto" },
 })
 
@@ -160,4 +166,57 @@ function NoticeStack({ items, max = 3, size, clamp, layout, className, ...props 
   )
 }
 
-export { InlineNotice, Notice, NoticeStack, noticeVariants }
+// 셸 안내 묶음. 페이지 영역(relative) 오른쪽 아래에 떠서 페이지를 밀지 않는다. 폭은 max-w-md, 높이는 영역의 2/5까지이고 넘치면 묶음 안에서 스크롤한다.
+const layerVariants = cva("absolute inset-x-4 bottom-4 z-40 ml-auto max-h-2/5 max-w-md flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg", {
+  variants: { empty: { true: "hidden", false: "flex" } },
+  defaultVariants: { empty: false },
+})
+const layerBody = cva("min-h-0 flex-col gap-2 overflow-y-auto p-2", {
+  variants: { collapsed: { true: "hidden", false: "flex" } },
+  defaultVariants: { collapsed: false },
+})
+
+/**
+ * 여러 부품이 각자 그리는 안내를 떠 있는 한 묶음으로 모은다. 안내 순서와 닫기는 각 부품이 그대로 정한다.
+ * 머리 줄은 안내 개수와 오류 개수를 보이고 접고 편다. 접어도 오류가 있다는 표시는 남고,
+ * 새 안내가 생기거나 오류가 늘면 다시 편다. 안내가 하나도 없으면 묶음도 보이지 않는다(부품은 그대로 붙어 있어 상태를 잃지 않는다).
+ */
+function NoticeLayer({ children, ...props }: Omit<React.ComponentProps<"section">, "className">) {
+  const body = React.useRef<HTMLDivElement>(null)
+  const id = React.useId()
+  const [total, setTotal] = React.useState(0)
+  const [errors, setErrors] = React.useState(0)
+  const [collapsed, setCollapsed] = React.useState(false)
+  const last = React.useRef({ total: 0, errors: 0 })
+  React.useLayoutEffect(() => {
+    const element = body.current!
+    const count = () => {
+      const notices = [...element.querySelectorAll("[data-slot=notice]")]
+      const next = { total: notices.length, errors: notices.filter(notice => notice.getAttribute("data-tone") === "error").length }
+      if (next.total > last.current.total || next.errors > last.current.errors) setCollapsed(false)
+      last.current = next
+      setTotal(next.total)
+      setErrors(next.errors)
+    }
+    count()
+    const observer = new MutationObserver(count)
+    observer.observe(element, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tone"] })
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <section data-slot="notice-layer" className={layerVariants({ empty: total === 0 })} {...props}>
+      <div className="flex shrink-0 items-center gap-2 border-b py-1 pr-1 pl-3 text-xs text-muted-foreground">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 tabular-nums">
+          안내 {total}개
+          {errors > 0 && <span className="flex items-center gap-1 text-destructive"><CircleAlert aria-hidden="true" className="size-3.5" />오류 {errors}개</span>}
+        </span>
+        <Button type="button" variant="ghost" size="xs" aria-expanded={!collapsed} aria-controls={id} onClick={() => setCollapsed(value => !value)}>
+          {collapsed ? <><ChevronUp aria-hidden="true" />펼치기</> : <><ChevronDown aria-hidden="true" />접기</>}
+        </Button>
+      </div>
+      <div ref={body} id={id} className={layerBody({ collapsed })}>{children}</div>
+    </section>
+  )
+}
+
+export { InlineNotice, Notice, NoticeLayer, NoticeStack, noticeVariants }

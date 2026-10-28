@@ -102,7 +102,7 @@ function UpdateResult({ result, locked, onAction }: { result: UpdateInstallResul
   </Notice>
 }
 
-/** 셸 수준 업데이트 안내. 어느 탭에서나 탭 아래 안내 영역에 보인다. 릴리스 노트는 서명되지 않은 글이라 글자로만 보인다. */
+/** 셸 수준 업데이트 안내. 어느 탭에서나 셸 안내 묶음에 보인다. 릴리스 노트는 서명되지 않은 글이라 글자로만 보인다. */
 export default function UpdateNotice() {
   const { bridge, data, setData, error, setError } = useShellUpdate()
   const [sending, setSending] = useState(false)
@@ -134,7 +134,7 @@ export default function UpdateNotice() {
   const answer = (name: UpdateAction) => { if (!answered.current) { answered.current = true; act(name) } }
   const busy = install && install.phase !== 'idle' && !(install.phase === 'ready' && install.readyDismissed)
   if (!notice && !busy && !install?.result && !error) return null
-  return <section ref={section} aria-label="업데이트 알림" className="flex flex-col gap-2 border-b px-4 py-2">
+  return <section ref={section} aria-label="업데이트 알림" className="flex flex-col gap-2">
     {install?.result && <UpdateResult result={install.result} locked={sending} onAction={act} />}
     {/* 준비됨 안내는 셸에서만 닫는다. 닫아도 받은 파일과 설정 업데이트 구역의 ‘지금 설치’는 남는다. */}
     {install && !(install.phase === 'ready' && install.readyDismissed) && <UpdateProgress idPrefix="update-progress" install={install} locked={sending} onAction={act} readyDismissible />}

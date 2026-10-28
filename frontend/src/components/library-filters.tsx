@@ -52,10 +52,13 @@ function chipText({ label, range }: LibraryChip) {
   return range ? `${label}: ${range.start ? formatDate(range.start) : "처음"} ~ ${range.end ? formatDate(range.end) : "끝 없음"}` : label
 }
 
+/**
+ * 적용한 조건 칩 줄. 칩이 없어도 한 줄 높이(칩 높이 + 초점 링 + 가로 스크롤바 자리)를 늘 차지해, 칩이 생기고 사라져도 아래 목록이 밀리지 않는다.
+ * 칩이 많으면 이 한 줄 안에서 가로로 넘긴다.
+ */
 export function LibraryFilterChips({ chips, options, onChange }: { chips: LibraryChip[]; options: LibraryViewOptions; onChange: Change }) {
-  if (!chips.length) return null
-  return <div aria-label="적용한 검색 조건" className="flex shrink-0 items-center gap-2 overflow-x-auto pb-1">
+  return <div aria-label="적용한 검색 조건" className="flex h-9 shrink-0 items-start gap-2 overflow-x-auto overflow-y-hidden px-0.5 pt-0.5">
     {chips.map(chip => { const text = chipText(chip); return <Button key={chip.key} variant="secondary" size="xs" title={text} aria-label={`${text} 지우기`} onClick={() => onChange(chip.reset)}><span className="max-w-60 truncate">{text}</span><X /></Button> })}
-    <Button variant="ghost" size="xs" onClick={() => onChange(clearLibraryFilters(options))}>모두 지우기</Button>
+    {chips.length > 0 && <Button variant="ghost" size="xs" onClick={() => onChange(clearLibraryFilters(options))}>모두 지우기</Button>}
   </div>
 }

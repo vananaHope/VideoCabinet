@@ -50,6 +50,8 @@ export default function LibraryPage() {
   const layoutPaused = useRef(false)
   const composing = useRef(false)
   const filterRevision = useRef(0)
+  // 결과가 바뀔 때 목록을 맨 위로 올리지 않고 보던 카드의 자리를 지킬지. 폴더 패널 여닫기만 자리를 지킨다.
+  const [keepPlace, setKeepPlace] = useState(false)
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
 
   useEffect(() => {
@@ -65,6 +67,7 @@ export default function LibraryPage() {
         // 조건에서 빠진 영상이나 명시적인 선택 변경은 코어가 보낸 선택을 따른다.
         setData(previous => next.preserveSelection && previous?.selectedId != null && next.visibleIds.includes(previous.selectedId)
           ? { ...next, selectedId: previous.selectedId } : next)
+        setKeepPlace(false)
         setDetailRevision(n => n + 1)
       }
       const thumbnailsChanged = (json: string) => {
@@ -164,7 +167,7 @@ export default function LibraryPage() {
     setData(data => data && { ...data, options: next })
     const revision = ++filterRevision.current
     request<Pick<LibraryData, "visibleIds" | "selectedId" | "options" | "chips">>(reply => bridge.view(JSON.stringify(next), reply)).then(result => {
-      if (revision === filterRevision.current) { optionsRef.current = result.options; setData(data => data && { ...data, ...result }) }
+      if (revision === filterRevision.current) { optionsRef.current = result.options; setData(data => data && { ...data, ...result }); setKeepPlace("mode" in patch) }
     }).catch(error => {
       if (revision === filterRevision.current) { optionsRef.current = previous; setData(data => data && { ...data, options: previous }); showError(error) }
     })
@@ -251,18 +254,21 @@ export default function LibraryPage() {
       {data && <RandomTagDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} tags={data.tags} load={loadTagCandidates}
         onPlay={randomPlay} onReturnFocus={() => randomMenu.current?.focus()} />}
     </div>
-    {data && <LibraryFilterChips options={data.options} chips={data.chips} onChange={filter} />}
-    <NoticeStack layout="yield" items={[
-      error && { tone: "error", message: error, onDismiss: () => setError("") },
-      randomNotice?.scope === resultScope && { tone: "info", message: randomNotice.message, onDismiss: () => setRandomNotice(null) },
-    ]} />
-    {/* 안내가 길어도 카드 격자·상세 패널이 최소 높이를 지킨다. */}
+    {/* 칩 줄은 칩이 없거나 첫 데이터 전에도 같은 높이를 차지해 아래 목록이 밀리지 않는다. */}
+    <LibraryFilterChips options={options} chips={data?.chips ?? []} onChange={filter} />
     <div className="flex min-h-40 flex-1 gap-2">
       {/* 패널을 닫아도 고른 폴더(folder)는 옵션에 남아 다시 열 때 복원된다. */}
       <Button size="icon-sm" variant={foldersOpen ? "secondary" : "outline"} aria-label="폴더 패널" aria-expanded={foldersOpen} aria-controls={foldersOpen ? "library-folder-panel" : undefined} disabled={!data}
         title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>
       {foldersOpen && <LibraryFolders collapsedIds={data.options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
-      <LibraryGrid cardSize={options.card_size} load={firstLoad} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} />
+      {/* 페이지 안내는 격자 위쪽에 떠 있는 띠라 생기고 사라져도 격자의 자리·열 수·스크롤이 그대로다. 툴바·칩 줄·상세 패널은 덮지 않는다. */}
+      <div className="relative flex min-w-0 flex-1">
+        <LibraryGrid cardSize={options.card_size} load={firstLoad} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} keepPlace={keepPlace} />
+        <NoticeStack layout="band" aria-label="라이브러리 안내" items={[
+          error && { tone: "error", message: error, onDismiss: () => setError("") },
+          randomNotice?.scope === resultScope && { tone: "info", message: randomNotice.message, onDismiss: () => setRandomNotice(null) },
+        ]} />
+      </div>
       <DetailPanel variant={!data ? (firstLoad === "failed" ? "failed" : "loading") : data.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} highlightGuidance={data?.keyBindings.highlightGuidance ?? ""} onRandomTag={tagId => randomPlay([tagId])} />
     </div>
   </main>
