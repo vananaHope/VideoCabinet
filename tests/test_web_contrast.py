@@ -333,6 +333,34 @@ def test_hover_and_selection_are_distinct_surfaces(window):
     hover_below_selection(selected, hover(window, "document.querySelector('#settings-category button:not([aria-current])')"))
 
 
+def test_search_result_badge_stays_distinct_on_rest_hover_and_selected_row(window):
+    # 검색 결과 행 안 출처 배지(muted)는 쉬는·호버·선택 어느 행 면에서도 면이 사라지지 않는다.
+    window.core.prepare_search()
+    window.show_search()
+    field = "document.querySelector('[data-page=search] input')"
+    wait_for(lambda: js(window, f"!!{field}?.getClientRects().length"))
+    QTest.mouseClick(view(window), Qt.MouseButton.LeftButton, pos=point(window, field))
+    QTest.keyClicks(view(window), 'mkv')
+    rows = "document.querySelectorAll('#search-results [role=option]')"
+    wait_for(lambda: js(window, f"{rows}.length") == 3 and not js(window, f"!!document.querySelector('#search-results [aria-disabled]')"))
+    selected_row = "document.querySelector('#search-results [aria-selected=true]')"
+    rest_row = f"[...{rows}].filter(e => e.getAttribute('aria-selected') !== 'true').at(-1)"
+    other_row = f"[...{rows}].find(e => e.getAttribute('aria-selected') !== 'true')"
+    still(window, "document.getElementById('search-results')")
+
+    def badge(row):
+        return probe(window, text_in(row, '파일 이름'))
+    rest, rest_badge = probe(window, rest_row), badge(rest_row)
+    selected, selected_badge = probe(window, selected_row), badge(selected_row)
+    hovered = hover(window, other_row)
+    hovered_badge = badge(other_row)
+    assert luminance(hovered['surface']) > luminance(rest['surface'])
+    assert ratio(hovered['surface'], rest['surface']) >= 1.15
+    for row, chip in ((rest, rest_badge), (hovered, hovered_badge), (selected, selected_badge)):
+        assert ratio(chip['surface'], row['surface']) >= 1.1
+        assert ratio(chip['text'], chip['surface']) >= TEXT
+
+
 def test_status_badges_notices_and_highlight_text_meet_text_contrast(window):
     grid = "document.getElementById('library-grid')"
     for label in ('아직 안 봄', '다 봄', '즐겨 보는'):

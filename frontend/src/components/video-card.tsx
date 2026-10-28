@@ -2,13 +2,14 @@ import { cva, type VariantProps } from "class-variance-authority"
 import type { ComponentProps } from "react"
 import { Film } from "lucide-react"
 import { StatusBadge } from "@/components/page-parts"
+import { selectableItem } from "@/components/ui/selectable-item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VideoTags } from "@/components/video-tags"
 import type { VideoData } from "@/bridge-types"
 import { formatDate } from "@/lib/dates"
 
 const cardVariants = cva("group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring", {
-  variants: { variant: { default: "border-border bg-card hover:bg-popover", selected: "border-ring bg-card ring-1 ring-ring", placeholder: "border-border bg-card" } },
+  variants: { variant: { default: ["border-border bg-card", selectableItem({ selected: false, inner: "muted" })], selected: "border-ring bg-card ring-1 ring-ring", placeholder: "border-border bg-card" } },
   defaultVariants: { variant: "default" },
 })
 
