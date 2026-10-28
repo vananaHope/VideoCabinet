@@ -1,6 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority"
 import { Button } from "@/components/ui/button"
 import { Notice } from "@/components/ui/notice"
+import { Placeholder, Skeleton } from "@/components/ui/skeleton"
 import { EmptyState, Tabs } from "@/components/page-parts"
 import { HighlightPanel, type HighlightSnapshot } from "@/components/highlight-panel"
 import { ExternalSubtitleList } from "@/components/external-subtitle-list"
@@ -11,7 +12,7 @@ import { actions, lockedDuringScan, type Action } from "@/bridge"
 import { formatDate } from "@/lib/dates"
 
 const detailVariants = cva("flex h-full w-72 shrink-0 flex-col gap-2 overflow-hidden rounded-lg border border-border bg-card p-3", {
-  variants: { variant: { selected: "", empty: "items-center justify-center text-center text-muted-foreground" } },
+  variants: { variant: { selected: "", loading: "", empty: "items-center justify-center text-center text-muted-foreground" } },
   defaultVariants: { variant: "selected" },
 })
 const actionVariants = cva("min-w-0", {
@@ -22,10 +23,26 @@ function DetailAction({ name, title, videoId, scanning, onAction, variant }: Var
     <Button className="w-full" variant={name === "play" ? "default" : name === "exclude" ? "destructive-outline" : "outline"} size="sm" disabled={scanning && lockedDuringScan(name)} onClick={() => onAction(name, videoId)}>{title}</Button>
   </div>
 }
+const wideActions: readonly Action[] = ['subtitles', 'review']
+/** 첫 데이터가 오기 전의 상세 자리. "선택한 영상 없음" 같은 거짓 빈 상태 대신 선택 영상의 제목·탭·작업 단추·정보 줄 자리를 잡는다. */
+function DetailPlaceholder() {
+  return <Placeholder layout="stack">
+    <Skeleton shape="line" className="w-4/5" />
+    <Skeleton shape="block" className="h-11 w-36" />
+    <div className="grid shrink-0 grid-cols-2 gap-1.5">
+      {actions.map(([name]) => <div key={name} className={actionVariants({ variant: wideActions.includes(name) ? "wide" : "compact" })}><Skeleton shape="control" className="w-full" /></div>)}
+    </div>
+    <div className="min-h-0 flex-1 space-y-2 border-t pt-2">
+      <Skeleton shape="block" className="h-20 w-full" />
+      <Skeleton shape="text" className="w-1/2" />
+      <Skeleton shape="text" className="w-2/5" />
+      <Skeleton shape="text" className="w-3/5" />
+    </div>
+  </Placeholder>
+}
 function DetailActions({ videoId, scanning, onAction }: { videoId: number; scanning: boolean; onAction: Props['onAction'] }) {
-  const wide = ['subtitles', 'review']
   return <div aria-label="영상 작업" className="grid shrink-0 grid-cols-2 gap-1.5">
-    {actions.map(([name, title]) => <DetailAction key={name} name={name} title={title} variant={wide.includes(name) ? "wide" : "compact"} videoId={videoId} scanning={scanning} onAction={onAction} />)}
+    {actions.map(([name, title]) => <DetailAction key={name} name={name} title={title} variant={wideActions.includes(name) ? "wide" : "compact"} videoId={videoId} scanning={scanning} onAction={onAction} />)}
   </div>
 }
 const queueLabels: Record<string, string> = { queued: "대기", transcribing: "받아쓰는 중", translating: "처리 중", completed: "완료", failed: "실패", held: "보류" }
@@ -43,7 +60,7 @@ function translationSummary(details: DetailsData) {
 type Props = VariantProps<typeof detailVariants> & { video?: VideoData; details: DetailsData | null; highlights: HighlightSnapshot | null; revision: number; tab: string; onTabChange: (tab: string) => void; scanning: boolean; onAction: (action: Action, id: number) => void; onHighlight: (videoId: number, highlightId: number, edit: boolean) => void; highlightGuidance: string; onRandomTag: (tagId: number) => void }
 export function DetailPanel({ video, details, highlights, revision, tab, onTabChange, scanning, onAction, onHighlight, highlightGuidance, onRandomTag, variant }: Props) {
   return <aside aria-label="선택 영상 상세" className={detailVariants({ variant })}>
-    {!video ? <EmptyState title="선택한 영상 없음" description="영상을 선택하면 상세 정보와 작업이 표시됩니다." /> : <>
+    {variant === "loading" ? <DetailPlaceholder /> : !video ? <EmptyState title="선택한 영상 없음" description="영상을 선택하면 상세 정보와 작업이 표시됩니다." /> : <>
       <h2 title={video.title} className="line-clamp-2 shrink-0 text-sm leading-5 font-semibold wrap-anywhere">{video.title}</h2>
       <Tabs variant="panel" label="영상 상세 탭" value={tab} onChange={onTabChange} items={[{ value: "info", label: "정보" }, { value: "highlights", label: `하이라이트${details ? ` · ${details.highlight_count}` : ""}` }]} />
       {tab === "highlights" ? <HighlightPanel key={video.id} videoId={video.id} snapshot={highlights} revision={revision} emptyDescription={highlightGuidance} onAction={onHighlight} /> : <>
