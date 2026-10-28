@@ -301,8 +301,8 @@ try:
     chips = capture('many-chips')
     assert chips['grid'] == many['grid'] and card_y(selected) == y, (many, chips)
     row = json.loads(js("JSON.stringify((() => { const e = document.querySelector('[aria-label=\"적용한 검색 조건\"]'); return [e.clientHeight, e.scrollWidth, e.clientWidth] })())"))
-    count = js("document.querySelectorAll('[aria-label=\"적용한 검색 조건\"] button').length")
-    checks.append(f'칩 {count}개(긴 태그): 한 줄({row[0]}px) 안에서 가로 스크롤({row[1]}>{row[2]}), 격자·선택 카드 그대로')
+    count = int(js("document.querySelectorAll('[aria-label=\"적용한 검색 조건\"] button').length"))
+    checks.append(f'칩 {count}개(긴 태그 2개 포함, "모두 지우기" 포함): 한 줄({row[0]}px), 넘치면 그 줄 안에서 가로 스크롤(지금 내용 폭 {row[1]}px · 보이는 폭 {row[2]}px), 격자·선택 카드 그대로')
     click('[aria-label="적용한 검색 조건"] button:last-child')
     wait(lambda: js("document.querySelectorAll('[aria-label=\"적용한 검색 조건\"] button').length") == 0, '칩 모두 지우기')
     assert capture('many-chips-cleared')['grid'] == many['grid']
