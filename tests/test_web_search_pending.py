@@ -230,6 +230,8 @@ def test_previous_results_stay_dimmed_and_inert_until_new_results(open_window, c
     # 흐린 결과는 보이기만 한다. 클릭·방향키·Enter가 이전 결과를 고르거나 재생하지 않는다.
     active = js(window, ACTIVE)
     click(window, '#search-result-1')
+    assert backend_selected(window) == 0
+    assert window.pages.currentWidget() is window.web_host and core.playback.session is None
     js(window, "document.getElementById('search-results').focus()")
     press(window, Qt.Key.Key_Down, Qt.Key.Key_End, Qt.Key.Key_Return)
     assert backend_selected(window) == 0

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { connectBridge, request } from "@/bridge"
 import type { SearchBridge, SearchData } from "@/bridge-types"
 import { EmptyState, PageHeader, StatusBadge } from "@/components/page-parts"
@@ -71,15 +71,22 @@ export default function SearchPage() {
     clearTimeout(timer.current)
     if (!composing.current) timer.current = setTimeout(() => find(value), 200)
   }
-  const results = data?.results ?? []
-  function select(index: number) {
+  const results = useMemo(() => data?.results ?? [], [data?.results])
+  const selectedIndex = data?.selectedIndex
+  const select = useCallback((index: number) => {
     setData(previous => previous && { ...previous, selectedIndex: index })
     if (bridge) request(reply => bridge.select(index, reply)).catch(showError)
     document.getElementById(`search-result-${index}`)?.scrollIntoView({ block: "nearest" })
-  }
-  function play(index: number) {
+  }, [bridge, showError])
+  const play = useCallback((index: number) => {
     if (bridge && results[index]) { setError(""); request(reply => bridge.play(index, reply)).catch(showError) }
-  }
+  }, [bridge, results, showError])
+  // 흐린 이전 결과(최대 500개)를 둔 채 글자를 칠 때마다 다시 그리지 않도록 결과·선택·흐림이 바뀔 때만 만든다.
+  const rows = useMemo(() => results.map((result, index) => <ResultRow key={index} id={`search-result-${index}`} selected={index === selectedIndex} stale={pending} onClick={() => { if (pending) return; select(index); document.getElementById("search-results")?.focus({ preventScroll: true }); play(index) }}>
+    <div className="min-w-0 flex-1 space-y-1"><p className="wrap-anywhere font-semibold"><MatchedText parts={result.title} /></p>
+      <div className="flex flex-wrap items-center gap-3"><StatusBadge variant={result.languageLabel !== null ? "outline" : undefined}>{result.source}</StatusBadge>{result.languageLabel !== null && <StatusBadge variant="outline">{result.languageLabel}</StatusBadge>}{result.start !== null && <span className="text-xs text-highlight tabular-nums">{timestamp(result.start)}</span>}{result.missing && <span className="text-xs text-muted-foreground">파일 없음</span>}</div>
+      <p className="whitespace-pre-wrap wrap-anywhere text-sm"><MatchedText parts={result.text} /></p></div>
+  </ResultRow>), [results, selectedIndex, pending, select, play])
   const state = data?.state ?? "empty"
   // 새 검색 중인데 흐리게 남길 결과도 없으면 이전 결과 안내(없음·오류·입력 안내)를 비우고 기다림 표시만 둔다.
   const quiet = pending && !results.length
@@ -107,15 +114,11 @@ export default function SearchPage() {
       error && { tone: "error", message: error, onDismiss: () => setError("") },
       !pending && state === "error" && { tone: "error", message: `검색 실패: ${data?.error}` },
     ]} />
-    <div id="search-results" role="listbox" aria-label="검색 결과" aria-busy={pending || state === "preparing"} aria-activedescendant={results.length ? `search-result-${data?.selectedIndex}` : undefined} tabIndex={0}
+    <div id="search-results" role="listbox" aria-label="검색 결과" aria-busy={pending || state === "preparing"} aria-activedescendant={results.length ? `search-result-${selectedIndex}` : undefined} tabIndex={0}
       onScroll={event => { if (event.currentTarget.offsetParent) scroll.current = event.currentTarget.scrollTop }}
-      onKeyDown={event => listKey(event, pending ? 0 : results.length, data?.selectedIndex ?? 0, select, () => play(data?.selectedIndex ?? -1))}
+      onKeyDown={event => listKey(event, pending ? 0 : results.length, selectedIndex ?? 0, select, () => play(selectedIndex ?? -1))}
       className="min-h-32 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
-      {results.length ? results.map((result, index) => <ResultRow key={index} id={`search-result-${index}`} selected={index === data?.selectedIndex} stale={pending} onClick={() => { if (pending) return; select(index); document.getElementById("search-results")?.focus({ preventScroll: true }); play(index) }}>
-        <div className="min-w-0 flex-1 space-y-1"><p className="wrap-anywhere font-semibold"><MatchedText parts={result.title} /></p>
-          <div className="flex flex-wrap items-center gap-3"><StatusBadge variant={result.languageLabel !== null ? "outline" : undefined}>{result.source}</StatusBadge>{result.languageLabel !== null && <StatusBadge variant="outline">{result.languageLabel}</StatusBadge>}{result.start !== null && <span className="text-xs text-highlight tabular-nums">{timestamp(result.start)}</span>}{result.missing && <span className="text-xs text-muted-foreground">파일 없음</span>}</div>
-          <p className="whitespace-pre-wrap wrap-anywhere text-sm"><MatchedText parts={result.text} /></p></div>
-      </ResultRow>) : !pending && <EmptyState title={empty[0]} description={empty[1]} />}
+      {results.length ? rows : !pending && <EmptyState title={empty[0]} description={empty[1]} />}
     </div>
     {/* 상태 줄은 비어도 한 줄 높이를 지킨다. 기다림 표시는 앞 문구가 있을 때만 띄워 놓는다. */}
     <div className="flex min-h-5 flex-wrap items-center text-sm text-muted-foreground">
