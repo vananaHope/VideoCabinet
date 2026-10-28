@@ -56,5 +56,12 @@
     "text-xl": "1.25rem",
     "text-2xl": "1.5rem",
     "text-3xl": "1.875rem"
+  },
+  "bundled-font": {
+    "weights": {
+      "400": "Regular",
+      "500": "Medium",
+      "600": "SemiBold"
+    }
   }
 }
