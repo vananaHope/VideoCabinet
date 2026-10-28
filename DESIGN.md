@@ -111,6 +111,14 @@ components:
     textColor: "{colors.card-foreground}"
     borderColor: "{colors.border}"
     rounded: "{rounded.lg}"
+  video-card-hover:
+    backgroundColor: "{colors.muted}"
+    borderColor: "{colors.border}"
+    rounded: "{rounded.lg}"
+  selectable-item-selected:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.accent-foreground}"
+    rounded: "{rounded.md}"
   status-badge-success:
     backgroundColor: "{colors.status-success}"
     textColor: "{colors.status-success-foreground}"
@@ -163,13 +171,13 @@ components:
 - **Projection Black** (`background`): 앱 바탕과 머리글.
 - **Booth Charcoal** (`card`): 카드, 목록 행, 상세 패널, 설정·통계 구역처럼 바탕 위에 쉬는 면. Qt 재생 화면의 머리글·조작 줄·하이라이트 목록.
 - **Curtain Gray** (`popover`): 떠 있는 층. 대화상자, 경고 대화상자, 팝오버, 메뉴, 선택 목록, 차트 툴팁, Qt 트레이 메뉴·공용 경고·재생 키 안내·툴팁. 카드와 그림자 없이도 구별된다(카드 대비 1.19:1).
-- **Aisle Graphite** (`muted`, `secondary`): 조용한 면과 호버 면. 썸네일 빈 자리, 자리 표시(`Skeleton`), 키 표시(`Kbd`), 구역 탭 묶음, 보조 단추·태그 칩, 고스트 단추·탭·목록 행·메뉴 밖 행의 호버. 떠 있는 층 위에서도 한 단계 보인다.
-- **Spot Graphite** (`accent`): 선택 면. 내비게이션·패널 탭의 선택, 고른 목록 행·폴더·대기열 행, 메뉴·선택 목록의 현재 항목, 보조 단추 호버와 구역 탭 묶음 안 호버(묶음 면이 이미 `muted`라서), Qt 눌린 단추·트레이 메뉴 현재 항목·고른 하이라이트. 호버(`muted`)와 같은 면을 쓰지 않는다.
+- **Aisle Graphite** (`muted`, `secondary`): 조용한 면과 호버 면. 썸네일 빈 자리, 자리 표시(`Skeleton`), 키 표시(`Kbd`), 구역 탭 묶음, 보조 단추·태그 칩, 고스트 단추·탭·목록 행·메뉴 밖 행·누를 수 있는 카드의 호버. 떠 있는 층 위에서도 한 단계 보인다.
+- **Spot Graphite** (`accent`): 선택 면. 내비게이션·패널 탭과 설정 분류의 선택, 고른 목록 행·폴더·대기열 행, 메뉴·선택 목록의 현재 항목, 보조 단추 호버와 구역 탭 묶음 안 호버(묶음 면이 이미 `muted`라서), Qt 눌린 단추·트레이 메뉴 현재 항목·고른 하이라이트. 호버(`muted`)와 같은 면을 쓰지 않는다.
 - **Dim Rail** (`border`): 장식 구분선. 구분선, 머리글·패널·설정 구역·쉬는 카드의 테두리, 떠 있는 층 테두리, 스크롤바 손잡이. 꼭 필요한 경계가 아니므로 WCAG 1.4.11의 3:1 예외이고 어둡게 둔다.
-- **Steel Hairline** (`input`): 조작 경계. 입력란·선택 목록·윤곽선 단추·Qt 단추처럼 경계가 곧 조작 대상의 모양인 요소의 테두리와, 카드 호버 테두리, 윤곽선 배지의 링. 바탕·카드·떠 있는 층 어디서나 3:1 이상이다. 입력 요소의 면은 이 색 30%(`bg-input/30`, 호버 50%)다.
+- **Steel Hairline** (`input`): 조작 경계. 입력란·선택 목록·윤곽선 단추·Qt 단추처럼 경계가 곧 조작 대상의 모양인 요소의 테두리와 윤곽선 배지의 링. 바탕·카드·떠 있는 층 어디서나 3:1 이상이다. 입력 요소의 면은 이 색 30%(`bg-input/30`, 호버 50%)다.
 - **Usher Gray** (`muted-foreground`): 보조 글자(설명, 길이, 시리즈 이름, 비선택 탭, 입력란 안내 글자). 선택 면(`accent`)과 입력란 면 위에서도 4.5:1 이상이다.
 - **Screen White** (`foreground`): 본문 글자.
-- **내용 카드 vs 조작 경계:** 영상·추천·검색 결과 카드는 썸네일·제목으로 식별되는 내용 묶음이라 쉬는 테두리가 장식(`border`)이고, 호버에만 `input`(또는 면 한 단계 `muted`)으로, 선택·초점은 `ring`으로 바뀐다. `input` 3:1은 경계가 곧 조작 대상인 요소에만 쓴다.
+- **내용 카드 vs 조작 경계:** 영상·추천·대사 검색 결과 카드는 썸네일·제목으로 식별되는 내용 묶음이라 쉬는 테두리가 장식(`border`)이고 호버에도 그대로다. 호버는 면이 한 단계(`card` → `muted`, 1.35:1) 밝아지고, 선택·초점은 `ring`으로 바뀐다. `input` 3:1은 경계가 곧 조작 대상인 요소에만 쓴다.
 
 ### Highlight (하이라이트 전용)
 - **Marker Yellow** (`highlight`): 지점 하이라이트와 "즐겨 보는" 배지.
@@ -189,7 +197,7 @@ components:
 
 **The Meaning-Only Color Rule.** 하이라이트 색과 상태 색은 그 의미에만 쓴다. 장식이나 구역 구분에 빌려 쓰지 않는다.
 
-**The Lit Ladder Rule.** 면 단계는 `background` → `card` → `popover`이고, 놓인 면 위의 호버는 `muted`, 선택은 `accent`다. 같은 역할은 같은 토큰을 쓰고, 호버와 선택은 같은 면을 쓰지 않는다. 바탕·카드·떠 있는 층 위에서 본문·보조 글자는 4.5:1, 조작 경계(`input`)와 초점·선택 윤곽(`ring`)은 3:1 이상이다. 색을 바꾸면 `tests/test_web_contrast.py`와 `tests/test_theme.py`가 이 기준을 다시 잰다.
+**The Lit Ladder Rule.** 면 단계는 `background` → `card` → `popover`이고, 놓인 면 위의 호버는 `muted`, 선택은 `accent`다. 같은 역할은 같은 토큰을 쓰고, 호버와 선택은 같은 면을 쓰지 않는다. 고를 수 있는 목록 항목(설정 분류·머리글·패널 탭·폴더·대화상자 목록·태그 고르기·대기열 행)은 공용 `selectableItem` variant 하나로 이 둘을 칠한다. 바탕·카드·떠 있는 층 위에서 본문·보조 글자는 4.5:1, 조작 경계(`input`)와 초점·선택 윤곽(`ring`)은 3:1 이상이다. 색을 바꾸면 `tests/test_web_contrast.py`와 `tests/test_theme.py`가 이 기준을 다시 잰다.
 
 ## Typography
 
@@ -234,7 +242,7 @@ components:
 - 통계 차트 툴팁만 shadcn 기본값 `shadow-xl`을 쓴다.
 
 ### Named Rules
-**The Flat-At-Rest Rule.** 카드·목록 행·패널은 호버나 선택에도 그림자를 얻지 않는다. 호버는 테두리 밝기(`border` → `input`) 또는 테두리 없는 행이면 면 한 단계(`muted`), 선택은 `ring` 테두리와 링(목록 행은 `accent` 면을 더한다)으로 표시한다.
+**The Flat-At-Rest Rule.** 카드·목록 행·패널은 호버나 선택에도 그림자를 얻지 않는다. 호버는 면 한 단계(`muted`)이고 쉬는 테두리는 그대로 두며, 선택은 `ring` 테두리와 링(목록 행은 `accent` 면을 더한다)으로 표시한다.
 
 ## Shapes
 
@@ -262,9 +270,10 @@ components:
 - **Navigation:** 머리글의 페이지 탭. 비선택은 `muted-foreground` 글자, 호버에 `muted` 면, 선택은 그보다 밝은 `accent` 면 + `accent-foreground` 글자. 강조색을 쓰지 않아 영상보다 튀지 않는다. 마지막 탭(설정)은 오른쪽 끝으로 민다. 툴팁에 단축키(`Ctrl+1`~`Ctrl+8`)가 보인다.
 - **Section:** 페이지 안 구역 전환. `muted` 묶음 면 안에서 선택 탭만 `primary` 면이고, 비선택 탭 호버는 묶음보다 한 단계 밝은 `accent` 면이다.
 - **Panel:** 테두리 묶음 안에서 호버는 `muted`, 선택 탭은 `accent` 면이다.
+- **Selectable Item:** 설정 분류(`Button`의 `item`·`item-selected` variant), 머리글·패널 탭, 폴더 트리, 대화상자 목록, 태그 고르기 행, 대기열 행·규칙, 대사 검색 결과, 통계의 많이 본 영상 행은 `components/ui/selectable-item.ts`의 `selectableItem`으로 호버 `muted`·선택 `accent`를 칠한다. 쓰는 곳은 배치만 더하고 색을 덮어쓰지 않는다.
 
 ### Cards / Containers
-- **Video Card:** `card` 면, 장식 `border` 테두리, `lg` 둥글기. 위는 16:9 썸네일(빈 자리는 `muted` 면 + 필름 아이콘), 아래는 고정 높이 정보 칸(제목 → 길이·시청 상태·자막·즐겨 보는 배지 → 시리즈 → 시청 통계 → 태그). 호버는 테두리가 `input`으로 밝아지고, 선택은 `ring` 테두리 + 1px 링이다.
+- **Video Card:** `card` 면, 장식 `border` 테두리, `lg` 둥글기. 위는 16:9 썸네일(빈 자리는 `muted` 면 + 필름 아이콘), 아래는 고정 높이 정보 칸(제목 → 길이·시청 상태·자막·즐겨 보는 배지 → 시리즈 → 시청 통계 → 태그). 호버는 면이 `muted`로 한 단계 밝아지고(테두리는 장식 `border` 그대로), 선택은 `ring` 테두리 + 1px 링이다.
 - **List Item:** `card` 면, `lg` 둥글기, 안쪽 1rem. 선택은 `ring` 테두리 + `accent` 면.
 - **Number Card:** `card` 면, `xl` 둥글기, 안쪽 1.5rem. 라벨 → 큰 숫자(Display) → 설명.
 - **Empty State:** 점선 테두리, `xl` 둥글기, 가운데 정렬 제목·설명·동작.

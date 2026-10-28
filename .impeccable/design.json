@@ -9,7 +9,7 @@
       "card": { "role": "neutral", "displayName": "Booth Charcoal", "purpose": "바탕 위에 쉬는 면(카드·목록 행·패널)." },
       "popover": { "role": "neutral", "displayName": "Curtain Gray", "purpose": "떠 있는 층(대화상자·팝오버·메뉴·선택 목록, Qt 트레이 메뉴·공용 경고). 카드 대비 1.19:1." },
       "secondary": { "role": "neutral", "displayName": "Aisle Graphite", "purpose": "muted와 같은 값. 보조 단추·태그 칩 면." },
-      "muted": { "role": "neutral", "displayName": "Aisle Graphite", "purpose": "썸네일 빈 자리·자리 표시·키 표시·구역 탭 묶음, 그리고 호버 면." },
+      "muted": { "role": "neutral", "displayName": "Aisle Graphite", "purpose": "썸네일 빈 자리·자리 표시·키 표시·구역 탭 묶음, 그리고 호버 면(목록 항목·누를 수 있는 카드)." },
       "accent": { "role": "neutral", "displayName": "Spot Graphite", "purpose": "선택 면(선택 탭·고른 행·메뉴 현재 항목). 호버(muted)와 구별된다." },
       "border": { "role": "neutral", "displayName": "Dim Rail", "purpose": "장식 구분선. WCAG 1.4.11 3:1 예외." },
       "input": { "role": "neutral", "displayName": "Steel Hairline", "purpose": "조작 경계(입력란·선택 목록·윤곽선 단추). 바탕·카드·떠 있는 층 위 3:1 이상." },
@@ -93,7 +93,7 @@
       "refersTo": "video-card",
       "description": "라이브러리 격자의 영상 하나. 썸네일이 주인공이다.",
       "html": "<button class=\"ds-video-card\"><span class=\"ds-video-thumb\"></span><span class=\"ds-video-body\"><span class=\"ds-video-title\">영상 제목</span><span class=\"ds-video-meta\">1:24:05</span></span></button>",
-      "css": ".ds-video-card { display: flex; flex-direction: column; width: 16rem; overflow: hidden; padding: 0; border: 1px solid var(--border, #3f3f46); border-radius: 0.75rem; background: var(--card, #18181b); color: var(--card-foreground, #fafafa); text-align: left; cursor: pointer; transition: border-color 100ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-video-card:hover { border-color: var(--input, #7c7c85); } .ds-video-card:focus-visible { outline: none; border-color: var(--ring, #818cf8); box-shadow: 0 0 0 1px var(--ring, #818cf8); } .ds-video-thumb { display: block; aspect-ratio: 16 / 9; background: var(--muted, #303036); } .ds-video-body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.5rem; } .ds-video-title { font: 500 0.875rem/1.25rem \"Pretendard\", \"Malgun Gothic\", sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-video-meta { font: 400 0.75rem/1rem \"Pretendard\", \"Malgun Gothic\", sans-serif; color: var(--muted-foreground, #afafb7); font-variant-numeric: tabular-nums; }"
+      "css": ".ds-video-card { display: flex; flex-direction: column; width: 16rem; overflow: hidden; padding: 0; border: 1px solid var(--border, #3f3f46); border-radius: 0.75rem; background: var(--card, #18181b); color: var(--card-foreground, #fafafa); text-align: left; cursor: pointer; transition: background-color 100ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-video-card:hover { background: var(--muted, #303036); } .ds-video-card:focus-visible { outline: none; border-color: var(--ring, #818cf8); box-shadow: 0 0 0 1px var(--ring, #818cf8); } .ds-video-thumb { display: block; aspect-ratio: 16 / 9; background: var(--muted, #303036); } .ds-video-body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.5rem; } .ds-video-title { font: 500 0.875rem/1.25rem \"Pretendard\", \"Malgun Gothic\", sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-video-meta { font: 400 0.75rem/1rem \"Pretendard\", \"Malgun Gothic\", sans-serif; color: var(--muted-foreground, #afafb7); font-variant-numeric: tabular-nums; }"
     },
     {
       "name": "Notice",
@@ -117,11 +117,11 @@
     "rules": [
       { "name": "The One Beam Rule", "body": "강조색은 인디고 하나다. 선택·초점·주 동작이 아닌 곳에 인디고를 칠하지 않는다.", "section": "colors" },
       { "name": "The Meaning-Only Color Rule", "body": "하이라이트 색과 상태 색은 그 의미에만 쓴다. 장식이나 구역 구분에 빌려 쓰지 않는다.", "section": "colors" },
-      { "name": "The Lit Ladder Rule", "body": "면 단계는 `background` → `card` → `popover`이고, 놓인 면 위의 호버는 `muted`, 선택은 `accent`다. 같은 역할은 같은 토큰을 쓰고, 호버와 선택은 같은 면을 쓰지 않는다. 바탕·카드·떠 있는 층 위에서 본문·보조 글자는 4.5:1, 조작 경계(`input`)와 초점·선택 윤곽(`ring`)은 3:1 이상이다.", "section": "colors" },
+      { "name": "The Lit Ladder Rule", "body": "면 단계는 `background` → `card` → `popover`이고, 놓인 면 위의 호버는 `muted`, 선택은 `accent`다. 같은 역할은 같은 토큰을 쓰고, 호버와 선택은 같은 면을 쓰지 않는다. 고를 수 있는 목록 항목(설정 분류·머리글·패널 탭·폴더·대화상자 목록·태그 고르기·대기열 행)은 공용 `selectableItem` variant 하나로 이 둘을 칠한다. 바탕·카드·떠 있는 층 위에서 본문·보조 글자는 4.5:1, 조작 경계(`input`)와 초점·선택 윤곽(`ring`)은 3:1 이상이다.", "section": "colors" },
       { "name": "The Tabular Numbers Rule", "body": "길이·횟수·시간·날짜·통계 숫자는 `tabular-nums`로 쓴다. 목록에서 숫자 폭이 흔들리지 않게 한다.", "section": "typography" },
       { "name": "The Body-Is-Small Rule", "body": "기본 크기는 0.875rem이다. 정보 밀도가 이 앱의 성격이므로, 본문을 키워 여백을 메우지 않는다.", "section": "typography" },
       { "name": "The Reserved Space Rule", "body": "기다리는 내용(썸네일, 패널, 통계, 안내)은 도착하기 전에 자리를 확보한다. 데이터가 들어와도 배치가 튀지 않는다.", "section": "layout" },
-      { "name": "The Flat-At-Rest Rule", "body": "카드·목록 행·패널은 호버나 선택에도 그림자를 얻지 않는다. 호버는 테두리 밝기(`border` → `input`) 또는 테두리 없는 행이면 면 한 단계(`muted`), 선택은 `ring` 테두리와 링(목록 행은 `accent` 면을 더한다)으로 표시한다.", "section": "elevation" },
+      { "name": "The Flat-At-Rest Rule", "body": "카드·목록 행·패널은 호버나 선택에도 그림자를 얻지 않는다. 호버는 면 한 단계(`muted`)이고 쉬는 테두리는 그대로 두며, 선택은 `ring` 테두리와 링(목록 행은 `accent` 면을 더한다)으로 표시한다.", "section": "elevation" },
       { "name": "The Token Source Rule", "body": "색·간격·둥글기·글자 크기를 바꿀 때는 `src/my_video_manager/web_tokens.json`을 고치고 `scripts/generate_web_types.py`로 `tokens.css`를 다시 만든다.", "section": "colors" }
     ],
     "dos": [
