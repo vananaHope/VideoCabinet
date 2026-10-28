@@ -1,15 +1,24 @@
 """네이티브 재생·셸·트레이의 테마. 웹 토큰을 단일 원본으로 쓴다."""
 
-from PySide6.QtGui import QColor, QFont, QPalette
+import logging
+from pathlib import Path
+
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 
 from .web_tokens import web_tokens
+
+logger = logging.getLogger(__name__)
 
 # 웹과 네이티브 재생의 단일 원본.
 _WEB = web_tokens()
 PLAYBACK_COLORS = _WEB["colors"]
-# 웹은 번들 글꼴(토큰의 첫 이름)을 쓰지만 Qt 글꼴 데이터베이스에는 아직 등록하지 않는다(#297).
-# 토큰의 대체 글꼴인 맑은 고딕을 명시해 재생 화면·트레이 메뉴·공용 경고가 시스템 기본 글꼴로 떨어지지 않게 한다.
-NATIVE_FONT = "Malgun Gothic"
+# 토큰 font-sans의 첫 이름은 번들 글꼴, 둘째 이름은 대체 글꼴(맑은 고딕)이다.
+BUNDLED_FONT, FALLBACK_FONT = (name.strip().strip('"') for name in _WEB["typography"]["font-sans"].split(",")[:2])
+# Qt는 웹 번들의 woff2를 읽지 못해 웹 빌드가 같은 글꼴의 정적 TrueType을 굵기별로 이 폴더에 둔다(frontend/vite.config.ts).
+QT_FONT_DIRECTORY = Path(__file__).with_name("web") / "qt-fonts"
+QT_FONT_FILES = tuple(f"{BUNDLED_FONT}-{stem}.ttf" for stem in _WEB["bundled-font"]["weights"].values())
+# 번들 글꼴을 등록하기 전과 등록에 실패했을 때는 대체 글꼴만 쓴다. 등록하면 웹처럼 번들 글꼴 뒤에 대체 글꼴을 둔다.
+_font_families = [FALLBACK_FONT]
 
 
 def playback_pixels(group, name):
@@ -18,7 +27,8 @@ def playback_pixels(group, name):
 
 
 def playback_font(size="text-sm"):
-    font = QFont(NATIVE_FONT)
+    font = QFont()
+    font.setFamilies(_font_families)
     font.setPixelSize(playback_pixels("typography", size))
     return font
 
@@ -29,7 +39,7 @@ def playback_stylesheet():
     spacing = playback_pixels("layout", "spacing")
     return f"""
     QWidget {{ color: {c['foreground']}; background: {c['background']};
-        font-family: "{NATIVE_FONT}";
+        font-family: {', '.join(f'"{name}"' for name in _font_families)};
         font-size: {playback_pixels('typography', 'text-sm')}px; }}
     QLabel {{ background: transparent; }}
     QWidget#playbackHeader, QWidget#playbackBar, QWidget#playbackHighlights,
@@ -82,3 +92,31 @@ def apply_theme(app):
     app.setFont(playback_font())
     app.setStyleSheet(playback_stylesheet())
     app.setProperty('darkThemeApplied', True)
+
+
+def use_bundled_font(app):
+    """번들 글꼴을 Qt 글꼴 데이터베이스에 등록해 재생 화면·트레이 메뉴·공용 경고에 쓴다.
+
+    실패가 앱 로그에 남도록 앱 로그 설정 뒤(창을 만들 때) 부른다. 굵기 하나라도 파일이 없거나
+    읽지 못하면 등록한 것도 되돌리고 대체 글꼴을 유지한다. 앱 시작은 막지 않는다.
+    """
+    global _font_families
+    if _font_families[0] == BUNDLED_FONT:
+        return True
+    registered = []
+    for name in QT_FONT_FILES:
+        path = QT_FONT_DIRECTORY / name
+        font_id = QFontDatabase.addApplicationFont(str(path))
+        if font_id >= 0:
+            registered.append(font_id)
+        if font_id < 0 or BUNDLED_FONT not in QFontDatabase.applicationFontFamilies(font_id):
+            for registered_id in registered:
+                QFontDatabase.removeApplicationFont(registered_id)
+            reason = '파일 없음' if not path.is_file() else '읽을 수 없는 글꼴'
+            logger.warning('번들 글꼴을 등록하지 못해 %s로 표시합니다(%s): %s', FALLBACK_FONT, reason, path)
+            return False
+    _font_families = [BUNDLED_FONT, FALLBACK_FONT]
+    if app.property('darkThemeApplied'):
+        app.setFont(playback_font())
+        app.setStyleSheet(playback_stylesheet())
+    return True

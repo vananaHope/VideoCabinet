@@ -20,7 +20,7 @@ from .web_dialogs_entries import ReviewDialog
 from .playback_page import PlaybackPage
 from .player_shutdown import PlayerShutdown
 from .qt_keys import key_name
-from .theme import apply_theme
+from .theme import apply_theme, use_bundled_font
 
 
 @dataclass
@@ -40,6 +40,8 @@ class MainWindow(QMainWindow):
     def __init__(self, core: AppCore, *, player_factory=MpvPlayer, folder_watch_options=None,
                  update_check_options=None, native_dialogs_factory=native_dialog_escape):
         apply_theme(QApplication.instance())
+        # 앱 로그 설정 뒤라 번들 글꼴 등록 실패가 로그에 남는다. 그 전의 시작 오류 대화상자는 대체 글꼴로 뜬다.
+        use_bundled_font(QApplication.instance())
         super().__init__()
         self.core = core
         self.player = None
