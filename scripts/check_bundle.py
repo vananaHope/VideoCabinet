@@ -25,7 +25,10 @@ REQUIRED_LICENSES = (
     'licenses/web/THIRD-PARTY-WEB.txt', 'licenses/web/manifest.json',
     'licenses/web/node_modules/react/LICENSE',
     'licenses/web/node_modules/react-dom/LICENSE',
+    'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
 )
+# 웹 셸의 번들 글꼴. Vite가 이름 뒤에 내용 해시를 붙인다.
+BUNDLED_FONTS = ('my_video_manager/web/assets/PretendardVariable-*.woff2',)
 
 
 def check_licenses(directory):
@@ -87,6 +90,8 @@ def check_bundle(directory: Path):
     ) + REQUIRED_LICENSES
     missing = [name for name in required if not (directory / name).is_file()
                or not (directory / name).stat().st_size]
+    missing += [pattern for pattern in BUNDLED_FONTS
+                if not any(path.stat().st_size for path in directory.glob(pattern))]
     cuda = [str(path.relative_to(directory)) for path in directory.rglob('*.dll')
             if path.name.lower().startswith(('cublas', 'cudnn', 'nvblas', 'cudart', 'nvrtc', 'cusparse', 'cufft', 'curand'))]
     unnecessary = [str(path.relative_to(directory)) for path in (directory / 'PySide6').rglob('*')

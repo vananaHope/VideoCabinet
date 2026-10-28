@@ -134,6 +134,7 @@ def bundle(packaging, tmp_path, monkeypatch):
         'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak',
         'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe', 'ffmpeg/LICENSE.txt', 'ffmpeg/README.txt',
         'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt', *checker.REQUIRED_LICENSES,
+        'my_video_manager/web/assets/PretendardVariable-AbCd1234.woff2',
     ]
     for name in files:
         path = tmp_path / name
@@ -165,6 +166,7 @@ def test_bundle_logs_pinned_ffmpeg_version(bundle, capsys):
     'licenses/python/faster-whisper/metadata/LICENSE', 'licenses/python/tokenizers/LICENSE',
     'licenses/python/av/metadata/licenses/LICENSE.txt',
     'licenses/web/THIRD-PARTY-WEB.txt', 'licenses/web/node_modules/react/LICENSE', 'PySide6/QtWebEngineProcess.exe', 'PySide6/resources/v8_context_snapshot.bin',
+    'my_video_manager/web/assets/PretendardVariable-AbCd1234.woff2', 'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
     'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak'])
 def test_bundle_missing_required_runtime_fails(bundle, name):
     checker, directory = bundle
@@ -515,3 +517,14 @@ def test_shipped_notices_have_no_build_machine_paths():
     assert not re.search(r'(?<![A-Za-z0-9])[A-Za-z]:[\\/]|/(?:home|Users)/|~[\\/]', content)
     assert str(Path.home()) not in content
     assert Path.home().as_posix() not in content
+
+
+def test_web_licenses_carry_bundled_font_ofl_text(packaging, licenses, tmp_path):
+    """실제 웹 프로덕션 의존성에서 번들 글꼴의 라이선스 원문(SIL OFL 1.1)을 모아 설치물 필수 경로에 둔다."""
+    frontend = Path(__file__).resolve().parents[1] / 'frontend'
+    packages = licenses.web_licenses(frontend, tmp_path / 'web')
+    font = next(p for p in packages if p['name'] == 'pretendard')
+    path = tmp_path / 'web' / font['files'][0]['path']
+    assert 'licenses/' + path.relative_to(tmp_path).as_posix() in packaging[1].REQUIRED_LICENSES
+    assert 'SIL Open Font License, Version 1.1' in path.read_text(encoding='utf-8')
+    assert 'pretendard 1.3.9' in (tmp_path / 'web/THIRD-PARTY-WEB.txt').read_text(encoding='utf-8')

@@ -49,6 +49,7 @@ React / React DOM, Radix UI, Recharts, TanStack Virtual: MIT;
   https://github.com/recharts/recharts
   https://github.com/TanStack/virtual
 Lucide: ISC; https://github.com/lucide-icons/lucide
+Pretendard (font): SIL Open Font License 1.1; https://github.com/orioncactus/pretendard
 PyInstaller bootloader: GPLv2+ with the bootloader distribution exception;
   https://pyinstaller.org/en/stable/license.html
 
