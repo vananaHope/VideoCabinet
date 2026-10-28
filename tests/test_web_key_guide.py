@@ -183,6 +183,8 @@ def test_closing_returns_focus_to_the_grid_and_arrow_keys_continue(window, how):
     press_f1(window)
     wait_guide(window)
     close_guide(window, how)
+    # Radix는 DOM 제거 뒤 별도 작업에서 초점을 복원한다.
+    wait_for(lambda: js(window, "document.activeElement.id") == "library-grid")
     assert js(window, "document.activeElement.id") == "library-grid"
     before = js(window, f"{GRID}.getAttribute('aria-activedescendant')")
     QTest.keyClick(view(window), Qt.Key.Key_Right)
@@ -202,9 +204,14 @@ def test_closing_returns_focus_to_the_search_field_and_typing_continues(window):
 def test_keyboard_button_gets_focus_back(window):
     wait_for(lambda: window.loaded)
     button = 'document.querySelector("header button[aria-label=\\"키 안내 (F1)\\"]")'
-    js(window, f"(b => {{ b.focus(); b.click() }})({button})")
+    # frontend_loaded는 초점 요청을 보낸 시점이다. 첫 격자 초점까지 기다린 뒤
+    # 실제 마우스로 연다(JS click은 문서 활성화와 포인터 초점 경로를 생략한다).
+    wait_for(lambda: js(window, "document.activeElement.id") == "library-grid")
+    point = json.loads(js(window, f"JSON.stringify((() => {{ const r = {button}.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }})())"))
+    QTest.mouseClick(view(window), Qt.MouseButton.LeftButton, pos=QPoint(round(point[0]), round(point[1])))
     wait_guide(window)
     close_guide(window, "escape")
+    wait_for(lambda: js(window, "document.activeElement.getAttribute('aria-label')") == "키 안내 (F1)")
     assert js(window, "document.activeElement.getAttribute('aria-label')") == "키 안내 (F1)"
 
 
