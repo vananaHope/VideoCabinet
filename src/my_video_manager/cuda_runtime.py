@@ -19,7 +19,7 @@ import zipfile
 
 from .runtime_assets import (CUDA_WHEELS, WHISPER_FILES, WHISPER_MODEL, WHISPER_REPOSITORY,
                              WHISPER_REVISION, DownloadAsset)
-from .subtitle_preparation_state import safe_detail, log_failure
+from .subtitle_preparation_state import safe_detail, log_failure, log_notice
 
 
 class PreparationError(RuntimeError):
@@ -409,6 +409,8 @@ class SubtitlePreparation:
             models = self.data_directory / 'models'
             # models 자체가 정션인 경우에도 외부 저장소를 따라 들어가지 않는다.
             if not _plain_directory(models) or models.resolve().parent != self.data_directory:
+                log_notice(self.data_directory, 'cleanup',
+                           f'models 폴더가 링크이거나 데이터 폴더 밖을 가리켜 이전 모델 정리를 건너뜁니다: {models}')
                 return
             for target in models.iterdir():
                 name = target.name

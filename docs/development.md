@@ -467,6 +467,7 @@ turbo 그룹의 검증·게시가 성공한 뒤(검증한 HF 캐시에 `ready.js
 `SubtitlePreparation.cleanup_previous_models()`가 `models/large-v3/` 전체와
 `models/large-v3*.partial`을 정리합니다. turbo 이름의 폴더·단계 폴더는 제외하며,
 `models/` 바로 아래의 실제 디렉터리인지 확인하고 정션·심볼릭 링크를 따라가지 않습니다.
+`models/` 폴더 자체가 링크면 자동 정리하지 않고 건너뛴 이유를 로그에 남깁니다.
 준비가 실패하거나 취소되면 이전 모델은 남습니다. 삭제 실패는 로그에만 남기고 준비는 성공합니다.
 다음 준비에서 다시 정리하고, 설치판 앱 시작 시 이미 준비됐다면 `start_cleanup_if_ready()`가
 뒤 작업으로 한 번 재시도합니다. `status()`·`prepared()`와 받아쓰기 자식은 삭제하지 않습니다.

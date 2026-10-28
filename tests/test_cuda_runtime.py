@@ -611,24 +611,24 @@ def test_failed_or_cancelled_turbo_preparation_keeps_legacy_models(tmp_path, ser
     assert all(path.read_bytes() == b'previous model' for path in legacy)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="열린 파일의 삭제를 막는 Windows 파일 잠금")
 @pytest.mark.parametrize('retry', ['prepare', 'startup'])
-def test_cleanup_failure_is_logged_and_retried_without_affecting_ready(tmp_path, server, monkeypatch, retry):
-    from my_video_manager import cuda_runtime
+def test_cleanup_failure_is_logged_and_retried_without_affecting_ready(tmp_path, server, retry):
     service = preparation(tmp_path, server)
     legacy = legacy_model_files(tmp_path)
-    original = cuda_runtime.shutil.rmtree
-    def denied(path, *args, **kwargs):
-        if Path(path).name.startswith('large-v3'):
-            raise PermissionError('legacy model in use')
-        return original(path, *args, **kwargs)
-    with monkeypatch.context() as patch:
-        patch.setattr(cuda_runtime.shutil, 'rmtree', denied)
+    locked = tmp_path / 'models/large-v3/old-revision/model.bin'
+    with locked.open('rb') as handle:  # Windows에서는 열린 파일을 지울 수 없다.
         result = service.prepare()
-    assert all(path.exists() for path in legacy)
-    assert service.status()['kind'] == 'ready'
-    assert service.prepared() == result
-    assert all(path.exists() for path in legacy)  # 조회는 삭제하지 않는다.
-    assert 'legacy model in use' in (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+        assert handle.read() == b'previous model'
+        assert locked.exists() and (tmp_path / 'models/large-v3').exists()
+        assert service.status()['kind'] == 'ready'
+        assert service.prepared() == result
+        assert locked.exists()  # 조회는 삭제하지 않는다.
+        logged = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+        assert '이전 모델 폴더를 정리하지 못했습니다.' in logged
+        # 실제 파일 잠금 때문에 난 OSError(Errno 13)와 대상 경로가 기록된다.
+        assert '[Errno 13]' in logged
+        assert str(Path('models/large-v3/old-revision/model.bin')) in logged
     requests = server[0].requests[:]
     if retry == 'prepare':
         assert service.prepare() == result
@@ -638,6 +638,8 @@ def test_cleanup_failure_is_logged_and_retried_without_affecting_ready(tmp_path,
         worker.join(CHILD_READY_TIMEOUT)
         assert not worker.is_alive()
     assert all(not path.exists() for path in legacy)
+    assert not (tmp_path / 'models/large-v3').exists()
+    assert service.prepared() == result
     assert server[0].requests == requests
 
 
@@ -715,6 +717,10 @@ def test_cleanup_never_follows_directory_links(tmp_path, server, location, kind)
     assert sentinel.read_bytes() == b'untouched'
     assert protected.is_file()
     assert service.status()['kind'] == 'ready'
+    if location == 'models':
+        # 링크라서 건너뛴 이유가 남아야 사용자가 남은 이전 모델을 알 수 있다.
+        logged = (data / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+        assert '이전 모델 정리를 건너뜁니다' in logged
 
 
 def test_cleanup_preserves_regular_file_named_like_old_model(tmp_path, server):
