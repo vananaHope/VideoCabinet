@@ -16,6 +16,7 @@ from qt_wait import wait_for
 from test_library_return_ui import Player
 from test_web_library_data import core
 from test_web_recommend_page import abandon, finish
+from web_frames import stop_recording as stop_frames
 from my_video_manager.ui import MainWindow
 from my_video_manager.web_shell import WebShellHost
 
@@ -131,9 +132,8 @@ def long_title_recommendations(core):
         core.add_video_tag(video.id, '자연다큐멘터리')
 
 
-def stop_recording(window):
-    js(window, 'window.__stopRecommendFrames = true')
-    return json.loads(js(window, 'JSON.stringify(window.__recommendFrames)'))
+def stop_recording(window, done):
+    return stop_frames(window, 'recommend', done)
 
 
 def elapse(window, milliseconds):
@@ -164,7 +164,9 @@ def test_first_display_placeholder_keeps_header_status_and_first_row(open_window
 
     js(window, 'window.__releaseData()')
     wait_for(lambda: js(window, CELLS) == 2 if recommended else EMPTY in js(window, PAGE_TEXT))
-    frames = stop_recording(window)
+    # 마지막 표본이 결과 상태를 담을 때까지 기록한다.
+    frames = stop_recording(window, lambda frame: frame['skeletons'] == 0 and frame['busy'] == 0
+                            and (frame['cells'] == 2 if recommended else EMPTY in frame['text']))
     loading, final = [frame for frame in frames if frame['skeletons']], frames[-1]
     assert loading and final['skeletons'] == 0 and final['busy'] == 0
     assert not any(EMPTY in frame['text'] for frame in loading)
@@ -204,7 +206,7 @@ def test_dismiss_keeps_rows_while_waiting_and_shows_pending_status(open_window, 
     wait_for(lambda: js(window, CELLS) == 1)
     wait_for(lambda: js(window, PENDING) == '추천을 다시 계산하는 중…')
     assert js(window, 'document.getElementById("recommendations").getAttribute("aria-busy")') == 'true'
-    waiting = stop_recording(window)
+    waiting = stop_recording(window, lambda frame: frame['cells'] == 1 and frame['pending'] == '추천을 다시 계산하는 중…')
     assert waiting
     for frame in waiting:
         # 줄을 비웠다 채우지 않고, 자리 표시로 바꾸지 않는다. 목록 위 배치도 그대로다.
@@ -230,7 +232,7 @@ def test_refresh_failure_keeps_rows_and_shows_error(open_window, core):
     window.refresh()
     wait_for(lambda: '추천을 불러오지 못했어요' in js(window, PAGE_TEXT))
     elapse(window, 100)
-    frames = stop_recording(window)
+    frames = stop_recording(window, lambda frame: '추천을 불러오지 못했어요' in frame['text'])
     # 보던 줄을 비우지 않고 오류 안내만 더한다. 자리 표시나 기다림 표시가 남지 않는다.
     assert all(frame['cells'] == 2 and frame['skeletons'] == 0 for frame in frames)
     final = frames[-1]

@@ -16,6 +16,7 @@ from PySide6.QtWebEngineCore import QWebEngineScript
 from qt_wait import wait_for
 from test_library_return_ui import Player
 from test_web_library_data import core
+from web_frames import stop_recording as stop_frames
 from my_video_manager.ui import MainWindow
 from my_video_manager.web_shell import WebShellHost
 
@@ -46,6 +47,7 @@ FRAME_RECORDER = """(() => {
         skeletons: main.querySelectorAll('[data-slot=skeleton]').length,
         busy: [...main.querySelectorAll('[aria-busy=true]')].map(element => element.hasAttribute('data-statistics-results') ? 'results' : element.tagName),
         pending: main.querySelector('[data-slot=pending-status]')?.textContent ?? null,
+        description: main.querySelector('[data-statistics-status] p')?.textContent ?? null,
         text: main.innerText,
       })
     }
@@ -127,9 +129,8 @@ def watch(core, video, seconds=40):
     core.playback.end()
 
 
-def stop_recording(window):
-    js(window, 'window.__stopStatisticsFrames = true')
-    return json.loads(js(window, 'JSON.stringify(window.__statisticsFrames)'))
+def stop_recording(window, done):
+    return stop_frames(window, 'statistics', done)
 
 
 def click(window, element):
@@ -161,7 +162,9 @@ def test_first_calculation_shows_placeholder_without_moving_layout(open_window, 
 
     release.set()
     wait_for(lambda: settled(window))
-    frames = stop_recording(window)
+    # 마지막 표본이 결과(자리 표시·aria-busy·기다림 표시 없음, 차트 있음)를 담을 때까지 기록한다.
+    frames = stop_recording(window, lambda frame: frame['skeletons'] == 0 and frame['busy'] == []
+                            and frame['pending'] == '' and frame['boxes']['chart'])
     loading, final = [frame for frame in frames if frame['skeletons']], frames[-1]
     assert loading and final['skeletons'] == 0 and final['busy'] == [] and final['pending'] == ''
     assert len(final['boxes']['cards']) == 6 and final['boxes']['chart']
@@ -195,7 +198,7 @@ def test_inventory_placeholder_keeps_card_row_and_counts_section(open_window, ho
     release.set()
     wait_for(lambda: js(window, RESULTS_BUSY) == 'false'
              and js(window, 'document.querySelectorAll("main[aria-label=\\"통계\\"] [data-slot=skeleton]").length') == 0)
-    frames = stop_recording(window)
+    frames = stop_recording(window, lambda frame: frame['skeletons'] == 0 and frame['busy'] == [] and frame['boxes']['counts'])
     loading, final = [frame for frame in frames if frame['skeletons']], frames[-1]
     assert loading and final['skeletons'] == 0 and final['busy'] == []
     assert len(final['boxes']['cards']) == 4 and final['boxes']['counts'] and final['boxes']['chart'] is None
@@ -226,7 +229,8 @@ def test_period_change_keeps_previous_result_and_shows_only_pending_status(open_
     release.set()
     wait_for(lambda: page.result['period']['days'] == 365 and settled(window)
              and js(window, 'document.querySelector("[data-statistics-status] p").textContent') != previous)
-    frames = stop_recording(window)
+    current = js(window, 'document.querySelector("[data-statistics-status] p").textContent')
+    frames = stop_recording(window, lambda frame: frame['description'] == current and frame['pending'] == '' and frame['busy'] == [])
     final = frames[-1]
     assert any(frame['pending'] for frame in frames) and final['pending'] == ''
     for frame in frames:
@@ -248,7 +252,7 @@ def test_failed_first_calculation_ends_waiting_and_retry_recovers(open_window, c
     # 실패는 끝난 상태다. 자리 표시·aria-busy·기다림 표시를 끝내고 오류 안내와 결과 없음 안내를 보인다.
     failed_at = js(window, 'performance.now()')
     wait_for(lambda: js(window, 'performance.now()') - failed_at > 600)
-    frames = [frame for frame in stop_recording(window) if frame['t'] >= failed_at]
+    frames = [frame for frame in stop_recording(window, lambda frame: frame['t'] > failed_at + 600) if frame['t'] >= failed_at]
     assert frames
     for frame in frames:
         assert frame['skeletons'] == 0 and frame['busy'] == [] and frame['pending'] == '', frame
