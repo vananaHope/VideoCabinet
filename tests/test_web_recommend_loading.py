@@ -119,6 +119,18 @@ def recommendations(core):
     finish(core, third)
 
 
+LONG_TITLE = '공백없는아주긴기준영상제목' * 6
+
+
+def long_title_recommendations(core):
+    # 긴 제목의 첫 영상을 다 보고 세 영상에 같은 태그를 붙여, 첫 줄이 『긴 제목』을 봤다면 줄(나머지 두 영상)이 된다.
+    source = core.videos()[0]
+    core.rename_video(source.id, LONG_TITLE)
+    finish(core, source)
+    for video in core.videos():
+        core.add_video_tag(video.id, '자연다큐멘터리')
+
+
 def stop_recording(window):
     js(window, 'window.__stopRecommendFrames = true')
     return json.loads(js(window, 'JSON.stringify(window.__recommendFrames)'))
@@ -130,10 +142,13 @@ def elapse(window, milliseconds):
     wait_for(lambda: js(window, 'performance.now()') - start > milliseconds)
 
 
-@pytest.mark.parametrize('recommended', [True, False], ids=['rows', 'empty'])
-def test_first_display_placeholder_keeps_header_status_and_first_row(open_window, core, recommended):
-    if recommended:
+@pytest.mark.parametrize('case', ['rows', 'long-title', 'empty'])
+def test_first_display_placeholder_keeps_header_status_and_first_row(open_window, core, case):
+    recommended = case != 'empty'
+    if case == 'rows':
         recommendations(core)
+    elif case == 'long-title':
+        long_title_recommendations(core)
     else:
         # 모든 영상을 관심 없음으로 빼 추천 줄이 하나도 없게 한다.
         for video in core.videos():
@@ -162,6 +177,16 @@ def test_first_display_placeholder_keeps_header_status_and_first_row(open_window
             assert (frame['boxes']['header'], frame['boxes']['status']) == (final['boxes']['header'], final['boxes']['status']), frame
     if not recommended:
         assert final['boxes']['list'] is None and EMPTY in final['text']
+    if case == 'long-title':
+        # 긴 줄 제목은 한 줄로 말줄임하고 개수는 그대로 보인다. 전체 제목은 줄 이름과 마우스 올림 제목에 남는다.
+        header = json.loads(js(window, """JSON.stringify((() => {
+          const row = document.querySelector('#recommendations [role=row]'), title = row.querySelector('[role=rowheader] h2')
+          const count = row.querySelector('[role=rowheader] > span')
+          return { label: row.getAttribute('aria-label'), title: title.title, text: title.textContent,
+            truncated: title.scrollWidth > title.clientWidth, count: count.textContent, countWidth: count.getBoundingClientRect().width }
+        })())"""))
+        assert header['truncated'] and header['count'] == '2개' and header['countWidth'] > 0, header
+        assert LONG_TITLE in header['title'] and LONG_TITLE in header['text'] and header['label'] == f"{header['text']} · 2개", header
 
 
 def test_dismiss_keeps_rows_while_waiting_and_shows_pending_status(open_window, core):

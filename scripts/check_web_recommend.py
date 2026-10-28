@@ -472,8 +472,12 @@ def screenshots():
         core.add_video_tag(target.id, name)
     core.add_video_tag(other.id, f'긴태그이름0' + '자연다큐멘터리' * 4)
     window = make_window(core)
+    placeholder = show_placeholder(window)
+    capture(window, 'recommend-long-placeholder')
     page = open_recommend(window)
     capture(window, 'recommend-long')
+    # 긴 기준 영상 제목도 한 줄 말줄임이라 자리 표시와 첫 줄 머리·카드 줄·첫 카드 경계가 같다.
+    assert read(window, BOXES) == placeholder, (placeholder, read(window, BOXES))
     layouts['long'] = layout(window)
     row, = layouts['long']['rows']
     assert row['cards'] == 2 and not row['cardOverflow'] and len(row['cardHeights']) == 1, row
@@ -485,8 +489,12 @@ def screenshots():
       const count = document.querySelector('#recommendations [role=rowheader] > span');
       return count.getBoundingClientRect().height <= parseFloat(getComputedStyle(count).lineHeight) + 1;
     })()"""), '긴 기준 영상 제목 옆 개수는 한 줄로 유지한다'
+    assert read(window, """(() => {
+      const title = document.querySelector('#recommendations [role=rowheader] h2');
+      return title.scrollWidth > title.clientWidth && title.title === title.textContent;
+    })()"""), '긴 줄 제목은 한 줄 말줄임, 마우스를 올리면 전체 제목'
     close(window)
-    checks.append('긴 제목·긴 이유: 카드 폭·높이 유지, 말줄임과 두 줄 자름')
+    checks.append('긴 제목·긴 이유: 카드 폭·높이 유지, 말줄임과 두 줄 자름, 줄 제목 한 줄 말줄임으로 자리 표시와 경계 동일')
 
 
 class FakePlayer:

@@ -84,12 +84,13 @@ export default function StatisticsPage() {
   const result = state.result ?? undefined
   const data = result?.period
   // 첫 결과 전에는 결과 자리에 자리 표시를 둔다. 탭을 열면 바로 계산을 시작하므로 첫 프레임부터 보인다.
+  // 결과가 오며 아래 구역이 붙어 스크롤바가 생겨도 폭이 같도록 main은 스크롤바 자리를 늘 잡는다(scroll-stable).
   // 실패하면 자리 표시를 끝내고 오류 안내를 따른다. 다시 계산할 때는 이전 결과를 그대로 두고 기다림 표시만 보인다.
   const failed = !!(error || state.message)
   const firstPending = !result && !failed
   const description = section === "inventory" ? "현재 라이브러리 현황 · 기간 선택과 무관" : data ? `${formatDate(data.start_date)} ~ ${formatDate(data.end_date)} · 1회 평균 ${duration(data.average_seconds)}` : ""
   const content = section === "inventory" ? <Inventory inventory={result?.inventory} library={data?.library} /> : <Activity result={result} metric={metric} onMetric={setMetric} onPlay={play} />
-  return <main ref={root} aria-label="통계" className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+  return <main ref={root} aria-label="통계" className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-y-auto scroll-stable p-4">
     <PageHeader title="시청 통계" description="오늘을 포함한 로컬 날짜 기준 · 틀어보기와 모아보기 복습 제외" actions={<Tabs label="통계 기간" value={String(state.days)} items={periods} onChange={choose} />} />
     {/* 표시 중인 결과의 범위와 기다림 표시를 한 줄에 둔다. 줄 높이는 문구가 생기고 사라져도 같다. */}
     <div data-statistics-status className="flex h-5 min-w-0 shrink-0 items-center gap-3 text-sm text-muted-foreground">

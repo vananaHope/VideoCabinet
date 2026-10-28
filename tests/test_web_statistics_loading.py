@@ -41,6 +41,7 @@ FRAME_RECORDER = """(() => {
           results: box(results)?.slice(0, 3) ?? null,
           cards: card ? [...card.parentElement.children].map(box) : null,
           chart: box(results?.querySelector('[data-slot=chart], [data-chart-placeholder]')),
+          counts: box(results?.querySelector('[data-statistics-inventory] > section')),
         },
         skeletons: main.querySelectorAll('[data-slot=skeleton]').length,
         busy: [...main.querySelectorAll('[aria-busy=true]')].map(element => element.hasAttribute('data-statistics-results') ? 'results' : element.tagName),
@@ -175,6 +176,32 @@ def test_first_calculation_shows_placeholder_without_moving_layout(open_window, 
         assert not any(zero in final['text'] for zero in ZERO_TEXTS)
     else:
         assert all(zero in final['text'] for zero in ZERO_TEXTS)
+
+
+def test_inventory_placeholder_keeps_card_row_and_counts_section(open_window, hold, core):
+    watch(core, core.videos()[0])
+    started, release = hold()
+    window = open_window()
+    window.navigate_web_tab('statistics')
+    wait_for(started.is_set)
+    wait_for(lambda: js(window, PENDING) == '30일 시청 기록을 계산하고 있어요…')
+    # 첫 계산 중에 라이브러리 현황 구역으로 바꾼다. 숫자 카드와 관리 현황이 자리 표시로 보인다.
+    click(window, 'document.querySelector(\'nav[aria-label="통계 구역"] [data-tab="inventory"]\')')
+    wait_for(lambda: js(window, 'document.querySelectorAll("[data-statistics-inventory] [data-slot=skeleton]").length') > 0)
+    js(window, 'window.__statisticsFrames.length = 0')
+    cleared = js(window, 'performance.now()')
+    wait_for(lambda: js(window, 'performance.now()') - cleared > 100)
+
+    release.set()
+    wait_for(lambda: js(window, RESULTS_BUSY) == 'false'
+             and js(window, 'document.querySelectorAll("main[aria-label=\\"통계\\"] [data-slot=skeleton]").length') == 0)
+    frames = stop_recording(window)
+    loading, final = [frame for frame in frames if frame['skeletons']], frames[-1]
+    assert loading and final['skeletons'] == 0 and final['busy'] == []
+    assert len(final['boxes']['cards']) == 4 and final['boxes']['counts'] and final['boxes']['chart'] is None
+    for frame in frames:
+        # 머리글·상태 줄·구역 탭·결과 시작·숫자 카드 줄·관리 현황 구역의 경계가 자리 표시와 결과에서 같다.
+        assert frame['boxes'] == final['boxes'], frame
 
 
 def test_period_change_keeps_previous_result_and_shows_only_pending_status(open_window, hold, core):
