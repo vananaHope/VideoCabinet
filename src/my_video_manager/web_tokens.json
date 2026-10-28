@@ -41,6 +41,12 @@
     "library-card-medium": "16rem",
     "library-card-large": "22rem"
   },
+  "motion": {
+    "motion-duration-quick": "100ms",
+    "motion-duration-enter": "150ms",
+    "motion-ease": "cubic-bezier(0.23, 1, 0.32, 1)",
+    "motion-enter-scale": "0.97"
+  },
   "typography": {
     "font-sans": "\"Malgun Gothic\", sans-serif",
     "text-xs": "0.75rem",

@@ -60,7 +60,7 @@ function SelectContent({
         position={position}
         sideOffset={sideOffset}
         className={cn(
-          "relative z-50 max-h-(--radix-select-content-available-height) max-w-(--radix-select-content-available-width) min-w-(--radix-select-trigger-width) overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md",
+          "relative z-50 max-h-(--radix-select-content-available-height) max-w-(--radix-select-content-available-width) min-w-(--radix-select-trigger-width) origin-(--radix-select-content-transform-origin) animate-layer-enter overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md",
           className
         )}
         // Esc는 목록만 닫는다. 포털 안 키 입력이 React 트리를 타고 대화상자·페이지 단축키로 새지 않게 막는다.

@@ -17,7 +17,8 @@ export type NoticeTone = "error" | "warning" | "info" | "success"
 const icons = { error: CircleAlert, warning: TriangleAlert, info: Info, success: CircleCheck } as const
 const rank: Record<NoticeTone, number> = { error: 0, warning: 1, success: 2, info: 3 }
 
-const noticeVariants = cva("flex min-w-0 items-start rounded-lg border text-foreground", {
+// 안내는 나타날 때만 투명도로 들어온다. 자리는 처음부터 차지하므로 전환이 배치를 밀지 않는다.
+const noticeVariants = cva("flex min-w-0 animate-fade-enter items-start rounded-lg border text-foreground", {
   variants: {
     tone: {
       error: "border-destructive/60 bg-destructive/10",

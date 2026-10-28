@@ -73,7 +73,7 @@ export function KeyGuideDialog({ bridge, tab, open, onOpenChange }: { bridge: Sh
   const groups = pageKeyGuides[tab as keyof typeof pageKeyGuides] ?? []
   return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal>
     {/* 내용을 오버레이 안에 두어 작은 창에서도 창 안에 맞추고 본문만 스크롤한다. 바깥을 누르면 닫힌다. */}
-    <Dialog.Overlay className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
+    <Dialog.Overlay className="fixed inset-0 z-50 flex animate-fade-enter items-center justify-center bg-background/80 p-4">
       {/* 초점이 뒤 페이지에 남아 있어도 닫기 키가 페이지 키(모아보기 Esc 복귀 등)로 이어지지 않게 한다. */}
       <Dialog.Content className="flex max-h-full w-full max-w-4xl flex-col gap-4 rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg" onEscapeKeyDown={event => event.stopPropagation()}
         onCloseAutoFocus={event => {
