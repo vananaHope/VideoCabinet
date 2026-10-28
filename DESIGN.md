@@ -320,7 +320,7 @@ components:
 - **Do** 색·간격·둥글기·글자 크기를 바꿀 때는 `src/my_video_manager/web_tokens.json`을 고치고 `scripts/generate_web_types.py`로 `tokens.css`를 다시 만든다(**The Token Source Rule**).
 - **Do** 모든 색을 테마 토큰 유틸리티(`bg-card`, `text-muted-foreground`, `border-ring` 등)로 쓴다.
 - **Do** 특별한 모양이 필요하면 쓰는 곳에서 덮어쓰지 말고, `cva` variant를 가진 전용 컴포넌트를 만든다.
-- **Do** 선택과 키보드 초점은 `ring`(#818cf8)으로, 호버는 테두리·면 밝기(`muted`)로 구별한다. 선택 면은 `accent`다.
+- **Do** 선택과 키보드 초점은 `ring`(#818cf8)으로, 호버는 면 한 단계(목록 행 `muted`, 영상·추천 카드 `popover`)로 구별한다. 선택 면은 `accent`다.
 - **Do** 썸네일·카드·패널의 크기를 내용이 오기 전에 확보한다.
 - **Do** 1100×720 offscreen 스크린샷(`scripts/check_web_*.py --offscreen`)으로 결과를 확인한다.
 
