@@ -1,7 +1,14 @@
 """고정된 과거 DDL로 DB를 만든다. 현재 코드의 열 삭제로 이전 버전을 흉내 내지 않는다."""
+from collections import Counter
 from contextlib import closing
 from pathlib import Path
 import sqlite3
+
+
+def snapshot_rows(db, columns, table):
+    """표의 행을 값과 중복 개수로 돌려준다. 행의 물리 순서는 스키마가 보증하지 않으며,
+    이전이 AUTOINCREMENT 표를 다시 만들면 `sqlite_sequence`의 행 순서가 바뀐다."""
+    return Counter(db.execute(f'SELECT {columns} FROM "{table}"').fetchall())
 
 
 def frozen_database(database, version, *, copy_from=None):

@@ -84,18 +84,18 @@ class QueueOrder:
     def __init__(self, connect):
         self.connect = connect
         with connect() as db:
-            db.executescript("""
+            db.executescript(f"""
                 CREATE TABLE IF NOT EXISTS subtitle_queue_order (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
                     automatic INTEGER NOT NULL,
                     promoted INTEGER NOT NULL DEFAULT 0,
-                    kind TEXT NOT NULL DEFAULT 'transcription',
+                    kind TEXT NOT NULL DEFAULT '{TRANSCRIPTION}',
                     UNIQUE(video_id, kind)
                 );
                 CREATE TABLE IF NOT EXISTS subtitle_queue_hidden (
                     video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
-                    kind TEXT NOT NULL DEFAULT 'transcription',
+                    kind TEXT NOT NULL DEFAULT '{TRANSCRIPTION}',
                     PRIMARY KEY(video_id, kind)
                 );
             """)
@@ -114,8 +114,8 @@ class QueueOrder:
         """같은 종류의 후속 단계까지 사라진 작업만 순번과 앞당기기를 끝낸다."""
         db.execute("DELETE FROM subtitle_queue_order WHERE video_id = ? AND kind = ? "
                    "AND NOT EXISTS (SELECT 1 FROM subtitle_queue WHERE video_id = ? AND kind = ?) "
-                   "AND (? != 'transcription' OR NOT EXISTS (SELECT 1 FROM translation_queue WHERE video_id = ?))",
-                   (video_id, kind, video_id, kind, kind, video_id))
+                   "AND (kind != ? OR NOT EXISTS (SELECT 1 FROM translation_queue WHERE video_id = ?))",
+                   (video_id, kind, video_id, kind, TRANSCRIPTION, video_id))
 
     def sort(self, entries):
         if not entries:

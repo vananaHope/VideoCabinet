@@ -4,7 +4,7 @@ import zipfile
 
 import pytest
 
-from legacy_schema import replace_with_frozen
+from legacy_schema import replace_with_frozen, snapshot_rows
 from my_video_manager.library import LIBRARY_DB_VERSION, migrate_library
 from test_translation import setup, source
 
@@ -19,7 +19,7 @@ def test_fixed_old_schema_migrates_with_progress_and_pre_upgrade_backup(setup, t
     with closing(sqlite3.connect(core.database)) as db:
         tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
         columns = {table: ','.join('"' + r[1] + '"' for r in db.execute(f'PRAGMA table_info("{table}")')) for table in tables}
-        before = {t: db.execute(f'SELECT {columns[t]} FROM "{t}"').fetchall() for t in tables}
+        before = {t: snapshot_rows(db, columns[t], t) for t in tables}
         assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='translation_glossary'").fetchone()
     upgraded = reopen()
     archive, = upgraded.automatic_backups()
@@ -31,7 +31,7 @@ def test_fixed_old_schema_migrates_with_progress_and_pre_upgrade_backup(setup, t
     for path, expected in ((backup, version), (core.database, LIBRARY_DB_VERSION)):
         with closing(sqlite3.connect(path)) as db:
             assert db.execute('PRAGMA user_version').fetchone()[0] == expected
-            assert {t: db.execute(f'SELECT {columns[t]} FROM "{t}"').fetchall() for t in tables} == before
+            assert {t: snapshot_rows(db, columns[t], t) for t in tables} == before
             assert db.execute('PRAGMA foreign_key_check').fetchall() == []
     assert upgraded.translation_queue()[0].completed_lines == 2
     assert upgraded.process_next_translation().completed_lines == 4

@@ -137,7 +137,7 @@ class Subtitles:
         self._activity = Lock()
         self.review = None
         with connect() as db:
-            db.executescript("""
+            db.executescript(f"""
                 CREATE TABLE IF NOT EXISTS subtitle_queue (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     video_id INTEGER NOT NULL REFERENCES videos(id),
@@ -145,7 +145,7 @@ class Subtitles:
                     requested_at TEXT NOT NULL,
                     state TEXT NOT NULL DEFAULT 'queued',
                     error TEXT,
-                    kind TEXT NOT NULL DEFAULT 'transcription',
+                    kind TEXT NOT NULL DEFAULT '{TRANSCRIPTION}',
                     UNIQUE(video_id, kind)
                 );
                 CREATE TABLE IF NOT EXISTS transcripts (
@@ -166,7 +166,8 @@ class Subtitles:
                     UNIQUE(transcript_id, ordinal)
                 );
             """)
-            db.execute("UPDATE subtitle_queue SET state = 'queued' WHERE state = 'transcribing' AND kind = 'transcription'")
+            db.execute("UPDATE subtitle_queue SET state = 'queued' WHERE state = 'transcribing' AND kind = ?",
+                       (TRANSCRIPTION,))
 
     def request(self, video_id: int, spoken_language: str | None, *, automatic=False) -> SubtitleQueueEntry | None:
         language = normalize_spoken_language(spoken_language)
@@ -174,7 +175,8 @@ class Subtitles:
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone():
                 raise ValueError("영상을 찾을 수 없습니다.")
-            old = db.execute("SELECT * FROM subtitle_queue WHERE video_id = ? AND kind = 'transcription'", (video_id,)).fetchone()
+            old = db.execute("SELECT * FROM subtitle_queue WHERE video_id = ? AND kind = ?",
+                             (video_id, TRANSCRIPTION)).fetchone()
             if automatic and (old or db.execute("SELECT 1 FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()):
                 return self._entry(old) if old else None
             is_range = self.review and self.review.range_for(old["id"]) if old else False
@@ -182,7 +184,7 @@ class Subtitles:
                 self._order.request(db, video_id, automatic=automatic)
                 return self._entry(old)  # 같은 요청의 더블클릭은 순서를 바꾸지 않는다.
             self._order.request(db, video_id, automatic=automatic, renew=True)
-            db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = 'transcription'", (video_id,))
+            db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, TRANSCRIPTION))
             cursor = db.execute(
                 "INSERT INTO subtitle_queue(video_id, spoken_language, requested_at) VALUES (?, ?, ?)",
                 (video_id, language, self._clock().isoformat()),
@@ -260,7 +262,8 @@ class Subtitles:
             if not db.in_transaction:
                 db.execute("BEGIN")
             row = db.execute("SELECT * FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
-            queue = db.execute("SELECT state FROM subtitle_queue WHERE video_id = ? AND kind = 'transcription'", (video_id,)).fetchone()
+            queue = db.execute("SELECT state FROM subtitle_queue WHERE video_id = ? AND kind = ?",
+                               (video_id, TRANSCRIPTION)).fetchone()
             count = db.execute("SELECT COUNT(*) FROM transcript_lines WHERE transcript_id = ?",
                                (row["id"],)).fetchone()[0] if row else 0
             return TranscriptSummary(row is not None, _transcript_language(row, count) if row else None,
