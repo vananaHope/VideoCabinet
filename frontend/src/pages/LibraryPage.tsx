@@ -12,7 +12,7 @@ import { DetailPanel } from "@/components/detail-panel"
 import { RandomPlayButton } from "@/components/random-play-button"
 import { RandomTagDialog } from "@/components/random-tag-dialog"
 import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
-import { libraryFilterDefaults, type LibraryData, type DetailsData, type HighlightData, type LibraryKeyBindingsData, type LibraryViewOptions, type TagCandidatesData } from "@/bridge-types"
+import { libraryViewDefaults, type LibraryData, type DetailsData, type HighlightData, type LibraryKeyBindingsData, type LibraryViewOptions, type TagCandidatesData } from "@/bridge-types"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
@@ -26,10 +26,6 @@ export const keyGuide: readonly KeyGuideGroup[] = [
     { keys: ["Enter", "메뉴 키"], label: "태그 칩 메뉴 (이 태그에서 무작위 재생)" },
   ] },
 ]
-
-// 첫 데이터가 오기 전 툴바를 같은 자리·같은 크기로 그릴 때 쓰는 기본 보기 조건(library_views.default_options와 같다).
-// 저장된 조건은 첫 스냅숏이 덮어쓴다. 저장된 카드 크기·조건을 먼저 받는 일은 #267이 맡는다.
-const loadingOptions: LibraryViewOptions = { ...libraryFilterDefaults, tags: [], mode: "all", folder: "", sort: "title", descending: false, card_size: "medium", collapsed_folders: [] }
 
 export default function LibraryPage() {
   const [bridge, setBridge] = useState<LibraryBridge | null>(null)
@@ -137,7 +133,8 @@ export default function LibraryPage() {
 
   const byId = useMemo(() => new Map(data?.videos.map(video => [video.id, video]) ?? []), [data?.videos])
   const visible = useMemo(() => data?.visibleIds.flatMap(id => byId.get(id) ?? []) ?? [], [data?.visibleIds, byId])
-  const options = data?.options ?? loadingOptions
+  // 첫 데이터 전에는 기본 보기 조건으로 툴바를 같은 자리·같은 크기에 그린다. 저장된 조건을 먼저 받는 일은 #267이 맡는다.
+  const options = data?.options ?? libraryViewDefaults
   const foldersOpen = data?.options.mode === 'folders'
   const resultScope = useMemo(() => data?.visibleIds.join(",") ?? "", [data?.visibleIds])
 

@@ -21,17 +21,21 @@ from my_video_manager.ui import MainWindow
 from my_video_manager.web_shell import WebShellHost
 
 # 문서가 만들어질 때부터 그린 프레임마다 사용자가 보는 배치를 기록한다.
-# hold면 웹 채널의 첫 라이브러리 스냅숏 응답을 window.__releaseLibrary()까지 붙잡는다.
+# hold면 웹 채널의 첫 라이브러리 스냅숏 응답을 window.__releaseLibrary()까지 붙잡고, fail이면 오류 응답으로 바꾼다.
 # Python 슬롯 안에서 기다리면 WebEngine 작업이 멈추므로 응답은 웹 쪽에서 늦춘다.
 FRAME_RECORDER = """(() => {
   const frames = window.__libraryFrames = []
   let held = %(hold)s, release = null, channelClass
+  const failed = %(fail)s
   window.__releaseLibrary = () => { held = false; release?.() }
   Object.defineProperty(window, 'QWebChannel', { configurable: true, get: () => channelClass, set(Original) {
     channelClass = function (transport, ready) {
       return new Original(transport, channel => {
         const library = channel.objects.library, snapshot = library.snapshot
-        library.snapshot = reply => snapshot.call(library, json => { if (held) release = () => reply(json); else reply(json) })
+        library.snapshot = reply => snapshot.call(library, json => {
+          if (failed) json = JSON.stringify({ error: '라이브러리를 읽지 못했습니다.' })
+          if (held) release = () => reply(json); else reply(json)
+        })
         ready(channel)
       })
     }
@@ -89,24 +93,25 @@ def js(window, source):
 
 @pytest.fixture
 def open_window(core, monkeypatch, qapp):
-    """프레임 기록을 켠 MainWindow를 연다. hold_data면 첫 라이브러리 데이터가 오지 않은 채로 돌려준다."""
+    """프레임 기록을 켠 MainWindow를 연다. hold_data면 첫 라이브러리 데이터가 오지 않은 채로 돌려주고, fail_data면 첫 데이터가 실패한다."""
     windows = []
     start = WebShellHost.start
-    hold = []
+    first_reply = []
 
     def record_frames(host):
         script = QWebEngineScript()
         script.setName('library-frames')
         script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        script.setSourceCode(FRAME_RECORDER % {'hold': 'true' if hold[-1] else 'false'})
+        hold, fail = first_reply[-1]
+        script.setSourceCode(FRAME_RECORDER % {'hold': json.dumps(hold), 'fail': json.dumps(fail)})
         host.engine_page.scripts().insert(script)
         start(host)
 
     monkeypatch.setattr(WebShellHost, 'start', record_frames)
 
-    def create(*, hold_data=False, library=None):
-        hold.append(hold_data)
+    def create(*, hold_data=False, fail_data=False, library=None):
+        first_reply.append((hold_data, fail_data))
         window = MainWindow(library or core, player_factory=Player)
         windows.append(window)
         window.show()
@@ -201,10 +206,23 @@ def test_empty_library_message_appears_only_after_data(open_window, tmp_path):
                     database=tmp_path / 'empty/library.sqlite3')
     window = open_window(hold_data=True, library=empty)
     wait_for(lambda: js(window, PENDING) == '불러오는 중…')
+    assert '라이브러리가 비어 있습니다' not in js(window, PAGE_TEXT)
     release(window)
     wait_for(lambda: '라이브러리가 비어 있습니다' in js(window, PAGE_TEXT))
-    recorded = stop_recording(window)
-    assert not any('라이브러리가 비어 있습니다' in frame['text'] or '선택한 영상 없음' in frame['text']
-                   for frame in recorded['frames'] if frame['busy'])
+    frames = stop_recording(window)['frames']
+    # 개수가 처음 보인 프레임 전까지가 데이터 전이다.
+    arrived = next(index for index, frame in enumerate(frames) if '등록 영상' in frame['text'])
+    assert arrived > 0
+    assert not any('라이브러리가 비어 있습니다' in frame['text'] or '선택한 영상 없음' in frame['text'] for frame in frames[:arrived])
     final = js(window, PAGE_TEXT)
     assert '선택한 영상 없음' in final and '등록 영상 0개 · 표시 0개' in final
+
+
+def test_failed_first_data_shows_error_without_false_empty_state(open_window):
+    window = open_window(fail_data=True)
+    wait_for(lambda: '라이브러리를 읽지 못했습니다.' in js(window, PAGE_TEXT))
+    text = js(window, PAGE_TEXT)
+    # 실패하면 기다림 표시를 멈추고 오류 안내를 보인다. 비었다는 거짓 안내나 누를 수 있는 컨트롤은 없다.
+    assert js(window, PENDING) == ''
+    assert '라이브러리가 비어 있습니다' not in text and '선택한 영상 없음' not in text and '0개' not in text
+    assert js(window, "document.querySelector('[aria-label=\"영상 제목 빠른 검색\"]').disabled")
