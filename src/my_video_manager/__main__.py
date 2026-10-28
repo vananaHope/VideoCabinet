@@ -10,7 +10,7 @@ def main():
         from .transcription import main as transcription_main
         return transcription_main(sys.argv[2:])
     parser = argparse.ArgumentParser(description="개인 영상 라이브러리")
-    from .app_version import current_version
+    from .app_version import DISPLAY_NAME, current_version
     parser.add_argument('--version', action='version', version=current_version())
     parser.add_argument("--data-dir", type=Path, help="데이터를 저장할 폴더 (기본: 사용자 프로필/.my-video-manager)")
     args = parser.parse_args()
@@ -56,7 +56,7 @@ def main():
         import logging
         logging.getLogger(__name__).exception('앱 시작 실패')
         message = str(error)
-        QMessageBox.critical(None, "시작 실패", message)
+        QMessageBox.critical(None, DISPLAY_NAME, f"시작하지 못했습니다.\n{message}")
         if instance is not None:
             instance.close()
         return 1
@@ -68,8 +68,8 @@ def main():
         instance.close()
         program, arguments = restart_command(data_directory)
         if not QProcess.startDetached(program, arguments)[0]:
-            QMessageBox.critical(None, '재시작 실패',
-                                 '앱을 다시 실행해 주세요. 백업 복원 예약은 그대로 남아 있습니다.')
+            QMessageBox.critical(None, DISPLAY_NAME,
+                                 '다시 시작하지 못했습니다. 앱을 다시 실행해 주세요. 백업 복원 예약은 그대로 남아 있습니다.')
             return 1
     return status
 

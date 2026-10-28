@@ -21,7 +21,7 @@ class TypeAlias:
 @dataclass(frozen=True)
 class Constant:
     name: str
-    values: tuple
+    values: tuple | str
     typescript_type: str | None = None
 
 

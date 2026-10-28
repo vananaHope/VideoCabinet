@@ -3,6 +3,7 @@
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QStyle, QSystemTrayIcon
 
+from .app_version import DISPLAY_NAME
 from .core import CommandType
 from .key_display import display_keys
 
@@ -16,7 +17,7 @@ class TrayControls(QObject):
         self._emergency_hidden = False
         self._emergency_focus = None
         self.icon = QSystemTrayIcon(window.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay), self)
-        self.icon.setToolTip("영상 라이브러리 · 자막 대기열")
+        self.icon.setToolTip(f"{DISPLAY_NAME} · 자막 대기열")
         menu = QMenu(window)
         menu.addAction("열기", self.open)
         self.hide_action = menu.addAction("창 숨기기", self.hide_window)
@@ -111,13 +112,13 @@ class TrayControls(QObject):
 
     def notify(self, message):
         """창이 숨었을 때 알릴 일. 트레이 풍선으로 보인다."""
-        self.icon.showMessage("영상 라이브러리", message)
+        self.icon.showMessage(DISPLAY_NAME, message)
 
     def notify_completion(self):
         counts = self.core.take_subtitle_queue_completion()
         if counts is not None:
             no_speech = f" · 말소리 없음 {counts.no_speech}개" if counts.no_speech else ""
-            self.icon.showMessage("자막 대기열 처리 종료",
+            self.icon.showMessage(DISPLAY_NAME, "자막 대기열 처리를 마쳤습니다. "
                                   f"이번 처리: 완료 {counts.completed}개{no_speech} · 실패 {counts.failed}개")
 
     def resume(self):
@@ -175,7 +176,7 @@ class TrayControls(QObject):
         except Exception as error:
             self.quitting = False
             self.resume()
-            QMessageBox.warning(window, "창 닫기 취소", str(error))
+            QMessageBox.warning(window, DISPLAY_NAME, f"창 닫기를 취소했습니다.\n{error}")
             event.ignore()
             return
         if self.quitting:
@@ -204,4 +205,4 @@ class TrayControls(QObject):
             window.pages.setCurrentIndex(0)
             event.ignore()
             if self.core.acknowledge_tray_notice():
-                self.icon.showMessage("영상 라이브러리", "트레이에서 계속 처리합니다. 트레이 메뉴에서 열거나 완전 종료할 수 있습니다.")
+                self.icon.showMessage(DISPLAY_NAME, "트레이에서 계속 처리합니다. 트레이 메뉴에서 열거나 완전 종료할 수 있습니다.")

@@ -1,6 +1,7 @@
 """웹 셸 공통 브리지 계약."""
 
 from . import web_shell_data, web_update_data
+from .app_version import DISPLAY_NAME
 from .web_contract_types import Argument, BridgeContract, Constant, TypeAlias
 from .web_tabs import TABS
 
@@ -18,7 +19,7 @@ SHELL = BridgeContract(
     aliases=(TypeAlias('Tab', tuple(name for name, _ in TABS)),
              TypeAlias('UpdateChoice', ('update', 'later', 'skip', 'unskip')),
              TypeAlias('UpdateAction', ('cancel', 'install', 'later', 'retry', 'dismiss'))),
-    constants=(Constant('tabs', TABS),),
+    constants=(Constant('tabs', TABS), Constant('appName', DISPLAY_NAME)),
     data_types=(web_shell_data.ShellData, web_shell_data.KeyGuideEntryData, web_shell_data.KeyGuideData,
                 web_update_data.UpdateNoticeData, web_update_data.UpdateInstallResultData,
                 web_update_data.UpdateInstallData, web_update_data.ShellUpdateData),

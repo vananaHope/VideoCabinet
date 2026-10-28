@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QSystemTra
 from test_emergency_hide_ui import app, window, key, emergency_key, play_to_twenty_seconds
 from test_web_dialogs import state, within
 from qt_wait import wait_for
+from my_video_manager.app_version import DISPLAY_NAME
 
 
 def js(window, source):
@@ -375,13 +376,13 @@ def test_playback_warning_closes_and_caller_does_not_resume_playback(window, mon
 
 
 def test_close_cancel_warning_closes_and_quit_stays_cancelled(window):
-    """완전 종료가 막혀 '창 닫기 취소' 경고가 뜬 채 탈출: 경고를 닫고 숨기며, 종료는 취소된 채 작업이 이어진다."""
+    """완전 종료가 막혀 창 닫기 취소 경고가 뜬 채 탈출: 경고를 닫고 숨기며, 종료는 취소된 채 작업이 이어진다."""
     play_to_twenty_seconds(window)
     window.tray.quit_blocker = lambda: "백업 작업이 끝난 뒤 완전 종료해 주세요."
     try:
         seen = press_in_modal(window, QMessageBox)
         window.tray.quit()
-        assert seen == {"title": "창 닫기 취소", "inside_exec": (False, False)}
+        assert seen == {"title": DISPLAY_NAME, "inside_exec": (False, False)}
         assert not window.isVisible() and not window.tray.quitting
         assert window.player.paused and window.balloons == []
         assert window.subtitles.timer.isActive()
@@ -391,7 +392,7 @@ def test_close_cancel_warning_closes_and_quit_stays_cancelled(window):
 
 
 def test_question_warning_closes_as_cancel(window):
-    """질문형 경고('받아쓰기 중 종료')는 닫기가 '취소'로 처리돼 종료하지 않는다."""
+    """질문형 경고(받아쓰기 중 종료 확인)는 닫기가 '취소'로 처리돼 종료하지 않는다."""
     class Busy:
         def isRunning(self):
             return True
@@ -402,7 +403,7 @@ def test_question_warning_closes_as_cancel(window):
     try:
         seen = press_in_modal(window, QMessageBox)
         window.tray.quit()
-        assert seen == {"title": "받아쓰기 중 종료", "inside_exec": (False, False)}
+        assert seen == {"title": DISPLAY_NAME, "inside_exec": (False, False)}
         assert not window.isVisible() and not window.tray.quitting
         assert not window.subtitles.stopping and window.subtitles.timer.isActive()
         assert window.balloons == []
