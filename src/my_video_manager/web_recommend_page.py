@@ -1,7 +1,6 @@
 """추천 줄 목록과 재생·관심 없음 작업. 재생 뒤에는 셸이 이 탭으로 돌려보낸다."""
 from PySide6.QtCore import QObject, QTimer
 
-from .recommendation import ROW_LIMIT
 from .web_json import encode
 from .web_page import WebPageController
 from .web_recommend_contract import RECOMMEND
@@ -98,7 +97,7 @@ class WebRecommendPage(WebPageController):
         host.register_page(self)
 
     def payload(self):
-        return dict(loaded=self.loaded, rowLimit=ROW_LIMIT, rows=self.rows, error=self.error)
+        return dict(loaded=self.loaded, rows=self.rows, error=self.error)
 
     def refresh(self):
         try:
@@ -107,8 +106,9 @@ class WebRecommendPage(WebPageController):
                                   self.core.subtitled_video_ids())
             self.error = ''
         except Exception as error:
-            # 추천 계산이 실패해도 다른 탭과 재생은 계속 쓴다. 안내는 이 탭에만 둔다.
-            self.rows, self.error = [], str(error)
+            # 추천 계산이 실패해도 다른 탭과 재생은 계속 쓴다. 안내는 이 탭에만 두고,
+            # 보던 줄은 비우지 않고 그대로 둔다(하던 자리를 잃지 않는다).
+            self.error = str(error)
         self.loaded = True
         self.bridge.changed.emit(encode(self.payload()))
 

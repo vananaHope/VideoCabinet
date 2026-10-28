@@ -12,7 +12,9 @@ from test_web_library_page import window_factory
 from test_web_library_data import core
 from test_library_return_ui import Player
 from qt_wait import wait_for
+from my_video_manager.recommendation import ROW_LIMIT
 from my_video_manager.web_contract import TABS
+from my_video_manager.web_recommend_contract import RECOMMEND
 
 
 def abandon(core, *videos):
@@ -60,7 +62,9 @@ def test_snapshot_lists_rows_with_video_cards_and_reasons(recommend, core):
     window, page = recommend
     first, second, third = core.videos()
     state = json.loads(page.bridge.snapshot())
-    assert state['loaded'] and state['error'] == '' and state['rowLimit'] == 20
+    assert state['loaded'] and state['error'] == ''
+    # 줄 최대 개수는 데이터 전에도 쓰도록 계약 상수로 넘긴다.
+    assert {constant.name: constant.values for constant in RECOMMEND.constants} == {'recommendRowLimit': ROW_LIMIT} and ROW_LIMIT == 20
     assert [(row['kind'], row['title']) for row in state['rows']] == [('continue_watching', '이어 보기')]
     assert {item['video']['id'] for item in state['rows'][0]['items']} == {first.id, second.id}
     item = state['rows'][0]['items'][0]
@@ -135,12 +139,15 @@ def test_show_dismissed_opens_folder_section(recommend):
     assert host.active_tab == 'folders' and requested[-1] == 'folders-dismissed'
 
 
-def test_recommendation_failure_stays_on_recommend_tab(recommend, core, monkeypatch):
+def test_recommendation_failure_stays_on_recommend_tab_and_keeps_rows(recommend, core, monkeypatch):
     window, page = recommend
+    before = rows(page)
+    assert before
     core.settings.set('recommend.revisit_days', -1)
     window.navigate_web_tab('recommend')
     state = json.loads(page.bridge.snapshot())
-    assert state['rows'] == [] and '추천 기간' in state['error']
+    # 다시 계산하다 실패해도 보던 줄은 그대로 두고 오류만 알린다.
+    assert rows(page) == before and '추천 기간' in state['error']
     window.navigate_web_tab('library')
     assert json.loads(window.library_page.bridge.snapshot())['videos']
 
