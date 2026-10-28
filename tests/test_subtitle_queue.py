@@ -1,7 +1,8 @@
 from wait_helpers import UI_READY_TIMEOUT
 
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event
+import sqlite3
+from threading import Event, get_ident
 
 import pytest
 
@@ -296,6 +297,62 @@ def test_remove_active_cancels_only_that_video_and_next_can_run(setup):
         core.process_next_translation()
     assert core.take_subtitle_queue_completion() == (1, 0, 0)
     assert not core.translation_queue()
+
+
+@pytest.mark.parametrize('previous_transcript', [False, True])
+def test_remove_active_while_cancellation_cleanup_holds_writer(setup, monkeypatch, previous_transcript):
+    core, _, (a, b) = setup
+    if previous_transcript:
+        core.request_subtitles(a.id)
+        core.process_next_subtitle()
+    original = core.transcript(a.id)
+    entered, writer_started, release_writer = Event(), Event(), Event()
+
+    class Cancellable(FakeTranscriber):
+        def transcribe(self, path, language, *, cancellation, progress=None):
+            entered.set()
+            assert cancellation.wait(5)
+            raise TranscriberCancelled
+
+    core = reopen(core, Cancellable())
+    core.request_subtitles(a.id)
+    core.request_subtitles(b.id)
+    caller = get_ident()
+    connect = sqlite3.connect
+
+    class ScheduledConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            # DB 어댑터에서 실제 취소 정리 쓰기와 제거의 접근 순서만 고정한다.
+            # 읽기 뒤 쓰기로 승격하면 두 연결이 서로의 잠금을 기다리게 된다.
+            omission = sql.startswith('INSERT') and 'translation_omissions' in sql
+            if get_ident() == caller:
+                if sql in ('BEGIN', 'BEGIN IMMEDIATE') or omission:
+                    assert writer_started.wait(5)
+                if sql == 'BEGIN IMMEDIATE' or omission or sql.startswith('DELETE FROM translation_queue'):
+                    release_writer.set()
+            result = super().execute(sql, parameters)
+            if get_ident() != caller and sql == "UPDATE subtitle_queue SET state = 'queued' WHERE id = ?":
+                writer_started.set()
+                assert release_writer.wait(5)
+            return result
+
+    with ThreadPoolExecutor() as pool:
+        future = pool.submit(core.process_next_subtitle)
+        assert entered.wait(5)
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3, 'connect', lambda *args, **kwargs:
+                          connect(*args, **kwargs, factory=ScheduledConnection))
+            try:
+                core.remove_from_subtitle_queue(a.id)
+            finally:
+                release_writer.set()
+            future.result(5)
+    assert writer_started.is_set()
+    assert [entry.video_id for entry in core.subtitle_queue()] == [b.id]
+    assert all(entry.video_id != a.id for entry in core.translation_queue())
+    assert core.transcript(a.id) == original
+    core = reopen(core, FakeTranscriber())
+    assert core.process_next_subtitle().video_id == b.id
 
 
 def test_completed_removal_and_first_tray_notice_survive_restart(setup):

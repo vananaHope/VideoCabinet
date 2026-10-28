@@ -410,6 +410,9 @@ class Translations:
     def remove(self, video_id, *, source=TRANSCRIPT):
         with self._activity:
             with self._connect() as db:
+                # 출처 조회가 읽기 트랜잭션을 열기 전에 쓰기를 예약한다.
+                # 취소된 받아쓰기의 정리 쓰기와 읽기→쓰기 승격이 교착하지 않게 한다.
+                db.execute("BEGIN IMMEDIATE")
                 original = self.sources.lines(source, video_id, connection=db)
                 if original:
                     db.execute("INSERT OR REPLACE INTO translation_omissions VALUES (?, ?, ?)",
