@@ -81,6 +81,7 @@ def place(window, video_id):
         columns: Number(grid.getAttribute('aria-colcount')), x: c ? Math.round(c.x) : null, y: c ? Math.round(c.y - g.y) : null,
         shown: !!c && c.bottom > g.top && c.top < g.bottom,
         full: !!c && c.top >= g.top + grid.clientTop && c.bottom <= g.top + grid.clientTop + grid.clientHeight,
+        visible: c ? Math.max(0, Math.min(c.bottom, g.top + grid.clientTop + grid.clientHeight) - Math.max(c.top, g.top + grid.clientTop)) : 0,
         max: grid.scrollHeight - grid.clientHeight }})
     }})()"""))
 
@@ -359,11 +360,17 @@ def test_folder_panel_close_from_open_panel_keeps_card_or_clamps_scroll(open_win
     assert window.library_page.selected_id == selected
     # 같은 세로 위치에 두려면 필요한 스크롤. 가능한 범위(0..max) 안이면 같은 위치를 지키고,
     # 밖이면 경계로 제한한다. 차이는 제한한 만큼뿐이다(목록 위아래에 빈 여백을 만들지 않는다).
-    # 선택 카드는 계속 보이고, 닫기 전에 완전히 보였으면 닫은 뒤에도 완전히 보인다.
+    # 선택 카드는 계속 보인다. 닫기 전에 완전히 보였으면 닫은 뒤에도 완전히 보이고,
+    # 일부만 보였으면 보이는 세로 길이가 줄지 않는다(완전히 보이게 하려고 더 움직이지는 않는다).
     # 맨 위 둘째 줄(index 2·3)은 3열의 줄이 2열보다 낮아(카드 폭이 좁다) 같은 자리에 두려면 음수 스크롤이 필요하다.
     # index 2는 새 첫 줄이 되어 319px, index 3은 줄 높이 차이 13px만큼 제한된다.
     desired = closed['top'] + closed['y'] - before['y']
-    assert closed['shown'] and (closed['full'] or not before['full']), (before, closed)
+    assert closed['shown'] and closed['visible'] > 0, (before, closed)
+    if before['full']:
+        assert closed['full'], (before, closed)
+    else:
+        # 줄 높이가 소수 픽셀이라 1px까지 반올림 차이를 둔다.
+        assert closed['visible'] >= before['visible'] - 1, (before, closed)
     actual = 'same' if 0 <= desired <= closed['max'] else 'clamp-top' if desired < 0 else 'clamp-bottom'
     if actual == 'same':
         assert near(closed['y'], before['y']), (before, closed)
@@ -408,6 +415,53 @@ def test_shell_notices_move_off_controls_after_settings_category_changes(open_wi
         wait_for(lambda: not any(overlaps(box(window, SHELL), box(window, selector)) for selector in controls))
         shell = box(window, SHELL)
         assert shell['bottom'] <= page['bottom'] and shell['top'] >= page['top'] and shell['height'] > 100, (category, shell)
+
+
+def count_frames(window):
+    """시험 쪽 탐침: 그린 프레임 수를 센다."""
+    js(window, """(() => { window.__frames = 0
+      const tick = () => { window.__frames++; requestAnimationFrame(tick) }
+      requestAnimationFrame(tick)
+      return true })()""")
+
+
+def test_shell_notices_move_off_controls_after_page_notice_expands(open_window):
+    # 긴 페이지 안내를 펼치면 안내 묶음이 안에서 스크롤하게 되어, 그 안의 단추는 더 이상 고정 조작 요소가 아니다.
+    # 창 크기 변경 없이 펼치기만으로 셸 묶음이 다시 골라 하단 작업 단추를 덮지 않는 모서리로 옮긴다.
+    window = open_window()
+    show_long_shell_notices(window)
+    window.navigate_web_tab('queue')
+    wait_for(lambda: window.web_host.active_tab == 'queue' and 'queue' in window.web_host._ready_pages)
+    page = '[data-page="queue"]'
+    window.web_host.controllers['queue'].bridge.bulkFinished.emit(json.dumps({'error': '오류 문구 ' * 100, 'message': '결과 문구 ' * 100}))
+    expand = f"[...document.querySelectorAll('{page} [data-slot=notice-stack] button')].filter(button => button.textContent === '전체 보기')"
+    wait_for(lambda: js(window, f'{expand}.length') == 2)
+    js(window, f"""(() => {{ {expand}.forEach((button, index) => button.dataset.probe = `expand-${{index}}`)
+      for (const button of document.querySelectorAll('{page} button')) if (button.textContent === '선택한 보류 재시도') button.dataset.probe = 'retry-held'
+      return true }})()""")
+    retry = '[data-probe="retry-held"]'
+    # 펼치기 전: 오른쪽 위는 페이지 안내의 단추를 덮으므로 셸 묶음은 오른쪽 아래에 남아 하단 단추를 덮는다(피할 모서리가 없다).
+    count_frames(window)
+    wait_for(lambda: js(window, 'window.__frames') >= 3)
+    assert js(window, f"document.querySelector('{SHELL}').dataset.corner") == 'bottom-right'
+    assert overlaps(box(window, SHELL), box(window, retry))
+    js(window, "window.__resized = 0; window.addEventListener('resize', () => window.__resized++); true")
+    for index in range(2):
+        click(window, f'[data-probe="expand-{index}"]')
+        wait_for(lambda: js(window, f"document.querySelector('[data-probe=\"expand-{index}\"]').getAttribute('aria-expanded')") == 'true')
+    stack = f"document.querySelector('{page} [data-slot=notice-stack]')"
+    assert js(window, f'{stack}.scrollHeight > {stack}.clientHeight + 1')
+    wait_for(lambda: not overlaps(box(window, SHELL), box(window, retry)))
+    shell, area = box(window, SHELL), box(window, page)
+    assert shell['bottom'] <= area['bottom'] and shell['top'] >= area['top'] and shell['height'] > 100, shell
+    assert js(window, 'window.__resized') == 0
+    # 접으면 안내 묶음이 다시 스크롤하지 않아 오른쪽 위가 페이지 안내의 단추를 덮는다. 셸 묶음은 다시 골라 펼치기 전 자리로 돌아간다.
+    # (오른쪽 위로 옮긴 묶음이 접기 단추 위에 떠 있으므로 키보드로 누른다.)
+    for index in range(2):
+        press(window, f'[data-probe="expand-{index}"]')
+        wait_for(lambda: js(window, f"document.querySelector('[data-probe=\"expand-{index}\"]').getAttribute('aria-expanded')") == 'false')
+    wait_for(lambda: js(window, f"document.querySelector('{SHELL}').dataset.corner") == 'bottom-right')
+    assert js(window, 'window.__resized') == 0
 
 
 def test_shell_layer_does_not_measure_page_while_grid_scrolls(open_window):

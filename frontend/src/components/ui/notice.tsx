@@ -3,7 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { ChevronDown, ChevronUp, CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { onLayoutChange } from "@/lib/layout-change"
+import { onLayoutChange, useLayoutChange, useLayoutPresence } from "@/lib/layout-change"
 
 /**
  * 앱 공용 안내. 위계는 네 가지다.
@@ -48,6 +48,9 @@ function NoticeMessage({ clamp, children }: { clamp: boolean; children: React.Re
   const ref = React.useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = React.useState(false)
   const [overflowing, setOverflowing] = React.useState(false)
+  // 본문이 생기고 사라지거나(펼침 목록) 펼치고 접으면 안내 높이와 묶음의 스크롤 여부가 바뀐다. 셸 묶음이 모서리를 다시 재게 알린다.
+  useLayoutPresence()
+  useLayoutChange(expanded, overflowing)
   React.useLayoutEffect(() => {
     const element = ref.current
     // 펼친 동안은 잘림을 잴 수 없으므로 마지막 판단(넘침)을 유지해 접기 버튼을 남긴다.
@@ -81,6 +84,8 @@ type NoticeProps = Omit<React.ComponentProps<"div">, "title"> & VariantProps<typ
 function Notice({ tone, size = "default", title, action, onDismiss, clamp = size === "default", children, className, role, ...props }: NoticeProps) {
   const Icon = icons[tone]
   const below = React.useContext(InLayer)
+  // 페이지 상태뿐 아니라 하위 부품의 로컬 상태(입력 오류·저장 결과)로도 생기고 사라진다. 그때마다 배치 변경을 알린다.
+  useLayoutPresence()
   return (
     <div data-slot="notice" data-tone={tone} role={role ?? (tone === "error" ? "alert" : "status")} className={cn(noticeVariants({ tone, size }), className)} {...props}>
       <Icon aria-hidden="true" className={toneText({ tone, size })} />
@@ -143,6 +148,8 @@ function NoticeStack({ items, max = 3, size, clamp, layout, className, ...props 
   clamp?: boolean
 }) {
   const [expanded, setExpanded] = React.useState(false)
+  // “더 보기”로 펼치고 접으면 묶음 높이와 스크롤 여부가 바뀐다.
+  useLayoutChange(expanded)
   const seen = new Set<string>()
   const visible = items
     .filter((item): item is NoticeItem => !!item && (!!item.title || (item.message !== undefined && item.message !== null && item.message !== "")))
@@ -227,7 +234,7 @@ function chooseCorner(layer: HTMLElement, region: Element | null, current: Corne
  * 새 안내가 생기거나 오류가 늘면 다시 편다. 안내가 하나도 없으면 묶음도 보이지 않는다(부품은 그대로 붙어 있어 상태를 잃지 않는다).
  * avoid 영역(지금 보이는 페이지)의 고정 조작 요소를 가리지 않는 모서리를 고른다. 오른쪽 아래가 기본이다.
  * 페이지가 바뀌거나 묶음이 새로 나타나면 처음부터 고르고, 같은 페이지에서 창 크기·묶음 크기·안내 개수가 바뀌거나
- * 페이지가 배치 변경 신호(useLayoutChange: 분류·구역 전환, 비동기 준비 완료)를 보내면 지금 모서리가 무언가를 가릴 때만 다시 고른다.
+ * 페이지가 배치 변경 신호(useLayoutChange: 분류·구역 전환, 비동기 준비 완료, 안내가 생기고 사라지거나 펼치고 접힘)를 보내면 지금 모서리가 무언가를 가릴 때만 다시 고른다.
  * 페이지 DOM 변경은 관찰하지 않는다. 가상 목록은 스크롤 프레임마다 DOM을 바꾸지만 고정 조작 요소는 그대로라 다시 잴 까닭이 없다.
  */
 function NoticeLayer({ children, avoid, ...props }: Omit<React.ComponentProps<"section">, "className"> & {
