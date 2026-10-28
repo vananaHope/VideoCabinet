@@ -117,9 +117,10 @@ export default function SearchPage() {
           <p className="whitespace-pre-wrap wrap-anywhere text-sm"><MatchedText parts={result.text} /></p></div>
       </ResultRow>) : !pending && <EmptyState title={empty[0]} description={empty[1]} />}
     </div>
-    <div className="flex min-h-5 flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
+    {/* 상태 줄은 비어도 한 줄 높이를 지킨다. 기다림 표시는 앞 문구가 있을 때만 띄워 놓는다. */}
+    <div className="flex min-h-5 flex-wrap items-center text-sm text-muted-foreground">
       {(pending || state !== "error") && <p role="status">{quiet ? "" : state === "preparing" ? "검색 색인 준비 중…" : state === "empty" ? "검색어를 입력하세요." : `검색 결과 ${results.length}개`}{!quiet && data?.truncated && ` · 최대 ${data.limit}개까지 표시합니다. 결과가 많습니다. 더 길게 입력하세요.`}</p>}
-      <PendingStatus pending={searching} label="검색 중…" size="sm" />
+      <PendingStatus pending={searching} label="검색 중…" size="sm" className={quiet ? undefined : "ms-3"} />
     </div>
   </main>
 }

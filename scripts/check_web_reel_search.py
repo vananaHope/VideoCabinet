@@ -120,7 +120,12 @@ def make_window(core):
     return window
 
 
-def capture_page(core, label, tab, text='', preparing=False, failed=False, completed=False):
+def show_results(window, core, text):
+    expected = len(core.search(text).results)
+    wait_until(lambda: read(window, f"document.querySelectorAll('#search-results [role=\"option\"]').length === {expected} && document.getElementById('search-results').getAttribute('aria-busy') === 'false'"))
+
+
+def capture_page(core, label, tab, text='', preparing=False, failed=False, completed=False, previous=None):
     if args.no_screenshots:
         return
     window = make_window(core)
@@ -133,15 +138,25 @@ def capture_page(core, label, tab, text='', preparing=False, failed=False, compl
             def fail():
                 raise RuntimeError('검증용 색인 오류')
             page.preparation = SimpleNamespace(ready=fail)
-        page.bridge.find(text)
+        if previous is not None:
+            # 이전 검색어의 결과를 받은 뒤, 새 결과를 보내지 않아 기다리는 화면(흐린 이전 결과·기다림 표시)을 남긴다.
+            query(window, previous)
+            show_results(window, core, previous)
+            page.refresh = lambda: None
+        else:
+            page.bridge.find(text)
         query(window, text)
-        if failed:
+        if previous is not None:
+            wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [data-slot=pending-status]').textContent === '검색 중…'"))
+            assert read(window, "document.getElementById('search-results').getAttribute('aria-busy')") == 'true'
+            assert read(window, "document.querySelectorAll('#search-results [role=\"option\"]:not([aria-disabled=true])').length") == 0
+            assert '검색 결과가 없습니다' not in read(window, "document.querySelector('main[aria-label=\"검색\"]').innerText")
+        elif failed:
             wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"alert\"]')?.textContent === '검색 실패: 검증용 색인 오류'"))
         elif preparing:
             wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('색인 준비 중')"))
         else:
-            expected = len(core.search(text).results)
-            wait_until(lambda: read(window, f"document.querySelectorAll('#search-results [role=\"option\"]').length === {expected} && document.getElementById('search-results').getAttribute('aria-busy') === 'false'"))
+            show_results(window, core, text)
             if core.search(text).truncated:
                 assert read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('500개')")
     wait_until(lambda: read(window, f"!document.querySelector('main[aria-label=\"{'검색' if tab == 'search' else '하이라이트 모아보기'}\"]').parentElement.hidden"))
@@ -162,6 +177,8 @@ def capture_page(core, label, tab, text='', preparing=False, failed=False, compl
     window.deleteLater()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     windows.remove(window)
+    # 한 core로 창을 여러 번 연다. core는 폴더 감시 컨트롤러를 하나만 만들므로 닫은 창의 자리를 비운다.
+    core._folder_watch = None
     checks.append(f'1100×720 웹: {label}')
 
 
@@ -176,6 +193,7 @@ def screenshots():
     capture_page(core, 'reel-empty', 'reel')
     capture_page(core, 'search-empty', 'search')
     capture_page(core, 'search-none', 'search', '없는검색어')
+    capture_page(core, 'search-none-pending', 'search', '없는검색어 더', previous='없는검색어')
     capture_page(core, 'search-preparing', 'search', '장면', preparing=True)
     capture_page(core, 'search-error', 'search', '장면', failed=True)
     first = mark(core, video, 2, 4)
@@ -187,11 +205,13 @@ def screenshots():
     core.playback.end()
     capture_page(core, 'reel-few', 'reel')
     capture_page(core, 'search-few', 'search', '장면')
+    capture_page(core, 'search-few-pending', 'search', '장면 다시', previous='장면')
     capture_page(core, 'reel-completed', 'reel', completed=True)
     core.update_highlight(first.id, start=2, end=4, note=('긴 메모와 줄바꿈\n' + '공백없는아주긴메모' * 30))
     core.rename_video(video.id, '긴 영상 제목 ' + 'LongTitle' * 20)
     long_tag = core.add_highlight_tag(first.id, '공백없는태그' * 8)
     capture_page(core, 'reel-long', 'reel')
+    capture_page(core, 'search-long', 'search', '메모')
     core.update_highlight(first.id, start=2, end=4, note='기억할 장면')
     core.delete_tag(long_tag.id)
     core.rename_video(video.id, '검증 영상')
@@ -199,6 +219,7 @@ def screenshots():
         mark(core, video, 10 + index / 100, note=f'검색할 장면 {index:03d}')
     capture_page(core, 'reel-many', 'reel')
     capture_page(core, 'search-cap', 'search', '장면')
+    capture_page(core, 'search-cap-pending', 'search', '장면 4', previous='장면')
 
 
 def verify():
