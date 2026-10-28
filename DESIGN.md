@@ -34,27 +34,27 @@ colors:
   status-warning-foreground: "#451a03"
 typography:
   display:
-    fontFamily: "Malgun Gothic, sans-serif"
+    fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "1.875rem"
     fontWeight: 600
     lineHeight: 1.2
   headline:
-    fontFamily: "Malgun Gothic, sans-serif"
+    fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "1.5rem"
     fontWeight: 600
     lineHeight: 1.333
   title:
-    fontFamily: "Malgun Gothic, sans-serif"
+    fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "1.125rem"
     fontWeight: 600
     lineHeight: 1.556
   body:
-    fontFamily: "Malgun Gothic, sans-serif"
+    fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "0.875rem"
     fontWeight: 400
     lineHeight: 1.429
   label:
-    fontFamily: "Malgun Gothic, sans-serif"
+    fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "0.75rem"
     fontWeight: 500
     lineHeight: 1.333
@@ -185,9 +185,9 @@ components:
 
 ## Typography
 
-**Body Font:** Malgun Gothic (with sans-serif)
+**Body Font:** Pretendard (with Malgun Gothic, sans-serif)
 
-**Character:** Windows에 기본으로 있는 한국어 고딕 하나로 모든 위계를 만든다. 글꼴을 섞지 않고 크기와 굵기(400·500·600)로만 위계를 나눈다. 앱은 오프라인으로 배포되므로, 글꼴을 바꾸려면 웹 번들에 글꼴 파일을 넣고 `web_tokens.json`의 `font-sans`를 고친다.
+**Character:** 앱에 번들한 한국어 글꼴 Pretendard(SIL OFL 1.1) 하나로 모든 위계를 만든다. 글꼴을 섞지 않고 크기와 굵기(400·500·600)로만 위계를 나눈다. 글꼴 파일은 npm 프로덕션 의존성 `pretendard`의 정적 woff2를 웹 번들에 넣는다. 굵기마다 첫 렌더용 부분 집합(라틴·기호·자주 쓰는 한글 2,780자, `font-display: block`)을 미리 읽고 첫 렌더 전에 기다려(상한 1초) 대체 글꼴이 보였다가 바뀌지 않게 한다. 나머지 한글 음절은 같은 글꼴의 전체 파일을 `unicode-range`(`swap`)로 두어 그 음절이 화면에 나올 때만 읽는다. 줄 높이와 카드 칸이 고정이라 바뀌어도 배치가 밀리지 않는다. 실행 중 네트워크에서 받지 않는다. 대체 글꼴은 맑은 고딕이다. 고정폭 표시(`font-mono`)도 같은 글꼴에 고정폭 숫자(`tnum`)를 켠다. Qt 화면(재생·트레이 메뉴·공용 경고)은 아직 맑은 고딕을 명시해 쓴다(#297에서 같은 글꼴로 맞춘다). 글꼴을 바꾸려면 `web_tokens.json`의 `font-sans`와 `index.css`의 `@font-face`를 함께 고친다.
 
 ### Hierarchy
 - **Display** (600, 1.875rem): 통계의 큰 숫자(`NumberCard`). 페이지당 몇 개뿐이다.

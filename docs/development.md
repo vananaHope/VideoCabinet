@@ -96,6 +96,8 @@ Remove-Item Env:MVM_WEB_DEV_URL
 웹은 생성된 `publicShellBridge()`·`publicLibraryBridge()` 래퍼만 사용하며 QObject 내부 메서드는 공개 API에 포함하지 않습니다.
 `connectBridge()`가 이 공개 래퍼들의 묶음(`{ shell, library }`)을 돌려줍니다.
 `web_tokens.json`은 웹 CSS와 네이티브 재생 화면에서 공유하는 색·간격·글꼴, 그리고 웹 전환의 시간·곡선(모션)의 단일 원본입니다.
+글꼴 `font-sans`의 첫 이름은 웹 번들 글꼴(Pretendard)이고, Qt 화면은 그 대체 글꼴인 맑은 고딕을 명시해 씁니다(`theme.NATIVE_FONT`).
+번들 글꼴의 굵기는 `bundled-font`가 원본입니다. `frontend/`에서 `npm run fonts`가 굵기마다 첫 렌더용 부분 집합(block)과 그 밖의 글자용 전체 파일(swap)의 `@font-face`를 `frontend/src/fonts.css`로 생성하며, 두 `unicode-range`는 woff2의 cmap에서 계산해 겹치지 않습니다. `npm run build`는 먼저 이 생성 결과와 다르면 실패합니다.
 Python에서는 `web_tokens.web_tokens()`로 읽습니다.
 변경 후 `.venv/Scripts/python scripts/generate_web_types.py`로 TypeScript 계약과 CSS 토큰을 생성합니다.
 `--check`는 생성 파일이 원본과 다르면 실패하며 setup과 pytest가 이를 확인합니다.

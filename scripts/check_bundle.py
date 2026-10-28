@@ -8,6 +8,7 @@ import subprocess
 
 from bundle_licenses import PYTHON_METADATA_ONLY
 from bundle_ffmpeg import EXECUTABLES, SHA256, URL, VERSION, digest
+from my_video_manager.web_tokens import web_tokens
 
 
 MAX_BUNDLE_BYTES = 950_000_000  # MB (decimal), not MiB
@@ -25,7 +26,12 @@ REQUIRED_LICENSES = (
     'licenses/web/THIRD-PARTY-WEB.txt', 'licenses/web/manifest.json',
     'licenses/web/node_modules/react/LICENSE',
     'licenses/web/node_modules/react-dom/LICENSE',
+    'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
 )
+# 웹 셸의 번들 글꼴: 토큰의 굵기마다 첫 렌더용 부분 집합과 그 밖의 글자용 전체 파일. Vite가 이름 뒤에 내용 해시를 붙인다.
+BUNDLED_FONT_FAMILY = web_tokens()['typography']['font-sans'].split(',')[0].strip().strip('"')
+BUNDLED_FONTS = tuple(f'my_video_manager/web/assets/{BUNDLED_FONT_FAMILY}-{stem}{kind}-*.woff2'
+                      for stem in web_tokens()['bundled-font']['weights'].values() for kind in ('.subset', ''))
 
 
 def check_licenses(directory):
@@ -87,6 +93,8 @@ def check_bundle(directory: Path):
     ) + REQUIRED_LICENSES
     missing = [name for name in required if not (directory / name).is_file()
                or not (directory / name).stat().st_size]
+    missing += [pattern for pattern in BUNDLED_FONTS
+                if not any(path.stat().st_size for path in directory.glob(pattern))]
     cuda = [str(path.relative_to(directory)) for path in directory.rglob('*.dll')
             if path.name.lower().startswith(('cublas', 'cudnn', 'nvblas', 'cudart', 'nvrtc', 'cusparse', 'cufft', 'curand'))]
     unnecessary = [str(path.relative_to(directory)) for path in (directory / 'PySide6').rglob('*')

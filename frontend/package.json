@@ -7,13 +7,15 @@
     "dev": "vite --host 127.0.0.1",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "build": "vite build"
+    "fonts": "node scripts/generate-fonts.mjs",
+    "build": "node scripts/generate-fonts.mjs --check && vite build"
   },
   "dependencies": {
     "@tanstack/react-virtual": "3.14.19",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "1.57.0",
+    "pretendard": "1.3.9",
     "radix-ui": "1.8.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",

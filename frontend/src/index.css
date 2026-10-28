@@ -5,7 +5,13 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* 번들 글꼴: 굵기마다 첫 렌더용 부분 집합(block)과 그 밖의 글자용 전체 파일(swap). */
+@import "./fonts.css";
+
 @theme inline {
+  /* 고정폭 표시(시각·길이)도 같은 글꼴의 고정폭 숫자로 그린다. */
+  --font-mono: var(--font-sans);
+  --font-mono--font-feature-settings: "tnum";
   --color-status-info-foreground: var(--status-info-foreground);
   --color-status-info: var(--status-info);
   --color-status-success-foreground: var(--status-success-foreground);

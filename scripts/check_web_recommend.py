@@ -459,12 +459,15 @@ def screenshots():
     checks.append('라이브러리 탭: 추천 영역 제거, 격자가 위로 넓어짐')
 
     # 긴 텍스트: 공백 없는 긴 제목과 긴 태그 이름이 든 이유.
+    # 제목은 글꼴 폭과 상관없이 줄 폭을 넘도록 충분히 길게 둔다. 파일 이름 길이 제한이 있어 추가 뒤 제목을 바꾼다.
     core, clock, folder = library('long')
-    favorite = add(core, folder, '공백없는아주긴기준영상제목' * 6)
+    favorite = add(core, folder, '기준 영상')
+    core.rename_video(favorite.id, '공백없는아주긴기준영상제목' * 20)
     watch(core, favorite, 58)
     watch(core, favorite, 58)
     watch(core, favorite, 58)
-    target = add(core, folder, '공백없는아주긴추천영상제목' * 6)
+    target = add(core, folder, '추천 영상')
+    core.rename_video(target.id, '공백없는아주긴추천영상제목' * 20)
     other = add(core, folder, '짧은 제목')
     for index in range(4):
         name = f'긴태그이름{index}' + '자연다큐멘터리' * 4
