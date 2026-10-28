@@ -347,6 +347,7 @@ export interface PreparationData {
 
 export interface QueueRowData {
   videoId: number
+  queueKind: string
   title: string
   state: string
   progress: number

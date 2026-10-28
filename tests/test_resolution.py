@@ -13,7 +13,7 @@ import pytest
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.media import parse_ffprobe_result
 from test_library import NOW, Media, records, record, Transcriber, video_file
-from legacy_schema import replace_with_frozen
+from legacy_schema import replace_with_frozen, snapshot_rows
 from my_video_manager.library import LIBRARY_DB_VERSION
 
 
@@ -110,7 +110,7 @@ def test_v2_migration_backs_up_before_ddl_and_preserves_all_existing_columns(tmp
     with closing(sqlite3.connect(core.database)) as db:
         tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
         columns = {table: ','.join(row[1] for row in db.execute(f'PRAGMA table_info({table})')) for table in tables}
-        before = {table: db.execute(f'SELECT {columns[table]} FROM {table}').fetchall() for table in tables}
+        before = {table: snapshot_rows(db, columns[table], table) for table in tables}
     upgraded = open_core(core.database)
     archive, = upgraded.automatic_backups()
     assert upgraded.inspect_backup(archive).db_version == 2
@@ -121,7 +121,7 @@ def test_v2_migration_backs_up_before_ddl_and_preserves_all_existing_columns(tmp
     for database, version in ((saved, 2), (core.database, LIBRARY_DB_VERSION)):
         with closing(sqlite3.connect(database)) as db:
             assert db.execute('PRAGMA user_version').fetchone()[0] == version
-            assert {table: db.execute(f'SELECT {columns[table]} FROM {table}').fetchall() for table in tables} == before
+            assert {table: snapshot_rows(db, columns[table], table) for table in tables} == before
             assert ('width' in [r[1] for r in db.execute('PRAGMA table_info(videos)')]) == (version >= 3)
     open_core(core.database)
     assert upgraded.automatic_backups() == (archive,)

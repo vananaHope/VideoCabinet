@@ -8,6 +8,7 @@ import re
 from uuid import uuid4
 
 from .subtitles import TranscriptLine, transcript_srt, normalize_subtitle_text
+from .subtitle_queue_kind import TRANSCRIPTION
 from .translation_kind import translation_task
 
 
@@ -107,8 +108,8 @@ class Review:
 
     @staticmethod
     def _editable(db, video_id):
-        if db.execute("SELECT 1 FROM subtitle_queue WHERE video_id = ? AND state IN ('queued', 'transcribing')",
-                      (video_id,)).fetchone():
+        if db.execute("SELECT 1 FROM subtitle_queue WHERE video_id = ? AND kind = ? AND state IN ('queued', 'transcribing')",
+                      (video_id, TRANSCRIPTION)).fetchone():
             raise ValueError("원어 자막 재생성이 끝난 뒤 검수하세요.")
 
     def edit(self, video_id, line_id, text, *, translated=False, overwrite_reviewed=False, keep_reviewed=False):
@@ -176,7 +177,7 @@ class Review:
             if transcript is None:
                 raise ValueError("먼저 원어 자막을 만드세요.")
             self._order.request(db, video_id, renew=True)
-            db.execute("DELETE FROM subtitle_queue WHERE video_id = ?", (video_id,))
+            db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, TRANSCRIPTION))
             language = transcript["spoken_language"]
             cursor = db.execute("INSERT INTO subtitle_queue(video_id, spoken_language, requested_at) VALUES (?, ?, ?)",
                                 (video_id, None if language == "und" else language, self._clock().isoformat()))

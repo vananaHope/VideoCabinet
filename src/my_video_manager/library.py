@@ -144,7 +144,7 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 5
+LIBRARY_DB_VERSION = 6
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
@@ -152,47 +152,91 @@ def migrate_library(db, *, before_upgrade=None) -> None:
     version = db.execute("PRAGMA user_version").fetchone()[0]
     if version > LIBRARY_DB_VERSION:
         raise ValueError("더 최신 버전에서 만든 라이브러리입니다. 프로그램을 업데이트하세요.")
+    if version == LIBRARY_DB_VERSION:
+        return
     if version < LIBRARY_DB_VERSION:
         from .backup import backup_before_migration
         (before_upgrade or backup_before_migration)(db, LIBRARY_DB_VERSION)
-    db.execute("BEGIN IMMEDIATE")
-    if version == 0:
-        db.execute("CREATE TABLE IF NOT EXISTS watched_folders (path TEXT PRIMARY KEY)")
-        db.execute("""CREATE TABLE IF NOT EXISTS videos (
-            id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE,
-            title TEXT NOT NULL, duration REAL NOT NULL, format TEXT NOT NULL,
-            thumbnail TEXT NOT NULL, registered_at TEXT NOT NULL)""")
-        db.execute("""CREATE TABLE IF NOT EXISTS locations (
-            path TEXT PRIMARY KEY, video_id INTEGER NOT NULL REFERENCES videos(id))""")
-    if version < 2:
-        db.execute("ALTER TABLE videos ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")
-        db.execute("ALTER TABLE locations ADD COLUMN size INTEGER")
-        db.execute("ALTER TABLE locations ADD COLUMN mtime_ns INTEGER")
-        db.execute("""CREATE TABLE library_file_checks (
-            path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
-            duration REAL, fingerprint TEXT)""")
-        db.execute("UPDATE videos SET excluded=1 WHERE ',' || lower(format) || ',' LIKE '%,gif,%'")
-        db.execute("PRAGMA user_version = 2")
-    if version < 3:
-        db.execute("ALTER TABLE videos ADD COLUMN width INTEGER")
-        db.execute("ALTER TABLE videos ADD COLUMN height INTEGER")
-        # 0=미처리, 1=확인, 2=파일 없음/실패(명시적 검사 때 재시도).
-        db.execute("ALTER TABLE videos ADD COLUMN resolution_checked INTEGER NOT NULL DEFAULT 0")
-        db.execute("CREATE INDEX videos_resolution_pending ON videos(id) WHERE resolution_checked=0")
-        db.execute("PRAGMA user_version = 3")
-    if version < 4:
-        db.execute("""CREATE TABLE translation_glossary (
-            queue_id TEXT NOT NULL REFERENCES translation_queue(id) ON DELETE CASCADE,
-            source TEXT NOT NULL, target TEXT NOT NULL, ordinal INTEGER NOT NULL,
-            PRIMARY KEY(queue_id, source))""")
-        db.execute("PRAGMA user_version = 4")
-    if version < 5:
-        # 자막 모듈을 아직 시작하지 않은 라이브러리에는 이 테이블이 없다.
-        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transcripts'").fetchone():
-            # 이전 릴리스의 모델은 역사적 사실이므로 현재 어댑터 상수를 쓰지 않는다.
-            # 기본값은 기존 행을 채우기 위한 것이며, 새 저장은 항상 모델을 명시한다.
-            db.execute("ALTER TABLE transcripts ADD COLUMN model TEXT NOT NULL DEFAULT 'large-v3'")
-        db.execute("PRAGMA user_version = 5")
+    # 부모 대기열을 재구성할 때 검수 구간의 ON DELETE CASCADE가 실행되지 않게 한다.
+    # PRAGMA는 트랜잭션 밖에서만 바뀌므로 이 함수가 이전 전체의 commit/rollback을 맡는다.
+    foreign_keys = db.execute("PRAGMA foreign_keys").fetchone()[0]
+    db.execute("PRAGMA foreign_keys = OFF")
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if version == 0:
+            db.execute("CREATE TABLE IF NOT EXISTS watched_folders (path TEXT PRIMARY KEY)")
+            db.execute("""CREATE TABLE IF NOT EXISTS videos (
+                id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL, duration REAL NOT NULL, format TEXT NOT NULL,
+                thumbnail TEXT NOT NULL, registered_at TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS locations (
+                path TEXT PRIMARY KEY, video_id INTEGER NOT NULL REFERENCES videos(id))""")
+        if version < 2:
+            db.execute("ALTER TABLE videos ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")
+            db.execute("ALTER TABLE locations ADD COLUMN size INTEGER")
+            db.execute("ALTER TABLE locations ADD COLUMN mtime_ns INTEGER")
+            db.execute("""CREATE TABLE library_file_checks (
+                path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
+                duration REAL, fingerprint TEXT)""")
+            db.execute("UPDATE videos SET excluded=1 WHERE ',' || lower(format) || ',' LIKE '%,gif,%'")
+            db.execute("PRAGMA user_version = 2")
+        if version < 3:
+            db.execute("ALTER TABLE videos ADD COLUMN width INTEGER")
+            db.execute("ALTER TABLE videos ADD COLUMN height INTEGER")
+            # 0=미처리, 1=확인, 2=파일 없음/실패(명시적 검사 때 재시도).
+            db.execute("ALTER TABLE videos ADD COLUMN resolution_checked INTEGER NOT NULL DEFAULT 0")
+            db.execute("CREATE INDEX videos_resolution_pending ON videos(id) WHERE resolution_checked=0")
+            db.execute("PRAGMA user_version = 3")
+        if version < 4:
+            db.execute("""CREATE TABLE translation_glossary (
+                queue_id TEXT NOT NULL REFERENCES translation_queue(id) ON DELETE CASCADE,
+                source TEXT NOT NULL, target TEXT NOT NULL, ordinal INTEGER NOT NULL,
+                PRIMARY KEY(queue_id, source))""")
+            db.execute("PRAGMA user_version = 4")
+        if version < 5:
+            # 자막 모듈을 아직 시작하지 않은 라이브러리에는 이 테이블이 없다.
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transcripts'").fetchone():
+                # 이전 릴리스의 모델은 역사적 사실이므로 현재 어댑터 상수를 쓰지 않는다.
+                # 기본값은 기존 행을 채우기 위한 것이며, 새 저장은 항상 모델을 명시한다.
+                db.execute("ALTER TABLE transcripts ADD COLUMN model TEXT NOT NULL DEFAULT 'large-v3'")
+            db.execute("PRAGMA user_version = 5")
+        if version < 6:
+            # id를 보존해야 검수 구간 요청의 FK와 재시도 대상이 그대로 이어진다.
+            tables = (
+                ("subtitle_queue", """id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_id INTEGER NOT NULL REFERENCES videos(id),
+                    spoken_language TEXT, requested_at TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'queued', error TEXT,
+                    kind TEXT NOT NULL DEFAULT 'transcription', UNIQUE(video_id, kind)""",
+                 "id, video_id, spoken_language, requested_at, state, error"),
+                ("subtitle_queue_order", """sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                    automatic INTEGER NOT NULL, promoted INTEGER NOT NULL DEFAULT 0,
+                    kind TEXT NOT NULL DEFAULT 'transcription', UNIQUE(video_id, kind)""",
+                 "sequence, video_id, automatic, promoted"),
+                ("subtitle_queue_hidden", """video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL DEFAULT 'transcription', PRIMARY KEY(video_id, kind)""", "video_id"),
+            )
+            for table, schema, columns in tables:
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    continue  # 모듈이 시작할 때 최신 구조로 만든다.
+                sequence = (db.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (table,)).fetchone()
+                            if table != "subtitle_queue_hidden" else None)
+                db.execute(f"CREATE TABLE {table}_v6 ({schema})")
+                db.execute(f"INSERT INTO {table}_v6 ({columns}) SELECT {columns} FROM {table}")
+                db.execute(f"DROP TABLE {table}")
+                db.execute(f"ALTER TABLE {table}_v6 RENAME TO {table}")
+                if sequence:
+                    # 지워진 요청의 id도 재사용하지 않는다(늦게 끝난 작업의 결과 보호).
+                    db.execute("UPDATE sqlite_sequence SET seq=MAX(seq, ?) WHERE name=?", (sequence[0], table))
+            db.execute("PRAGMA user_version = 6")
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    finally:
+        db.execute(f"PRAGMA foreign_keys = {foreign_keys}")
+
 
 
 class Library:

@@ -57,6 +57,7 @@ def test_queue_initial_add_promote_remove_and_counts(queue_page, setup):
     snapshot = reply(page.bridge.snapshot())
     assert snapshot['order'] == [a.id, b.id]
     assert snapshot['counts'][0]['count'] == 2
+    assert {row['queueKind'] for row in snapshot['rows']} == {'transcription'}
     reply(page.bridge.action('promote', b.id))
     assert reply(page.bridge.snapshot())['order'] == [b.id, a.id]
     reply(page.bridge.action('remove', b.id))
@@ -78,7 +79,7 @@ def test_progress_delta_contains_only_changed_row_and_no_order(queue_page, setup
     entries = core.subtitle_queue_items()
     monkeypatch.setattr(core, 'subtitle_queue_items', lambda: (replace(entries[0], progress=.5), entries[1]))
     page.refresh()
-    assert changes == [dict(rows=[dict(videoId=a.id, title=a.title, state='queued', progress=.5, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기')],
+    assert changes == [dict(rows=[dict(videoId=a.id, queueKind='transcription', title=a.title, state='queued', progress=.5, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기')],
                             removed=[], order=None, counts=None, canRetryFailed=False)]
 
 

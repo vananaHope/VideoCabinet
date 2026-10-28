@@ -11,6 +11,8 @@ from threading import Event, Lock
 from typing import Callable, Protocol
 from uuid import uuid4
 
+from .subtitle_queue_kind import TRANSCRIPTION
+
 
 @dataclass(frozen=True)
 class TranscriptSegment:
@@ -108,6 +110,7 @@ class SubtitleQueueEntry:
     progress: float = 0.0
     retry_guidance: str | None = None
     no_speech: bool = False
+    queue_kind: str = TRANSCRIPTION
 
 
 def normalize_spoken_language(language: str | None) -> str | None:
@@ -134,14 +137,16 @@ class Subtitles:
         self._activity = Lock()
         self.review = None
         with connect() as db:
-            db.executescript("""
+            db.executescript(f"""
                 CREATE TABLE IF NOT EXISTS subtitle_queue (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    video_id INTEGER NOT NULL UNIQUE REFERENCES videos(id),
+                    video_id INTEGER NOT NULL REFERENCES videos(id),
                     spoken_language TEXT,
                     requested_at TEXT NOT NULL,
                     state TEXT NOT NULL DEFAULT 'queued',
-                    error TEXT
+                    error TEXT,
+                    kind TEXT NOT NULL DEFAULT '{TRANSCRIPTION}',
+                    UNIQUE(video_id, kind)
                 );
                 CREATE TABLE IF NOT EXISTS transcripts (
                     video_id INTEGER PRIMARY KEY REFERENCES videos(id),
@@ -161,7 +166,8 @@ class Subtitles:
                     UNIQUE(transcript_id, ordinal)
                 );
             """)
-            db.execute("UPDATE subtitle_queue SET state = 'queued' WHERE state = 'transcribing'")
+            db.execute("UPDATE subtitle_queue SET state = 'queued' WHERE state = 'transcribing' AND kind = ?",
+                       (TRANSCRIPTION,))
 
     def request(self, video_id: int, spoken_language: str | None, *, automatic=False) -> SubtitleQueueEntry | None:
         language = normalize_spoken_language(spoken_language)
@@ -169,7 +175,8 @@ class Subtitles:
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone():
                 raise ValueError("영상을 찾을 수 없습니다.")
-            old = db.execute("SELECT * FROM subtitle_queue WHERE video_id = ?", (video_id,)).fetchone()
+            old = db.execute("SELECT * FROM subtitle_queue WHERE video_id = ? AND kind = ?",
+                             (video_id, TRANSCRIPTION)).fetchone()
             if automatic and (old or db.execute("SELECT 1 FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()):
                 return self._entry(old) if old else None
             is_range = self.review and self.review.range_for(old["id"]) if old else False
@@ -177,27 +184,27 @@ class Subtitles:
                 self._order.request(db, video_id, automatic=automatic)
                 return self._entry(old)  # 같은 요청의 더블클릭은 순서를 바꾸지 않는다.
             self._order.request(db, video_id, automatic=automatic, renew=True)
-            db.execute("DELETE FROM subtitle_queue WHERE video_id = ?", (video_id,))
+            db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, TRANSCRIPTION))
             cursor = db.execute(
                 "INSERT INTO subtitle_queue(video_id, spoken_language, requested_at) VALUES (?, ?, ?)",
                 (video_id, language, self._clock().isoformat()),
             )
             return self._entry(db.execute("SELECT * FROM subtitle_queue WHERE id = ?", (cursor.lastrowid,)).fetchone())
 
-    def retry_failed(self, queue_id):
+    def retry_failed(self, queue_id, *, kind=TRANSCRIPTION):
         """같은 요청을 다시 대기시켜 구간 정보와 원어 지정을 보존한다."""
         with self._connect() as db:
-            row = db.execute("SELECT video_id FROM subtitle_queue WHERE id = ? AND state = 'failed'", (queue_id,)).fetchone()
+            row = db.execute("SELECT video_id FROM subtitle_queue WHERE id = ? AND kind = ? AND state = 'failed'", (queue_id, kind)).fetchone()
         if row is None:
             raise ValueError("실패한 자막 요청이 바뀌었습니다.")
         # 위치 확인은 사라진 파일을 정리할 수 있으므로 쓰기 트랜잭션 밖에서 한다.
         self._playback_location(row["video_id"])
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM subtitle_queue WHERE id = ? AND state = 'failed'", (queue_id,)).fetchone()
+            row = db.execute("SELECT * FROM subtitle_queue WHERE id = ? AND kind = ? AND state = 'failed'", (queue_id, kind)).fetchone()
             if row is None:
                 raise ValueError("실패한 자막 요청이 바뀌었습니다.")
-            self._order.request(db, row["video_id"], renew=True)
+            self._order.request(db, row["video_id"], kind=kind, renew=True)
             db.execute("UPDATE subtitle_queue SET state = 'queued', error = NULL, requested_at = ? WHERE id = ?",
                        (self._clock().isoformat(), queue_id))
 
@@ -214,23 +221,23 @@ class Subtitles:
         return SubtitleQueueEntry(row["id"], row["video_id"], row["spoken_language"],
                                   datetime.fromisoformat(row["requested_at"]), row["state"], message, detail,
                                   self._progress.get(row["id"], 0),
-                                  self._retry_guidance(row["id"]) if message else None)
+                                  self._retry_guidance(row["id"]) if message else None, queue_kind=row["kind"])
 
     def _retry_guidance(self, queue_id):
         return ("검수 창의 구간 다시 생성으로 재시도하세요. "
                 "대기열 화면의 실패 항목 모두 재시도로 같은 구간을 다시 시도할 수도 있습니다"
                 if self.review and self.review.range_for(queue_id) else "다시 요청하면 재시도합니다")
 
-    def queue(self) -> tuple[SubtitleQueueEntry, ...]:
+    def queue(self, *, kind=TRANSCRIPTION) -> tuple[SubtitleQueueEntry, ...]:
         with self._connect() as db:
-            entries = tuple(self._entry(row) for row in db.execute("SELECT * FROM subtitle_queue ORDER BY id"))
+            entries = tuple(self._entry(row) for row in db.execute("SELECT * FROM subtitle_queue WHERE (? IS NULL OR kind = ?) ORDER BY id", (kind, kind)))
         return self._order.sort(entries)
 
-    def remove(self, video_id):
+    def remove(self, video_id, *, kind=TRANSCRIPTION):
         with self._activity:
             with self._connect() as db:
-                db.execute("DELETE FROM subtitle_queue WHERE video_id = ?", (video_id,))
-            if self._active_video == video_id and self._active_cancellation:
+                db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, kind))
+            if kind == TRANSCRIPTION and self._active_video == video_id and self._active_cancellation:
                 self._active_cancellation.set()
 
     def resume_processing(self):
@@ -255,7 +262,8 @@ class Subtitles:
             if not db.in_transaction:
                 db.execute("BEGIN")
             row = db.execute("SELECT * FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
-            queue = db.execute("SELECT state FROM subtitle_queue WHERE video_id = ?", (video_id,)).fetchone()
+            queue = db.execute("SELECT state FROM subtitle_queue WHERE video_id = ? AND kind = ?",
+                               (video_id, TRANSCRIPTION)).fetchone()
             count = db.execute("SELECT COUNT(*) FROM transcript_lines WHERE transcript_id = ?",
                                (row["id"],)).fetchone()[0] if row else 0
             return TranscriptSummary(row is not None, _transcript_language(row, count) if row else None,
