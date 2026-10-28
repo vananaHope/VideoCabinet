@@ -96,7 +96,8 @@ Remove-Item Env:MVM_WEB_DEV_URL
 웹은 생성된 `publicShellBridge()`·`publicLibraryBridge()` 래퍼만 사용하며 QObject 내부 메서드는 공개 API에 포함하지 않습니다.
 `connectBridge()`가 이 공개 래퍼들의 묶음(`{ shell, library }`)을 돌려줍니다.
 `web_tokens.json`은 웹 CSS와 네이티브 재생 화면에서 공유하는 색·간격·글꼴, 그리고 웹 전환의 시간·곡선(모션)의 단일 원본입니다.
-글꼴 `font-sans`의 첫 이름은 웹 번들 글꼴(Pretendard)이고, Qt 화면은 그 대체 글꼴인 맑은 고딕을 명시해 씁니다(`theme.NATIVE_FONT`).
+글꼴 `font-sans`의 첫 이름은 번들 글꼴(Pretendard), 둘째 이름은 대체 글꼴(맑은 고딕)이며 웹과 Qt 화면이 같이 씁니다.
+Qt는 woff2를 읽지 못하므로 `npm run build`가 `pretendard` 패키지의 정적 TrueType(`dist/public/static/alternative/*.ttf`)을 굵기마다 `src/my_video_manager/web/qt-fonts/`에 복사하고(`frontend/vite.config.ts`), `MainWindow`가 앱 로그 설정 뒤 `theme.use_bundled_font()`로 Qt 글꼴 데이터베이스에 등록합니다. 소스 실행도 `npm run build`를 한 상태를 전제로 하며, 파일이 없거나 읽지 못하면 맑은 고딕으로 뜨고 `logs/app.log`에 경고를 남깁니다. 설치물 검사(`scripts/check_bundle.py`)는 이 ttf 파일들을 필수로 요구합니다.
 번들 글꼴의 굵기는 `bundled-font`가 원본입니다. `frontend/`에서 `npm run fonts`가 굵기마다 첫 렌더용 부분 집합(block)과 그 밖의 글자용 전체 파일(swap)의 `@font-face`를 `frontend/src/fonts.css`로 생성하며, 두 `unicode-range`는 woff2의 cmap에서 계산해 겹치지 않습니다. `npm run build`는 먼저 이 생성 결과와 다르면 실패합니다.
 Python에서는 `web_tokens.web_tokens()`로 읽습니다.
 변경 후 `.venv/Scripts/python scripts/generate_web_types.py`로 TypeScript 계약과 CSS 토큰을 생성합니다.
