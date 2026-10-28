@@ -1,6 +1,7 @@
 import { useMemo, type KeyboardEvent, type CSSProperties } from "react"
 import { ChevronDown, ChevronRight, Folder } from "lucide-react"
 import { cva } from "class-variance-authority"
+import { selectableItem } from "@/components/ui/selectable-item"
 import type { LibraryFolder } from "@/bridge-types"
 import type { KeyGuideRow } from "@/lib/key-guide"
 
@@ -13,7 +14,7 @@ export const folderKeyRows: readonly KeyGuideRow[] = [
 ]
 
 const row = cva("folder-tree-row flex w-full min-w-0 items-center gap-1 rounded-md py-2 pr-2 text-left text-xs", {
-  variants: { selected: { true: "bg-accent text-accent-foreground", false: "text-muted-foreground hover:bg-muted" } },
+  variants: { selected: { true: selectableItem({ selected: true }), false: selectableItem({ selected: false, tone: "quiet" }) } },
 })
 export function LibraryFolders({ folders, selected, onSelect, collapsedIds, onCollapse }: { collapsedIds: string[]; onCollapse: (ids: string[]) => void; folders: LibraryFolder[]; selected: string; onSelect: (id: string) => void }) {
   const collapsed = useMemo(() => new Set(collapsedIds), [collapsedIds])

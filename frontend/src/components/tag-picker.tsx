@@ -3,6 +3,7 @@ import { cva } from "class-variance-authority"
 import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { selectableItem } from "@/components/ui/selectable-item"
 import { tagNameKey } from "@/lib/tag-name-key"
 import { tagChoices } from "@/lib/tag-search"
 import type { TagUsageData } from "@/bridge-types"
@@ -19,7 +20,7 @@ const option = cva("flex min-w-0 cursor-default items-center gap-2 text-sm data-
     layout: { chip: "max-w-full rounded-full border px-3 py-1", row: "w-full rounded-md px-3 py-1.5" },
     multiple: {
       true: "hover:bg-muted aria-selected:bg-primary aria-selected:text-primary-foreground",
-      false: "hover:bg-muted aria-selected:bg-accent aria-selected:text-accent-foreground",
+      false: selectableItem({ selected: "aria" }),
     },
   },
 })

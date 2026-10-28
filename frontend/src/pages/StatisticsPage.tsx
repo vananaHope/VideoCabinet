@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { cva } from "class-variance-authority"
 import { connectBridge, request } from "@/bridge"
 import type { StatisticsBridge, StatisticsDashboard, StatisticsData } from "@/bridge-types"
 import { EmptyState, PageHeader, Tabs } from "@/components/page-parts"
@@ -6,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Notice } from "@/components/ui/notice"
 import { PendingStatus } from "@/components/ui/pending-status"
 import { Placeholder } from "@/components/ui/skeleton"
+import { selectableItem } from "@/components/ui/selectable-item"
 import { DailyChart, duration, type Metric } from "@/components/statistics/DailyChart"
 import { ActivityChart } from "@/components/statistics/ActivityChart"
 import { Inventory } from "@/components/statistics/Inventory"
@@ -17,6 +19,8 @@ import { useLayoutChange } from "@/lib/layout-change"
 const periods = [7, 30, 90, 365].map(days => ({ value: String(days), label: `${days}일` }))
 const metrics = [{ value: "watched_seconds", label: "시청 시간" }, { value: "viewing_count", label: "시청 횟수" }]
 const weekdays = ["일", "월", "화", "수", "목", "금", "토"]
+// 많이 본 영상 행은 고를 수 있는 목록 항목처럼 호버에 한 단계 밝아진다.
+const topVideo = cva(["flex w-full min-w-0 items-center gap-3 rounded-lg p-3 text-left focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60", selectableItem({ selected: false })])
 const hours = Array.from({ length: 24 }, (_, hour) => `${hour}시`)
 const change = (value: number | null) => value === null ? "이전 기록 없음" : `이전 같은 기간 대비 ${value > 0 ? "+" : ""}${value.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`
 
@@ -41,7 +45,7 @@ function Activity({ result, metric, onMetric, onPlay }: { result?: StatisticsDas
     </section>
     <div className="grid gap-5 lg:grid-cols-2"><ActivityChart title="요일별 시청 시간" values={result?.weekday_seconds} labels={weekdays} /><ActivityChart title="시간대별 시청 시간" values={result?.hourly_seconds} labels={hours} tickStep={3} /></div>
     {data && <section className="min-w-0 space-y-3 rounded-xl border bg-card p-5"><PageHeader variant="section" title="가장 많이 본 영상" description="이 기간의 시청 시간순 · 최대 5개" />
-      {data.top_videos.length === 0 ? <EmptyState title="아직 시청한 영상이 없어요" description="영상을 시청하면 여기에 표시됩니다." /> : <ol className="space-y-2">{data.top_videos.map((video, index) => <li key={video.video_id}><button type="button" data-statistics-video={video.video_id} onClick={() => onPlay(video.video_id)} disabled={video.excluded || video.missing} className="flex w-full min-w-0 items-center gap-3 rounded-lg p-3 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60" title={video.title}><span className="text-sm text-muted-foreground">{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium">{video.title}</span><span className="block text-xs text-muted-foreground">{duration(video.watched_seconds)} · {video.viewing_count.toLocaleString()}회{video.excluded ? " · 제외한 영상" : video.missing ? " · 파일 없음" : " · 재생"}</span></span></button></li>)}</ol>}
+      {data.top_videos.length === 0 ? <EmptyState title="아직 시청한 영상이 없어요" description="영상을 시청하면 여기에 표시됩니다." /> : <ol className="space-y-2">{data.top_videos.map((video, index) => <li key={video.video_id}><button type="button" data-statistics-video={video.video_id} onClick={() => onPlay(video.video_id)} disabled={video.excluded || video.missing} className={topVideo()} title={video.title}><span className="text-sm text-muted-foreground">{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium">{video.title}</span><span className="block text-xs text-muted-foreground">{duration(video.watched_seconds)} · {video.viewing_count.toLocaleString()}회{video.excluded ? " · 제외한 영상" : video.missing ? " · 파일 없음" : " · 재생"}</span></span></button></li>)}</ol>}
     </section>}
   </>
 }

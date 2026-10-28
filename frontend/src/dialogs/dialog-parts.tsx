@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { DialogRow } from '@/bridge-types'
 import { Dialog, DialogContent, DialogHeader } from '@/components/ui/dialog'
 import { SelectField } from '@/components/ui/select'
+import { selectableItem } from '@/components/ui/selectable-item'
 import { tagPickerKeepsEscape } from '@/lib/tag-search'
 
 export function DialogFrame({ title, description, children, onClose, composing, onSize, wide }: { title: string; description: string; children: ReactNode; onClose: () => void; composing: { current: boolean }; onSize: (width: number, height: number) => void; wide: boolean }) {
@@ -31,7 +32,7 @@ export function DialogFrame({ title, description, children, onClose, composing, 
 }
 
 const itemStyle = cva('w-full min-w-0 cursor-default border-b px-3 py-2 text-left text-sm last:border-b-0', {
-  variants: { selected: { true: 'bg-accent text-accent-foreground ring-1 ring-inset ring-ring', false: 'hover:bg-muted' } },
+  variants: { selected: { true: selectableItem({ selected: true, ring: true }), false: selectableItem({ selected: false }) } },
 })
 const marker = cva('font-mono text-xs tabular-nums', { variants: { range: { true: 'text-highlight-range', false: 'text-highlight' } } })
 

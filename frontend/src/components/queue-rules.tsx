@@ -5,10 +5,11 @@ import type { QueueBridge, QueueRuleData, QueueRulesData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SelectField } from "@/components/ui/select"
+import { selectableItem } from "@/components/ui/selectable-item"
 import { ConfirmDialog, EmptyState } from "@/components/page-parts"
 import type { KeyGuideRow } from "@/lib/key-guide"
 
-const ruleClass = cva("w-full border-b px-4 py-3 text-left text-sm", { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
+const ruleClass = cva("w-full border-b px-4 py-3 text-left text-sm", { variants: { selected: { true: selectableItem({ selected: true }), false: ["bg-card", selectableItem({ selected: false })] } } })
 
 // 아래 keyDown과 같은 키. 키 안내 '지금 화면'에 보인다.
 export const queueRuleKeyRows: readonly KeyGuideRow[] = [
