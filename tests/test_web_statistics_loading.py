@@ -159,6 +159,8 @@ def test_first_calculation_shows_placeholder_without_moving_layout(open_window, 
     assert js(window, "document.querySelector('main[aria-label=\"통계\"] [data-slot=pending-status]').getAttribute('role')") == 'status'
     text = js(window, PAGE_TEXT)
     assert not any(zero in text for zero in ZERO_TEXTS) and '통계를 계산하지 못했어요' not in text
+    # 자리 표시를 담은 표본이 기록에 쌓인 뒤에 계산을 풀어 준다.
+    wait_for(lambda: js(window, 'window.__statisticsFrames.some(frame => frame.skeletons > 0)'))
 
     release.set()
     wait_for(lambda: settled(window))
@@ -192,8 +194,8 @@ def test_inventory_placeholder_keeps_card_row_and_counts_section(open_window, ho
     click(window, 'document.querySelector(\'nav[aria-label="통계 구역"] [data-tab="inventory"]\')')
     wait_for(lambda: js(window, 'document.querySelectorAll("[data-statistics-inventory] [data-slot=skeleton]").length') > 0)
     js(window, 'window.__statisticsFrames.length = 0')
-    cleared = js(window, 'performance.now()')
-    wait_for(lambda: js(window, 'performance.now()') - cleared > 100)
+    # 비운 기록에 현황 구역 자리 표시 표본이 하나 이상 쌓인 뒤에 계산을 풀어 준다.
+    wait_for(lambda: js(window, 'window.__statisticsFrames.some(frame => frame.skeletons > 0 && frame.boxes.counts)'))
 
     release.set()
     wait_for(lambda: js(window, RESULTS_BUSY) == 'false'
@@ -225,6 +227,8 @@ def test_period_change_keeps_previous_result_and_shows_only_pending_status(open_
     assert js(window, 'document.querySelector("[data-statistics-status] p").textContent') == previous
     assert js(window, 'document.querySelectorAll("main[aria-label=\\"통계\\"] [data-slot=skeleton]").length') == 0
     assert js(window, CHARTS) == 3
+    # 기다림 표시를 담은 표본이 기록에 쌓인 뒤에 계산을 풀어 준다.
+    wait_for(lambda: js(window, 'window.__statisticsFrames.some(frame => frame.pending)'))
 
     release.set()
     wait_for(lambda: page.result['period']['days'] == 365 and settled(window)

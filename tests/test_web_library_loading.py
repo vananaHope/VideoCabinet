@@ -16,6 +16,7 @@ from PySide6.QtWebEngineCore import QWebEngineScript
 from qt_wait import wait_for
 from test_library_return_ui import Player
 from test_web_library_data import Media, core
+from web_frames import stop_recording as stop_frames
 from my_video_manager.core import AppCore
 from my_video_manager.ui import MainWindow
 from my_video_manager.web_shell import WebShellHost
@@ -145,7 +146,10 @@ def release(window):
     wait_for(lambda: js(window, GRID_BUSY) == 'false')
 
 
-def stop_recording(window):
+def stop_recording(window, done=None):
+    """기록을 멈추고 프레임·시각·문구 기록을 돌려준다. done이 있으면 마지막 프레임이 done을 만족할 때까지 기다린 뒤 멈춘다."""
+    if done:
+        stop_frames(window, 'library', done)
     js(window, 'window.__stopLibraryFrames = true')
     return json.loads(js(window, 'JSON.stringify({frames: window.__libraryFrames, moments: window.__libraryMoments, statuses: window.__libraryStatuses})'))
 
@@ -174,13 +178,18 @@ def test_first_entry_placeholders_keep_toolbar_and_first_row_in_place(open_windo
     # 데이터 전 툴바는 같은 자리에 있지만 누를 수 없다.
     click(window, 'button[aria-label="정렬 방향"]')
     click(window, 'button[aria-label="폴더 패널"]')
+    # 마우스 입력은 렌더러에 비동기로 닿는다. 뒤이은 표지 클릭이 처리될 때까지 기다려 앞선 두 클릭이 데이터 전에 처리됐음을 보장한다.
+    js(window, "window.__marked = 0; document.querySelector('[data-slot=pending-status]').addEventListener('click', () => window.__marked++)")
+    click(window, '[data-slot=pending-status]')
+    wait_for(lambda: js(window, 'window.__marked') == 1)
     assert js(window, "document.querySelector('button[aria-label=\"정렬 방향\"]').textContent") == '오름차순 ↑'
     assert js(window, "document.querySelector('button[aria-label=\"폴더 패널\"]').getAttribute('aria-expanded')") == 'false'
     assert js(window, "document.querySelector('[aria-label=\"영상 제목 빠른 검색\"]').disabled")
 
     release(window)
     wait_for(lambda: js(window, FIRST_ROW) > 0)
-    recorded = stop_recording(window)
+    # 마지막 표본이 결과(aria-busy·자리 표시 없음, 첫 줄 카드 있음)를 담을 때까지 기록한다.
+    recorded = stop_recording(window, lambda frame: not frame['busy'] and frame['placeholders'] == 0 and frame['cells'])
     frames = recorded['frames']
     loading = [frame for frame in frames if frame['busy']]
     final = frames[-1]
@@ -202,16 +211,27 @@ def test_first_entry_placeholders_keep_toolbar_and_first_row_in_place(open_windo
     assert '불러오는 중…' not in final['text'] and '등록 영상 3개 · 표시 3개' in final['text']
 
 
-def test_pending_status_does_not_flash_when_data_arrives_quickly(open_window):
+def library_with_video(root):
+    """영상 하나를 등록한 새 라이브러리. 폴더 감시 컨트롤러는 라이브러리마다 하나라 창을 다시 열 때 쓴다."""
+    library = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
+                      database=root / 'data/library.sqlite3')
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / 'Python 기초.mkv'
+    path.write_bytes(b'video')
+    library.add_file(path)
+    return library
+
+
+def test_pending_status_does_not_flash_when_data_arrives_quickly(open_window, tmp_path):
     # 300ms 안에 데이터가 오면 기다림 표시는 한 번도 나타나지 않는다.
     # 격자가 붙은 시각(기다림 타이머 시작보다 늦지 않다)부터 데이터를 본 시각(실제 반영보다 이르지 않다)까지가
     # 250ms 안일 때만 타이머가 끝나기 전에 데이터가 왔다고 말할 수 있다.
-    # 부하로 늦은 실행은 이 경우의 재현이 아니므로 검증 없이 통과시키지 않고, 창을 새로 열어 다시 재현한다.
+    # 부하로 늦은 실행은 이 경우의 재현이 아니므로 검증 없이 통과시키지 않고, 창을 새 라이브러리로 새로 열어 다시 재현한다.
     attempts = []
-    for _ in range(3):
-        window = open_window()
+    for attempt in range(3):
+        window = open_window(library=library_with_video(tmp_path / f'attempt-{attempt}'))
         wait_for(lambda: js(window, FIRST_ROW) > 0)
-        recorded = stop_recording(window)
+        recorded = stop_recording(window, lambda frame: not frame['busy'])
         moments = recorded['moments']
         attempts.append(moments)
         if moments['data'] - moments['grid'] < 250:
@@ -230,7 +250,7 @@ def test_empty_library_message_appears_only_after_data(open_window, tmp_path):
     assert '라이브러리가 비어 있습니다' not in js(window, PAGE_TEXT)
     release(window)
     wait_for(lambda: '라이브러리가 비어 있습니다' in js(window, PAGE_TEXT))
-    frames = stop_recording(window)['frames']
+    frames = stop_recording(window, lambda frame: '라이브러리가 비어 있습니다' in frame['text'])['frames']
     # 개수가 처음 보인 프레임 전까지가 데이터 전이다.
     arrived = next(index for index, frame in enumerate(frames) if '등록 영상' in frame['text'])
     assert arrived > 0

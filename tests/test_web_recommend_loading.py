@@ -161,6 +161,8 @@ def test_first_display_placeholder_keeps_header_status_and_first_row(open_window
     assert js(window, 'document.querySelectorAll("main[aria-label=\\"추천\\"] [aria-busy=true]").length') == 1
     assert js(window, PENDING) == ''
     assert EMPTY not in js(window, PAGE_TEXT) and js(window, CELLS) == 0
+    # 자리 표시를 담은 표본이 기록에 쌓인 뒤에 데이터를 보낸다.
+    wait_for(lambda: js(window, 'window.__recommendFrames.some(frame => frame.skeletons > 0)'))
 
     js(window, 'window.__releaseData()')
     wait_for(lambda: js(window, CELLS) == 2 if recommended else EMPTY in js(window, PAGE_TEXT))
