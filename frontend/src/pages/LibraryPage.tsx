@@ -225,9 +225,9 @@ export default function LibraryPage() {
       <LibraryChoice name="sort" label="정렬" options={options} disabled={!data} onChange={filter} />
       <Button size="sm" variant="outline" aria-label="정렬 방향" disabled={!data} onClick={() => filter({ descending: !options.descending })}>{options.descending ? "내림차순 ↓" : "오름차순 ↑"}</Button>
       <LibraryFilters options={options} tags={data?.tags ?? []} disabled={!data} onChange={filter} />
-      {/* 개수 자리는 폭을 잡아 두어 첫 데이터가 와도 옆 컨트롤이 밀리지 않는다. 그 전에는 "0개" 대신 기다림 표시를 둔다. */}
-      {data ? <p aria-label="라이브러리 등록·표시 개수" className="min-w-40 shrink-0 text-xs text-muted-foreground tabular-nums">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
-        : <PendingStatus pending={!error} className="min-w-40 shrink-0" />}
+      {/* 개수 자리는 9,999개까지 들어가는 폭을 잡아 두어 첫 데이터가 와도 옆 컨트롤이 밀리지 않는다. 그 전에는 "0개" 대신 기다림 표시를 둔다. */}
+      {data ? <p aria-label="라이브러리 등록·표시 개수" className="min-w-44 shrink-0 text-xs text-muted-foreground tabular-nums">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
+        : <PendingStatus pending={!error} className="min-w-44 shrink-0" />}
       <RandomPlayButton menuRef={randomMenu} disabled={!data} scopes={[
         { key: "results", label: "현재 결과에서", onSelect: () => randomPlay() },
         { key: "all", label: "영상 전체에서", onSelect: () => randomPlay("all"), shortcut: data?.keyBindings.randomPlay },

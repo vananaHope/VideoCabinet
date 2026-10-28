@@ -28,7 +28,7 @@ const wideActions: readonly Action[] = ['subtitles', 'review']
 function DetailPlaceholder() {
   return <Placeholder layout="stack">
     <Skeleton shape="line" className="w-4/5" />
-    <Skeleton shape="block" className="h-11 w-36" />
+    <Skeleton shape="block" className="h-11.5 w-full" />
     <div className="grid shrink-0 grid-cols-2 gap-1.5">
       {actions.map(([name]) => <div key={name} className={actionVariants({ variant: wideActions.includes(name) ? "wide" : "compact" })}><Skeleton shape="control" className="w-full" /></div>)}
     </div>
