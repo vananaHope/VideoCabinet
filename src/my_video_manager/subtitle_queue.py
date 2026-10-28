@@ -10,6 +10,7 @@ from typing import NamedTuple
 from .subtitles import normalize_spoken_language
 from .translation_kind import translation_task
 from .subtitle_queue_kind import TRANSCRIPTION, queue_task_key
+from .translation_source import TRANSCRIPT, TranslationSources
 
 
 @dataclass(frozen=True)
@@ -81,8 +82,9 @@ def _display_error_detail(detail):
 
 
 class QueueOrder:
-    def __init__(self, connect):
+    def __init__(self, connect, *, sources=None):
         self.connect = connect
+        self.sources = sources or TranslationSources()
         with connect() as db:
             db.executescript(f"""
                 CREATE TABLE IF NOT EXISTS subtitle_queue_order (
@@ -114,8 +116,8 @@ class QueueOrder:
         """같은 종류의 후속 단계까지 사라진 작업만 순번과 앞당기기를 끝낸다."""
         db.execute("DELETE FROM subtitle_queue_order WHERE video_id = ? AND kind = ? "
                    "AND NOT EXISTS (SELECT 1 FROM subtitle_queue WHERE video_id = ? AND kind = ?) "
-                   "AND (kind != ? OR NOT EXISTS (SELECT 1 FROM translation_queue WHERE video_id = ?))",
-                   (video_id, kind, video_id, kind, TRANSCRIPTION, video_id))
+                   "AND NOT EXISTS (SELECT 1 FROM translation_queue WHERE video_id = ? AND source = ?)",
+                   (video_id, kind, video_id, kind, video_id, self.sources.for_queue_kind(kind)))
 
     def sort(self, entries):
         if not entries:
@@ -254,8 +256,8 @@ class SubtitleQueue:
                     "SELECT id, title, (SELECT spoken_language FROM transcripts WHERE video_id=v.id) AS language, "
                     "EXISTS(SELECT 1 FROM transcripts WHERE video_id = v.id) AS has_transcript, "
                     "EXISTS(SELECT 1 FROM translation_lines tr JOIN transcript_lines l ON l.id=tr.line_id "
-                    "JOIN transcripts t ON t.id=l.transcript_id WHERE t.video_id=v.id) AS has_result "
-                    "FROM videos v WHERE id IN (" + placeholders + ")", batch))
+                    "JOIN transcripts t ON t.id=l.transcript_id WHERE t.video_id=v.id AND tr.source=?) AS has_result "
+                    "FROM videos v WHERE id IN (" + placeholders + ")", (TRANSCRIPT, *batch)))
                 hidden.update((r["video_id"], r["kind"]) for r in db.execute(
                     "SELECT video_id, kind FROM subtitle_queue_hidden WHERE video_id IN (" + placeholders + ")", batch))
         result = []

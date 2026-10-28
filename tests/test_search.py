@@ -1,3 +1,4 @@
+from my_video_manager.translation_source import TRANSCRIPT
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -207,7 +208,7 @@ def test_pre_search_database_backfills_original_and_translation(tmp_path, with_t
     else:
         # 원어 색인이 이미 있는 DB에 구 빌드가 번역을 저장한 뒤 다시 열어도 검색된다.
         with sqlite3.connect(database) as db:
-            db.execute("INSERT INTO translation_lines VALUES (?, ?)", ("legacy-line", "뒤늦은 번역"))
+            db.execute("INSERT INTO translation_lines VALUES (?, ?, ?, ?)", ("legacy-line", "뒤늦은 번역", original.video_id, TRANSCRIPT))
         core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=database)
         assert core.search("뒤늦은번역").results[0].source == "translation"
     with sqlite3.connect(database) as db:
@@ -225,7 +226,7 @@ def test_connections_without_app_functions_can_write_update_and_cascade_delete(l
         db.execute(f"PRAGMA recursive_triggers={recursive_triggers}")
         db.execute("INSERT INTO transcript_lines VALUES (?, ?, ?, ?, ?, ?)",
                    ("external-line", transcript.id, 99, 70, 75, "External phrase"))
-        db.execute("INSERT INTO translation_lines VALUES (?, ?)", ("external-line", "외부 번역문"))
+        db.execute("INSERT INTO translation_lines VALUES (?, ?, ?, ?)", ("external-line", "외부 번역문", video.id, TRANSCRIPT))
     assert core.search("externalphrase").results[0].start == 70
     assert core.search("외부번역문").results[0].start == 70
     with sqlite3.connect(core.database) as db:
@@ -341,8 +342,8 @@ def test_subtitles_stay_in_video_and_time_order_after_line_edits(library, query)
         core.request_subtitles(video.id)
         core.process_next_subtitle()
         with sqlite3.connect(core.database) as db:
-            db.executemany("INSERT INTO translation_lines VALUES (?, ?)",
-                           [(line.id, "공통 자막 번역") for line in core.transcript(video.id).lines])
+            db.executemany("INSERT INTO translation_lines VALUES (?, ?, ?, ?)",
+                           [(line.id, "공통 자막 번역", video.id, TRANSCRIPT) for line in core.transcript(video.id).lines])
 
     def order():
         return [(r.video_id, r.start, r.source) for r in core.search(query).results]

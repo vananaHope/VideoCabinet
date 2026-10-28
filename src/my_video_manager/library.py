@@ -144,7 +144,7 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 6
+LIBRARY_DB_VERSION = 7
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
@@ -230,6 +230,10 @@ def migrate_library(db, *, before_upgrade=None) -> None:
                     # 지워진 요청의 id도 재사용하지 않는다(늦게 끝난 작업의 결과 보호).
                     db.execute("UPDATE sqlite_sequence SET seq=MAX(seq, ?) WHERE name=?", (sequence[0], table))
             db.execute("PRAGMA user_version = 6")
+        if version < 7:
+            from .translation_schema import migrate_translation_sources
+            migrate_translation_sources(db)
+            db.execute("PRAGMA user_version = 7")
         db.commit()
     except BaseException:
         db.rollback()

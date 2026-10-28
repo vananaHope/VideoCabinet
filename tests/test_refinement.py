@@ -13,6 +13,7 @@ from my_video_manager.subtitles import TranscriberResult, TranscriptSegment, Tra
 from my_video_manager.translation import TranslationError, TranslationCancelled, TranslationResponse, TranslatedLine
 from my_video_manager.translation_cli import translation_prompt, parse_translation_response
 from my_video_manager.translation_glossary import GlossaryEntry
+from my_video_manager.translation_source import TRANSCRIPT
 from test_translation import Media, Transcriber, source, finish
 
 
@@ -428,8 +429,8 @@ def test_search_limit_counts_unique_refined_lines(refinement):
         TranscriptSegment(i, i + 1, f'대량일치 원어 {i}') for i in range(501)), model="large-v3")
     original = source(core, vid)
     with sqlite3.connect(core.database) as db:
-        db.executemany('INSERT INTO translation_lines VALUES (?,?)',
-                       [(line.id, f'대량일치 다듬음 {i}') for i, line in enumerate(original.lines)])
+        db.executemany('INSERT INTO translation_lines VALUES (?,?,?,?)',
+                       [(line.id, f'대량일치 다듬음 {i}', vid, TRANSCRIPT) for i, line in enumerate(original.lines)])
     result = core.search('대량일치')
     assert result.truncated
     assert [(r.start, r.source) for r in result.results] == [(i, 'refinement') for i in range(500)]

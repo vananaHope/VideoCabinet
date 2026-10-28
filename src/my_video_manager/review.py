@@ -10,6 +10,7 @@ from uuid import uuid4
 from .subtitles import TranscriptLine, transcript_srt, normalize_subtitle_text
 from .subtitle_queue_kind import TRANSCRIPTION
 from .translation_kind import translation_task
+from .translation_source import TRANSCRIPT
 
 
 class ReviewConfirmationRequired(ValueError):
@@ -81,10 +82,11 @@ class Review:
                        COALESCE(tr.text, target.text) AS translated
                 FROM transcript_lines l JOIN transcripts t ON t.id = l.transcript_id
                 LEFT JOIN subtitle_reviews r ON r.line_id = l.id
-                LEFT JOIN translation_lines tr ON tr.line_id = l.id
-                LEFT JOIN translation_targets target ON target.line_id = l.id
+                LEFT JOIN translation_lines tr ON tr.line_id = l.id AND tr.source = ?
+                LEFT JOIN translation_queue q ON q.video_id=t.video_id AND q.source = ?
+                LEFT JOIN translation_targets target ON target.line_id = l.id AND target.queue_id=q.id
                 WHERE t.video_id = ? ORDER BY l.ordinal
-            """, (video_id,)).fetchall()
+            """, (TRANSCRIPT, TRANSCRIPT, video_id)).fetchall()
         return tuple(ReviewLine(TranscriptLine(r["id"], r["start"], r["end"], r["text"]),
                                 r["translated"], bool(r["original_reviewed"]),
                                 bool(r["translation_reviewed"])) for r in rows)
@@ -135,11 +137,12 @@ class Review:
             db.execute("INSERT OR IGNORE INTO subtitle_reviews(line_id) VALUES (?)", (line_id,))
             if translated:
                 db.execute("UPDATE subtitle_reviews SET translation_reviewed = 1 WHERE line_id = ?", (line_id,))
-                db.execute("INSERT INTO translation_lines VALUES (?, ?) ON CONFLICT(line_id) "
-                           "DO UPDATE SET text = excluded.text", (line_id, text))
-                db.execute("DELETE FROM translation_line_providers WHERE line_id = ?", (line_id,))
+                db.execute("INSERT INTO translation_lines VALUES (?, ?, ?, ?) ON CONFLICT(video_id, source, line_id) "
+                           "DO UPDATE SET text = excluded.text", (line_id, text, video_id, TRANSCRIPT))
+                db.execute("DELETE FROM translation_line_providers WHERE line_id = ? AND source = ?", (line_id, TRANSCRIPT))
                 # 이미 실행 중인 응답도 이 줄을 다시 쓰지 못한다.
-                db.execute("DELETE FROM translation_targets WHERE line_id = ?", (line_id,))
+                db.execute("DELETE FROM translation_targets WHERE line_id = ? AND queue_id IN "
+                           "(SELECT id FROM translation_queue WHERE video_id=? AND source=?)", (line_id, video_id, TRANSCRIPT))
                 self.translations.finish_ready(db, video_id)
             else:
                 db.execute("UPDATE transcript_lines SET text = ? WHERE id = ?", (text, line_id))
@@ -225,9 +228,9 @@ class Review:
             lines = self.lines(video_id, connection=db)
             title = db.execute("SELECT title FROM videos WHERE id = ?", (video_id,)).fetchone()[0]
             pending = db.execute("SELECT COUNT(*) FROM translation_targets target "
-                                 "JOIN translation_lines saved ON saved.line_id = target.line_id "
+                                 "JOIN translation_lines saved ON saved.line_id = target.line_id AND saved.source=? "
                                  "JOIN translation_queue q ON q.id = target.queue_id "
-                                 "WHERE q.video_id = ?", (video_id,)).fetchone()[0] if translated else 0
+                                 "WHERE q.video_id = ? AND q.source=?", (TRANSCRIPT, video_id, TRANSCRIPT)).fetchone()[0] if translated else 0
         selected = tuple(replace(line.original, text=line.translation) if translated else line.original
                          for line in lines if not translated or line.translation is not None)
         if not selected:

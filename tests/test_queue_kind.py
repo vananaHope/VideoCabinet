@@ -9,7 +9,7 @@ import pytest
 from legacy_schema import replace_with_frozen
 from my_video_manager.backup import create_backup
 from my_video_manager.core import AppCore
-from my_video_manager.library import migrate_library
+from my_video_manager.library import migrate_library, LIBRARY_DB_VERSION
 from my_video_manager.subtitle_queue import QueueOrder, SubtitleQueue, SubtitleQueueItem
 from my_video_manager.subtitle_queue_kind import TRANSCRIPTION
 from my_video_manager.web_queue_data import row_data
@@ -129,7 +129,7 @@ def test_v5_migration_preserves_pending_failed_order_and_backup(setup, tmp_path)
     assert all(e.queue_kind == TRANSCRIPTION for e in migrated.subtitle_queue())
     backup, = migrated.automatic_backups()
     assert migrated.inspect_backup(backup).db_version == 5
-    assert migrated.create_backup(tmp_path / "v6.zip").metadata.db_version == 6
+    assert migrated.create_backup(tmp_path / "v6.zip").metadata.db_version == LIBRARY_DB_VERSION
     assert reopen(migrated, adapter).subtitle_queue() == expected
     assert len(migrated.automatic_backups()) == 1
     assert migrated.retry_failed_subtitles().retried == 1
@@ -164,7 +164,7 @@ def test_v5_migration_keeps_range_retry_and_deleted_request_ids(setup):
     assert migrated.request_subtitles(b.id).id > discarded.id
 
 
-@pytest.mark.parametrize("version", [5, 6])
+@pytest.mark.parametrize("version", [5, 6, LIBRARY_DB_VERSION])
 def test_queue_survives_backup_restore_roundtrip(setup, tmp_path, version):
     core, adapter, (a, b) = setup
     adapter.error = RuntimeError("saved failure")
@@ -173,8 +173,8 @@ def test_queue_survives_backup_restore_roundtrip(setup, tmp_path, version):
     core.request_automatic_subtitles(b.id)
     core.promote_subtitle(b.id)
     expected = core.subtitle_queue()
-    if version == 5:
-        replace_with_frozen(core.database, 5)
+    if version < LIBRARY_DB_VERSION:
+        replace_with_frozen(core.database, version)
     archive = create_backup(core.database, tmp_path / "queue.zip")
     assert archive.metadata.db_version == version
     core = reopen(core, adapter)
@@ -184,7 +184,7 @@ def test_queue_survives_backup_restore_roundtrip(setup, tmp_path, version):
     assert apply(core.database).status == "applied"
     restored = reopen(core, adapter)
     assert restored.subtitle_queue() == expected
-    assert restored.create_backup(tmp_path / "restored.zip").metadata.db_version == 6
+    assert restored.create_backup(tmp_path / "restored.zip").metadata.db_version == LIBRARY_DB_VERSION
 
 
 def test_v5_migration_failure_rolls_back_and_can_retry(setup):
@@ -218,7 +218,7 @@ def test_v5_empty_queue_schema_and_repeated_open(tmp_path, existing_tables):
     for _ in range(2):
         core = AppCore(database=database, media=FakeMedia(), clock=lambda: NOW)
         assert core.subtitle_queue_items() == ()
-    assert core.create_backup(tmp_path / "empty.zip").metadata.db_version == 6
+    assert core.create_backup(tmp_path / "empty.zip").metadata.db_version == LIBRARY_DB_VERSION
 
 
 @pytest.mark.parametrize("language,stage", [("en", "translation"), ("ko", "refinement")])
