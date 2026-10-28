@@ -18,8 +18,8 @@ export function DialogFrame({ title, description, children, onClose, composing, 
     return () => observer.disconnect()
   }, [content, onSize])
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal>
-    <Dialog.Overlay data-dialog-overlay className="fixed inset-0 z-40 bg-background/80" />
-    <Dialog.Content ref={setContent} data-dialog-frame data-wide={wide} className="fixed inset-4 z-40 m-auto flex h-fit flex-col gap-4 overflow-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"
+    <Dialog.Overlay data-dialog-overlay className="fixed inset-0 z-40 animate-fade-enter bg-background/80" />
+    <Dialog.Content ref={setContent} data-dialog-frame data-wide={wide} className="fixed inset-4 z-40 m-auto flex h-fit animate-fade-enter flex-col gap-4 overflow-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"
       onInteractOutside={event => event.preventDefault()}
       onEscapeKeyDown={event => {
         // 태그 고르기가 검색어·활성 후보를 먼저 지울 Esc는 대화상자를 닫지 않는다.

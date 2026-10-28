@@ -69,8 +69,8 @@ export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onRetu
   }
 
   return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal>
-    <Dialog.Overlay className="fixed inset-0 z-50 bg-background/80" />
-    <Dialog.Content ref={content} className="fixed inset-4 z-50 m-auto flex h-fit max-w-lg flex-col gap-4 overflow-y-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"
+    <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-enter bg-background/80" />
+    <Dialog.Content ref={content} className="fixed inset-4 z-50 m-auto flex h-fit animate-fade-enter max-w-lg flex-col gap-4 overflow-y-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"
       onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLElement>("[role=combobox]")?.focus() }}
       onCloseAutoFocus={event => { event.preventDefault(); onReturnFocus() }}
       onEscapeKeyDown={event => { if (tagPickerKeepsEscape(event)) event.preventDefault() }}>

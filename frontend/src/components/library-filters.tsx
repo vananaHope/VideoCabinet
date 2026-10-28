@@ -23,7 +23,7 @@ const dateFilters = [['added', '추가일'], ['modified', '수정한 날짜'], [
 export function LibraryFilters({ options, tags, disabled, onChange }: { options: LibraryViewOptions; tags: TagUsageData[]; disabled?: boolean; onChange: Change }) {
   return <Popover.Root><Popover.Trigger asChild><Button variant="outline" size="sm" disabled={disabled}><SlidersHorizontal />필터</Button></Popover.Trigger>
     <Popover.Portal><Popover.Content aria-label="라이브러리 필터 패널" align="end" sideOffset={8} onEscapeKeyDown={event => { if (tagPickerKeepsEscape(event)) event.preventDefault() }}
-      className="z-50 max-h-112 w-128 overflow-y-auto rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg">
+      className="z-50 max-h-112 w-128 origin-(--radix-popover-content-transform-origin) animate-layer-enter overflow-y-auto rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg">
       <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">검색 조건</h2><Popover.Close asChild><Button size="icon-xs" variant="ghost" aria-label="필터 닫기"><X /></Button></Popover.Close></div>
       <div className="grid grid-cols-2 gap-3">
         <LibraryChoice name="viewing" label="시청 상태" options={options} onChange={onChange} />

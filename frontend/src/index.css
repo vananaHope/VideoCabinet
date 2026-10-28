@@ -41,6 +41,15 @@
   --radius-xl: calc(var(--radius) + 0.25rem);
   /* 대기열 고정 머리글 높이. 머리글 높이와 목록 scroll-padding이 같은 값을 쓴다. */
   --spacing-queue-header: calc(var(--spacing) * 7.25);
+  /* 전환은 web_tokens.json의 motion 값 하나를 쓴다. transition-colors 같은 유틸리티도 이 기본 시간·곡선을 따른다.
+     떠 있는 층(대화상자·메뉴·선택 목록)·탭 내용·안내는 열릴 때만 투명도(메뉴는 작은 크기 변화 포함)로 들어오고, 닫힘은 즉시다. */
+  --default-transition-duration: var(--motion-duration-quick);
+  --default-transition-timing-function: var(--motion-ease);
+  --animate-layer-enter: layer-enter var(--motion-duration-enter) var(--motion-ease);
+  --animate-fade-enter: fade-enter var(--motion-duration-enter) var(--motion-ease);
+  --animate-tab-enter: fade-enter var(--motion-duration-quick) var(--motion-ease);
+  @keyframes layer-enter { from { opacity: 0; transform: scale(var(--motion-enter-scale)); } }
+  @keyframes fade-enter { from { opacity: 0; } }
 
 }
 
@@ -52,6 +61,10 @@
   :focus-visible { @apply outline-2 outline-offset-2 outline-ring; }
   ::-webkit-scrollbar { @apply w-2 h-2; }
   ::-webkit-scrollbar-thumb { @apply rounded-full bg-border; }
+  /* 움직임 줄이기에서는 앱의 모든 전환·애니메이션을 끈다. 처음부터 최종 모습으로 그리고, 진행 상태는 움직임 없이 보인다. */
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after { animation: none !important; transition: none !important; }
+  }
 }
 
 /* 측정 결과만 사용자 정의 속성으로 전달한다. 모양은 테마와 전용 컴포넌트가 소유한다. */

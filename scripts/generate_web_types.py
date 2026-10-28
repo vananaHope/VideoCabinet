@@ -71,7 +71,7 @@ def render_types(contracts=CONTRACTS):
 
 def render_tokens():
     tokens = web_tokens()
-    variables = {**tokens['colors'], **tokens['layout']}
+    variables = {**tokens['colors'], **tokens['layout'], **tokens['motion']}
     return ('/* scripts/generate_web_types.py로 생성. web_tokens.json을 수정하세요. */\n:root {\n'
             + ''.join(f'  --{key}: {value};\n' for key, value in variables.items()) + '}\n@theme {\n'
             + ''.join(f'  --{key}: {value};\n' for key, value in tokens['typography'].items()) + '}\n')
