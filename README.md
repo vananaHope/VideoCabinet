@@ -4,7 +4,7 @@ Windows용 개인 영상 라이브러리입니다. 폴더의 영상을 모아 �
 
 - 화면: Python + PySide6, 웹 UI(React·shadcn)
 - 재생: libmpv
-- 받아쓰기: faster-whisper(GPU)
+- 받아쓰기: faster-whisper large-v3-turbo(GPU)
 
 **최신 버전 받기 → [GitHub Releases](https://github.com/vananaHope/my-video-manager-releases/releases/latest)**
 
@@ -30,7 +30,7 @@ Windows용 개인 영상 라이브러리입니다. 폴더의 영상을 모아 �
 2. 시작 메뉴에서 **My Video Manager**를 엽니다.
 3. **폴더 관리(Ctrl+7) → 감시 폴더 추가**로 영상 폴더를 등록합니다.
 
-- **처음 자동 자막을 만들 때** CUDA 라이브러리와 Whisper 모델(약 4.3GB)을 내려받습니다. NVIDIA GPU와 드라이버가 필요합니다.
+- **처음 자동 자막을 만들 때** CUDA 라이브러리와 Whisper large-v3-turbo 모델(합계 약 2.9 GB)을 내려받습니다. NVIDIA GPU와 드라이버가 필요합니다.
 - **번역**에는 Codex·Claude CLI 가운데 하나를 설치해 로그인하거나, OpenCode Go 키를 등록해야 합니다(설정 → 번역).
 - 코드 서명을 하지 않아 SmartScreen 경고가 뜰 수 있습니다. Release의 `.sha256`으로 파일을 검증할 수 있습니다.
 - 업데이트나 제거 전에는 트레이에서 **완전 종료**하세요. 새 버전을 덮어 설치해도 데이터는 남습니다.

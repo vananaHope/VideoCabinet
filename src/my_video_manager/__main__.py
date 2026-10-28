@@ -61,6 +61,9 @@ def main():
             instance.close()
         return 1
     window.show()
+    if getattr(sys, 'frozen', False):
+        from .cuda_runtime import SubtitlePreparation
+        SubtitlePreparation(data_directory).start_cleanup_if_ready()
     status = app.exec()
     if app.property('backupRestartRequested'):
         from PySide6.QtCore import QProcess

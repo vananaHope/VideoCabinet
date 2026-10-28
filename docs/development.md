@@ -429,7 +429,7 @@ JSON 파싱 → schema 검증** 순서로 처리하고 불변 `UpdateManifest`�
 
 작업자 스레드에서
 `AppCore.prepare_subtitle_support(cancellation=Event(), progress=callback)`을 호출하면
-CUDA와 Whisper large-v3를 같은 흐름에서 준비합니다.
+CUDA와 Whisper large-v3-turbo를 같은 흐름에서 준비합니다.
 독립 어댑터 `SubtitlePreparation(data_directory, adapter=RuntimeDownloadAdapter(), gpu_available=...)`도
 사용할 수 있으며 `prepare()`가 CUDA 디렉터리들과 모델 경로를 반환합니다.
 콜백은 `PreparationProgress(phase, asset, completed, total)`을 받습니다.
@@ -449,18 +449,30 @@ frozen 받아쓰기 자식은 `prepared()`로 완료 결과만 읽고, 없으면
 준비 다운로드는 명시적인 `prepare_subtitle_support()` 흐름에서만 실행합니다.
 
 CUDA 버전은 기존 `cuda` extra와 같고 Windows x64 공식 PyPI 휠 URL·SHA-256은
-`runtime_assets.py`에 고정했습니다. Whisper도 같은 파일의 revision과 SHA-256으로 검증합니다.
+`runtime_assets.py`에 고정했습니다. Whisper 저장소는
+`mobiuslabsgmbh/faster-whisper-large-v3-turbo`, revision은
+`0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`이며 같은 파일의 크기와 SHA-256으로 검증합니다.
+`config.json`의 `alignment_heads`를 단어 시각에 사용합니다. 소스 실행도 같은 revision을
+`download_model(TRANSCRIPTION_MODEL, cache_dir=..., revision=WHISPER_REVISION)`으로 받습니다.
+어댑터가 반환하는 모델 이름은 `large-v3-turbo`입니다. 엔진과 CUDA 버전은 바꾸지 않습니다.
 CUDA는 `data_directory/runtime/cuda/<wheel-sha256>/`에 DLL만,
-모델은 기존 `data_directory/models/` 아래 `large-v3/<revision>/`에 둡니다.
-소스 실행의 `models/models--Systran--faster-whisper-large-v3/snapshots/<revision>/`가 있으면
+모델은 기존 `data_directory/models/` 아래 `large-v3-turbo/<revision>/`에 둡니다.
+소스 실행의 `models/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/<revision>/`가 있으면
 고정 파일 전체의 크기와 SHA-256을 한 번 확인해 `ready.json`을 만들고 그 경로를 그대로 재사용합니다.
 맞지 않는 HF 캐시는 보존하고 앱 전용 폴더에 다시 받습니다.
 반쯤 받은 `.part`와 추출 중 `.partial` 폴더는 다음 시도에서 지웁니다.
 HF 캐시를 재사용할 때도 현재 revision의 앱 전용 `.partial`은 먼저 정리합니다.
-이전 버전의 완료 런타임·모델은 실행 중인 DLL과 구버전으로 되돌리기를 보호하기 위해 자동 삭제하지 않습니다.
-고정 버전을 바꾼 뒤 새 판 받아쓰기까지 확인했다면, 모든 앱을 완전히 종료하고
-`runtime/cuda/<이전 wheel-sha256>`와 `models/large-v3/<이전 revision>` 및 이전 `.partial`만 수동으로 지울 수 있습니다.
-현재 해시·revision은 `runtime_assets.py`가 원본입니다. 공유 Hugging Face 캐시는 자동으로 정리하지 않습니다.
+CUDA 완료본은 그대로 재사용하므로 기존 설치판은 turbo 모델만 내려받습니다.
+turbo 그룹의 검증·게시가 성공한 뒤(검증한 HF 캐시에 `ready.json`을 쓴 경우 포함)에만
+`SubtitlePreparation.cleanup_previous_models()`가 `models/large-v3/` 전체와
+`models/large-v3*.partial`을 정리합니다. turbo 이름의 폴더·단계 폴더는 제외하며,
+`models/` 바로 아래의 실제 디렉터리인지 확인하고 정션·심볼릭 링크를 따라가지 않습니다.
+준비가 실패하거나 취소되면 이전 모델은 남습니다. 삭제 실패는 로그에만 남기고 준비는 성공합니다.
+다음 준비에서 다시 정리하고, 설치판 앱 시작 시 이미 준비됐다면 `start_cleanup_if_ready()`가
+뒤 작업으로 한 번 재시도합니다. `status()`·`prepared()`와 받아쓰기 자식은 삭제하지 않습니다.
+정리 뒤 구버전으로 돌아가면 large-v3를 다시 준비해야 합니다. 기존 자막·모델 기록은 그대로 남습니다.
+CUDA 런타임과 `models/models--*` 형태의 Hugging Face 캐시 및 다른 모델은 자동 삭제하지 않습니다.
+현재 해시·revision과 다운로드 용량(합계 약 2.9 GB)은 `runtime_assets.py`의 자산 목록이 원본입니다.
 완료 표시와 파일 크기가 맞으면 다시 받지 않으며, 같은 데이터 폴더의 준비 작업은 프로세스 사이에서도 직렬화합니다.
 소스 받아쓰기는 기존 `.venv` CUDA와 Hugging Face 모델 캐시를 계속 사용합니다.
 
@@ -741,7 +753,7 @@ OS가 자동화 키를 전달하지 않는 환경에서는 이 검사가 실패�
 - `tag_editing.py`: 직접 입력한 이름과 명시적으로 고른 자동 완성 후보의 확정 규칙.
 - `subtitles.py`: 영속 자막 대기열, 원어·원어 자막 저장, 받아쓰기 Protocol과 SRT 변환.
 - `subtitle_queue.py`: 자동 자막 규칙, 요청 순서·앞당기기와 영상별 대기열 상태.
-- `transcription.py`: 별도 프로세스의 faster-whisper large-v3 GPU 어댑터.
+- `transcription.py`: 별도 프로세스의 faster-whisper large-v3-turbo GPU 어댑터.
 - `cuda_runtime.py`: 첫 자막 요청의 CUDA·Whisper 다운로드, 해시 검증, 취소와 완료 파일 재사용.
 - `windows_job.py`: 앱 종료 시 받아쓰기 프로세스 트리를 정리하는 Windows Job 어댑터.
 - `subtitle_controls.py`: 웹 자막 요청 진입, 백그라운드 처리, 완료된 자막의 플레이어 연결.

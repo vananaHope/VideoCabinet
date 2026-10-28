@@ -107,7 +107,7 @@ def fake_transcription(monkeypatch, language, segments):
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=Model))
     monkeypatch.setitem(sys.modules, "faster_whisper.audio", SimpleNamespace(decode_audio=lambda path: []))
     monkeypatch.setitem(sys.modules, "faster_whisper.utils",
-                        SimpleNamespace(download_model=lambda name, *, cache_dir: "model"))
+                        SimpleNamespace(download_model=lambda name, *, cache_dir, revision: "model"))
     return calls
 
 
@@ -131,6 +131,7 @@ def test_child_entrypoint_passes_word_timestamps_and_balanced_vad(monkeypatch, c
     assert calls["model"][1]["compute_type"] == "float16"
     payload = json.loads(capsys.readouterr().out)
     assert payload["spoken_language"] == "ja"
+    assert payload["model"] == "large-v3-turbo"
     assert payload["segments"] == [{"start": 0.0, "end": 2.0, "text": "こんにちは世界"}]
 
 

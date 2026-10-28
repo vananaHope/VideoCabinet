@@ -12,9 +12,10 @@ from threading import Event
 from typing import Iterable
 
 from .subtitles import TranscriberCancelled, TranscriberError, TranscriberResult, TranscriptSegment
+from .runtime_assets import WHISPER_MODEL, WHISPER_REVISION
 
 
-TRANSCRIPTION_MODEL = "large-v3"
+TRANSCRIPTION_MODEL = WHISPER_MODEL
 
 
 @lru_cache(maxsize=None)
@@ -235,7 +236,7 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
         raise TranscriberError("decode", str(error)) from error
     try:
         model_path = (str(prepared.model_directory) if prepared else
-                      download_model(TRANSCRIPTION_MODEL, cache_dir=str(model_directory)))
+                      download_model(TRANSCRIPTION_MODEL, cache_dir=str(model_directory), revision=WHISPER_REVISION))
     except Exception as error:
         raise TranscriberError("model_download", str(error)) from error
     try:
