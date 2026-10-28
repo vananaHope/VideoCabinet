@@ -446,6 +446,41 @@ try:
         assert host.controllers['library'].selected_id == selected_before
         metrics['checks'].append('내용 크기 컨테이너 grab·숨은 페이지 가상화 크기/스크롤/선택 보존')
 
+        # #296 대화상자 층 밖의 웹 대화상자(키 안내·무작위 태그·페이지 확인·새 키 입력)도 같은 틀인지 찍는다.
+        focus_proxy = host.view.focusProxy()
+        def painted():
+            js("window.shellDialogPainted = false; requestAnimationFrame(() => requestAnimationFrame(() => { window.shellDialogPainted = true }))")
+            wait(lambda: js('window.shellDialogPainted'))
+            settle(300)
+        def shell_dialog(name, start):
+            start()
+            wait(lambda: js("!!document.querySelector('[role=dialog], [role=alertdialog]')?.getClientRects().length") and dialogs.web_modal)
+            painted()
+            capture(name)
+            QTest.keyClick(focus_proxy, Qt.Key.Key_Escape)
+            wait(lambda: js("!document.querySelector('[role=dialog], [role=alertdialog]')") and not dialogs.web_modal)
+        def random_tag():
+            js("document.querySelector('[data-page=library] [aria-label=\"무작위 재생 범위\"]').focus()")
+            QTest.keyClick(focus_proxy, Qt.Key.Key_Down)
+            wait(lambda: js("document.activeElement?.dataset.slot") == 'dropdown-menu-item')
+            QTest.keyClick(focus_proxy, Qt.Key.Key_End)
+            wait(lambda: js("document.activeElement?.textContent.startsWith('태그에서')") is True)
+            QTest.keyClick(focus_proxy, Qt.Key.Key_Return)
+        host.view.setFocus()
+        js("document.getElementById('library-grid').focus()")
+        shell_dialog('key-guide', lambda: QTest.keyClick(focus_proxy, Qt.Key.Key_F1))
+        shell_dialog('random-tag', random_tag)
+        window.navigate_web_tab('settings')
+        wait(lambda: host.active_tab == 'settings' and js("!!document.querySelector('#settings-category [data-category=keys]')?.getClientRects().length"))
+        painted()
+        shell_dialog('confirm-quit', lambda: js("Array.from(document.querySelectorAll('[aria-label=\"일반 설정\"] button')).find(b => b.textContent === '완전 종료').click()"))
+        js("document.querySelector('#settings-category [data-category=keys]').click()")
+        wait(lambda: js("!!document.querySelector('button[data-command]')?.getClientRects().length"))
+        painted()
+        shell_dialog('key-capture', lambda: js("document.querySelector('button[data-command]').click()"))
+        window.navigate_web_tab('library')
+        metrics['checks'].append('키 안내·무작위 태그·페이지 확인·새 키 입력 대화상자 열기·Esc 닫기')
+
     if args.real:
         if args.windows_ime:
             web_modal('tags', {'video_id': video.id}, windows_ime)
