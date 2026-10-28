@@ -188,6 +188,19 @@ def test_transitions_run_without_reduced_motion_and_never_block_input(request):
     wait_for(lambda: not present(window, '[data-slot=dropdown-menu-content]'))
     wait_for(lambda: js(window, "document.activeElement?.getAttribute('aria-label')") == '무작위 재생 범위')
 
+    # 무작위 태그 대화상자('태그에서…')도 같은 여는 전환을 쓰고, 열리는 도중 Esc가 바로 닫는다.
+    js(window, 'window.motionHeld = []')
+    QTest.keyClick(view(window), Qt.Key.Key_Down)
+    wait_for(lambda: js(window, "document.activeElement?.dataset.slot") == 'dropdown-menu-item')
+    QTest.keyClick(view(window), Qt.Key.Key_End)
+    wait_for(lambda: js(window, "document.activeElement?.textContent.startsWith('태그에서')") is True)
+    QTest.keyClick(view(window), Qt.Key.Key_Return)
+    wait_held(window, 'dialog', 'fade-enter', MOTION['motion-duration-enter'])
+    wait_for(lambda: present(window, GUIDE) and window.web_host.dialogs.blocks_shell_actions)
+    QTest.keyClick(view(window), Qt.Key.Key_Escape)
+    wait_for(lambda: not present(window, GUIDE) and not window.web_host.dialogs.blocks_shell_actions)
+    wait_for(lambda: js(window, "document.activeElement?.getAttribute('aria-label')") == '무작위 재생 범위')
+
     # 필터 팝오버와 그 안의 선택 목록: 선택 목록의 Esc는 목록만 바로 닫는다.
     js(window, "Array.from(document.querySelectorAll('[data-page=library] button')).find(b => b.textContent === '필터').focus()")
     QTest.keyClick(view(window), Qt.Key.Key_Return)
