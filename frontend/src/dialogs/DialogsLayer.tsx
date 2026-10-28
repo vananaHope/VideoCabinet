@@ -1,7 +1,9 @@
+import { cva } from 'class-variance-authority'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { connectBridge, request } from '@/bridge'
 import type { DialogData, DialogSnapshot, DialogsBridge, DialogValues } from '@/bridge-types'
 import { Button } from '@/components/ui/button'
+import { DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { NoticeStack } from '@/components/ui/notice'
 import { ConfirmDialog } from '@/components/page-parts'
@@ -12,6 +14,10 @@ import { RandomScopeForm, randomScopeReady } from './RandomScopeForm'
 
 type FormValues = Omit<DialogValues, 'start' | 'end'> & { start: number | string; end: number | string }
 type Draft = { form: FormValues; selected: string; member: string; available: string; scroll: number[] }
+
+// 번역 설정·결과나 무작위 범위의 태그 후보가 늘어나도 본문만 스크롤해 확인/취소 단추는 항상 본문 아래에 남는다.
+// 초점 테두리가 스크롤 가장자리에서 잘리지 않게 공용 DialogBody처럼 안쪽으로 조금 띄운다.
+const body = cva('flex min-h-0 flex-col gap-4', { variants: { scroll: { true: '-m-1 overflow-y-auto p-1', false: '' } } })
 
 export default function DialogsLayer() {
   const [bridge, setBridge] = useState<DialogsBridge | null>(null)
@@ -86,7 +92,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   if (kind === 'video-exclude') return <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }}
     title={data.confirm_title} description={data.confirmation} variant="destructive" onConfirm={() => void act('confirm')} />
   return <DialogFrame title={data.title} description={data.description} onClose={() => { if (!data.confirmation) void act('close') }} composing={composing} onSize={onSize} wide={['review', 'series', 'highlights'].includes(kind)}>
-    <div ref={content} data-dialog-body={kind} className="flex min-h-0 flex-col gap-4" onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
+    <div ref={content} data-dialog-body={kind} className={body({ scroll: kind === 'translation' || kind === 'random-scope' })} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
       onKeyDown={event => {
         // 태그 고르기 검색 칸처럼 Enter를 먼저 쓴 입력(defaultPrevented)에서는 저장하지 않는다.
         if (editable && event.target instanceof HTMLInputElement && event.target.type !== 'checkbox'
@@ -133,15 +139,15 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       ]} />
     </div>
     {/* 선택한 행에 대한 작업은 왼쪽, 대화상자를 끝내는 닫기·취소 → 주 작업은 오른쪽 끝에 둔다. 순서는 그대로다. */}
-    <footer className="flex flex-wrap justify-end gap-2">
-      {kind === 'tags' && <div className="mr-auto flex flex-wrap gap-2">{button('선택한 태그 떼기', 'remove', !currentSelected)}{button('모든 태그 관리', 'manage')}</div>}
-      {kind === 'tag-manager' && <div className="mr-auto flex flex-wrap gap-2">{button('이름 변경', 'rename', !currentSelected, 'default')}{button('태그 삭제', 'delete', !currentSelected, 'destructive')}</div>}
-      {kind === 'highlights' && <div className="mr-auto flex flex-wrap gap-2">{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</div>}
-      {kind === 'review' && <div className="mr-auto flex flex-wrap gap-2">{data.task_kind === 'refinement' && button(data.task_label, 'refine', data.locked)}{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button(`${data.short_label} SRT 저장`, 'export-translation', !data.rows.length)}</div>}
+    <DialogFooter start={kind === 'tags' ? <>{button('선택한 태그 떼기', 'remove', !currentSelected)}{button('모든 태그 관리', 'manage')}</>
+      : kind === 'tag-manager' ? <>{button('이름 변경', 'rename', !currentSelected, 'default')}{button('태그 삭제', 'delete', !currentSelected, 'destructive')}</>
+      : kind === 'highlights' ? <>{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</>
+      : kind === 'review' ? <>{data.task_kind === 'refinement' && button(data.task_label, 'refine', data.locked)}{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button(`${data.short_label} SRT 저장`, 'export-translation', !data.rows.length)}</>
+      : undefined}>
       {button(editable ? '취소' : '닫기', 'close')}
       {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'translation' || kind === 'random-scope' ? '확인' : '저장', 'save',
         data.locked || data.network_busy || kind === 'range' && !!data.warning || kind === 'random-scope' && !randomScopeReady(data, form), kind === 'range' ? 'destructive' : 'default')}
-    </footer>
+    </DialogFooter>
     {data.keep_reviewed && <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.confirm_title} description={data.confirmation}
       confirmLabel={`새 원어로 다시 ${data.task_label}`} cancelLabel="사용자 수정본 유지" onCancel={() => void act('keep-reviewed')}
       variant="destructive" onConfirm={() => void act('confirm')} />}

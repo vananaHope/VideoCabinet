@@ -34,6 +34,7 @@ from PySide6.QtWidgets import QApplication
 from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
+from my_video_manager.random_continuous_play import RandomPlayScope
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.translation import TranslatedLine
 from my_video_manager.ui import MainWindow
@@ -138,6 +139,9 @@ def js(code):
 def capture(name, widget=window):
     if args.real:
         return  # 실창에서는 데스크톱 캡처를 하지 않는다.
+    # 바뀐 DOM이 실제로 그려진 뒤 찍는다. offscreen grab은 마지막으로 그린 프레임을 돌려준다.
+    js("window.capturePainted = false; requestAnimationFrame(() => requestAnimationFrame(() => { window.capturePainted = true }))")
+    wait(lambda: js('window.capturePainted'))
     settle()
     path = args.output / f'web-{name}.png'
     captured = widget.grab()
@@ -151,6 +155,20 @@ def capture(name, widget=window):
     else:
         assert captured.save(str(path))
     metrics['screens'].append(path.name)
+
+
+def footer_layout(name):
+    """맨 위 대화상자의 끝 단추 차례·모양과 틀 안쪽 오른쪽·아래 끝까지의 거리(px)를 기록한다. 전·후를 같은 방식으로 잰다."""
+    layout = js("""(() => {
+      const content = Array.from(document.querySelectorAll('[role=dialog], [role=alertdialog]')).filter(e => e.getClientRects().length).at(-1)
+      const style = getComputedStyle(content), frame = content.getBoundingClientRect(), box = e => e.getBoundingClientRect()
+      const right = frame.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight)
+      const bottom = frame.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom)
+      const buttons = Array.from(content.querySelectorAll('button')).filter(b => b.getClientRects().length).slice(-3)
+      return JSON.stringify({frame: [Math.round(frame.width), Math.round(frame.height)], radius: style.borderTopLeftRadius,
+        buttons: buttons.map(b => [b.textContent, b.dataset.variant ?? '', Math.round(right - box(b).right), Math.round(bottom - box(b).bottom)])})
+    })()""")
+    metrics.setdefault('footers', {})[name] = json.loads(layout)
 
 
 def click(text):
@@ -361,6 +379,8 @@ try:
         selected_tag = js("document.querySelector('[aria-label=\"붙은 태그\"] [role=option][aria-selected=true]').id")
         click('모든 태그 관리')
         click('이름 변경')
+        capture('tag-rename')
+        footer_layout('tag-rename')
         input_value('새 이름', '이름 변경 검증')
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
         wait(lambda: any(tag.name == '이름 변경 검증' for tag in core.tags()))
@@ -440,11 +460,63 @@ try:
                 metrics.setdefault('container_sizes', {})[kind] = rect
                 capture(f'container-{kind}', container)
             web_modal(kind, context, container_check)
+        # #296 무작위 이어 재생 범위는 재생 화면에서만 열린다(컨테이너). 플레이어 없이 재생 세션만 만들어 켜고,
+        # 긴 이름 태그 35개 중 3개를 고른 태그 범위로 연다.
+        core.playback.start(video.id, 0)
+        core.set_random_continuous_enabled(True)
+        core.set_random_continuous_scope(RandomPlayScope('tags', tag_ids=tuple(tag.id for tag in core.video_tags(video.id)[:3])))
+        def random_scope_check():
+            wait(lambda: dialogs.container is not None)
+            settle(300)
+            container = dialogs.container
+            assert container.width() <= window.width() and container.height() <= window.height()
+            metrics.setdefault('container_sizes', {})['random-scope'] = [container.width(), container.height()]
+            footer_layout('random-scope')
+            capture('container-random-scope', container)
+        web_modal('random-scope', {}, random_scope_check)
+        core.set_random_continuous_enabled(False)
+        core.playback.end()
+        metrics['checks'].append('무작위 이어 재생 범위(재생 중 컨테이너)·태그 이름 변경 촬영과 끝 단추 배치 기록')
         window.pages.setCurrentWidget(host)
         settle(300)
         assert js("JSON.stringify([document.getElementById('library-grid').scrollTop, document.getElementById('library-grid').clientWidth, document.getElementById('library-grid').clientHeight])") == before, (before, js("JSON.stringify([document.getElementById('library-grid').scrollTop, document.getElementById('library-grid').clientWidth, document.getElementById('library-grid').clientHeight])"))
         assert host.controllers['library'].selected_id == selected_before
         metrics['checks'].append('내용 크기 컨테이너 grab·숨은 페이지 가상화 크기/스크롤/선택 보존')
+
+        # #296 대화상자 층 밖의 웹 대화상자(키 안내·무작위 태그·페이지 확인·새 키 입력)도 같은 틀인지 찍는다.
+        focus_proxy = host.view.focusProxy()
+        def painted():
+            js("window.shellDialogPainted = false; requestAnimationFrame(() => requestAnimationFrame(() => { window.shellDialogPainted = true }))")
+            wait(lambda: js('window.shellDialogPainted'))
+            settle(300)
+        def shell_dialog(name, start):
+            start()
+            wait(lambda: js("!!document.querySelector('[role=dialog], [role=alertdialog]')?.getClientRects().length") and dialogs.web_modal)
+            painted()
+            capture(name)
+            QTest.keyClick(focus_proxy, Qt.Key.Key_Escape)
+            wait(lambda: js("!document.querySelector('[role=dialog], [role=alertdialog]')") and not dialogs.web_modal)
+        def random_tag():
+            js("document.querySelector('[data-page=library] [aria-label=\"무작위 재생 범위\"]').focus()")
+            QTest.keyClick(focus_proxy, Qt.Key.Key_Down)
+            wait(lambda: js("document.activeElement?.dataset.slot") == 'dropdown-menu-item')
+            QTest.keyClick(focus_proxy, Qt.Key.Key_End)
+            wait(lambda: js("document.activeElement?.textContent.startsWith('태그에서')") is True)
+            QTest.keyClick(focus_proxy, Qt.Key.Key_Return)
+        host.view.setFocus()
+        js("document.getElementById('library-grid').focus()")
+        shell_dialog('key-guide', lambda: QTest.keyClick(focus_proxy, Qt.Key.Key_F1))
+        shell_dialog('random-tag', random_tag)
+        window.navigate_web_tab('settings')
+        wait(lambda: host.active_tab == 'settings' and js("!!document.querySelector('#settings-category [data-category=keys]')?.getClientRects().length"))
+        painted()
+        shell_dialog('confirm-quit', lambda: js("Array.from(document.querySelectorAll('[aria-label=\"일반 설정\"] button')).find(b => b.textContent === '완전 종료').click()"))
+        js("document.querySelector('#settings-category [data-category=keys]').click()")
+        wait(lambda: js("!!document.querySelector('button[data-command]')?.getClientRects().length"))
+        painted()
+        shell_dialog('key-capture', lambda: js("document.querySelector('button[data-command]').click()"))
+        window.navigate_web_tab('library')
+        metrics['checks'].append('키 안내·무작위 태그·페이지 확인·새 키 입력 대화상자 열기·Esc 닫기')
 
     if args.real:
         if args.windows_ime:
