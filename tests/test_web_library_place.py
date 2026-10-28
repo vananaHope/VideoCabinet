@@ -16,6 +16,7 @@ from qt_wait import wait_for
 from test_library_return_ui import Player
 from test_web_library_data import Media
 from test_web_library_loading import click, js
+from web_frames import stop_recording
 from my_video_manager.core import AppCore
 from my_video_manager.library_views import default_options
 from my_video_manager.subtitle_preparation_ui import preparation_state
@@ -78,7 +79,9 @@ def place(window, video_id):
       const c = card?.getBoundingClientRect()
       return JSON.stringify({{ grid: [g.x, g.y, g.width, g.height].map(Math.round), top: Math.round(grid.scrollTop),
         columns: Number(grid.getAttribute('aria-colcount')), x: c ? Math.round(c.x) : null, y: c ? Math.round(c.y - g.y) : null,
-        shown: !!c && c.bottom > g.top && c.top < g.bottom }})
+        shown: !!c && c.bottom > g.top && c.top < g.bottom,
+        full: !!c && c.top >= g.top + grid.clientTop && c.bottom <= g.top + grid.clientTop + grid.clientHeight,
+        max: grid.scrollHeight - grid.clientHeight }})
     }})()"""))
 
 
@@ -86,21 +89,21 @@ def record(window, video_id):
     """그린 프레임마다 선택 카드 자리를 남긴다."""
     js(window, f"""(() => {{
       const frames = window.__placeFrames = []
-      window.__placeStop = false
+      window.__stopPlaceFrames = false
       const sample = () => {{
         const grid = {GRID}, g = grid.getBoundingClientRect(), c = document.getElementById('video-{video_id}')?.getBoundingClientRect()
         frames.push({{ grid: [g.x, g.y, g.width, g.height].map(Math.round), columns: Number(grid.getAttribute('aria-colcount')),
           x: c ? Math.round(c.x) : null, y: c ? Math.round(c.y - g.y) : null }})
-        if (!window.__placeStop) requestAnimationFrame(sample)
+        if (!window.__stopPlaceFrames) requestAnimationFrame(sample)
       }}
       requestAnimationFrame(sample)
       return true
     }})()""")
 
 
-def frames(window):
-    js(window, 'window.__placeStop = true')
-    return json.loads(js(window, 'JSON.stringify(window.__placeFrames)'))
+def frames(window, done):
+    """마지막 프레임이 done을 만족할 때까지(결과 상태가 표본에 담길 때까지) 기다린 뒤 기록을 멈춘다."""
+    return stop_recording(window, 'place', done)
 
 
 def choose_middle_card(window):
@@ -191,7 +194,7 @@ def test_page_and_shell_notices_float_without_moving_selected_card(open_window):
     window.subtitles.set_preparation(preparation_state('ready'))
     wait_for(lambda: js(window, f"document.querySelector('{SHELL}').checkVisibility()") is False)
     assert place(window, selected) == before
-    recorded = frames(window)
+    recorded = frames(window, lambda frame: frame['y'] == before['y'])
     assert recorded and all(frame == recorded[0] for frame in recorded), [f for f in recorded if f != recorded[0]][:3]
     assert recorded[0]['y'] == before['y'] and recorded[0]['x'] == before['x']
 
@@ -232,7 +235,7 @@ def test_filter_chip_row_keeps_grid_and_selected_card_in_place(open_window):
     wait_for(lambda: window.library_page.options['query'] == '')
     assert place(window, selected) == before
     assert box(window, '[aria-label="적용한 검색 조건"]') == chips
-    recorded = frames(window)
+    recorded = frames(window, lambda frame: frame['y'] == before['y'])
     assert recorded and all(frame == recorded[0] for frame in recorded), [f for f in recorded if f != recorded[0]][:3]
 
 
@@ -264,9 +267,10 @@ def test_folder_panel_keeps_selected_card_at_same_height(open_window):
     closed = place(window, selected)
     assert closed['shown'] and near(closed['y'], before['y']) and closed['columns'] == before['columns'], (before, closed)
     assert near(closed['top'], before['top'])
-    # 그 사이 그린 프레임에서도 선택 카드의 세로 위치가 튀지 않는다.
-    recorded = frames(window)
+    # 그 사이 그린 프레임에서도 선택 카드의 세로 위치와 격자 자체의 세로 위치가 튀지 않는다.
+    recorded = frames(window, lambda frame: frame['columns'] == before['columns'])
     assert recorded and all(near(frame['y'], before['y']) for frame in recorded), [f for f in recorded if not near(f['y'], before['y'])][:3]
+    assert all(frame['grid'][1] == before['grid'][1] for frame in recorded), [f for f in recorded if f['grid'][1] != before['grid'][1]][:3]
     assert window.library_page.selected_id == selected
 
 
@@ -296,14 +300,17 @@ def test_folder_panel_keeps_scroll_near_when_selected_card_leaves_result(open_wi
     assert remaining and selected not in window.library_page.visible_ids
     after = [place(window, id) for id in remaining]
     assert after[0]['top'] > 0 and any(card['shown'] for card in after), (before, shown, after)
+    # 근처의 상한: 보이던 카드 중 결과에 남은 카드가 이전 세로 위치에서 한 줄 높이 안에 있다.
+    # (패널이 열리며 결과 변경과 열 수 변경으로 두 번 자리를 맞추므로 한 번에 맞출 때보다 한 줄 안쪽까지 어긋날 수 있다.)
+    row = js(window, f"parseFloat(getComputedStyle({GRID}).getPropertyValue('--grid-row-height')) * parseFloat(getComputedStyle(document.documentElement).fontSize)")
+    previous = dict(shown)
+    drift = min(abs(card['y'] - previous[id]) for id, card in zip(remaining, after) if card['y'] is not None)
+    assert drift <= row, (row, shown, after)
 
 
 def test_shell_notices_move_off_fixed_page_controls(open_window):
     window = open_window()
-    window.show_status('검사 실패: ' + '접근할 수 없는 감시 폴더가 있습니다. ' * 10)
-    window.subtitles.timer.stop()
-    window.subtitles.set_preparation(preparation_state('failed', kind='error', message='자막 기능 준비 실패: ' + '파일을 받지 못했습니다. ' * 8))
-    wait_for(lambda: js(window, f"document.querySelectorAll('{SHELL} [data-slot=notice]').length") == 2)
+    show_long_shell_notices(window)
     # 폴더 관리의 오른쪽 아래에는 스크롤로 옮길 수 없는 최소 길이 입력란과 저장 단추가 있다. 셸 묶음은 그 자리를 피한다.
     QTest.keyClick(view(window), Qt.Key.Key_7, Qt.KeyboardModifier.ControlModifier)
     wait_for(lambda: window.web_host.active_tab == 'folders' and js(window, "!!document.getElementById('folders-minimum')?.checkVisibility()"))
@@ -318,3 +325,117 @@ def test_shell_notices_move_off_fixed_page_controls(open_window):
     wait_for(lambda: window.web_host.active_tab == 'library' and box(window, SHELL)['right'] > box(window, '#library-grid')['right'])
     for selector in ('[aria-label="무작위 재생"]', '[aria-label="영상 작업"]', '[aria-label="영상 상세 탭"]'):
         assert not overlaps(box(window, SHELL), box(window, selector)), selector
+
+
+FULL_CELLS = f"""JSON.stringify((() => {{ const grid = {GRID}, g = grid.getBoundingClientRect(), top = g.top + grid.clientTop
+  return [...document.querySelectorAll('#library-grid [role=gridcell]')].filter(cell => {{ const r = cell.getBoundingClientRect(); return r.top >= top && r.bottom <= top + grid.clientHeight }})
+    .map(cell => Number(cell.id.slice(6))) }})())"""
+
+
+@pytest.mark.parametrize('start, row_index', [('top', 2), ('top', 3), ('middle', 0), ('middle', 1), ('bottom', -1)])
+def test_folder_panel_close_from_open_panel_keeps_card_or_clamps_scroll(open_window, start, row_index):
+    # 저장된 열린 패널(폴더별·폴더 미선택이라 결과는 60개 그대로, 2열)에서 시작해 패널 안에서 고른 카드로 닫는다(3열).
+    # top: 맨 위에서 둘째 줄 카드(결과 index 2·3). middle: 몇 줄 내린 뒤 완전히 보이는 첫 줄의 카드. bottom: 맨 끝에서 마지막 카드.
+    window = open_window(mode='folders')
+    wait_for(lambda: js(window, '!!document.getElementById("library-folder-panel")'))
+    wait_for(lambda: js(window, f"{GRID}.getAttribute('aria-colcount')") == '2')
+    if start != 'top':
+        js(window, f'{GRID}.scrollTop = {900 if start == "middle" else 100000}')
+        wait_for(lambda: js(window, f'{GRID}.scrollTop') > 0)
+    # 가상화된 줄은 스크롤 다음 프레임에 그려진다.
+    wait_for(lambda: len(json.loads(js(window, FULL_CELLS))) >= 2)
+    selected = window.library_page.visible_ids[row_index] if start == 'top' else json.loads(js(window, FULL_CELLS))[row_index]
+    click(window, f'#video-{selected}')
+    wait_for(lambda: window.library_page.selected_id == selected)
+    before = place(window, selected)
+    assert before['shown'] and before['columns'] == 2, before
+    if start == 'bottom':
+        assert before['top'] == before['max'] and selected == window.library_page.visible_ids[-1], before
+
+    toggle_folders(window, False)
+    wait_for(lambda: js(window, '!document.getElementById("library-folder-panel")'))
+    wait_for(lambda: place(window, selected)['columns'] == 3)
+    closed = place(window, selected)
+    assert window.library_page.selected_id == selected
+    # 같은 세로 위치에 두려면 필요한 스크롤. 가능한 범위(0..max) 안이면 같은 위치를 지키고,
+    # 밖이면 경계로 제한한다. 차이는 제한한 만큼뿐이다(목록 위아래에 빈 여백을 만들지 않는다).
+    # 선택 카드는 계속 보이고, 닫기 전에 완전히 보였으면 닫은 뒤에도 완전히 보인다.
+    # 맨 위 둘째 줄(index 2·3)은 3열의 줄이 2열보다 낮아(카드 폭이 좁다) 같은 자리에 두려면 음수 스크롤이 필요하다.
+    # index 2는 새 첫 줄이 되어 319px, index 3은 줄 높이 차이 13px만큼 제한된다.
+    desired = closed['top'] + closed['y'] - before['y']
+    assert closed['shown'] and (closed['full'] or not before['full']), (before, closed)
+    actual = 'same' if 0 <= desired <= closed['max'] else 'clamp-top' if desired < 0 else 'clamp-bottom'
+    if actual == 'same':
+        assert near(closed['y'], before['y']), (before, closed)
+    else:
+        assert closed['top'] == (0 if desired < 0 else closed['max']), (before, closed, desired)
+    assert actual == {'top': 'clamp-top', 'middle': 'same', 'bottom': 'clamp-bottom'}[start], (before, closed, desired)
+
+
+def show_long_shell_notices(window):
+    """자막 기능 준비 실패와 긴 검사 실패 알림. 둘 다 오래 남는 셸 안내다."""
+    window.show_status('검사 실패: ' + '접근할 수 없는 감시 폴더가 있습니다. ' * 10)
+    window.subtitles.timer.stop()
+    window.subtitles.set_preparation(preparation_state('failed', kind='error', message='자막 기능 준비 실패: ' + '파일을 받지 못했습니다. ' * 8))
+    wait_for(lambda: js(window, f"document.querySelectorAll('{SHELL} [data-slot=notice]').length") == 2)
+
+
+def test_shell_notices_move_off_controls_after_settings_category_changes(open_window):
+    # 설정 분류는 이미 붙은 구역의 hidden만 바꾼다. 분류를 옮겨도 셸 묶음은 새로 보이는 고정 단추를 피한다.
+    window = open_window()
+    show_long_shell_notices(window)
+    QTest.keyClick(view(window), Qt.Key.Key_8, Qt.KeyboardModifier.ControlModifier)
+    wait_for(lambda: window.web_host.active_tab == 'settings' and js(window, "!!document.querySelector('#settings-category [data-category=\"backup\"]')?.checkVisibility()"))
+    for category in ('keys', 'recommend', 'translation', 'transcription', 'backup'):
+        click(window, f'#settings-category [data-category="{category}"]')
+        wait_for(lambda: js(window, f"document.querySelector('#settings-category [data-category=\"{category}\"]').getAttribute('aria-current')") == 'true')
+    automatic = '[data-page="settings"] section[aria-label="자동 백업"]'
+    js(window, f"""(() => {{ for (const button of document.querySelectorAll('{automatic} > div:first-child button')) button.dataset.probe = button.textContent; return true }})()""")
+    buttons = ['[data-probe="새로고침"]', '[data-probe="폴더 열기"]']
+    # 자동 백업 목록 새로고침이 끝나 단추를 다시 쓸 수 있게 된 뒤의 배치에서 확인한다.
+    wait_for(lambda: all(js(window, f"!!document.querySelector('{selector}')?.checkVisibility() && !document.querySelector('{selector}').disabled") for selector in buttons))
+    fixed = buttons + ['#settings-category [data-category="backup"]', '[data-page="settings"] [data-backup-create]']
+    wait_for(lambda: not any(overlaps(box(window, SHELL), box(window, selector)) for selector in fixed if box(window, selector)))
+    shell, page = box(window, SHELL), box(window, '[data-page="settings"]')
+    assert shell['bottom'] <= page['bottom'] and shell['top'] >= page['top'] and shell['height'] > 100
+    # 백업을 피해 옮긴 모서리(1100×720에서는 왼쪽 아래)에는 일반의 완전 종료·번역의 선택/재시도 단추가 있다.
+    # 이 두 분류로 옮길 때는 비동기 갱신 없이 hidden만 바뀐다. 그래도 묶음은 그 단추를 피한다.
+    js(window, """(() => { for (const button of document.querySelectorAll('[data-page="settings"] button'))
+      if (['완전 종료', '선택 / 재시도'].includes(button.textContent)) button.dataset.probe = button.textContent; return true })()""")
+    for category, controls in (('general', ['[data-probe="완전 종료"]', '#settings-minimum']), ('translation', ['[data-probe="선택 / 재시도"]'])):
+        click(window, f'#settings-category [data-category="{category}"]')
+        wait_for(lambda: all(js(window, f"!!document.querySelector('{selector}')?.checkVisibility()") for selector in controls))
+        wait_for(lambda: not any(overlaps(box(window, SHELL), box(window, selector)) for selector in controls))
+        shell = box(window, SHELL)
+        assert shell['bottom'] <= page['bottom'] and shell['top'] >= page['top'] and shell['height'] > 100, (category, shell)
+
+
+def test_shell_layer_does_not_measure_page_while_grid_scrolls(open_window):
+    # 가상 격자는 스크롤 프레임마다 카드 DOM을 바꾸지만 고정 조작 요소는 그대로다. 셸 묶음은 그때 페이지를 다시 재지 않는다.
+    window = open_window()
+    show_long_shell_notices(window)
+    wait_for(lambda: js(window, f"document.querySelector('{SHELL}').checkVisibility()") is True)
+    # 시험 쪽 탐침: 고정 조작 요소를 잴 때 부르는 checkVisibility 호출 수와 그린 프레임 수를 센다.
+    js(window, """(() => { const original = Element.prototype.checkVisibility
+      window.__measured = 0
+      Element.prototype.checkVisibility = function (...args) { window.__measured++; return original.apply(this, args) }
+      window.__frames = 0
+      const tick = () => { window.__frames++; requestAnimationFrame(tick) }
+      requestAnimationFrame(tick)
+      return true })()""")
+    # 앞선 안내로 예약된 다시 재기가 끝난 다음부터 센다.
+    wait_for(lambda: js(window, 'window.__frames') >= 3)
+    first = js(window, "document.querySelector('#library-grid [role=gridcell]').id")
+    js(window, f"""(() => {{ window.__measured = 0; window.__scrolled = 0
+      const step = () => {{ {GRID}.scrollTop += 60; if (++window.__scrolled < 30) requestAnimationFrame(step) }}
+      requestAnimationFrame(step)
+      return true }})()""")
+    wait_for(lambda: js(window, 'window.__scrolled') == 30)
+    # 스크롤로 가상 격자가 다른 카드를 그렸고(DOM이 바뀜), 그 뒤 몇 프레임을 더 그려도 묶음은 재지 않았다.
+    wait_for(lambda: js(window, "document.querySelector('#library-grid [role=gridcell]').id") != first)
+    frame = js(window, 'window.__frames')
+    wait_for(lambda: js(window, 'window.__frames') >= frame + 3)
+    assert js(window, 'window.__measured') == 0
+    # 탐침이 실제 재기를 잡는지: 창 크기 변경 신호에는 다시 잰다.
+    js(window, "window.dispatchEvent(new Event('resize')); true")
+    wait_for(lambda: js(window, 'window.__measured') > 0)
