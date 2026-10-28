@@ -47,6 +47,28 @@ def test_order_priority_and_promotion_are_per_video_and_kind(setup):
     assert QueueOrder(connect).sort((direct, automatic, other)) == (other, direct, automatic)
 
 
+def test_pending_kinds_coexist_at_public_queue_boundary(setup, monkeypatch):
+    core, _, (a, _) = setup
+    original = core.request_subtitles(a.id)
+    other = replace(original, id=original.id + 1, queue_kind="test-kind")
+    connect = connection_factory(core.database)
+    order = QueueOrder(connect)
+    with connect() as db:
+        order.request(db, a.id, kind=other.queue_kind, automatic=True)
+    # 다음 종류의 처리 모듈을 공개 조회 경계에서 대역으로 제공한다.
+    # 실제 DB에는 영상·순서·숨김을 사용하며 시험용 저장/실행기는 제품에 넣지 않는다.
+    monkeypatch.setattr(core, "subtitle_queue", lambda *, kind=TRANSCRIPTION:
+                        tuple(e for e in (original, other) if kind is None or e.queue_kind == kind))
+    queue = SubtitleQueue(core, order)
+    assert [(e.video_id, e.queue_kind, e.state) for e in queue.items()] == [
+        (a.id, TRANSCRIPTION, "queued"), (a.id, other.queue_kind, "queued")]
+    queue.hide(a.id, kind=other.queue_kind)
+    assert [(e.video_id, e.queue_kind) for e in queue.items()] == [(a.id, TRANSCRIPTION)]
+    with connect() as db:
+        order.request(db, a.id, kind=other.queue_kind)
+    assert len(queue.items()) == 2
+
+
 def test_completion_and_hidden_records_are_per_video_and_kind(setup):
     core, adapter, (a, _) = setup
     adapter.result = replace(adapter.result, segments=())
