@@ -57,7 +57,16 @@ export default function LibraryPage() {
     let disconnect = () => {}
     connectBridge().then(async ({ library: api, shell }) => {
       if (disposed) return
-      const changed = (json: string) => { const next: LibraryData = JSON.parse(json); if (composing.current && optionsRef.current) next.options.query = optionsRef.current.query; optionsRef.current = next.options; setData(next); setDetailRevision(n => n + 1) }
+      const changed = (json: string) => {
+        const next: LibraryData = JSON.parse(json)
+        if (composing.current && optionsRef.current) next.options.query = optionsRef.current.query
+        optionsRef.current = next.options
+        // 자막·번역 완료가 늦게 도착해도 그사이 고른 영상이 결과에 남아 있으면 유지한다.
+        // 조건에서 빠진 영상이나 명시적인 선택 변경은 코어가 보낸 선택을 따른다.
+        setData(previous => next.preserveSelection && previous?.selectedId != null && next.visibleIds.includes(previous.selectedId)
+          ? { ...next, selectedId: previous.selectedId } : next)
+        setDetailRevision(n => n + 1)
+      }
       const thumbnailsChanged = (json: string) => {
         const ids = new Set<number>(JSON.parse(json))
         setData(previous => previous && { ...previous, videos: previous.videos.map(video => ids.has(video.id) ? { ...video, thumbnail: `mvm-thumb://video/${video.id}?v=640` } : video) })

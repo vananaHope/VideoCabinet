@@ -280,13 +280,13 @@ def test_open_target_list_tab_commits_cursor_and_moves_like_native_select(window
 
     def key(value, modifiers=Qt.KeyboardModifier.NoModifier):
         QTest.keyClick(view, value, modifiers)
-        QTest.qWait(150)
 
     target = "document.getElementById('queue-target')"
     is_open = "!!document.querySelector('[data-slot=select-content]')"
     wait_for(lambda: js("document.getElementById('library-grid') !== null"))
     window.navigate_web_tab('queue')
-    wait_for(lambda: js("!!document.querySelector('[data-tab=rules]')"))
+    # DOM 존재만으로는 큐 진입의 비동기 초점 요청이 끝났다고 볼 수 없다.
+    wait_for(lambda: js("document.activeElement.id === 'queue-list'"))
     # offscreen 문서는 실제 마우스 입력이 있어야 포커스를 얻는다.
     point = json.loads(js("JSON.stringify((() => { const r = document.querySelector('[data-tab=rules]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })())"))
     QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=QPoint(int(point[0]), int(point[1])))
@@ -296,9 +296,11 @@ def test_open_target_list_tab_commits_cursor_and_moves_like_native_select(window
     for modifiers, next_focus, expected in ((Qt.KeyboardModifier.NoModifier, 'queue-language', tags[1]),
                                             (Qt.KeyboardModifier.ShiftModifier, 'queue-rules', tags[0])):
         js(f"{target}.focus()")
+        wait_for(lambda: js(f"document.activeElement === {target} && document.hasFocus()"))
         key(Qt.Key.Key_Space)
-        wait_for(lambda: js(is_open))
+        wait_for(lambda: js(is_open) and js("document.activeElement?.dataset.slot") == 'select-item')
         key(Qt.Key.Key_Down if expected is tags[1] else Qt.Key.Key_Up)
+        wait_for(lambda: js("document.activeElement?.dataset.value") == f'tag:{expected.id}')
         tab = Qt.Key.Key_Tab if modifiers == Qt.KeyboardModifier.NoModifier else Qt.Key.Key_Backtab
         key(tab, modifiers)
         wait_for(lambda: not js(is_open) and js('document.activeElement.id') == 'queue-target')

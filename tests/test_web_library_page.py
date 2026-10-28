@@ -187,7 +187,9 @@ def test_detail_panel_shows_no_speech_and_translation_skip_reason(window_factory
     from my_video_manager.core import AppCore
     from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
     from test_web_library_data import Media
-    from test_web_statistics import wait_for
+    from PySide6.QtCore import QPoint
+    from qt_wait import wait_for
+    from test_library_return_ui import Player
 
     class Transcriber:
         result = TranscriberResult('nn', (), 0.61, model="large-v3")
@@ -206,6 +208,7 @@ def test_detail_panel_shows_no_speech_and_translation_skip_reason(window_factory
         writer.request_subtitles(video_id, language)
         writer.process_next_subtitle()
     window = window_factory()
+    window.player_factory = Player
     page, host = window.library_page, window.web_host
 
     def js(code):
@@ -217,26 +220,72 @@ def test_detail_panel_shows_no_speech_and_translation_skip_reason(window_factory
     def details():
         return js("document.getElementById('detail-scroll')?.innerText ?? ''")
 
-    def select(video_id, expected):
+    def select(video_id, expected, *, release_update=False):
         wait_for(lambda: js(f"!!document.getElementById('video-{video_id}')"))
-        js(f"document.getElementById('video-{video_id}').click()")
+        js(f"document.getElementById('video-{video_id}').scrollIntoView({{block: 'nearest'}})")
+        point = json.loads(js(f"JSON.stringify((() => {{ const r = document.getElementById('video-{video_id}').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }})())"))
+        wait_for(lambda: js(f"document.elementFromPoint({point[0]}, {point[1]})?.closest('[role=gridcell]')?.id") == f'video-{video_id}')
+        QTest.mouseClick(host.view.focusProxy() or host.view, Qt.MouseButton.LeftButton,
+                         pos=QPoint(round(point[0]), round(point[1])))
         wait_for(lambda: page.selected_id == video_id)
+        if release_update:
+            # 새 선택 뒤 이전 자막 갱신을 받는 순서. 두 프레임은 고정 시간이 아니라
+            # replay한 React 상태가 DOM에 반영됐다는 완료 표식이다.
+            js("window.releaseLibraryUpdate(); requestAnimationFrame(() => requestAnimationFrame(() => { window.libraryUpdateRendered = true }))")
+            wait_for(lambda: js("window.libraryUpdateRendered === true"))
+        wait_for(lambda: js(f"document.getElementById('video-{video_id}').getAttribute('aria-selected')") == 'true')
         wait_for(lambda: expected in details())
         return details()
 
-    text = select(auto, '말소리를 찾지 못했습니다')
+    text = select(auto, '원어 자막 · 말소리를 찾지 못했습니다.')
     assert '원어 자막 · 말소리를 찾지 못했습니다.' in text and '0줄' not in text
     assert '번역 자막 없음 · 원어 자막 줄이 없어 만들지 않았습니다.' in text
-    text = select(specified, '원어: ja · 말소리를 찾지 못했습니다.')
+    # 자막 완료 push가 WebChannel에서 늦게 전달돼도 그사이 고른 영상은 유지한다.
+    # 실제 공개 신호가 만든 snapshot 한 개만 보류하고 나머지 메시지는 통과시킨다.
+    def hold_update(signal, video_id):
+        js("""(() => {
+          window.releaseLibraryUpdate = null;
+          window.libraryUpdateRendered = false;
+          const transport = qt.webChannelTransport, receive = transport.onmessage;
+          transport.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === 1 && data.object === 'library' && typeof data.args?.[0] === 'string'
+                && JSON.parse(data.args[0]).videos) {
+              transport.onmessage = receive;
+              window.releaseLibraryUpdate = () => receive.call(transport, event);
+            } else receive.call(transport, event);
+          };
+        })()""")
+        signal.emit(video_id)
+        wait_for(lambda: js("typeof window.releaseLibraryUpdate === 'function'"))
+
+    hold_update(window.subtitles.video_changed, auto)
+    text = select(specified, '원어: ja · 말소리를 찾지 못했습니다.', release_update=True)
     assert '번역 자막 없음 · 원어 자막 줄이 없어 만들지 않았습니다.' in text
-    text = select(spoken, '원어: en · 1줄')
+    hold_update(window.translations.video_changed, specified)
+    text = select(spoken, '원어: en · 1줄', release_update=True)
     assert '말소리' not in text and '만들지 않았습니다' not in text
 
     # 다시 받아써서 말소리를 찾으면 선택 영상의 안내가 정상 요약으로 바뀐다.
-    select(auto, '말소리를 찾지 못했습니다')
+    select(auto, '원어 자막 · 말소리를 찾지 못했습니다.')
     transcriber.result = speech
     writer.request_subtitles(auto, 'en')
     writer.process_next_subtitle()
     window.subtitles.video_changed.emit(auto)
     wait_for(lambda: '원어: en · 1줄' in details())
     assert '말소리' not in details() and '만들지 않았습니다' not in details()
+
+    # 완료 갱신에서 선택이 결과 밖으로 빠지면 코어가 정한 대체 선택을 쓴다.
+    page.bridge.view(json.dumps({**page.options, 'query': core.video(specified).title}))
+    window.subtitles.video_changed.emit(auto)
+    wait_for(lambda: js("document.getElementById('library-grid').getAttribute('aria-activedescendant')") == f'video-{specified}')
+    wait_for(lambda: '원어: ja · 말소리를 찾지 못했습니다.' in details())
+    assert page.selected_id == specified
+
+    # 일반 갱신/재생 복귀는 현재 웹 선택보다 코어의 명시적인 선택을 우선한다.
+    page.bridge.view(json.dumps({**page.options, 'query': ''}))
+    page.bridge.select(spoken)
+    page.return_from_playback()
+    wait_for(lambda: js("document.getElementById('library-grid').getAttribute('aria-activedescendant')") == f'video-{spoken}')
+    wait_for(lambda: '원어: en · 1줄' in details())
+    assert page.selected_id == spoken

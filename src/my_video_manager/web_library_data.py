@@ -101,6 +101,7 @@ class LibraryData(TypedDict):
     tags: list[TagUsageData]
     visibleIds: list[int]
     selectedId: int | None
+    preserveSelection: bool
     scanning: bool
     options: LibraryViewOptions
     folders: list[LibraryFolder]
