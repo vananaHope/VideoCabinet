@@ -6,19 +6,19 @@ colors:
   foreground: "#fafafa"
   card: "#18181b"
   card-foreground: "#fafafa"
-  popover: "#18181b"
+  popover: "#27272a"
   popover-foreground: "#fafafa"
   primary: "#4f46e5"
   primary-foreground: "#ffffff"
   primary-text: "#a5b4fc"
-  secondary: "#27272a"
+  secondary: "#303036"
   secondary-foreground: "#fafafa"
-  muted: "#27272a"
-  muted-foreground: "#a1a1aa"
-  accent: "#27272a"
+  muted: "#303036"
+  muted-foreground: "#afafb7"
+  accent: "#3f3f46"
   accent-foreground: "#fafafa"
   border: "#3f3f46"
-  input: "#71717a"
+  input: "#7c7c85"
   ring: "#818cf8"
   destructive: "#fca5a5"
   destructive-foreground: "#450a0a"
@@ -86,11 +86,12 @@ components:
     padding: "0.5rem 1rem"
     height: "2.25rem"
   button-ghost-hover:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.accent-foreground}"
+    backgroundColor: "{colors.muted}"
+    textColor: "{colors.foreground}"
     rounded: "{rounded.md}"
   input:
     backgroundColor: "{colors.background}"
+    borderColor: "{colors.input}"
     textColor: "{colors.foreground}"
     rounded: "{rounded.md}"
     padding: "0.25rem 0.75rem"
@@ -108,7 +109,16 @@ components:
   video-card:
     backgroundColor: "{colors.card}"
     textColor: "{colors.card-foreground}"
+    borderColor: "{colors.border}"
     rounded: "{rounded.lg}"
+  video-card-hover:
+    backgroundColor: "{colors.popover}"
+    borderColor: "{colors.border}"
+    rounded: "{rounded.lg}"
+  selectable-item-selected:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.accent-foreground}"
+    rounded: "{rounded.md}"
   status-badge-success:
     backgroundColor: "{colors.status-success}"
     textColor: "{colors.status-success-foreground}"
@@ -157,13 +167,17 @@ components:
 - **Soft Indigo Text** (`primary-text`): 어두운 바탕 위 인디고 글자(링크 단추, 강조 숫자 카드). 진한 `primary`를 글자에 쓰면 대비가 모자라서 따로 둔다.
 
 ### Neutral
+면은 바탕 → 카드 → 떠 있는 층 순서로 한 단계씩 밝아지고, 그 위에서 호버는 한 단계, 선택은 그보다 한 단계 더 밝다.
 - **Projection Black** (`background`): 앱 바탕과 머리글.
-- **Booth Charcoal** (`card`, `popover`): 카드, 목록 행, 대화상자, 팝오버의 면.
-- **Aisle Graphite** (`secondary`, `muted`, `accent`): 보조 단추, 썸네일 빈 자리, 호버 면, 내비게이션 탭 선택 면, 키 표시(`Kbd`).
-- **Dim Rail** (`border`): 기본 테두리, 구분선, 스크롤바 손잡이.
-- **Steel Hairline** (`input`): 입력란 테두리, 카드 호버 테두리, 윤곽선 배지의 링.
-- **Usher Gray** (`muted-foreground`): 보조 글자(설명, 길이, 시리즈 이름, 비선택 탭).
+- **Booth Charcoal** (`card`): 카드, 목록 행, 상세 패널, 설정·통계 구역처럼 바탕 위에 쉬는 면. Qt 재생 화면의 머리글·조작 줄·하이라이트 목록.
+- **Curtain Gray** (`popover`): 떠 있는 층, 그리고 안에 `muted` 면(배지·태그 칩·썸네일 자리)이 있는 카드·행(영상·추천 카드, 대사 검색·모아보기 결과, 자막 대기열 행)의 호버 면(카드 바로 위 단계). 대화상자, 경고 대화상자, 팝오버, 메뉴, 선택 목록, 차트 툴팁, Qt 트레이 메뉴·공용 경고·재생 키 안내·툴팁. 카드와 그림자 없이도 구별된다(카드 대비 1.19:1).
+- **Aisle Graphite** (`muted`, `secondary`): 조용한 면과 호버 면. 썸네일 빈 자리, 자리 표시(`Skeleton`), 키 표시(`Kbd`), 구역 탭 묶음, 보조 단추·태그 칩, 고스트 단추·탭·목록 행·메뉴 밖 행의 호버. 떠 있는 층 위에서도 한 단계 보인다.
+- **Spot Graphite** (`accent`): 선택 면. 내비게이션·패널 탭과 설정 분류의 선택, 고른 목록 행·폴더·대기열 행, 메뉴·선택 목록의 현재 항목, 보조 단추 호버와 구역 탭 묶음 안 호버(묶음 면이 이미 `muted`라서), Qt 눌린 단추·트레이 메뉴 현재 항목·고른 하이라이트. 호버(`muted`)와 같은 면을 쓰지 않는다.
+- **Dim Rail** (`border`): 장식 구분선. 구분선, 머리글·패널·설정 구역·쉬는 카드의 테두리, 떠 있는 층 테두리, 스크롤바 손잡이. 꼭 필요한 경계가 아니므로 WCAG 1.4.11의 3:1 예외이고 어둡게 둔다.
+- **Steel Hairline** (`input`): 조작 경계. 입력란·선택 목록·윤곽선 단추·Qt 단추처럼 경계가 곧 조작 대상의 모양인 요소의 테두리와 윤곽선 배지의 링. 바탕·카드·떠 있는 층 어디서나 3:1 이상이다. 입력 요소의 면은 이 색 30%(`bg-input/30`, 호버 50%)다.
+- **Usher Gray** (`muted-foreground`): 보조 글자(설명, 길이, 시리즈 이름, 비선택 탭, 입력란 안내 글자). 선택 면(`accent`)과 입력란 면 위에서도 4.5:1 이상이다.
 - **Screen White** (`foreground`): 본문 글자.
+- **내용 카드 vs 조작 경계:** 영상·추천·대사 검색 결과 카드는 썸네일·제목으로 식별되는 내용 묶음이라 쉬는 테두리가 장식(`border`)이고 호버에도 그대로다. 호버는 면이 면 단계의 다음 칸(`card` → `popover`, 1.19:1)으로 밝아진다. `muted`가 아닌 까닭은 카드 안 `muted` 배지(아직 안 봄)·태그 칩이 호버 때 카드 면에 묻히지 않게 하려는 것이다. 출처 배지가 있는 대사 검색 결과, 태그 칩·썸네일 자리가 있는 모아보기 결과, 대기 배지·진행 막대가 있는 자막 대기열 행도 같은 이유로 호버가 `popover`다(배지 면 / 호버 면 1.14:1, 선택 면 `accent` 위 1.26:1). 안에 `muted` 면이 없는 목록 행만 호버가 `muted`다. 이 구분은 공용 `selectableItem`의 `inner: "muted"`가 맡는다. 선택·초점은 `ring`으로 바뀐다. `input` 3:1은 경계가 곧 조작 대상인 요소에만 쓴다.
 
 ### Highlight (하이라이트 전용)
 - **Marker Yellow** (`highlight`): 지점 하이라이트와 "즐겨 보는" 배지.
@@ -182,6 +196,8 @@ components:
 **The One Beam Rule.** 강조색은 인디고 하나다. 선택·초점·주 동작이 아닌 곳에 인디고를 칠하지 않는다.
 
 **The Meaning-Only Color Rule.** 하이라이트 색과 상태 색은 그 의미에만 쓴다. 장식이나 구역 구분에 빌려 쓰지 않는다.
+
+**The Lit Ladder Rule.** 면 단계는 `background` → `card` → `popover`이고, 놓인 면 위의 호버는 `muted`, 선택은 `accent`다. 같은 역할은 같은 토큰을 쓰고, 호버와 선택은 같은 면을 쓰지 않는다. 고를 수 있는 목록 항목(설정 분류·머리글·패널 탭·폴더·대화상자 목록·태그 고르기·대기열 행·검색 결과·영상 카드)은 공용 `selectableItem` variant 하나로 이 둘을 칠한다. 안에 `muted` 면이 있는 항목은 호버만 한 칸 위 `popover`다. 바탕·카드·떠 있는 층 위에서 본문·보조 글자는 4.5:1, 조작 경계(`input`)와 초점·선택 윤곽(`ring`)은 3:1 이상이다. 색을 바꾸면 `tests/test_web_contrast.py`와 `tests/test_theme.py`가 이 기준을 다시 잰다.
 
 ## Typography
 
@@ -217,7 +233,7 @@ components:
 
 ## Elevation & Depth
 
-쉬는 면은 평평하다. 깊이는 그림자가 아니라 면의 명도 단계(`background` → `card` → `secondary`/`accent`)와 얇은 테두리로 나눈다. 그림자는 바탕 위에 떠서 다른 내용을 가리는 층(대화상자, 경고 대화상자, 필터 팝오버, 메뉴)에만 쓰고, 그 뒤에는 `background` 80% 덮개를 깐다. 입력란과 윤곽선 단추의 아주 옅은 그림자(`shadow-xs`)는 shadcn 기본값을 그대로 둔 것이다.
+쉬는 면은 평평하다. 깊이는 그림자가 아니라 면의 명도 단계(`background` → `card` → `popover`, 그 위 호버 `muted` → 선택 `accent`)와 얇은 테두리로 나눈다. 떠 있는 층은 그림자 없이도 카드보다 밝은 면으로 구별된다. 그림자는 바탕 위에 떠서 다른 내용을 가리는 층(대화상자, 경고 대화상자, 필터 팝오버, 메뉴)에만 쓰고, 그 뒤에는 `background` 80% 덮개를 깐다. 입력란과 윤곽선 단추의 아주 옅은 그림자(`shadow-xs`)는 shadcn 기본값을 그대로 둔 것이다.
 
 ### Shadow Vocabulary
 - **Floating layer** (`shadow-lg`): 대화상자·팝오버·키 안내·떠 있는 안내(라이브러리 띠·셸 안내 묶음).
@@ -226,7 +242,7 @@ components:
 - 통계 차트 툴팁만 shadcn 기본값 `shadow-xl`을 쓴다.
 
 ### Named Rules
-**The Flat-At-Rest Rule.** 카드·목록 행·패널은 호버나 선택에도 그림자를 얻지 않는다. 호버는 테두리 밝기(`border` → `input`), 선택은 `ring` 테두리와 링으로 표시한다.
+**The Flat-At-Rest Rule.** 카드·목록 행·패널은 호버나 선택에도 그림자를 얻지 않는다. 호버는 면 한 단계(목록 행은 `muted`, 안에 `muted` 면(배지·태그 칩·썸네일 자리)이 있는 카드·행은 면 단계의 다음 칸 `popover`)이고 쉬는 테두리는 그대로 두며, 선택은 `ring` 테두리와 링(목록 행은 `accent` 면을 더한다)으로 표시한다.
 
 ## Shapes
 
@@ -245,18 +261,19 @@ components:
 절제된 단추. 색이 있는 단추는 화면에 하나 정도다.
 - **Shape:** `md` 둥글기(0.625rem). 기본 높이 2.25rem, 크기는 xs 1.5rem · sm 2rem · 기본 2.25rem · lg 2.5rem과 같은 크기의 정사각 아이콘 단추.
 - **Primary:** `primary` 면 + `primary-foreground` 글자. 호버에서 면이 90%로 옅어진다.
-- **Secondary / Outline / Ghost:** 보조 동작은 `secondary` 면, 윤곽선 단추는 `input` 테두리 + 옅은 면, 고스트는 호버에만 `accent` 면이 생긴다.
+- **Secondary / Outline / Ghost:** 보조 동작은 `secondary` 면(호버에 `accent`로 한 단계), 윤곽선 단추는 `input` 테두리 + `input` 30% 면(호버 50%), 고스트는 호버에만 `muted` 면이 생긴다.
 - **Destructive:** 되돌릴 수 없는 동작은 `destructive` 면, 덜 강한 경우는 `destructive` 윤곽선.
 - **Link:** `primary-text` 글자, 호버에 밑줄.
 - **Focus:** `ring` 색 2px 링. 비활성은 50% 불투명도.
 
 ### Navigation (Tabs)
-- **Navigation:** 머리글의 페이지 탭. 비선택은 `muted-foreground` 글자, 호버에 `muted` 면, 선택은 `accent` 면 + `accent-foreground` 글자. 강조색을 쓰지 않아 영상보다 튀지 않는다. 마지막 탭(설정)은 오른쪽 끝으로 민다. 툴팁에 단축키(`Ctrl+1`~`Ctrl+8`)가 보인다.
-- **Section:** 페이지 안 구역 전환. `muted` 묶음 면 안에서 선택 탭만 `primary` 면이다.
-- **Panel:** 테두리 묶음 안에서 선택 탭이 `accent` 면이다.
+- **Navigation:** 머리글의 페이지 탭. 비선택은 `muted-foreground` 글자, 호버에 `muted` 면, 선택은 그보다 밝은 `accent` 면 + `accent-foreground` 글자. 강조색을 쓰지 않아 영상보다 튀지 않는다. 마지막 탭(설정)은 오른쪽 끝으로 민다. 툴팁에 단축키(`Ctrl+1`~`Ctrl+8`)가 보인다.
+- **Section:** 페이지 안 구역 전환. `muted` 묶음 면 안에서 선택 탭만 `primary` 면이고, 비선택 탭 호버는 묶음보다 한 단계 밝은 `accent` 면이다.
+- **Panel:** 테두리 묶음 안에서 호버는 `muted`, 선택 탭은 `accent` 면이다.
+- **Selectable Item:** 설정 분류(`Button`의 `item`·`item-selected` variant), 머리글·패널 탭, 폴더 트리, 대화상자 목록, 태그 고르기 행, 대기열 행·규칙, 대사 검색·모아보기 결과, 통계의 많이 본 영상 행, 영상·추천 카드는 `components/ui/selectable-item.ts`의 `selectableItem`으로 호버 `muted`·선택 `accent`를 칠한다. 안에 `muted` 배지·태그 칩·썸네일 자리가 있는 항목(영상·추천 카드, 검색·모아보기 결과, 대기열 행)은 `inner: "muted"`로 호버를 `popover`로 올린다. 쓰는 곳은 배치만 더하고 색을 덮어쓰지 않는다.
 
 ### Cards / Containers
-- **Video Card:** `card` 면, `border` 테두리, `lg` 둥글기. 위는 16:9 썸네일(빈 자리는 `muted` 면 + 필름 아이콘), 아래는 고정 높이 정보 칸(제목 → 길이·시청 상태·자막·즐겨 보는 배지 → 시리즈 → 시청 통계 → 태그). 호버는 테두리가 `input`으로 밝아지고, 선택은 `ring` 테두리 + 1px 링이다.
+- **Video Card:** `card` 면, 장식 `border` 테두리, `lg` 둥글기. 위는 16:9 썸네일(빈 자리는 `muted` 면 + 필름 아이콘), 아래는 고정 높이 정보 칸(제목 → 길이·시청 상태·자막·즐겨 보는 배지 → 시리즈 → 시청 통계 → 태그). 호버는 면이 `popover`로 한 단계 밝아지고(테두리는 장식 `border` 그대로, 안쪽 `muted` 배지·태그 칩은 계속 구별된다), 선택은 `ring` 테두리 + 1px 링이다.
 - **List Item:** `card` 면, `lg` 둥글기, 안쪽 1rem. 선택은 `ring` 테두리 + `accent` 면.
 - **Number Card:** `card` 면, `xl` 둥글기, 안쪽 1.5rem. 라벨 → 큰 숫자(Display) → 설명.
 - **Empty State:** 점선 테두리, `xl` 둥글기, 가운데 정렬 제목·설명·동작.
@@ -303,7 +320,7 @@ components:
 - **Do** 색·간격·둥글기·글자 크기를 바꿀 때는 `src/my_video_manager/web_tokens.json`을 고치고 `scripts/generate_web_types.py`로 `tokens.css`를 다시 만든다(**The Token Source Rule**).
 - **Do** 모든 색을 테마 토큰 유틸리티(`bg-card`, `text-muted-foreground`, `border-ring` 등)로 쓴다.
 - **Do** 특별한 모양이 필요하면 쓰는 곳에서 덮어쓰지 말고, `cva` variant를 가진 전용 컴포넌트를 만든다.
-- **Do** 선택과 키보드 초점은 `ring`(#818cf8)으로, 호버는 테두리·면 밝기로 구별한다.
+- **Do** 선택과 키보드 초점은 `ring`(#818cf8)으로, 호버는 면 한 단계(목록 행 `muted`, 안에 `muted` 면(배지·태그 칩·썸네일 자리)이 있는 카드·행 `popover`)로 구별한다. 선택 면은 `accent`다.
 - **Do** 썸네일·카드·패널의 크기를 내용이 오기 전에 확보한다.
 - **Do** 1100×720 offscreen 스크린샷(`scripts/check_web_*.py --offscreen`)으로 결과를 확인한다.
 

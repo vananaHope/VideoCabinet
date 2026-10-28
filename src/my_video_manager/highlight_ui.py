@@ -38,7 +38,7 @@ class HighlightProgress(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(
             f"QToolTip {{ color: {PLAYBACK_COLORS['foreground']}; "
-            f"background-color: {PLAYBACK_COLORS['card']}; "
+            f"background-color: {PLAYBACK_COLORS['popover']}; "
             f"border: 1px solid {PLAYBACK_COLORS['border']}; }}"
         )
         self.duration = 0
@@ -145,7 +145,7 @@ class _PlaybackHighlightDelegate(QStyledItemDelegate):
         c = PLAYBACK_COLORS
         nearest = bool(index.data(Qt.ItemDataRole.UserRole + 1))
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        painter.fillRect(option.rect, QColor(c['secondary'] if selected else c['card']))
+        painter.fillRect(option.rect, QColor(c['accent'] if selected else c['card']))
         if nearest:
             painter.fillRect(option.rect.left(), option.rect.top() + 8, 3,
                              option.rect.height() - 16, QColor(c['highlight']))

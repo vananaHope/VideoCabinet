@@ -2,13 +2,14 @@ import { memo, useCallback, useSyncExternalStore, type KeyboardEvent, type React
 import { cva } from "class-variance-authority"
 import { StatusBadge } from "@/components/page-parts"
 import { InlineNotice } from "@/components/ui/notice"
+import { selectableItem } from "@/components/ui/selectable-item"
 import type { KeyGuideRow } from "@/lib/key-guide"
 import { QueueStore } from "./queue-store"
 
 // 열 비율은 영상 2 : 상태 1 : 진행률 1 : 안내 2로 두어 긴 안내가 일찍 잘리지 않게 한다.
 const columns = "grid grid-cols-6 gap-3 px-3"
 const wide = "col-span-2 min-w-0"
-const rowClass = cva(`${columns} items-center border-b py-1 text-sm`, { variants: { selected: { true: "bg-accent", false: "bg-card" } } })
+const rowClass = cva(`${columns} items-center border-b py-1 text-sm`, { variants: { selected: { true: selectableItem({ selected: true }), false: ["bg-card", selectableItem({ selected: false, inner: "muted" })] } } })
 // 안내가 많아도 머리글과 행 세 개 이상이 보이는 높이를 지킨다.
 // 고정 머리글 높이 토큰을 scroll-padding에도 써서, 키보드로 위쪽 행을 골라도 머리글에 가리지 않게 한다.
 const listClass = cva("min-h-32 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border scroll-pt-queue-header" } } })

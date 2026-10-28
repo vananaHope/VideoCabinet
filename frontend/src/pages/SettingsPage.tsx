@@ -65,7 +65,7 @@ export default function SettingsPage() {
     <PageHeader title="설정" description="키 배치와 라이브러리 설정을 한곳에서 관리합니다. Alt+S 또는 Ctrl+8로 엽니다." />
     <NoticeStack items={[error && { tone: 'error', message: error, onDismiss: () => setError('') }]} />
     <div className="flex min-h-0 flex-1 gap-6">
-      <nav id="settings-category" aria-label="설정 분류" className="flex w-40 shrink-0 flex-col gap-2">{categories.map(([id, label]) => <Button key={id} variant={category === id ? 'secondary' : 'ghost'} aria-current={category === id ? 'true' : undefined} data-category={id} onClick={() => setCategory(id)}>{label}</Button>)}</nav>
+      <nav id="settings-category" aria-label="설정 분류" className="flex w-40 shrink-0 flex-col gap-2">{categories.map(([id, label]) => <Button key={id} variant={category === id ? 'item-selected' : 'item'} aria-current={category === id ? 'true' : undefined} data-category={id} onClick={() => setCategory(id)}>{label}</Button>)}</nav>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
         <BackupSettings bridge={bridge} active={category === 'backup'} />
         <section hidden={category !== 'general'} className="space-y-6" aria-label="일반 설정">

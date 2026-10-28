@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { cva } from 'class-variance-authority'
+import { selectableItem } from '@/components/ui/selectable-item'
 import type { DialogData, DialogValues } from '@/bridge-types'
 import { RandomTagFields, tagCandidateCount } from '@/components/random-tag-dialog'
 
@@ -7,7 +8,7 @@ type ScopeValues = Pick<DialogValues, 'choice' | 'members'>
 
 const optionStyle = cva('flex min-w-0 items-start gap-3 rounded-md border px-3 py-2 text-sm', {
   variants: {
-    selected: { true: 'bg-accent text-accent-foreground ring-1 ring-inset ring-ring', false: 'hover:bg-muted' },
+    selected: { true: selectableItem({ selected: true, ring: true }), false: selectableItem({ selected: false }) },
     disabled: { true: 'opacity-50', false: '' },
   },
 })

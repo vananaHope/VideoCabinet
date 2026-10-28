@@ -42,8 +42,8 @@ def playback_stylesheet():
         font-family: {', '.join(f'"{name}"' for name in _font_families)};
         font-size: {playback_pixels('typography', 'text-sm')}px; }}
     QLabel {{ background: transparent; }}
-    QWidget#playbackHeader, QWidget#playbackBar, QWidget#playbackHighlights,
-    QWidget#playbackHelp {{ background: {c['card']}; }}
+    QWidget#playbackHeader, QWidget#playbackBar, QWidget#playbackHighlights {{ background: {c['card']}; }}
+    QWidget#playbackHelp, QMessageBox {{ background: {c['popover']}; }}
     QWidget#playbackHeader {{ border-bottom: 1px solid {c['border']}; }}
     QWidget#playbackBar {{ border-top: 1px solid {c['border']}; }}
     QWidget#playbackHighlights {{ border-left: 1px solid {c['border']}; }}
@@ -52,17 +52,17 @@ def playback_stylesheet():
     QLabel[playbackRole="warning"] {{ color: {c['highlight-open']}; }}
     QLabel[playbackRole="title"] {{ font-weight: 600; }}
     QPushButton, QToolButton {{ background: {c['secondary']}; color: {c['foreground']};
-        border: 1px solid {c['border']}; border-radius: {radius}px;
+        border: 1px solid {c['input']}; border-radius: {radius}px;
         padding: {spacing}px {spacing * 2}px; }}
     QPushButton:hover, QToolButton:hover {{ border-color: {c['muted-foreground']}; }}
     /* 재생 기호(⏮ ⏸ ⏭ 등)가 컬러 이모지로 그려지지 않게 단색 기호 글꼴을 쓴다. */
     QToolButton[playbackRole="symbol"] {{ font-family: "Segoe UI Symbol";
         font-size: {playback_pixels('typography', 'text-base')}px; }}
-    QPushButton:checked, QToolButton:checked {{ background: {c['secondary']}; color: {c['primary-text']}; }}
+    QPushButton:checked, QToolButton:checked {{ background: {c['accent']}; color: {c['primary-text']}; }}
     QPushButton:focus, QToolButton:focus, QAbstractItemView:focus {{ border: 2px solid {c['ring']}; }}
     QListWidget {{ background: {c['card']}; border: 2px solid transparent; outline: none; }}
     QMenu {{ background: {c['popover']}; color: {c['popover-foreground']}; border: 1px solid {c['border']}; }}
-    QMenu::item:selected {{ background: {c['secondary']}; border-left-color: {c['ring']}; }}
+    QMenu::item:selected {{ background: {c['accent']}; border-left-color: {c['ring']}; }}
     QScrollBar {{ background: {c['card']}; }}
     QScrollBar::handle {{ background: {c['border']}; }}
     QScrollBar::handle:hover {{ background: {c['muted-foreground']}; }}
@@ -85,7 +85,8 @@ def apply_theme(app):
         QPalette.ColorRole.Base: 'card', QPalette.ColorRole.Text: 'foreground',
         QPalette.ColorRole.Button: 'secondary', QPalette.ColorRole.ButtonText: 'foreground',
         QPalette.ColorRole.ToolTipBase: 'popover', QPalette.ColorRole.ToolTipText: 'popover-foreground',
-        QPalette.ColorRole.Highlight: 'primary', QPalette.ColorRole.HighlightedText: 'primary-text',
+        QPalette.ColorRole.Highlight: 'primary', QPalette.ColorRole.HighlightedText: 'primary-foreground',
+        QPalette.ColorRole.PlaceholderText: 'muted-foreground',
     }.items():
         palette.setColor(role, QColor(colors[token]))
     app.setPalette(palette)
