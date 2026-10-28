@@ -77,9 +77,10 @@ export default function App() {
         기본 창에서는 각 페이지가 높이에 맞춰 내부 목록만 스크롤하므로 바깥 스크롤이 생기지 않는다. */}
     <div className="relative flex min-h-0 flex-1 flex-col">
       {Object.entries(pages).map(([name, Page]) => Page && <div key={name} data-page={name} hidden={tab !== name} className={pageArea({ entering: view.entering && tab === name })}><Page /></div>)}
-      {/* 셸 안내는 페이지를 밀지 않고 페이지 영역 오른쪽 아래에 떠 있는 한 묶음으로 쌓는다. 머리글·탭 줄과 페이지 위쪽의 툴바·상세 패널 단추를 가리지 않는다.
+      {/* 셸 안내는 페이지를 밀지 않고 페이지 영역 모서리(기본 오른쪽 아래)에 떠 있는 한 묶음으로 쌓는다. 머리글·탭 줄은 덮지 않고,
+          지금 페이지의 툴바·작업 단추 줄 같은 고정 조작 요소를 가장 적게 가리는 모서리를 고른다.
           자막 기능 준비가 먼저, 그 아래 연결 오류와 작업 알림, 마지막에 새 버전 알림이 온다. 묶음은 접을 수 있고 넘치면 안에서 스크롤한다. */}
-      <NoticeLayer aria-label="앱 안내">
+      <NoticeLayer aria-label="앱 안내" avoid={`[data-page="${tab}"]`}>
         <SubtitlePreparation />
         <NoticeStack items={[
           error && { tone: "error", message: error, onDismiss: () => setError("") },
