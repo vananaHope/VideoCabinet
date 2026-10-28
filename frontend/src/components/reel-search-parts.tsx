@@ -3,9 +3,13 @@ import type { ComponentProps, KeyboardEvent } from "react"
 import type { SearchTextData } from "@/bridge-types"
 import type { KeyGuideRow } from "@/lib/key-guide"
 
-const row = cva("flex min-w-0 gap-3 rounded-lg border p-3 text-left", { variants: { selected: { true: "border-ring bg-accent", false: "border-border bg-card hover:bg-muted" } } })
-export function ResultRow({ selected, ...props }: ComponentProps<"div"> & { selected: boolean }) {
-  return <div {...props} role="option" aria-selected={selected} className={row({ selected })} />
+// stale: 새 결과를 기다리는 동안 흐리게 보이기만 하는 이전 결과. 비활성과 같은 50% 불투명도이고 포인터를 받지 않는다.
+const row = cva("flex min-w-0 gap-3 rounded-lg border p-3 text-left", {
+  variants: { selected: { true: "border-ring bg-accent", false: "border-border bg-card hover:bg-muted" }, stale: { true: "pointer-events-none opacity-50", false: "" } },
+  defaultVariants: { stale: false },
+})
+export function ResultRow({ selected, stale = false, ...props }: ComponentProps<"div"> & { selected: boolean; stale?: boolean }) {
+  return <div {...props} role="option" aria-selected={selected} aria-disabled={stale || undefined} className={row({ selected, stale })} />
 }
 
 export function SearchInput(props: ComponentProps<"input">) {
