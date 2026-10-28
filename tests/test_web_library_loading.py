@@ -5,6 +5,7 @@
 from datetime import datetime, timezone
 import json
 import os
+from time import monotonic
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
@@ -17,6 +18,7 @@ from qt_wait import wait_for
 from test_library_return_ui import Player
 from test_web_library_data import Media, core
 from web_frames import stop_recording as stop_frames
+from wait_helpers import UI_READY_TIMEOUT
 from my_video_manager.core import AppCore
 from my_video_manager.ui import MainWindow
 from my_video_manager.web_shell import WebShellHost
@@ -28,15 +30,31 @@ FRAME_RECORDER = """(() => {
   const frames = window.__libraryFrames = []
   let held = %(hold)s, release = null, channelClass
   const failed = %(fail)s
+  const fastData = %(fast_data)s
   window.__releaseLibrary = () => { held = false; release?.() }
+  // 빠른 응답 시험은 공개 snapshot으로 미리 준비한 응답을 쓴다. Qt 왕복과 Python 폴링을
+  // 측정 구간에서 빼고, 격자와 응답 콜백이 모두 준비된 첫 microtask에서 전달한다.
+  const releaseFast = () => {
+    if (fastData !== null && held && release && document.getElementById('library-grid')) {
+      window.__libraryMoments.release = performance.now()
+      window.__releaseLibrary()
+    }
+  }
   Object.defineProperty(window, 'QWebChannel', { configurable: true, get: () => channelClass, set(Original) {
     channelClass = function (transport, ready) {
       return new Original(transport, channel => {
         const library = channel.objects.library, snapshot = library.snapshot
-        library.snapshot = reply => snapshot.call(library, json => {
-          if (failed) json = JSON.stringify({ error: '라이브러리를 읽지 못했습니다.' })
-          if (held) release = () => reply(json); else reply(json)
-        })
+        library.snapshot = reply => {
+          if (fastData !== null) {
+            release = () => reply(fastData)
+            queueMicrotask(releaseFast)
+            return
+          }
+          snapshot.call(library, json => {
+            if (failed) json = JSON.stringify({ error: '라이브러리를 읽지 못했습니다.' })
+            if (held) release = () => reply(json); else reply(json)
+          })
+        }
         ready(channel)
       })
     }
@@ -73,6 +91,7 @@ FRAME_RECORDER = """(() => {
   const moments = window.__libraryMoments = {}, statuses = window.__libraryStatuses = []
   const mark = () => {
     if (moments.grid === undefined && document.getElementById('library-grid')) moments.grid = performance.now()
+    if (fastData !== null && held) queueMicrotask(releaseFast)
     if (moments.pending === undefined && document.querySelector('[data-slot=pending-status]')?.textContent) moments.pending = performance.now()
   }
   for (const name of ['appendChild', 'insertBefore']) {
@@ -120,25 +139,40 @@ def open_window(core, monkeypatch, qapp):
         script.setName('library-frames')
         script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        hold, fail = first_reply[-1]
-        script.setSourceCode(FRAME_RECORDER % {'hold': json.dumps(hold), 'fail': json.dumps(fail)})
+        hold, fail, fast = first_reply[-1]
+        # 직접 만든 JSON 대신 실제 MainWindow의 공개 브리지 결과를 그대로 전달한다.
+        fast_data = host.controllers['library'].bridge.snapshot() if fast else None
+        script.setSourceCode(FRAME_RECORDER % {'hold': json.dumps(hold), 'fail': json.dumps(fail),
+                                              'fast_data': json.dumps(fast_data)})
         host.engine_page.scripts().insert(script)
         start(host)
 
-    monkeypatch.setattr(WebShellHost, 'start', record_frames)
+    def start_recorded(host):
+        # 빠른 응답은 MainWindow 초기 refresh가 끝난 공개 snapshot을 준비한 뒤 문서를 연다.
+        if not first_reply[-1][2]:
+            record_frames(host)
 
-    def create(*, hold_data=False, fail_data=False, library=None):
-        first_reply.append((hold_data, fail_data))
+    monkeypatch.setattr(WebShellHost, 'start', start_recorded)
+
+    def create(*, hold_data=False, fail_data=False, fast_data=False, library=None):
+        first_reply.append((hold_data or fast_data, fail_data, fast_data))
         window = MainWindow(library or core, player_factory=Player)
         windows.append(window)
+        if fast_data:
+            record_frames(window.web_host)
         window.show()
         return window
 
-    yield create
-    for window in windows:
+    def close(window):
+        windows.remove(window)
         window.tray.quit()
         window.deleteLater()
-    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    create.close = close
+    yield create
+    for window in tuple(windows):
+        close(window)
 
 
 def release(window):
@@ -226,15 +260,20 @@ def test_pending_status_does_not_flash_when_data_arrives_quickly(open_window, tm
     # 300ms 안에 데이터가 오면 기다림 표시는 한 번도 나타나지 않는다.
     # 격자가 붙은 시각(기다림 타이머 시작보다 늦지 않다)부터 데이터를 본 시각(실제 반영보다 이르지 않다)까지가
     # 250ms 안일 때만 타이머가 끝나기 전에 데이터가 왔다고 말할 수 있다.
-    # 부하로 늦은 실행은 이 경우의 재현이 아니므로 검증 없이 통과시키지 않고, 창을 새 라이브러리로 새로 열어 다시 재현한다.
+    # 응답은 시험이 준비해 renderer에서 hold/release한다. 그래도 OS가 renderer 자체를 오래 멈춘 시도는
+    # 빠른 응답의 재현이 아니므로 새 라이브러리로 다시 연다. 시도 횟수가 아닌 공용 UI 준비 한도를 쓰며,
+    # 유효한 시도 없이 한도가 끝나면 반드시 실패한다. 기다림 표시 단언 실패는 재시도하지 않는다.
     attempts = []
-    for attempt in range(3):
-        window = open_window(library=library_with_video(tmp_path / f'attempt-{attempt}'))
+    deadline = monotonic() + UI_READY_TIMEOUT
+    while monotonic() < deadline:
+        window = open_window(fast_data=True, library=library_with_video(tmp_path / f'attempt-{len(attempts)}'))
         wait_for(lambda: js(window, FIRST_ROW) > 0)
         recorded = stop_recording(window, lambda frame: not frame['busy'])
         moments = recorded['moments']
         attempts.append(moments)
+        open_window.close(window)
         if moments['data'] - moments['grid'] < 250:
+            assert moments['grid'] <= moments['release'] <= moments['data'], moments
             break
     else:
         pytest.fail(f'데이터가 250ms 안에 오는 경우를 재현하지 못했다: {attempts}')
