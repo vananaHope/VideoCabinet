@@ -8,7 +8,8 @@ from threading import Event, Lock
 from typing import Protocol
 from uuid import uuid4
 
-from .subtitle_queue_kind import TRANSCRIPTION
+from .translation_source import TRANSCRIPT, TranslationSources
+from .translation_schema import create_source_tables, install_transcript_references
 from .subtitles import TranscriptLine, TranscriptSummary
 from .translation_kind import translation_task, TranslationTask
 from .translation_models import DEFAULT_PROVIDER, provider
@@ -123,6 +124,7 @@ class Translation:
     video_id: int
     transcript_id: str
     lines: tuple[TranscriptLine, ...]  # 같은 ID와 시각, 한국어 텍스트
+    source: str = TRANSCRIPT
 
 
 @dataclass(frozen=True)
@@ -150,14 +152,15 @@ class TranslationQueueEntry:
     retry_at: datetime | None
     error: str | None
     error_detail: str | None
+    queue_kind: str
+    source: str
     notice: str = ""
     kind: str = "translation"
-    queue_kind: str = TRANSCRIPTION
 
 
 class Translations:
     def __init__(self, connect, clock, subtitles, settings, translator, *, batch_size=None,
-                 retry_delay=timedelta(minutes=15), format_attempts=3, order=None, protected_lines=None, options=None):
+                 retry_delay=timedelta(minutes=15), format_attempts=3, order=None, protected_lines=None, options=None, sources=None):
         if (batch_size is not None and batch_size < 1) or format_attempts < 1 or retry_delay.total_seconds() <= 0:
             raise ValueError("번역 묶음 크기, 재시도 횟수와 보류 시간은 양수여야 합니다.")
         self._connect, self._clock = connect, clock
@@ -171,31 +174,14 @@ class Translations:
         self._cached_request = None
         self._cached_transcript = None
         self._activity = Lock()
-        self._protected_lines = protected_lines or (lambda db: set())
+        self.sources = sources or TranslationSources()
+        self.sources.register(TRANSCRIPT, subtitles.transcript, queue_kind=self.sources.queue_kind(TRANSCRIPT),
+                              protected_lines=protected_lines)
         self._glossaries = GlossaryStore()
         self._batch_progress = {}
         with connect() as db:
+            create_source_tables(db)
             db.executescript("""
-                CREATE TABLE IF NOT EXISTS translation_lines (
-                    line_id TEXT PRIMARY KEY REFERENCES transcript_lines(id) ON DELETE CASCADE,
-                    text TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS translation_queue (
-                    id TEXT PRIMARY KEY,
-                    video_id INTEGER NOT NULL UNIQUE REFERENCES videos(id),
-                    transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
-                    requested_at TEXT NOT NULL,
-                    state TEXT NOT NULL DEFAULT 'queued',
-                    retry_at TEXT,
-                    error_kind TEXT,
-                    error_detail TEXT
-                );
-                CREATE TABLE IF NOT EXISTS translation_targets (
-                    queue_id TEXT NOT NULL REFERENCES translation_queue(id) ON DELETE CASCADE,
-                    line_id TEXT NOT NULL REFERENCES transcript_lines(id) ON DELETE CASCADE,
-                    text TEXT,
-                    PRIMARY KEY(queue_id, line_id)
-                );
                 CREATE TABLE IF NOT EXISTS translation_cli_backoff (
                     cli TEXT PRIMARY KEY,
                     retry_at TEXT NOT NULL
@@ -205,10 +191,6 @@ class Translations:
                     cli TEXT NOT NULL,
                     attempts INTEGER NOT NULL,
                     PRIMARY KEY(queue_id, cli)
-                );
-                CREATE TABLE IF NOT EXISTS translation_line_providers (
-                    line_id TEXT PRIMARY KEY REFERENCES transcript_lines(id) ON DELETE CASCADE,
-                    provider TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS translation_target_providers (
                     queue_id TEXT NOT NULL,
@@ -230,10 +212,8 @@ class Translations:
                     queue_id TEXT PRIMARY KEY REFERENCES translation_queue(id) ON DELETE CASCADE,
                     message TEXT NOT NULL
                 );
-                CREATE TABLE IF NOT EXISTS translation_omissions (
-                    transcript_id TEXT PRIMARY KEY REFERENCES transcripts(id) ON DELETE CASCADE
-                );
             """)
+            install_transcript_references(db)
             db.execute("UPDATE translation_queue SET state = 'queued' WHERE state = 'translating'")
         self.enqueue_eligible()  # 원어 저장 직후 강제 종료된 경우도 복구한다.
 
@@ -251,17 +231,24 @@ class Translations:
             ids = [row[0] for row in db.execute("""
                 SELECT video_id FROM transcripts t
                 WHERE t.spoken_language NOT IN ('ko', 'und')
-                  AND NOT EXISTS (SELECT 1 FROM translation_queue q WHERE q.video_id = t.video_id)
-                  AND NOT EXISTS (SELECT 1 FROM translation_omissions o WHERE o.transcript_id = t.id)
+                  AND NOT EXISTS (SELECT 1 FROM translation_queue q WHERE q.video_id = t.video_id AND q.source = ?)
+                  AND NOT EXISTS (SELECT 1 FROM translation_omissions o WHERE o.transcript_id = t.id AND o.source = ?)
                   AND EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id = t.id
-                              AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id = l.id))
-            """)]
+                              AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id = l.id AND tr.source = ?))
+            """, (TRANSCRIPT, TRANSCRIPT, TRANSCRIPT))]
         for video_id in ids:
             self.request(video_id, automatic=True)
 
+    def _generation_current(self, db, source, video_id, generation_id):
+        if source == TRANSCRIPT:
+            return db.execute("SELECT 1 FROM transcripts WHERE id=? AND video_id=?",
+                              (generation_id, video_id)).fetchone() is not None
+        current = self.sources.lines(source, video_id, connection=db)
+        return current is not None and current.id == generation_id
+
     def request(self, video_id: int, line_ids=None, *, automatic=False, connection=None,
-                preserve_state=False, continue_order=False):
-        transcript = self._subtitles.transcript(video_id, connection=connection)
+                preserve_state=False, continue_order=False, source=TRANSCRIPT):
+        transcript = self.sources.lines(source, video_id, connection=connection)
         if transcript is None or not transcript.lines or transcript.spoken_language in (None, "und"):
             if automatic:
                 return None
@@ -272,28 +259,27 @@ class Translations:
         with (nullcontext(connection) if connection is not None else self._connect()) as db:
             if not db.in_transaction:
                 db.execute("BEGIN IMMEDIATE")
-            if not db.execute("SELECT 1 FROM transcripts WHERE id = ?", (transcript.id,)).fetchone():
+            if not self._generation_current(db, source, video_id, transcript.id):
                 return None  # 동시에 원어가 교체됐다. 다음 자동 등록에서 새 세대를 처리한다.
-            old = db.execute("SELECT * FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
-            selected -= self._protected_lines(db)
+            old = db.execute("SELECT * FROM translation_queue WHERE video_id = ? AND source = ?", (video_id, source)).fetchone()
+            selected -= self.sources.protected_lines(source, db)
             if not selected:
                 return self._entry(db, old) if old else None
             if automatic:
-                if db.execute("SELECT 1 FROM translation_omissions WHERE transcript_id = ?", (transcript.id,)).fetchone():
+                if db.execute("SELECT 1 FROM translation_omissions WHERE transcript_id = ? AND source = ? AND video_id = ?", (transcript.id, source, video_id)).fetchone():
                     return None
                 if old:
                     return self._entry(db, old)
                 saved = {r[0] for r in db.execute(
-                    "SELECT line_id FROM translation_lines JOIN transcript_lines ON id = line_id "
-                    "WHERE transcript_id = ?", (transcript.id,))}
+                    "SELECT line_id FROM translation_lines WHERE video_id = ? AND source = ?", (video_id, source))}
                 selected -= saved
                 if not selected:
                     return None
             else:
-                db.execute("DELETE FROM translation_omissions WHERE transcript_id = ?", (transcript.id,))
+                db.execute("DELETE FROM translation_omissions WHERE video_id = ? AND source = ?", (video_id, source))
             if self._order:
                 # 새 직접 요청은 남은 순번 행과 무관하게 뒤에 서고, 후속 단계는 받은 순번을 잇는다.
-                self._order.request(db, video_id, automatic=automatic,
+                self._order.request(db, video_id, kind=self.sources.queue_kind(source), automatic=automatic,
                                     renew=not automatic and not continue_order
                                     and (old is None or old["state"] == "failed"))
             # 명시적인 전체 재시도는 저장한 묶음을 재사용한다.
@@ -319,10 +305,11 @@ class Translations:
                 attempts = list(db.execute("SELECT cli, attempts FROM translation_limit_attempts WHERE queue_id = ?",
                                            (old["id"],))) if old and preserve_state else []
                 glossary = self._glossaries.load(db, old['id']) if old else None
-                db.execute("DELETE FROM translation_queue WHERE video_id = ?", (video_id,))
+                db.execute("DELETE FROM translation_queue WHERE video_id = ? AND source = ?", (video_id, source))
                 queue_id = uuid4().hex
-                db.execute("INSERT INTO translation_queue(id, video_id, transcript_id, requested_at) VALUES (?, ?, ?, ?)",
-                           (queue_id, video_id, transcript.id, self._clock().isoformat()))
+                db.execute("INSERT INTO translation_queue(id, video_id, transcript_id, requested_at, source, spoken_language) "
+                           "VALUES (?, ?, ?, ?, ?, ?)",
+                           (queue_id, video_id, transcript.id, self._clock().isoformat(), source, transcript.spoken_language))
                 if glossary is not None:
                     self._glossaries.save(db, queue_id, glossary)
                 if old and preserve_state:
@@ -353,14 +340,14 @@ class Translations:
 
     def _existing_refinements(self, db):
         rows = db.execute("""SELECT t.video_id,
-                EXISTS (SELECT 1 FROM translation_omissions o WHERE o.transcript_id=t.id) AS omitted
+                EXISTS (SELECT 1 FROM translation_omissions o WHERE o.transcript_id=t.id AND o.source=?) AS omitted
             FROM transcripts t JOIN videos v ON v.id=t.video_id
             WHERE t.spoken_language='ko' AND NOT v.excluded
-              AND NOT EXISTS (SELECT 1 FROM translation_queue q WHERE q.video_id=t.video_id)
+              AND NOT EXISTS (SELECT 1 FROM translation_queue q WHERE q.video_id=t.video_id AND q.source=?)
               AND EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id=t.id
-                          AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id=l.id))
+                          AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id=l.id AND tr.source=?))
               AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=t.video_id AND s.kind=?
-                              AND s.state IN ('queued', 'transcribing'))""", (TRANSCRIPTION,)).fetchall()
+                              AND s.state IN ('queued', 'transcribing'))""", (TRANSCRIPT, TRANSCRIPT, TRANSCRIPT, self.sources.queue_kind(TRANSCRIPT))).fetchall()
         return [r['video_id'] for r in rows if not r['omitted']], sum(r['omitted'] for r in rows)
 
     def existing_refinement_candidates(self):
@@ -379,36 +366,39 @@ class Translations:
                 count += self.request(video_id, automatic=True, connection=db) is not None
         return count, skipped
 
-    def finish_ready(self, db, video_id):
+    def finish_ready(self, db, video_id, *, source=TRANSCRIPT):
         """검수/구간 삭제가 마지막 미완료 대상을 없앤 경우도 저장한 묶음을 확정한다."""
-        row = db.execute("SELECT id FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
+        row = db.execute("SELECT id FROM translation_queue WHERE video_id = ? AND source = ?", (video_id, source)).fetchone()
         if row is None or db.execute("SELECT 1 FROM translation_targets WHERE queue_id = ? AND text IS NULL",
                                      (row[0],)).fetchone():
             return
-        protected = self._protected_lines(db)
+        protected = self.sources.protected_lines(source, db)
         targets = [(r["line_id"], r["text"]) for r in db.execute(
             "SELECT line_id, text FROM translation_targets WHERE queue_id = ?", (row[0],))
                    if r["line_id"] not in protected]
-        db.executemany("DELETE FROM translation_lines WHERE line_id = ?", [(id_,) for id_, _ in targets])
-        db.executemany("INSERT INTO translation_lines VALUES (?, ?)", targets)
+        db.executemany("DELETE FROM translation_lines WHERE video_id=? AND source=? AND line_id=?",
+                       [(video_id, source, id_) for id_, _ in targets])
+        db.executemany("INSERT INTO translation_lines VALUES (?, ?, ?, ?)",
+                       [(id_, text, video_id, source) for id_, text in targets])
         self._commit_providers(db, row[0])
         db.execute("DELETE FROM translation_queue WHERE id = ?", (row[0],))
         if self._order:
-            self._order.finish(db, video_id)
+            self._order.finish(db, video_id, kind=self.sources.queue_kind(source))
 
-    @staticmethod
-    def _entry(db, row):
+    def _entry(self, db, row):
         counts = db.execute("SELECT COUNT(text), COUNT(*) FROM translation_targets WHERE queue_id = ?",
                             (row["id"],)).fetchone()
         error = TranslationError(row["error_kind"], row["error_detail"]) if row["error_kind"] else None
         if error and row['error_kind'] != 'usage_limit_repeated' and row['error_detail'] and row['error_detail'].startswith('OpenCode Go'):
             error = row['error_detail']
         notice = db.execute("SELECT message FROM translation_fallback_notices WHERE queue_id=?", (row["id"],)).fetchone()
-        language = db.execute("SELECT spoken_language FROM transcripts WHERE id=?", (row["transcript_id"],)).fetchone()[0]
+        language = row["spoken_language"]
         task = translation_task(language)
         return TranslationQueueEntry(row["id"], row["video_id"], row["state"], counts[0], counts[1],
                                      datetime.fromisoformat(row["retry_at"]) if row["retry_at"] else None,
-                                     str(error) if error else None, row["error_detail"], notice[0] if notice else "", task.kind)
+                                     str(error) if error else None, row["error_detail"],
+                                     queue_kind=self.sources.queue_kind(row["source"]), source=row["source"],
+                                     notice=notice[0] if notice else "", kind=task.kind)
 
     def queue(self):
         with self._connect() as db:
@@ -417,38 +407,43 @@ class Translations:
                 "SELECT * FROM translation_queue ORDER BY requested_at, rowid"))
         return self._order.sort(entries) if self._order else entries
 
-    def remove(self, video_id):
+    def remove(self, video_id, *, source=TRANSCRIPT):
         with self._activity:
             with self._connect() as db:
-                db.execute("INSERT OR IGNORE INTO translation_omissions SELECT id FROM transcripts WHERE video_id = ?", (video_id,))
-                db.execute("DELETE FROM translation_queue WHERE video_id = ?", (video_id,))
-            if self._active_video == video_id and self._active_cancellation:
+                # 출처 조회가 읽기 트랜잭션을 열기 전에 쓰기를 예약한다.
+                # 취소된 받아쓰기의 정리 쓰기와 읽기→쓰기 승격이 교착하지 않게 한다.
+                db.execute("BEGIN IMMEDIATE")
+                original = self.sources.lines(source, video_id, connection=db)
+                if original:
+                    db.execute("INSERT OR REPLACE INTO translation_omissions VALUES (?, ?, ?)",
+                               (original.id, video_id, source))
+                db.execute("DELETE FROM translation_queue WHERE video_id=? AND source=?", (video_id, source))
+            if self._active_video == (video_id, source) and self._active_cancellation:
                 self._active_cancellation.set()
 
     def resume_processing(self):
         self._cancellation.clear()
 
-    def translation(self, video_id):
+    def translation(self, video_id, *, source=TRANSCRIPT):
         with self._connect() as db:
             db.execute("BEGIN")
-            transcript = db.execute("SELECT id FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
-            if transcript is None:
+            original = self.sources.lines(source, video_id, connection=db)
+            if original is None or not original.lines:
                 return None
-            rows = db.execute("SELECT t.*, tr.text AS translated FROM transcript_lines t "
-                              "LEFT JOIN translation_lines tr ON tr.line_id = t.id "
-                              "WHERE transcript_id = ? ORDER BY ordinal", (transcript[0],)).fetchall()
-            if not rows or any(row["translated"] is None for row in rows):
+            saved = dict(db.execute("SELECT line_id, text FROM translation_lines WHERE video_id=? AND source=?",
+                                    (video_id, source)))
+            if any(line.id not in saved for line in original.lines):
                 return None
-            return Translation(video_id, transcript[0], tuple(
-                TranscriptLine(r["id"], r["start"], r["end"], r["translated"]) for r in rows))
+            return Translation(video_id, original.id, tuple(
+                TranscriptLine(line.id, line.start, line.end, saved[line.id]) for line in original.lines), source)
 
     def available(self, video_id):
         with self._connect() as db:
             return bool(db.execute("""SELECT 1 FROM transcripts t WHERE t.video_id=?
                 AND EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id=t.id)
                 AND NOT EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id=t.id
-                    AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id=l.id))""",
-                (video_id,)).fetchone())
+                    AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id=l.id AND tr.source=?))""",
+                (video_id, TRANSCRIPT)).fetchone())
 
     def summary(self, video_id: int, *, connection=None) -> TranslationSummary:
         """확정 번역과 현재 요청의 저장된 부분 번역을 선택 영상 범위에서 센다."""
@@ -456,15 +451,15 @@ class Translations:
             if not db.in_transaction:
                 db.execute("BEGIN")
             transcript = db.execute("SELECT id FROM transcripts WHERE video_id = ?", (video_id,)).fetchone()
-            queue = db.execute("SELECT id, state FROM translation_queue WHERE video_id = ?", (video_id,)).fetchone()
+            queue = db.execute("SELECT id, state FROM translation_queue WHERE video_id = ? AND source = ?", (video_id, TRANSCRIPT)).fetchone()
             count = 0
             if transcript:
                 count = db.execute("""
                     SELECT COUNT(*) FROM transcript_lines l
-                    LEFT JOIN translation_lines tr ON tr.line_id = l.id
+                    LEFT JOIN translation_lines tr ON tr.line_id = l.id AND tr.source = ?
                     LEFT JOIN translation_targets target ON target.queue_id = ? AND target.line_id = l.id
                     WHERE l.transcript_id = ? AND COALESCE(tr.text, target.text) IS NOT NULL
-                """, (queue["id"] if queue else None, transcript[0])).fetchone()[0]
+                """, (TRANSCRIPT, queue["id"] if queue else None, transcript[0])).fetchone()[0]
             return TranslationSummary(count, queue["state"] if queue else None)
 
     def stop_processing(self):
@@ -473,23 +468,28 @@ class Translations:
             if self._active_cancellation:
                 self._active_cancellation.set()
 
-    def line_providers(self, video_id):
+    def line_providers(self, video_id, *, source=TRANSCRIPT):
         with self._connect() as db:
-            return {r['id']: r['provider'] for r in db.execute("""
-                SELECT l.id, CASE WHEN tr.line_id IS NOT NULL THEN saved.provider ELSE pending.provider END AS provider
-                FROM transcript_lines l JOIN transcripts t ON t.id=l.transcript_id
-                LEFT JOIN translation_lines tr ON tr.line_id=l.id
-                LEFT JOIN translation_line_providers saved ON saved.line_id=l.id
-                LEFT JOIN translation_target_providers pending ON pending.line_id=l.id
-                WHERE t.video_id=?
-            """, (video_id,))}
+            db.execute("BEGIN")
+            original = self.sources.lines(source, video_id, connection=db)
+            if original is None:
+                return {}
+            saved = dict(db.execute("SELECT line_id, provider FROM translation_line_providers "
+                                    "WHERE video_id=? AND source=?", (video_id, source)))
+            committed = {r[0] for r in db.execute("SELECT line_id FROM translation_lines "
+                                                "WHERE video_id=? AND source=?", (video_id, source))}
+            pending = dict(db.execute("SELECT p.line_id, p.provider FROM translation_target_providers p "
+                                     "JOIN translation_queue q ON q.id=p.queue_id WHERE q.video_id=? AND q.source=?",
+                                     (video_id, source)))
+            return {line.id: (saved if line.id in committed else pending).get(line.id) for line in original.lines}
 
     @staticmethod
     def _commit_providers(db, queue_id):
-        db.execute("DELETE FROM translation_line_providers WHERE line_id IN "
-                   "(SELECT line_id FROM translation_targets WHERE queue_id=?)", (queue_id,))
-        db.execute("INSERT INTO translation_line_providers SELECT line_id, provider "
-                   "FROM translation_target_providers WHERE queue_id=?", (queue_id,))
+        row = db.execute("SELECT video_id, source FROM translation_queue WHERE id=?", (queue_id,)).fetchone()
+        db.execute("DELETE FROM translation_line_providers WHERE video_id=? AND source=? AND line_id IN "
+                   "(SELECT line_id FROM translation_targets WHERE queue_id=?)", (*row, queue_id))
+        db.execute("INSERT INTO translation_line_providers SELECT line_id, provider, ?, ? "
+                   "FROM translation_target_providers WHERE queue_id=?", (*row, queue_id))
 
     def _route(self, db, queue_id, cli):
         route = db.execute("SELECT provider FROM translation_routes WHERE queue_id=?", (queue_id,)).fetchone()
@@ -510,7 +510,7 @@ class Translations:
         reason = {'usage_limit': '사용량 한도', 'format': '형식 오류 재시도 소진',
                   'authentication': 'CLI 로그인 필요', 'missing_cli': 'CLI 없음',
                   'timeout': 'CLI 응답 시간 초과'}.get(kind, 'CLI 오류')
-        language = db.execute("SELECT t.spoken_language FROM transcripts t JOIN translation_queue q ON q.transcript_id=t.id WHERE q.id=?", (queue_id,)).fetchone()[0]
+        language = db.execute("SELECT spoken_language FROM translation_queue WHERE id=?", (queue_id,)).fetchone()[0]
         message = f"{provider(cli).label} {reason} → OpenCode Go로 이어서 {translation_task(language).label}"
         db.execute("INSERT OR REPLACE INTO translation_routes VALUES (?, ?)", (queue_id, 'opencode_go'))
         db.execute("INSERT OR REPLACE INTO translation_fallback_notices VALUES (?, ?)", (queue_id, message))
@@ -524,7 +524,8 @@ class Translations:
 
     def ready(self, *, cli=None):
         cli = self.cli if cli is None else cli
-        blocked = {e.video_id for e in self._subtitles.queue() if e.state in ("queued", "transcribing")}
+        blocked = {(e.video_id, e.queue_kind) for e in self._subtitles.queue(kind=None)
+                   if e.state in ("queued", "transcribing")}
         entries = sorted(self.queue(), key=lambda e: e.state == "held")
         with self._connect() as db:
             routes = dict(db.execute('SELECT queue_id, provider FROM translation_job_options'))
@@ -532,7 +533,7 @@ class Translations:
             backoffs = {r[0] for r in db.execute('SELECT cli, retry_at FROM translation_cli_backoff')
                         if datetime.fromisoformat(r[1]) > self._clock()}
         for entry in entries:
-            if entry.video_id in blocked or entry.state not in ('queued', 'held'):
+            if (entry.video_id, entry.queue_kind) in blocked or entry.state not in ('queued', 'held'):
                 continue
             route = routes.get(entry.id, cli)
             if route in backoffs and not (self._can_fallback(route) and 'opencode_go' not in backoffs):
@@ -540,7 +541,7 @@ class Translations:
             return entry
         return None
 
-    def _translate_batch(self, remaining, language, cli, cancellation, queue_id, transcript, glossary):
+    def _translate_batch(self, remaining, language, cli, cancellation, queue_id, transcript, glossary, source):
         with self._connect() as db:
             row = db.execute('SELECT selections FROM translation_job_options WHERE queue_id=?', (queue_id,)).fetchone()
         if row is None:
@@ -565,7 +566,7 @@ class Translations:
             with self._connect() as db:
                 current = db.execute("""SELECT 1 FROM translation_queue q WHERE q.id=?
                     AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=q.video_id AND s.kind=?
-                                    AND s.state IN ('queued', 'transcribing'))""", (queue_id, TRANSCRIPTION)).fetchone()
+                                    AND s.state IN ('queued', 'transcribing'))""", (queue_id, self.sources.queue_kind(source))).fetchone()
             if not current:
                 raise TranslationCancelled
             lines = remaining[:progress.size]
@@ -582,7 +583,7 @@ class Translations:
                     break
                 previous = index
             with self._connect() as db:
-                context = self._context(db, transcript, lines, queue_id)
+                context = self._context(db, transcript, lines, queue_id, source)
             try:
                 response = adapter.translate(lines, language, cli=cli, cancellation=cancellation,
                                              context=context, glossary=glossary.entries, **kwargs)
@@ -608,7 +609,7 @@ class Translations:
                 progress.successes = 0
                 raise TranslationError('other', str(error)) from error
 
-    def _context(self, db, transcript, targets, queue_id):
+    def _context(self, db, transcript, targets, queue_id, source):
         target_ids = {line.id for line in targets}
         indices = [i for i, line in enumerate(transcript.lines) if line.id in target_ids]
         # 각 대상의 가까운 앞 줄부터 공평하게 모으고 원어 순서로 보낸다.
@@ -627,12 +628,13 @@ class Translations:
             return ()
         # 미번역 대상은 옛 확정 번역보다 우선한다. 수정 후 낡은 번역을 맥락에 넣지 않는다.
         marks = ','.join('?' for _ in preceding)
-        translated = dict(db.execute(f"""SELECT l.id,
-            CASE WHEN target.line_id IS NOT NULL THEN target.text ELSE saved.text END
-            FROM transcript_lines l
-            LEFT JOIN translation_targets target ON target.line_id=l.id AND target.queue_id=?
-            LEFT JOIN translation_lines saved ON saved.line_id=l.id
-            WHERE l.id IN ({marks})""", (queue_id, *(line.id for line in preceding))))
+        ids = tuple(line.id for line in preceding)
+        translated = dict(db.execute(
+            f"SELECT line_id, text FROM translation_lines WHERE video_id=? AND source=? AND line_id IN ({marks})",
+            (transcript.video_id, source, *ids)))
+        translated.update(db.execute(
+            f"SELECT line_id, text FROM translation_targets WHERE queue_id=? AND line_id IN ({marks})",
+            (queue_id, *ids)))
         return tuple(ContextLine(line.id, line.text, translated.get(line.id)) for line in preceding)
 
     def _prune_progress(self, db):
@@ -652,7 +654,7 @@ class Translations:
             # 줄 수정·구간 교체는 요청 ID를 바꾸므로 다음 묶음은 새 원어를 읽는다.
             # 캐시는 현재 요청 하나만 보관하며 다른 영상으로 넘어가면 교체한다.
             if self._cached_request != pending.id:
-                self._cached_transcript = self._subtitles.transcript(pending.video_id)
+                self._cached_transcript = self.sources.lines(pending.source, pending.video_id)
                 self._cached_request = pending.id
             transcript = self._cached_transcript
             if transcript is None:
@@ -675,14 +677,14 @@ class Translations:
                 with self._connect() as db:
                     if not db.execute("UPDATE translation_queue SET state = 'translating' WHERE id = ?", (pending.id,)).rowcount:
                         return None
-                self._active_video = pending.video_id
+                self._active_video = (pending.video_id, pending.source)
                 cancellation = self._active_cancellation = Event()
                 if self._cancellation.is_set():
                     cancellation.set()
             try:
                 try:
                     result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation,
-                                                   pending.id, transcript, glossary)
+                                                   pending.id, transcript, glossary, pending.source)
                 except TranslationError as error:
                     if cancellation.is_set():
                         raise TranslationCancelled
@@ -704,16 +706,17 @@ class Translations:
                         from .opencode_go import OpenCodeGoError
                         raise OpenCodeGoError('usage_limit', retry_at=backoff)
                     result = self._translate_batch(lines, transcript.spoken_language, cli, cancellation,
-                                                   pending.id, transcript, glossary)
+                                                   pending.id, transcript, glossary, pending.source)
                 if cancellation.is_set():
                     raise TranslationCancelled
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
                     current = db.execute("SELECT * FROM translation_queue WHERE id = ?", (pending.id,)).fetchone()
                     # 재생성 중이거나 요청/원어 세대가 바뀌면 진행 중의 낡은 응답을 버린다.
-                    if (current is None or current["transcript_id"] != transcript.id or db.execute(
+                    if (current is None or current["transcript_id"] != transcript.id
+                            or not self._generation_current(db, pending.source, pending.video_id, transcript.id) or db.execute(
                             "SELECT 1 FROM subtitle_queue WHERE video_id = ? AND kind = ? AND state IN ('queued', 'transcribing')",
-                            (pending.video_id, TRANSCRIPTION)).fetchone()):
+                            (pending.video_id, pending.queue_kind)).fetchone()):
                         return None
                     if self._cancellation.is_set():
                         raise TranslationCancelled
@@ -728,10 +731,11 @@ class Translations:
                     done = not db.execute("SELECT 1 FROM translation_targets WHERE queue_id = ? AND text IS NULL",
                                           (pending.id,)).fetchone()
                     if done:
-                        db.execute("DELETE FROM translation_lines WHERE line_id IN "
-                                   "(SELECT line_id FROM translation_targets WHERE queue_id = ?)", (pending.id,))
-                        db.execute("INSERT INTO translation_lines SELECT line_id, text FROM translation_targets "
-                                   "WHERE queue_id = ?", (pending.id,))
+                        db.execute("DELETE FROM translation_lines WHERE video_id=? AND source=? AND line_id IN "
+                                   "(SELECT line_id FROM translation_targets WHERE queue_id=?)",
+                                   (pending.video_id, pending.source, pending.id))
+                        db.execute("INSERT INTO translation_lines SELECT line_id, text, ?, ? FROM translation_targets "
+                                   "WHERE queue_id=?", (pending.video_id, pending.source, pending.id))
                     db.execute("UPDATE translation_queue SET state = ?, retry_at = NULL, error_kind = NULL, "
                                "error_detail = NULL WHERE id = ?", ("completed" if done else "queued", pending.id))
                     entry = self._entry(db, db.execute("SELECT * FROM translation_queue WHERE id = ?", (pending.id,)).fetchone())
@@ -739,7 +743,7 @@ class Translations:
                         self._commit_providers(db, pending.id)
                         db.execute("DELETE FROM translation_queue WHERE id = ?", (pending.id,))
                         if self._order:
-                            self._order.finish(db, pending.video_id)
+                            self._order.finish(db, pending.video_id, kind=pending.queue_kind)
                 self._batch_progress[(pending.id, cli)].succeeded(self._batch_size or provider(cli).batch_size)
                 with self._connect() as db:
                     self._prune_progress(db)

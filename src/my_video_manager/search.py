@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock
 from .translation_kind import translation_task
+from .translation_source import TRANSCRIPT
 
 from typing import Literal
 import unicodedata
@@ -114,14 +115,18 @@ class Search:
         delete = f"DELETE FROM search_subtitle_lines WHERE source='{source}' AND line_id=CAST(old.{identifier} AS TEXT);"
         for event, body in (("INSERT", insert), ("DELETE", delete), ("UPDATE", delete + insert)):
             trigger_event = "UPDATE OF text" if event == "UPDATE" else event
+            reference = "old" if event == "DELETE" else "new"
+            condition = f"WHEN {reference}.source='{TRANSCRIPT}'" if source == "translation" else ""
             db.execute(f"""CREATE TRIGGER search_{source}_{event.lower()}
-                AFTER {trigger_event} ON {table} BEGIN {body} END""")
+                AFTER {trigger_event} ON {table} {condition} BEGIN {body} END""")
     @staticmethod
     def _backfill_source(db, source, table, identifier):
         # 준비 전에 새 줄을 저장해도 기존 줄을 빠뜨리지 않도록 완료 표식은 별도로 둔다.
         if not db.execute("SELECT 1 FROM search_backfill_sources WHERE source=?", (source,)).fetchone():
+            condition = " WHERE source=?" if source == "translation" else ""
+            parameters = (source, TRANSCRIPT) if source == "translation" else (source,)
             db.execute(f"""INSERT OR IGNORE INTO search_subtitle_lines(source, line_id, text)
-                SELECT ?, {identifier}, text FROM {table}""", (source,))
+                SELECT ?, {identifier}, text FROM {table}{condition}""", parameters)
             db.execute("INSERT INTO search_backfill_sources VALUES (?)", (source,))
 
     @staticmethod
@@ -206,8 +211,8 @@ class Search:
                     if source == 'transcript':
                         # 같은 ID만 조회해 첫 일치 위치에서 다듬은 행을 고른다.
                         # 전체 후보 정렬 없이 상한+1개에서 읽기를 끝낼 수 있다.
-                        refined = db.execute('SELECT text FROM translation_lines WHERE line_id=?',
-                                             (row['line_id'],)).fetchone()
+                        refined = db.execute('SELECT text FROM translation_lines WHERE line_id=? AND source=?',
+                                             (row['line_id'], TRANSCRIPT)).fetchone()
                         if refined is not None and key in search_key(refined['text']):
                             source, text = task.kind, refined['text']
                     else:

@@ -28,6 +28,7 @@ from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, t
 from .translation import (Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection,
                           translation_skip_reason)
 from .subtitle_queue_kind import TRANSCRIPTION, queue_task_key
+from .translation_source import TRANSCRIPT, TranslationSources
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
@@ -173,7 +174,8 @@ class AppCore:
         }
         self._viewings = ViewingStore(self._connect, clock, viewing_settings or ViewingSettings())
         self.playback.subscribe(ViewingRecorder(self._start_viewing, self._viewings.report, self._viewings.end))
-        self._queue_order = QueueOrder(self._connect)
+        self._translation_sources = TranslationSources()
+        self._queue_order = QueueOrder(self._connect, sources=self._translation_sources)
         self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location, self._queue_order)
         self._review = Review(self._connect, clock, self._subtitles, self.playback_location, self._queue_order)
         self._subtitles.review = self._review
@@ -182,7 +184,8 @@ class AppCore:
                                                        secret_store=translation_secret_store, transport=translation_transport)
         self._translations = Translations(self._connect, clock, self._subtitles, self.settings, translator,
                                           batch_size=translation_batch_size, order=self._queue_order,
-                                          protected_lines=self._review.protected_lines, options=self._translation_options)
+                                          protected_lines=self._review.protected_lines, options=self._translation_options,
+                                          sources=self._translation_sources)
         self._review.translations = self._translations
         self._auto_subtitle_rules = AutoSubtitleRules(self._connect, self)
         self._subtitle_queue = SubtitleQueue(self, self._queue_order)
@@ -389,8 +392,8 @@ class AppCore:
     def translation_models(self, key='', *, cancellation=None):
         return self._translation_options.models(key, cancellation=cancellation)
 
-    def translation_line_providers(self, video_id):
-        return self._translations.line_providers(video_id)
+    def translation_line_providers(self, video_id, *, source=TRANSCRIPT):
+        return self._translations.line_providers(video_id, source=source)
 
     def backup_inventory(self, *, include_automatic=True):
         """목록·예약 존재 여부만 조회한다. 실제 복원은 inspect/request에서 검증한다."""
@@ -448,9 +451,14 @@ class AppCore:
     def set_translation_cli(self, cli: str) -> None:
         self._translations.set_cli(cli)
 
-    def request_translation(self, video_id: int, line_ids=None) -> TranslationQueueEntry | None:
+    def register_translation_source(self, source, read_lines, *, queue_kind, protected_lines=None):
+        """앱 코어 모듈이 현재 줄 묶음과 보호된 줄 조회를 연결하는 등록 지점."""
+        self._translation_sources.register(source, read_lines, queue_kind=queue_kind,
+                                           protected_lines=protected_lines)
+
+    def request_translation(self, video_id: int, line_ids=None, *, source=TRANSCRIPT) -> TranslationQueueEntry | None:
         """전체 또는 지정한 원어 줄 ID만 번역한다. 실패/보류 재요청은 완료한 묶음을 유지한다."""
-        return self._translations.request(video_id, line_ids)
+        return self._translations.request(video_id, line_ids, source=source)
 
     def subtitle_task(self, video_id):
         return self._translations.task(video_id)
@@ -464,8 +472,8 @@ class AppCore:
     def request_existing_refinements(self):
         return self._translations.request_existing_refinements()
 
-    def translation(self, video_id: int) -> Translation | None:
-        return self._translations.translation(video_id)
+    def translation(self, video_id: int, *, source=TRANSCRIPT) -> Translation | None:
+        return self._translations.translation(video_id, source=source)
 
     def translation_queue(self) -> tuple[TranslationQueueEntry, ...]:
         return self._translations.queue()
@@ -634,8 +642,9 @@ class AppCore:
 
     def remove_from_subtitle_queue(self, video_id, *, kind=TRANSCRIPTION):
         self._subtitles.remove(video_id, kind=kind)
-        if kind == TRANSCRIPTION:
-            self._translations.remove(video_id)
+        source = self._translation_sources.for_queue_kind(kind)
+        if source is not None:
+            self._translations.remove(video_id, source=source)
         self._subtitle_queue.hide(video_id, kind=kind)
 
     def promote_subtitle(self, video_id, *, kind=TRANSCRIPTION):
@@ -646,10 +655,10 @@ class AppCore:
 
     def retry_failed_subtitles(self, *, kind=TRANSCRIPTION):
         failed = [e for e in self.subtitle_queue(kind=kind) if e.state == "failed"]
-        translated = [e for e in self.translation_queue() if e.state == "failed"] if kind == TRANSCRIPTION else []
+        translated = [e for e in self.translation_queue() if e.state == "failed" and e.queue_kind == kind]
         retried, skipped = set(), []
         for entries, request in ((failed, lambda e: self._subtitles.retry_failed(e.id, kind=e.queue_kind)),
-                                 (translated, lambda e: self.request_translation(e.video_id))):
+                                 (translated, lambda e: self.request_translation(e.video_id, source=e.source))):
             for entry in entries:
                 try:
                     request(entry)

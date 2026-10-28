@@ -1,4 +1,6 @@
 """라이브러리 보기 정책. 목록 갱신 때 만든 인덱스를 조건 변경마다 재사용한다."""
+from .translation_source import TRANSCRIPT
+
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import TypedDict
@@ -250,11 +252,11 @@ def build_index(snapshot, watched_folders, connect):
         rows = db.execute('''SELECT v.id,
             EXISTS(SELECT 1 FROM transcripts t WHERE t.video_id=v.id),
             EXISTS(SELECT 1 FROM transcripts t JOIN transcript_lines l ON l.transcript_id=t.id
-                   JOIN translation_lines tr ON tr.line_id=l.id WHERE t.video_id=v.id),
+                   JOIN translation_lines tr ON tr.line_id=l.id WHERE t.video_id=v.id AND tr.source=?),
             EXISTS(SELECT 1 FROM external_subtitle_files f JOIN external_subtitles s ON s.file_id=f.id
                    JOIN external_subtitle_lines l ON l.subtitle_id=s.id WHERE f.video_id=v.id),
             EXISTS(SELECT 1 FROM highlights h WHERE h.video_id=v.id)
-            FROM videos v WHERE v.excluded=0''').fetchall()
+            FROM videos v WHERE v.excluded=0''', (TRANSCRIPT,)).fetchall()
     presence = [{r[0] for r in rows if r[column]} for column in range(1, 5)]
     nodes, members = {}, {}
     roots = [f.path for f in watched_folders]

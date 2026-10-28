@@ -1,5 +1,7 @@
 """시청 통계의 순수 계산과 일괄 조회 어댑터. 결과는 asdict 후 JSON으로 보낼 수 있다."""
 
+from .translation_source import TRANSCRIPT
+
 from dataclasses import dataclass
 from bisect import bisect_right
 from datetime import date, datetime, timedelta, tzinfo
@@ -360,15 +362,15 @@ class StatisticsReader:
                 JOIN translation_queue q ON q.id = g.queue_id
                 JOIN transcripts t ON t.video_id = q.video_id
                 JOIN transcript_lines l ON l.id = g.line_id AND l.transcript_id = t.id
-                WHERE g.rowid > ? AND g.rowid <= ? AND g.text IS NOT NULL"""),
+                WHERE g.rowid > ? AND g.rowid <= ? AND g.text IS NOT NULL AND q.source=?"""),
             ('translation_lines', """SELECT DISTINCT t.video_id FROM translation_lines g
                 JOIN transcript_lines l ON l.id = g.line_id
                 JOIN transcripts t ON t.id = l.transcript_id
-                WHERE g.rowid > ? AND g.rowid <= ?"""),
+                WHERE g.rowid > ? AND g.rowid <= ? AND g.source=?"""),
         )
         for table, query in queries:
             last_rowid = db.execute(f'SELECT COALESCE(MAX(rowid), 0) FROM {table}').fetchone()[0]
             for lower in range(0, last_rowid, 10000):
-                rows = db.execute(query, (lower, lower + 10000)).fetchall()
+                rows = db.execute(query, (lower, lower + 10000, TRANSCRIPT)).fetchall()
                 korean.update(row[0] for row in rows)
         return korean
