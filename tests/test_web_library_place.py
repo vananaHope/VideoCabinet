@@ -170,7 +170,7 @@ def test_page_and_shell_notices_float_without_moving_selected_card(open_window):
         assert not overlaps(shell, box(window, selector)), selector
     assert grid['left'] <= band['left'] and band['right'] <= grid['right'] and band['top'] >= grid['top'] and band['height'] <= grid['height'] / 2 + 1
     page = box(window, '[data-page="library"]')
-    assert shell['width'] <= 448 + 1 and shell['height'] <= page['height'] * 0.4 + 1, shell
+    assert shell['width'] <= 448 + 1 and shell['height'] <= page['height'] / 3 + 1, shell
     assert shell['right'] <= page['right'] and shell['bottom'] <= page['bottom'] and shell['top'] >= page['top']
 
     # 셸 묶음은 키보드로 접고 편다. 접어도 오류 개수는 남는다.
@@ -296,3 +296,25 @@ def test_folder_panel_keeps_scroll_near_when_selected_card_leaves_result(open_wi
     assert remaining and selected not in window.library_page.visible_ids
     after = [place(window, id) for id in remaining]
     assert after[0]['top'] > 0 and any(card['shown'] for card in after), (before, shown, after)
+
+
+def test_shell_notices_move_off_fixed_page_controls(open_window):
+    window = open_window()
+    window.show_status('검사 실패: ' + '접근할 수 없는 감시 폴더가 있습니다. ' * 10)
+    window.subtitles.timer.stop()
+    window.subtitles.set_preparation(preparation_state('failed', kind='error', message='자막 기능 준비 실패: ' + '파일을 받지 못했습니다. ' * 8))
+    wait_for(lambda: js(window, f"document.querySelectorAll('{SHELL} [data-slot=notice]').length") == 2)
+    # 폴더 관리의 오른쪽 아래에는 스크롤로 옮길 수 없는 최소 길이 입력란과 저장 단추가 있다. 셸 묶음은 그 자리를 피한다.
+    QTest.keyClick(view(window), Qt.Key.Key_7, Qt.KeyboardModifier.ControlModifier)
+    wait_for(lambda: window.web_host.active_tab == 'folders' and js(window, "!!document.getElementById('folders-minimum')?.checkVisibility()"))
+    js(window, """(() => { const save = [...document.querySelectorAll('[data-page="folders"] button')].find(button => button.textContent === '저장')
+      save.dataset.probe = 'save'; return true })()""")
+    fixed = ['#folders-minimum', '[data-probe="save"]', '[data-page="folders"] main > div:first-child button']
+    wait_for(lambda: not any(overlaps(box(window, SHELL), box(window, selector)) for selector in fixed))
+    shell, page = box(window, SHELL), box(window, '[data-page="folders"]')
+    assert shell['bottom'] <= page['bottom'] and shell['top'] >= page['top'] and shell['height'] > 100
+    # 라이브러리로 돌아오면 다시 기본 자리(오른쪽 아래)에서 툴바·상세 패널 단추를 덮지 않는다.
+    QTest.keyClick(view(window), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
+    wait_for(lambda: window.web_host.active_tab == 'library' and box(window, SHELL)['right'] > box(window, '#library-grid')['right'])
+    for selector in ('[aria-label="무작위 재생"]', '[aria-label="영상 작업"]', '[aria-label="영상 상세 탭"]'):
+        assert not overlaps(box(window, SHELL), box(window, selector)), selector

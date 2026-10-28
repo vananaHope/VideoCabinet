@@ -342,13 +342,15 @@ try:
     capture('notice-3-long-notes')
     click('[aria-label="새 버전 알림"] [aria-expanded="false"]')
     region = json.loads(js('JSON.stringify(document.querySelector(\'[aria-label="앱 안내"]\').getBoundingClientRect())'))
-    assert region['height'] <= 720 / 4 + 1, region
+    page = json.loads(js('JSON.stringify(document.querySelector(\'[aria-label="앱 안내"]\').parentElement.getBoundingClientRect())'))
+    # 셸 안내 묶음은 페이지 영역 모서리에 떠 있고 높이는 그 영역의 1/3까지다(#263).
+    assert region['height'] <= page['height'] / 3 + 1 and region['bottom'] <= page['bottom'], (region, page)
     capture('notice-4-long-notes-expanded')
     # 저장값을 고쳐 HTML을 넣으면 다시 요약한 값과 달라 그 기록을 버린다(요소도 글자도 보이지 않는다).
     show({**patch, 'release_notes': '<img src=x onerror="document.title=1"><b>굵게</b>'})
     assert js('document.querySelector(\'[aria-label="업데이트 알림"] img, [aria-label="업데이트 알림"] b\') === null')
     assert notice_text() == '' and core.last_update_check() is None
-    checks.append('긴 노트는 두 줄로 접고 전체 보기, 펼쳐도 안내 영역 1/4 안, 고친 저장 노트(HTML)는 기록째 버림')
+    checks.append('긴 노트는 두 줄로 접고 전체 보기, 펼쳐도 셸 안내 묶음(페이지 영역 1/3) 안, 고친 저장 노트(HTML)는 기록째 버림')
 
     # 나중에: 키보드로 고르면 알림이 사라지고 포커스는 현재 탭으로 간다. 다음 확인 결과에서 다시 알린다.
     show(patch)
