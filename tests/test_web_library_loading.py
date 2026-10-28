@@ -247,7 +247,8 @@ def test_failed_first_data_settles_and_recovers_when_library_arrives(open_window
     # 비었다는 거짓 안내, 누를 수 있는 컨트롤, 불러오는 중처럼 보이는 자리 표시는 없다.
     assert js(window, PENDING) == ''
     assert js(window, GRID_BUSY) == 'false'
-    assert js(window, "document.querySelectorAll('[aria-busy=true], [data-slot=video-card-placeholder], [data-slot=skeleton]').length") == 0
+    # 숨은 다른 탭(통계·추천)의 첫 데이터 전 자리 표시는 세지 않는다.
+    assert js(window, "document.querySelector('main[aria-label=\"라이브러리\"]').querySelectorAll('[aria-busy=true], [data-slot=video-card-placeholder], [data-slot=skeleton]').length") == 0
     assert '영상 목록을 읽지 못했습니다' in text
     assert '라이브러리가 비어 있습니다' not in text and '선택한 영상 없음' not in text and '0개' not in text
     assert js(window, SEARCH_DISABLED)
