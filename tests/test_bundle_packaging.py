@@ -134,7 +134,7 @@ def bundle(packaging, tmp_path, monkeypatch):
         'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak',
         'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe', 'ffmpeg/LICENSE.txt', 'ffmpeg/README.txt',
         'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt', *checker.REQUIRED_LICENSES,
-        *(pattern.replace('*', 'AbCd1234') for pattern in checker.BUNDLED_FONTS),
+        *(pattern.replace('*', 'AbCd1234') for pattern in checker.BUNDLED_FONTS), *checker.QT_FONTS,
     ]
     for name in files:
         path = tmp_path / name
@@ -168,6 +168,7 @@ def test_bundle_logs_pinned_ffmpeg_version(bundle, capsys):
     'licenses/web/THIRD-PARTY-WEB.txt', 'licenses/web/node_modules/react/LICENSE', 'PySide6/QtWebEngineProcess.exe', 'PySide6/resources/v8_context_snapshot.bin',
     'my_video_manager/web/assets/Pretendard-Medium.subset-AbCd1234.woff2', 'my_video_manager/web/assets/Pretendard-SemiBold-AbCd1234.woff2',
     'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
+    'my_video_manager/web/qt-fonts/Pretendard-Regular.ttf', 'my_video_manager/web/qt-fonts/Pretendard-SemiBold.ttf',
     'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak'])
 def test_bundle_missing_required_runtime_fails(bundle, name):
     checker, directory = bundle
@@ -529,3 +530,12 @@ def test_web_licenses_carry_bundled_font_ofl_text(packaging, licenses, tmp_path)
     assert 'licenses/' + path.relative_to(tmp_path).as_posix() in packaging[1].REQUIRED_LICENSES
     assert 'SIL Open Font License, Version 1.1' in path.read_text(encoding='utf-8')
     assert 'pretendard 1.3.9' in (tmp_path / 'web/THIRD-PARTY-WEB.txt').read_text(encoding='utf-8')
+
+
+def test_installer_requires_the_qt_font_files_the_app_registers(packaging):
+    """웹 빌드가 토큰의 굵기마다 둔 정적 TrueType이 설치물 필수 파일이고, 앱이 등록하는 파일과 같다(Qt는 woff2를 읽지 못한다)."""
+    from my_video_manager import theme
+    web = Path(theme.__file__).with_name('web')
+    assert theme.QT_FONT_DIRECTORY == web / 'qt-fonts'
+    assert packaging[1].QT_FONTS == tuple(f'my_video_manager/web/qt-fonts/{name}' for name in theme.QT_FONT_FILES)
+    assert all((theme.QT_FONT_DIRECTORY / name).stat().st_size for name in theme.QT_FONT_FILES)
