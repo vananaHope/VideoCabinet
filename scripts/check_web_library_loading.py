@@ -172,7 +172,8 @@ if args.fail_first:
     frames()
     dismissed = json.loads(js(LAYOUT))
     assert window.grab().save(str(args.output / f'{name}-failed-dismissed.png'))
-    busy = js("document.querySelectorAll('[aria-busy=true], [data-slot=video-card-placeholder], [data-slot=skeleton]').length")
+    # 숨은 다른 탭(통계·추천)의 첫 데이터 전 자리 표시는 세지 않는다.
+    busy = js("document.querySelector('main[aria-label=\"라이브러리\"]').querySelectorAll('[aria-busy=true], [data-slot=video-card-placeholder], [data-slot=skeleton]').length")
     print(json.dumps({
         'case': f'{name}-failed', 'busy': [failed['busy'], dismissed['busy']], 'status': [failed['status'], dismissed['status']],
         'busy_or_placeholder_elements': busy, 'moved_after_dismiss': sorted(key for key in failed['toolbar'] if failed['toolbar'][key] != dismissed['toolbar'][key]),

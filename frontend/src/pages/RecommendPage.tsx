@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { connectBridge, request } from "@/bridge"
-import type { RecommendBridge, RecommendData, RecommendationRowData } from "@/bridge-types"
+import { recommendRowLimit, type RecommendBridge, type RecommendData, type RecommendationRowData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
 import { NoticeStack } from "@/components/ui/notice"
+import { PendingStatus } from "@/components/ui/pending-status"
+import { Placeholder, Skeleton } from "@/components/ui/skeleton"
 import { EmptyState, PageHeader } from "@/components/page-parts"
-import { RecommendationCard, RecommendationMenu } from "@/components/recommendation-card"
+import { RecommendationCard, RecommendationCardPlaceholder, RecommendationMenu } from "@/components/recommendation-card"
 import { openKeyboardMenu } from "@/components/library-grid"
 import { menuKeyRow, type KeyGuideGroup } from "@/lib/key-guide"
 
@@ -48,6 +50,18 @@ function reveal(videoId: number) {
   list.scrollTop += top < 0 ? top : bottom > 0 ? Math.min(bottom, top) : 0
 }
 
+// 첫 추천이 오기 전의 줄 자리. 실제 줄과 같은 머리글 높이(h-5, 실제 제목은 한 줄 말줄임)·카드 줄(다섯 장 폭)로 첫 화면을 채운다.
+function RecommendationsPlaceholder() {
+  return <div data-recommend-list className="min-h-0 flex-1 overflow-hidden scroll-stable rounded-lg p-1">
+    <Placeholder label="추천을 불러오는 중"><div className="space-y-3">
+      {[0, 1, 2].map(row => <section key={row} className="flex flex-col gap-1">
+        <div className="flex h-5 items-center px-1"><Skeleton shape="text" className="w-28" /></div>
+        <div className="recommendation-row rounded-lg p-1">{[0, 1, 2, 3, 4].map(card => <RecommendationCardPlaceholder key={card} />)}</div>
+      </section>)}
+    </div></Placeholder>
+  </div>
+}
+
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
   { title: "추천 줄", rows: [
@@ -65,11 +79,14 @@ export default function RecommendPage() {
   const [error, setError] = useState("")
   const [cursor, setCursor] = useState<Cursor | null>(null)
   const [dismissed, setDismissed] = useState<{ id: number; title: string } | null>(null)
+  // 응답을 기다리는 관심 없음·되돌리기 요청 수. 그동안 이전 줄을 그대로 두고 기다림 표시만 보인다.
+  const [requests, setRequests] = useState(0)
   // 줄마다 마지막으로 고른 카드. ↑/↓로 돌아오면 그 카드로 간다.
   const remembered = useRef(new Map<string, number>())
   const focusTarget = useRef(() => {})
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
   const rows = data?.rows ?? []
+  const loaded = data?.loaded ?? false
   const active = locate(rows, cursor)
   const activeId = active ? rows[active.row].items[active.column].video.id : null
 
@@ -115,13 +132,17 @@ export default function RecommendPage() {
     const { video } = select(position)
     if (bridge) request(reply => bridge.play(video.id, reply)).catch(showError)
   }
+  function track<T>(task: Promise<T>) {
+    setRequests(count => count + 1)
+    return task.finally(() => setRequests(count => count - 1))
+  }
   function dismiss(position: Position) {
     const { video } = select(position)
-    if (bridge) request(reply => bridge.dismiss(video.id, reply)).then(() => setDismissed({ id: video.id, title: video.title })).catch(showError)
+    if (bridge) track(request(reply => bridge.dismiss(video.id, reply))).then(() => setDismissed({ id: video.id, title: video.title })).catch(showError)
   }
   function restore(videoId: number) {
     if (!bridge) return
-    request(reply => bridge.restore(videoId, reply)).then(() => {
+    track(request(reply => bridge.restore(videoId, reply))).then(() => {
       setDismissed(null)
       document.getElementById("recommendations")?.focus({ preventScroll: true })
     }).catch(showError)
@@ -152,7 +173,7 @@ export default function RecommendPage() {
 
   const count = rows.reduce((sum, row) => sum + row.items.length, 0)
   return <main aria-label="추천" className="flex h-full flex-col gap-3 p-4">
-    <PageHeader title="추천" description={`시청·하이라이트·태그를 근거로 지금 볼 만한 영상을 이유별 줄로 보여 줍니다. 영상은 한 줄에만 나오고 줄마다 최대 ${data?.rowLimit ?? ""}개입니다.`}
+    <PageHeader title="추천" description={`시청·하이라이트·태그를 근거로 지금 볼 만한 영상을 이유별 줄로 보여 줍니다. 영상은 한 줄에만 나오고 줄마다 최대 ${recommendRowLimit}개입니다.`}
       actions={<Button id="recommend-dismissed" variant="outline" onClick={() => { if (bridge) request(reply => bridge.showDismissed(reply)).catch(showError) }}>관심 없음 되돌리기</Button>} />
     <NoticeStack layout="yield" items={[
       error && { tone: "error", message: error, onDismiss: () => setError("") },
@@ -160,13 +181,19 @@ export default function RecommendPage() {
       dismissed && { tone: "success", message: `관심 없음으로 뺐어요: ${dismissed.title}`, onDismiss: () => setDismissed(null),
         action: <Button size="xs" variant="outline" onClick={() => restore(dismissed.id)}>되돌리기</Button> },
     ]} />
-    {count > 0 && <p className="text-xs text-muted-foreground">{`추천 ${rows.length}줄 · ${count}개 · ←/→ 줄 안 이동 · ↑/↓ 줄 사이 이동 · Enter 재생 · Backspace 관심 없음 · 우클릭 메뉴`}</p>}
-    {!rows.length ? (!data?.error && <EmptyState variant="page" title={data?.loaded ? "지금은 추천할 영상이 없어요" : "불러오는 중…"}
-      description={data?.loaded ? "영상을 보거나 하이라이트·태그를 남기면 이유와 함께 여기에 보여 줍니다. 관심 없음으로 뺀 영상은 ‘관심 없음 되돌리기’에서 다시 추천받을 수 있어요." : ""} />)
-      : <div id="recommendations" role="grid" aria-label="추천 줄" aria-activedescendant={activeId !== null ? cardId(activeId) : undefined} tabIndex={0} onKeyDown={key}
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
+    {/* 개수·키 안내 줄은 데이터 전에도 같은 높이로 자리를 잡고, 요청을 기다리는 동안 기다림 표시를 같은 줄에 둔다. */}
+    <div data-recommend-status className="flex h-4 min-w-0 shrink-0 items-center gap-3 text-xs text-muted-foreground">
+      {count > 0 ? <p className="min-w-0 truncate">{`추천 ${rows.length}줄 · ${count}개 · ←/→ 줄 안 이동 · ↑/↓ 줄 사이 이동 · Enter 재생 · Backspace 관심 없음 · 우클릭 메뉴`}</p>
+        : !loaded && !error && <Skeleton shape="text" className="w-80" />}
+      <PendingStatus pending={requests > 0} label="추천을 다시 계산하는 중…" className="ml-auto shrink-0" />
+    </div>
+    {!loaded ? (!error && <RecommendationsPlaceholder />)
+      : !rows.length ? (!data?.error && <EmptyState variant="page" title="지금은 추천할 영상이 없어요"
+        description="영상을 보거나 하이라이트·태그를 남기면 이유와 함께 여기에 보여 줍니다. 관심 없음으로 뺀 영상은 ‘관심 없음 되돌리기’에서 다시 추천받을 수 있어요." />)
+      : <div id="recommendations" data-recommend-list role="grid" aria-label="추천 줄" aria-busy={requests > 0} aria-activedescendant={activeId !== null ? cardId(activeId) : undefined} tabIndex={0} onKeyDown={key}
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-stable rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
         {rows.map((row, rowIndex) => <section key={row.key} role="row" aria-label={`${row.title} · ${row.items.length}개`} className="flex flex-col gap-1">
-          <div role="rowheader" className="flex items-baseline gap-2 px-1"><h2 className="text-sm font-semibold">{row.title}</h2><span className="shrink-0 text-xs text-muted-foreground">{row.items.length}개</span></div>
+          <div role="rowheader" className="flex h-5 min-w-0 items-baseline gap-2 px-1"><h2 title={row.title} className="min-w-0 truncate text-sm font-semibold">{row.title}</h2><span className="shrink-0 text-xs text-muted-foreground">{row.items.length}개</span></div>
           <div className="recommendation-row rounded-lg p-1">
             {row.items.map((item, column) => <RecommendationMenu key={item.video.id} onPlay={() => play({ row: rowIndex, column })} onDismiss={() => dismiss({ row: rowIndex, column })}
               onClose={() => document.getElementById("recommendations")?.focus({ preventScroll: true })}>

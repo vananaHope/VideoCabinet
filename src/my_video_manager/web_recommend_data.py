@@ -20,7 +20,6 @@ class RecommendationRowData(TypedDict):
 
 class RecommendData(TypedDict):
     loaded: bool
-    rowLimit: int
     rows: list[RecommendationRowData]
     error: str
 

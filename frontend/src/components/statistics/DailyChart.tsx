@@ -1,5 +1,6 @@
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
+import { ChartContainer, ChartPlaceholder, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
+import { Skeleton } from "@/components/ui/skeleton"
 import type { DailyViewingStatistics } from "@/bridge-types"
 import { formatDate, formatShortDate } from "@/lib/dates"
 
@@ -25,7 +26,9 @@ export function exactDuration(seconds: number): string {
   const remainder = (milliseconds % 60000 / 1000).toLocaleString("ko-KR", { maximumFractionDigits: 3 })
   return `${hours ? `${hours.toLocaleString()}시간 ` : ""}${hours || minutes ? `${minutes}분 ` : ""}${remainder}초`
 }
-export function DailyChart({ daily, metric }: { daily: DailyViewingStatistics[]; metric: Metric }) {
+// daily가 없으면(첫 계산 중) 단위 줄과 차트 자리를 같은 높이로 잡는다.
+export function DailyChart({ daily, metric }: { daily?: DailyViewingStatistics[]; metric: Metric }) {
+  if (!daily) return <div className="space-y-2"><Skeleton shape="text" className="w-40" /><ChartPlaceholder /></div>
   const maximum = Math.max(...daily.map(day => day[metric]), 0)
   const divisor = metric === "viewing_count" ? 1 : timeDivisor(maximum)
   const unit = metric === "viewing_count" ? "회" : divisor === 3600 ? "시간" : divisor === 60 ? "분" : "초"

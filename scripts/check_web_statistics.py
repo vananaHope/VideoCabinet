@@ -1,6 +1,7 @@
 """통계 페이지의 1100×720 화면, 키보드, 실제 mpv 왕복 검사.
 
 스크린샷: python scripts/check_web_statistics.py --offscreen --count 50000
+첫 계산 실패: python scripts/check_web_statistics.py --offscreen --fail-first
 실창: desktop_lock.py run --owner issue-52 -- python scripts/check_web_statistics.py --verify
 """
 import argparse
@@ -27,6 +28,7 @@ parser.add_argument('--count', type=int, choices=(0, 8, 50000), default=8)
 parser.add_argument('--verify', action='store_true')
 parser.add_argument('--empty-library', action='store_true')
 parser.add_argument('--resolution-pending', action='store_true')
+parser.add_argument('--fail-first', action='store_true', help='첫 계산을 실패시켜 오류·결과 없음 화면을 찍고 다시 시도로 이어 간다')
 parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-52')
 args = parser.parse_args()
 if args.empty_library and (args.count != 0 or args.verify):
@@ -34,6 +36,8 @@ if args.empty_library and (args.count != 0 or args.verify):
 sample = 'empty' if args.empty_library else str(args.count)
 if args.resolution_pending:
     sample += '-pending'
+if args.fail_first:
+    sample += '-fail'
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 if args.offscreen:
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = '--disable-gpu'
@@ -190,7 +194,7 @@ def check_refresh_keeps_content():
     page.bridge.setPeriod(365)
     try:
         wait(started.is_set)
-        wait(lambda: js("document.querySelector('main[aria-label=통계]').getAttribute('aria-busy')") == 'true')
+        wait(lambda: js(RESULTS_BUSY) == 'true')
         assert page.result['period']['days'] == 30
         assert js("document.querySelector('[data-slot=chart]') === globalThis.previousStatisticsChart")
         assert js("document.querySelector('main[aria-label=통계]').scrollTop") == scroll
@@ -198,16 +202,81 @@ def check_refresh_keeps_content():
         release.set()
         core.statistics_dashboard = original
     content_ready(365)
-    assert js("document.querySelector('main[aria-label=통계]').getAttribute('aria-busy')") == 'false'
+    assert js(RESULTS_BUSY) == 'false'
+    assert not js("document.querySelector('main[aria-label=통계]').hasAttribute('aria-busy')")
     assert js("document.querySelector('[data-slot=chart]') === globalThis.previousStatisticsChart")
     assert js("document.querySelector('main[aria-label=통계]').scrollTop") == scroll
-    checks.append('재계산 중 이전 본문·스크롤 보존, aria-busy true → false')
+    checks.append('재계산 중 이전 본문·스크롤 보존, 결과 영역 aria-busy true → false')
+
+
+# 자리 표시 → 실제 결과에서 움직이면 안 되는 요소의 경계. 결과 영역은 시작 위치(x·y·폭)만 본다.
+BOXES = """JSON.stringify((() => {
+  const main = document.querySelector('main[aria-label=통계]'), results = main.querySelector('[data-statistics-results]')
+  const box = e => e ? [...Object.values(e.getBoundingClientRect().toJSON())].slice(0, 4).map(v => Math.round(v * 10) / 10) : null
+  const card = results?.querySelector('section')
+  return {header: box(main.firstElementChild), period: box(main.querySelector('nav[aria-label="통계 기간"]')),
+    status: box(main.querySelector('[data-statistics-status]')), sections: box(main.querySelector('nav[aria-label="통계 구역"]')),
+    results: box(results)?.slice(0, 3), cards: card ? [...card.parentElement.children].map(box) : null,
+    chart: box(results?.querySelector('[data-slot=chart], [data-chart-placeholder]'))}
+})())"""
+RESULTS_BUSY = "document.querySelector('[data-statistics-results]')?.getAttribute('aria-busy') ?? null"
+PENDING = "document.querySelector('main[aria-label=통계] [data-slot=pending-status]').textContent"
+SKELETONS = "document.querySelectorAll('main[aria-label=통계] [data-slot=skeleton]').length"
+
+
+def check_first_calculation():
+    """첫 계산을 붙잡아 자리 표시를 찍고, 결과가 와도 위쪽 요소·첫 카드 줄·첫 차트가 움직이지 않는지 본다."""
+    original = core.statistics_dashboard
+    started, release = Event(), Event()
+    def slow(days):
+        core.statistics_dashboard = original
+        started.set()
+        assert release.wait(30)
+        return original(days)
+    core.statistics_dashboard = slow
+    window.navigate_web_tab('statistics')
+    try:
+        wait(started.is_set)
+        wait(lambda: js(PENDING) == '30일 시청 기록을 계산하고 있어요…')
+        assert js(RESULTS_BUSY) == 'true' and js(SKELETONS) > 0
+        assert not js("document.querySelector('main[aria-label=통계]').hasAttribute('aria-busy')")
+        placeholder = json.loads(js(BOXES))
+        if args.offscreen:
+            window.grab().save(str(args.output / f'{sample}-placeholder.png'))
+    finally:
+        release.set()
+    content_ready(30)
+    assert js(SKELETONS) == 0 and js(PENDING) == ''
+    final = json.loads(js(BOXES))
+    assert placeholder == final, (placeholder, final)
+    checks.append('첫 계산: 자리 표시(결과 영역 aria-busy)·300ms 뒤 기다림 표시, 결과 도착 전후 머리글·상태 줄·구역 탭·첫 카드 줄·첫 차트 경계 동일')
+
+
+def check_first_failure():
+    """첫 계산이 실패하면 자리 표시와 기다림 표시를 끝내고 오류·결과 없음 안내를 보인 뒤, 다시 시도로 회복한다."""
+    original = core.statistics_dashboard
+    def fail(days):
+        raise ValueError('통계를 읽지 못했습니다.')
+    core.statistics_dashboard = fail
+    window.navigate_web_tab('statistics')
+    wait(lambda: '통계를 계산하지 못했어요' in js("document.querySelector('main[aria-label=통계]').innerText"))
+    settle(600)
+    assert js(SKELETONS) == 0 and js(PENDING) == ''
+    assert js("document.querySelectorAll('main[aria-label=통계] [aria-busy=true]').length") == 0
+    if args.offscreen:
+        window.grab().save(str(args.output / f'{sample}-failed.png'))
+    core.statistics_dashboard = original
+    js("[...document.querySelectorAll('main[aria-label=통계] button')].find(b => b.textContent === '다시 시도').click()")
+    content_ready(30)
+    checks.append('첫 계산 실패: 자리 표시·aria-busy·기다림 표시 종료, 오류·결과 없음 안내, 다시 시도로 회복')
 
 
 try:
     wait(lambda: bool(js("!!document.querySelector('[data-tab=statistics]')")))
-    window.navigate_web_tab('statistics')
-    content_ready(30)
+    if args.fail_first:
+        check_first_failure()
+    else:
+        check_first_calculation()
     check_refresh_keeps_content()
     for days in (7, 30, 90, 365):
         js(f"document.querySelector('nav[aria-label=\"통계 기간\"] [data-tab=\"{days}\"]').click()")

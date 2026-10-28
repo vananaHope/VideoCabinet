@@ -302,11 +302,11 @@ export interface RecommendationRowData {
 
 export interface RecommendData {
   loaded: boolean
-  rowLimit: number
   rows: Array<RecommendationRowData>
   error: string
 }
 
+export const recommendRowLimit: number = 20
 export interface RecommendBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void

@@ -199,6 +199,26 @@ def open_recommend(window):
     return page
 
 
+# 자리 표시 → 실제 줄에서 움직이면 안 되는 요소의 경계: 머리글·개수 줄·목록 영역·첫 줄 머리·카드 줄·첫 카드.
+BOXES = """(() => {
+  const main = document.querySelector('main[aria-label="추천"]'), list = main.querySelector('[data-recommend-list]'), row = list?.querySelector('section')
+  const box = e => e ? [...Object.values(e.getBoundingClientRect().toJSON())].slice(0, 4).map(v => Math.round(v * 10) / 10) : null
+  return {header: box(main.firstElementChild), status: box(main.querySelector('[data-recommend-status]')), list: box(list),
+    rowHeader: box(row?.children[0]), strip: box(row?.children[1]), card: box(row?.children[1].children[0])}
+})()"""
+
+
+def show_placeholder(window):
+    """탭만 바꾸고 추천은 아직 계산하지 않아, 첫 데이터가 오기 전 화면(줄 자리 표시)을 본다."""
+    window.web_host.set_tab('recommend')
+    wait_until(lambda: read(window, "!document.querySelector('main[aria-label=\"추천\"]').parentElement.hidden"))
+    wait_until(lambda: read(window, "document.querySelectorAll('main[aria-label=\"추천\"] [data-slot=recommendation-card-placeholder]').length") == 15)
+    assert read(window, "document.querySelectorAll('main[aria-label=\"추천\"] [aria-busy=true]').length") == 1
+    assert '지금은 추천할 영상이 없어요' not in read(window, "document.querySelector('main[aria-label=\"추천\"]').innerText")
+    settle()
+    return read(window, BOXES)
+
+
 def active(window):
     return read(window, "document.getElementById('recommendations')?.getAttribute('aria-activedescendant')")
 
@@ -234,8 +254,13 @@ def screenshots():
     for video in videos[:3]:
         watch(core, video, 25)
     window = make_window(core)
+    placeholder = show_placeholder(window)
+    capture(window, 'recommend-placeholder')
     page = open_recommend(window)
     capture(window, 'recommend-few')
+    assert read(window, BOXES) == placeholder, (placeholder, read(window, BOXES))
+    assert read(window, "document.querySelectorAll('main[aria-label=\"추천\"] [data-slot=skeleton]').length") == 0
+    checks.append('추천 첫 표시: 줄 자리 표시(aria-busy) → 실제 줄에서 머리글·개수 줄·목록·첫 줄 머리·카드 줄·첫 카드 경계 동일')
     layouts['few'] = layout(window)
     rows = layouts['few']['rows']
     assert [(row['label'], row['cards']) for row in rows] == [
@@ -447,8 +472,12 @@ def screenshots():
         core.add_video_tag(target.id, name)
     core.add_video_tag(other.id, f'긴태그이름0' + '자연다큐멘터리' * 4)
     window = make_window(core)
+    placeholder = show_placeholder(window)
+    capture(window, 'recommend-long-placeholder')
     page = open_recommend(window)
     capture(window, 'recommend-long')
+    # 긴 기준 영상 제목도 한 줄 말줄임이라 자리 표시와 첫 줄 머리·카드 줄·첫 카드 경계가 같다.
+    assert read(window, BOXES) == placeholder, (placeholder, read(window, BOXES))
     layouts['long'] = layout(window)
     row, = layouts['long']['rows']
     assert row['cards'] == 2 and not row['cardOverflow'] and len(row['cardHeights']) == 1, row
@@ -460,8 +489,12 @@ def screenshots():
       const count = document.querySelector('#recommendations [role=rowheader] > span');
       return count.getBoundingClientRect().height <= parseFloat(getComputedStyle(count).lineHeight) + 1;
     })()"""), '긴 기준 영상 제목 옆 개수는 한 줄로 유지한다'
+    assert read(window, """(() => {
+      const title = document.querySelector('#recommendations [role=rowheader] h2');
+      return title.scrollWidth > title.clientWidth && title.title === title.textContent;
+    })()"""), '긴 줄 제목은 한 줄 말줄임, 마우스를 올리면 전체 제목'
     close(window)
-    checks.append('긴 제목·긴 이유: 카드 폭·높이 유지, 말줄임과 두 줄 자름')
+    checks.append('긴 제목·긴 이유: 카드 폭·높이 유지, 말줄임과 두 줄 자름, 줄 제목 한 줄 말줄임으로 자리 표시와 경계 동일')
 
 
 class FakePlayer:
