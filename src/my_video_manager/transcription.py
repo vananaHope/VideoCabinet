@@ -1,6 +1,6 @@
 """faster-whisper 어댑터. CUDA의 네이티브 실패도 앱 종료로 번지지 않도록 격리한다."""
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from functools import lru_cache
 import json
 import os
@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from threading import Event
+from typing import Iterable
 
 from .subtitles import TranscriberCancelled, TranscriberError, TranscriberResult, TranscriptSegment
 
@@ -117,6 +118,87 @@ class FasterWhisperTranscriber:
             progress_directory.cleanup()
 
 
+@dataclass(frozen=True)
+class TimedWord:
+    """줄 나누기에 필요한 단어 값. faster-whisper 타입에 묶이지 않는다."""
+    start: float
+    end: float
+    text: str
+
+
+# WhisperJAV v1.9.5(커밋 8917f5a)의 faster-whisper 내장 VAD balanced 프리셋.
+# neg_threshold는 넘기지 않아 faster-whisper 기본값을 쓴다.
+VAD_PARAMETERS = {
+    "threshold": 0.40,
+    "min_speech_duration_ms": 100,
+    "max_speech_duration_s": 6.0,
+    "min_silence_duration_ms": 300,
+    "speech_pad_ms": 400,
+}
+_LINE_BREAK_SILENCE_SECONDS = 0.8
+_LINE_MAX_DURATION_SECONDS = 7.0
+# 초 단위 시각은 이진 부동소수라 경계값이 0.799999…처럼 어긋난다.
+_TIME_EPSILON = 1e-9
+_LINE_MAX_CHARACTERS = 42
+_CJK_LINE_MAX_CHARACTERS = 25
+_CJK_LANGUAGES = ("ja", "zh", "ko")
+_SENTENCE_PUNCTUATION = frozenset("。、？！，?!.,")
+
+
+def _characters(text):
+    """줄 길이 상한은 공백을 세지 않는다."""
+    return sum(1 for character in text if not character.isspace())
+
+
+def split_into_lines(words: Iterable[TimedWord], spoken_language: str | None) -> list[TranscriptSegment]:
+    """한 Whisper 구간의 단어를 앱 규칙으로 줄로 나눈다. 단어 안은 나누지 않는다."""
+    words = list(words)
+    limit = _CJK_LINE_MAX_CHARACTERS if spoken_language in _CJK_LANGUAGES else _LINE_MAX_CHARACTERS
+    lines = []
+
+    def add_line(group):
+        if not group:
+            return
+        text = "".join(word.text for word in group).strip()
+        if text and group[-1].end > group[0].start:
+            lines.append(TranscriptSegment(group[0].start, group[-1].end, text))
+
+    current = []
+    current_characters = 0
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if not current:
+            current = [word]
+            current_characters = _characters(word.text)
+            index += 1
+            continue
+        # 긴 무음은 상한보다 먼저 줄을 끊는다.
+        if word.start - current[-1].end >= _LINE_BREAK_SILENCE_SECONDS - _TIME_EPSILON:
+            add_line(current)
+            current = [word]
+            current_characters = _characters(word.text)
+            index += 1
+            continue
+        if (word.end - current[0].start > _LINE_MAX_DURATION_SECONDS + _TIME_EPSILON
+                or current_characters + _characters(word.text) > limit):
+            # 상한에 걸리면 지금 줄의 마지막 문장부호 뒤로 되돌아가 나눈다.
+            split = next((position for position in range(len(current) - 1, -1, -1)
+                          if any(character in _SENTENCE_PUNCTUATION for character in current[position].text)),
+                         None)
+            prefix = current if split is None else current[:split + 1]
+            add_line(prefix)
+            current = current[len(prefix):]
+            current_characters = sum(_characters(item.text) for item in current)
+            # 넘긴 단어를 새 줄에서 같은 규칙으로 다시 검사한다.
+            continue
+        current.append(word)
+        current_characters += _characters(word.text)
+        index += 1
+    add_line(current)
+    return lines
+
+
 def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | None, *,
                       progress=None, start: float = 0, duration: float | None = None) -> TranscriberResult:
     prepared = None
@@ -161,11 +243,28 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
     except Exception as error:
         raise TranscriberError("gpu_unavailable", str(error)) from error
     segments, info = model.transcribe(audio, language=spoken_language, beam_size=5,
-                                      vad_filter=True, condition_on_previous_text=False)
+                                      vad_filter=True, vad_parameters=VAD_PARAMETERS,
+                                      word_timestamps=True, condition_on_previous_text=False)
+    line_language = spoken_language if spoken_language is not None else info.language
     lines = []
     for segment in segments:
-        if segment.text.strip() and segment.end > segment.start and (duration is None or segment.start < duration):
-            lines.append(TranscriptSegment(segment.start, min(segment.end, duration) if duration is not None else segment.end, segment.text.strip()))
+        words = getattr(segment, "words", None)
+        if words:
+            for line in split_into_lines(
+                    (TimedWord(word.start, word.end, word.word) for word in words), line_language):
+                if duration is not None:
+                    if line.start >= duration:
+                        continue
+                    end = min(line.end, duration)
+                else:
+                    end = line.end
+                if end > line.start:
+                    lines.append(TranscriptSegment(line.start, end, line.text))
+        else:
+            print(f"단어 시각이 없어 구간을 한 줄로 처리합니다: {segment.start:.2f}~{segment.end:.2f}", file=sys.stderr)
+            if segment.text.strip() and segment.end > segment.start and (duration is None or segment.start < duration):
+                end = min(segment.end, duration) if duration is not None else segment.end
+                lines.append(TranscriptSegment(segment.start, end, segment.text.strip()))
         if progress:
             progress(segment.end)
     return TranscriberResult(info.language, tuple(lines), info.language_probability, model=TRANSCRIPTION_MODEL)
