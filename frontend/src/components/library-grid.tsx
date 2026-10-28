@@ -87,6 +87,8 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
     const indexes = new Map(videos.map((video, index) => [video.id, index]))
     const anchor = place.cards.find(card => indexes.has(card.id))
     // 보이던 카드가 모두 결과에서 빠지면 맨 위가 아니라 이전 스크롤 근처에 남는다.
+    // 같은 세로 위치에 두려면 스크롤이 0보다 작거나 끝보다 커야 할 때(예: 열이 늘어 선택 카드가 새 첫 줄이 됨)는
+    // 목록 위아래에 빈 여백을 만들지 않고 브라우저가 가능한 범위로 깎게 둔다. 그 차이는 깎인 만큼뿐이고 카드는 계속 보인다.
     element.scrollTop = anchor ? Math.floor(indexes.get(anchor.id)! / columns) * rowHeight - anchor.offset : place.top
     shown.current.top = element.scrollTop
   }

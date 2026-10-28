@@ -14,6 +14,7 @@ import { RandomTagDialog } from "@/components/random-tag-dialog"
 import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
 import { libraryViewDefaults, type LibraryData, type DetailsData, type HighlightData, type LibraryKeyBindingsData, type LibraryViewOptions, type TagCandidatesData } from "@/bridge-types"
 import type { KeyGuideGroup } from "@/lib/key-guide"
+import { useLayoutChange } from "@/lib/layout-change"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -52,6 +53,8 @@ export default function LibraryPage() {
   const filterRevision = useRef(0)
   // 결과가 바뀔 때 목록을 맨 위로 올리지 않고 보던 카드의 자리를 지킬지. 폴더 패널 여닫기만 자리를 지킨다.
   const [keepPlace, setKeepPlace] = useState(false)
+  // 격자 스크롤·썸네일 도착은 고정 조작 요소를 옮기지 않으므로 결과·선택·상세가 바뀔 때만 알린다.
+  useLayoutChange(data?.options, data?.visibleIds, data?.selectedId, details, detailTab, error)
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
 
   useEffect(() => {

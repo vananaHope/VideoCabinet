@@ -12,6 +12,7 @@ import { Inventory } from "@/components/statistics/Inventory"
 import { StatisticsCard } from "@/components/statistics/StatisticsCard"
 import { formatDate } from "@/lib/dates"
 import type { KeyGuideGroup } from "@/lib/key-guide"
+import { useLayoutChange } from "@/lib/layout-change"
 
 const periods = [7, 30, 90, 365].map(days => ({ value: String(days), label: `${days}일` }))
 const metrics = [{ value: "watched_seconds", label: "시청 시간" }, { value: "viewing_count", label: "시청 횟수" }]
@@ -53,6 +54,7 @@ export default function StatisticsPage() {
   const [section, setSection] = useState("activity")
   const [metric, setMetric] = useState<Metric>("watched_seconds")
   const [error, setError] = useState("")
+  useLayoutChange(section, state, error)
   const bridge = useRef<StatisticsBridge | null>(null)
   const root = useRef<HTMLElement>(null)
   useEffect(() => {

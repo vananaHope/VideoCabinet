@@ -3,6 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { ChevronDown, ChevronUp, CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { onLayoutChange } from "@/lib/layout-change"
 
 /**
  * 앱 공용 안내. 위계는 네 가지다.
@@ -225,8 +226,9 @@ function chooseCorner(layer: HTMLElement, region: Element | null, current: Corne
  * 머리 줄은 안내 개수와 오류 개수를 보이고 접고 편다. 접어도 오류가 있다는 표시는 남고,
  * 새 안내가 생기거나 오류가 늘면 다시 편다. 안내가 하나도 없으면 묶음도 보이지 않는다(부품은 그대로 붙어 있어 상태를 잃지 않는다).
  * avoid 영역(지금 보이는 페이지)의 고정 조작 요소를 가리지 않는 모서리를 고른다. 오른쪽 아래가 기본이다.
- * 페이지가 바뀌거나 묶음이 새로 나타나면 처음부터 고르고, 같은 페이지에서 창 크기·묶음 크기·페이지 내용이 바뀌면
- * 지금 모서리가 무언가를 가릴 때만 다시 고른다.
+ * 페이지가 바뀌거나 묶음이 새로 나타나면 처음부터 고르고, 같은 페이지에서 창 크기·묶음 크기·안내 개수가 바뀌거나
+ * 페이지가 배치 변경 신호(useLayoutChange: 분류·구역 전환, 비동기 준비 완료)를 보내면 지금 모서리가 무언가를 가릴 때만 다시 고른다.
+ * 페이지 DOM 변경은 관찰하지 않는다. 가상 목록은 스크롤 프레임마다 DOM을 바꾸지만 고정 조작 요소는 그대로라 다시 잴 까닭이 없다.
  */
 function NoticeLayer({ children, avoid, ...props }: Omit<React.ComponentProps<"section">, "className"> & {
   /** 가리지 않을 영역의 선택자. 바뀌면(페이지 전환) 모서리를 다시 고른다. */
@@ -266,10 +268,9 @@ function NoticeLayer({ children, avoid, ...props }: Omit<React.ComponentProps<"s
     placed.current = { avoid, shown: total > 0 }
     const resized = new ResizeObserver(later)
     resized.observe(element)
-    const changed = new MutationObserver(later)
-    if (region) changed.observe(region, { subtree: true, childList: true })
+    const stop = onLayoutChange(later)
     window.addEventListener("resize", later)
-    return () => { cancelAnimationFrame(frame); resized.disconnect(); changed.disconnect(); window.removeEventListener("resize", later) }
+    return () => { cancelAnimationFrame(frame); resized.disconnect(); stop(); window.removeEventListener("resize", later) }
   }, [avoid, total, collapsed])
   return (
     <section ref={layer} data-slot="notice-layer" data-corner={corner} className={layerVariants({ empty: total === 0, corner })} {...props}>

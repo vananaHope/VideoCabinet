@@ -9,6 +9,7 @@ import { EmptyState, PageHeader } from "@/components/page-parts"
 import { ResultRow, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
 import { formatDateTime } from "@/lib/dates"
 import type { KeyGuideGroup } from "@/lib/key-guide"
+import { useLayoutChange } from "@/lib/layout-change"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -21,6 +22,7 @@ export default function ReelPage() {
   const [data, setData] = useState<ReelData | null>(null)
   const [error, setError] = useState("")
   const [hiddenStatus, setHiddenStatus] = useState("")
+  useLayoutChange(data, error, hiddenStatus)
   const scroll = useRef(0)
   const goHome = useRef(() => {})
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
