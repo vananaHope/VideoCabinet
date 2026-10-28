@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Dialog } from "radix-ui"
 import { Dices } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog"
 import { TagPicker } from "@/components/tag-picker"
 import { tagPickerKeepsEscape } from "@/lib/tag-search"
 import type { TagCandidatesData, TagUsageData } from "@/bridge-types"
@@ -68,21 +68,17 @@ export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onRetu
     onPlay(chosen)
   }
 
-  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal>
-    <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-enter bg-background/80" />
-    <Dialog.Content ref={content} className="fixed inset-4 z-50 m-auto flex h-fit animate-fade-enter max-w-lg flex-col gap-4 overflow-y-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent ref={content} size="compact"
       onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLElement>("[role=combobox]")?.focus() }}
       onCloseAutoFocus={event => { event.preventDefault(); onReturnFocus() }}
       onEscapeKeyDown={event => { if (tagPickerKeepsEscape(event)) event.preventDefault() }}>
-      <header className="space-y-2">
-        <Dialog.Title className="text-lg font-semibold">태그에서 무작위 재생</Dialog.Title>
-        <Dialog.Description className="text-sm text-muted-foreground">고른 태그 중 하나라도 붙은 영상에서 하나를 골라 재생합니다. 후보 수는 파일 없음·제외 영상을 뺀 수라 태그 옆 숫자(붙은 영상 수)보다 적을 수 있습니다.</Dialog.Description>
-      </header>
+      <DialogHeader title="태그에서 무작위 재생" description="고른 태그 중 하나라도 붙은 영상에서 하나를 골라 재생합니다. 후보 수는 파일 없음·제외 영상을 뺀 수라 태그 옆 숫자(붙은 영상 수)보다 적을 수 있습니다." />
       <RandomTagFields tags={tags} selected={chosen} onChange={setSelected} count={count} error={error} />
-      <div className="flex justify-end gap-2">
-        <Dialog.Close asChild><Button variant="outline">취소</Button></Dialog.Close>
+      <DialogFooter>
+        <DialogClose asChild><Button variant="outline">취소</Button></DialogClose>
         <Button disabled={!playable} onClick={play}><Dices aria-hidden="true" />재생</Button>
-      </div>
-    </Dialog.Content>
-  </Dialog.Portal></Dialog.Root>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 }

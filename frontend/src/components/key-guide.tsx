@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { Dialog } from "radix-ui"
 import { Keyboard } from "lucide-react"
 import { request } from "@/bridge"
 import { tabs, type KeyGuideData, type KeyGuideEntryData, type ShellBridge } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
 import { Notice } from "@/components/ui/notice"
 import type { KeyGuideGroup, KeyGuideRow } from "@/lib/key-guide"
@@ -71,37 +71,30 @@ export function KeyGuideDialog({ bridge, tab, open, onOpenChange }: { bridge: Sh
   }, [open, onOpenChange])
   const label = tabs.find(([value]) => value === tab)?.[1] ?? ""
   const groups = pageKeyGuides[tab as keyof typeof pageKeyGuides] ?? []
-  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal>
-    {/* 내용을 오버레이 안에 두어 작은 창에서도 창 안에 맞추고 본문만 스크롤한다. 바깥을 누르면 닫힌다. */}
-    <Dialog.Overlay className="fixed inset-0 z-50 flex animate-fade-enter items-center justify-center bg-background/80 p-4">
-      {/* 초점이 뒤 페이지에 남아 있어도 닫기 키가 페이지 키(모아보기 Esc 복귀 등)로 이어지지 않게 한다. */}
-      <Dialog.Content className="flex max-h-full w-full max-w-4xl flex-col gap-4 rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg" onEscapeKeyDown={event => event.stopPropagation()}
-        onCloseAutoFocus={event => {
-          // 연결된 Trigger가 없으므로 Radix 기본 복원 대신 연 자리로 돌려준다(Esc·F1·닫기·바깥 누르기 모두).
-          event.preventDefault()
-          const target = origin.current
-          origin.current = null
-          if (focusable(target)) target.focus({ preventScroll: true })
-        }}>
-        <div className="space-y-1">
-          <Dialog.Title className="text-lg font-semibold">키 안내 · {label}</Dialog.Title>
-          <Dialog.Description className="text-sm text-muted-foreground">바꿀 수 있는 키는 설정 → 키 배치에서 바꾸며, 여기에는 지금 키 배치가 보입니다.</Dialog.Description>
-        </div>
-        <div tabIndex={0} aria-label="키 목록" className="grid min-h-0 grid-cols-2 gap-6 overflow-y-auto rounded-md focus-visible:outline-2 focus-visible:outline-ring">
-          <section aria-label="앱 전체" className="min-w-0 space-y-2">
-            <h3 className="font-semibold">앱 전체</h3>
-            {error ? <Notice tone="error">{error}</Notice> : app ? <KeyRows rows={app} /> : <p role="status" className="text-sm text-muted-foreground">키 배치를 읽는 중…</p>}
-          </section>
-          <section aria-label="지금 화면" className="min-w-0 space-y-2">
-            <h3 className="font-semibold">지금 화면 · {label}</h3>
-            <Groups groups={groups} />
-          </section>
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <p className="text-xs text-muted-foreground">Esc · F1 · 바깥 누르기로도 닫습니다.</p>
-          <Dialog.Close asChild><Button variant="outline">닫기</Button></Dialog.Close>
-        </div>
-      </Dialog.Content>
-    </Dialog.Overlay>
-  </Dialog.Portal></Dialog.Root>
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    {/* 초점이 뒤 페이지에 남아 있어도 닫기 키가 페이지 키(모아보기 Esc 복귀 등)로 이어지지 않게 한다. 바깥을 누르면 닫힌다. */}
+    <DialogContent size="wide" onEscapeKeyDown={event => event.stopPropagation()}
+      onCloseAutoFocus={event => {
+        // 연결된 Trigger가 없으므로 Radix 기본 복원 대신 연 자리로 돌려준다(Esc·F1·닫기·바깥 누르기 모두).
+        event.preventDefault()
+        const target = origin.current
+        origin.current = null
+        if (focusable(target)) target.focus({ preventScroll: true })
+      }}>
+      <DialogHeader title={`키 안내 · ${label}`} description="바꿀 수 있는 키는 설정 → 키 배치에서 바꾸며, 여기에는 지금 키 배치가 보입니다." />
+      <div tabIndex={0} aria-label="키 목록" className="grid min-h-0 grid-cols-2 gap-6 overflow-y-auto rounded-md focus-visible:outline-2 focus-visible:outline-ring">
+        <section aria-label="앱 전체" className="min-w-0 space-y-2">
+          <h3 className="font-semibold">앱 전체</h3>
+          {error ? <Notice tone="error">{error}</Notice> : app ? <KeyRows rows={app} /> : <p role="status" className="text-sm text-muted-foreground">키 배치를 읽는 중…</p>}
+        </section>
+        <section aria-label="지금 화면" className="min-w-0 space-y-2">
+          <h3 className="font-semibold">지금 화면 · {label}</h3>
+          <Groups groups={groups} />
+        </section>
+      </div>
+      <DialogFooter start={<p className="text-xs text-muted-foreground">Esc · F1 · 바깥 누르기로도 닫습니다.</p>}>
+        <DialogClose asChild><Button variant="outline">닫기</Button></DialogClose>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 }

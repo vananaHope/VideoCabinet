@@ -1,7 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority"
-import { AlertDialog } from "radix-ui"
 import type { ReactNode } from "react"
 import { Button } from "@/components/ui/button"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader } from "@/components/ui/dialog"
 
 export function PageHeader({ title, description, actions, variant = "page" }: { title: string; description?: string; actions?: ReactNode; variant?: "page" | "section" }) {
   return <div className="flex min-w-0 items-start justify-between gap-4"><div className="min-w-0 space-y-1">
@@ -35,5 +35,13 @@ const row = cva("flex min-w-0 items-center justify-between gap-4 rounded-lg bord
 export function ListItem({ title, description, action, variant }: { title: string; description?: string; action?: ReactNode } & VariantProps<typeof row>) { return <div className={row({ variant })}><div className="min-w-0"><p className="truncate font-medium">{title}</p>{description && <p className="text-sm text-muted-foreground">{description}</p>}</div>{action}</div> }
 
 export function ConfirmDialog({ open, onOpenChange, title, description, confirmLabel = "확인", cancelLabel = "취소", onConfirm, onCancel, variant = "default" }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; confirmLabel?: string; cancelLabel?: string; onConfirm: () => void; onCancel?: () => void; variant?: "default" | "destructive" }) {
-  return <AlertDialog.Root open={open} onOpenChange={onOpenChange}><AlertDialog.Portal><AlertDialog.Overlay className="fixed inset-0 z-50 animate-fade-enter bg-background/80" /><AlertDialog.Content className="fixed inset-0 z-50 m-auto h-fit animate-fade-enter w-full max-w-lg space-y-4 rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"><AlertDialog.Title className="text-lg font-semibold">{title}</AlertDialog.Title><AlertDialog.Description className="text-sm text-muted-foreground">{description}</AlertDialog.Description><div className="flex justify-end gap-2"><AlertDialog.Cancel asChild><Button variant="outline" onClick={onCancel}>{cancelLabel}</Button></AlertDialog.Cancel><AlertDialog.Action asChild><Button variant={variant} onClick={onConfirm}>{confirmLabel}</Button></AlertDialog.Action></div></AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root>
+  return <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialogContent>
+      <AlertDialogHeader title={title} description={description} />
+      <AlertDialogFooter>
+        <AlertDialogCancel asChild><Button variant="outline" onClick={onCancel}>{cancelLabel}</Button></AlertDialogCancel>
+        <AlertDialogAction asChild><Button variant={variant} onClick={onConfirm}>{confirmLabel}</Button></AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 }

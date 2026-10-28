@@ -1,10 +1,9 @@
 import { cva } from 'class-variance-authority'
-import { Dialog } from 'radix-ui'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { DialogRow } from '@/bridge-types'
+import { Dialog, DialogContent, DialogHeader } from '@/components/ui/dialog'
 import { SelectField } from '@/components/ui/select'
 import { tagPickerKeepsEscape } from '@/lib/tag-search'
-import './dialogs.css'
 
 export function DialogFrame({ title, description, children, onClose, composing, onSize, wide }: { title: string; description: string; children: ReactNode; onClose: () => void; composing: { current: boolean }; onSize: (width: number, height: number) => void; wide: boolean }) {
   const [content, setContent] = useState<HTMLDivElement | null>(null)
@@ -17,19 +16,18 @@ export function DialogFrame({ title, description, children, onClose, composing, 
     observer.observe(content)
     return () => observer.disconnect()
   }, [content, onSize])
-  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal>
-    <Dialog.Overlay data-dialog-overlay className="fixed inset-0 z-40 animate-fade-enter bg-background/80" />
-    <Dialog.Content ref={setContent} data-dialog-frame data-wide={wide} className="fixed inset-4 z-40 m-auto flex h-fit animate-fade-enter flex-col gap-4 overflow-auto rounded-xl border bg-popover p-6 text-popover-foreground shadow-lg"
+  // 재생 중에는 셸이 이 틀을 내용 크기의 창으로 옮긴다(공용 틀의 container 배치). 그 창 크기는 이 틀의 크기를 따른다.
+  return <Dialog open onOpenChange={open => { if (!open) onClose() }}>
+    <DialogContent ref={setContent} data-dialog-frame size={wide ? 'wide' : 'default'} placement="container"
       onInteractOutside={event => event.preventDefault()}
       onEscapeKeyDown={event => {
         // 태그 고르기가 검색어·활성 후보를 먼저 지울 Esc는 대화상자를 닫지 않는다.
         if (composing.current || tagPickerKeepsEscape(event)) event.preventDefault()
       }}>
-      <header className="space-y-2"><Dialog.Title className="text-lg font-semibold">{title}</Dialog.Title>
-        <Dialog.Description className="text-sm text-muted-foreground">{description || '입력한 내용을 확인한 뒤 저장하세요.'}</Dialog.Description></header>
+      <DialogHeader title={title} description={description || '입력한 내용을 확인한 뒤 저장하세요.'} />
       {children}
-    </Dialog.Content>
-  </Dialog.Portal></Dialog.Root>
+    </DialogContent>
+  </Dialog>
 }
 
 const itemStyle = cva('w-full min-w-0 cursor-default border-b px-3 py-2 text-left text-sm last:border-b-0', {
@@ -42,11 +40,11 @@ export function DialogList({ label, rows, selected, onSelect, onActivate, review
   review?: boolean; highlights?: boolean; clickActivates?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  // 목록은 대화상자 최대 높이 안에서 남는 공간을 쓴다. 재생 중 컨테이너의 상한은 dialogs.css가 정한다.
+  // 목록은 대화상자 최대 높이 안에서 남는 공간을 쓴다. 재생 중 컨테이너에서는 목록이 창 높이까지 자라 영상을 가리지 않게 상한을 둔다.
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <p className="mb-2 text-sm font-medium">{label} · {rows.length}</p>
     <div ref={ref} role="listbox" aria-label={label} tabIndex={0} aria-activedescendant={selected ? `${label}-${selected}` : undefined}
-      data-dialog-list className="min-h-24 flex-1 overflow-auto rounded-md border focus-visible:outline-2 focus-visible:outline-ring"
+      data-dialog-list className="min-h-24 flex-1 overflow-auto rounded-md border focus-visible:outline-2 focus-visible:outline-ring in-data-dialog-container:max-h-(--dialog-list-max-height)"
       onKeyDown={event => {
         if (event.nativeEvent.isComposing || event.keyCode === 229) return
         const index = rows.findIndex(row => row.id === selected)
