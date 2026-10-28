@@ -9,9 +9,9 @@ import { libraryChoices, libraryFilterDefaults, type LibraryViewOptions, type Ta
 import { formatDate } from "@/lib/dates"
 
 type Change = (value: Partial<LibraryViewOptions>) => void
-export function LibraryChoice({ name, label, options, onChange }: { name: keyof typeof libraryChoices; label: string; options: LibraryViewOptions; onChange: Change }) {
+export function LibraryChoice({ name, label, options, disabled, onChange }: { name: keyof typeof libraryChoices; label: string; options: LibraryViewOptions; disabled?: boolean; onChange: Change }) {
   return <label className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"><span className="shrink-0">{label}</span>
-    <SelectField aria-label={label} value={options[name]} options={libraryChoices[name]} onValueChange={value => onChange({ [name]: value })} className="max-w-48" />
+    <SelectField aria-label={label} value={options[name]} options={libraryChoices[name]} disabled={disabled} onValueChange={value => onChange({ [name]: value })} className="max-w-48" />
   </label>
 }
 
@@ -20,8 +20,8 @@ export function clearLibraryFilters(options: LibraryViewOptions): LibraryViewOpt
 }
 
 const dateFilters = [['added', '추가일'], ['modified', '수정한 날짜'], ['viewed', '마지막 시청']] as const
-export function LibraryFilters({ options, tags, onChange }: { options: LibraryViewOptions; tags: TagUsageData[]; onChange: Change }) {
-  return <Popover.Root><Popover.Trigger asChild><Button variant="outline" size="sm"><SlidersHorizontal />필터</Button></Popover.Trigger>
+export function LibraryFilters({ options, tags, disabled, onChange }: { options: LibraryViewOptions; tags: TagUsageData[]; disabled?: boolean; onChange: Change }) {
+  return <Popover.Root><Popover.Trigger asChild><Button variant="outline" size="sm" disabled={disabled}><SlidersHorizontal />필터</Button></Popover.Trigger>
     <Popover.Portal><Popover.Content aria-label="라이브러리 필터 패널" align="end" sideOffset={8} onEscapeKeyDown={event => { if (tagPickerKeepsEscape(event)) event.preventDefault() }}
       className="z-50 max-h-112 w-128 overflow-y-auto rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg">
       <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">검색 조건</h2><Popover.Close asChild><Button size="icon-xs" variant="ghost" aria-label="필터 닫기"><X /></Button></Popover.Close></div>

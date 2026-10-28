@@ -5,13 +5,14 @@ import { LibraryChoice, LibraryFilters, LibraryFilterChips } from "@/components/
 import { LibraryFolders, folderKeyRows } from "@/components/library-folders"
 import { Button } from "@/components/ui/button"
 import { NoticeStack } from "@/components/ui/notice"
-import { LibraryGrid, gridKeyRows } from "@/components/library-grid"
+import { PendingStatus } from "@/components/ui/pending-status"
+import { LibraryGrid, gridKeyRows, type FirstLoad } from "@/components/library-grid"
 import type { HighlightSnapshot } from "@/components/highlight-panel"
 import { DetailPanel } from "@/components/detail-panel"
 import { RandomPlayButton } from "@/components/random-play-button"
 import { RandomTagDialog } from "@/components/random-tag-dialog"
 import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
-import type { LibraryData, DetailsData, HighlightData, LibraryKeyBindingsData, LibraryViewOptions, TagCandidatesData } from "@/bridge-types"
+import { libraryViewDefaults, type LibraryData, type DetailsData, type HighlightData, type LibraryKeyBindingsData, type LibraryViewOptions, type TagCandidatesData } from "@/bridge-types"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
@@ -42,6 +43,8 @@ export default function LibraryPage() {
   const randomMenu = useRef<HTMLButtonElement>(null)
   const optionsRef = useRef<LibraryViewOptions | null>(null)
   const [error, setError] = useState("")
+  // 첫 데이터 요청이 실패했는지. 오류 안내를 닫아도 실패는 그대로이고, 뒤에 데이터가 오면 ready가 된다.
+  const [firstLoadFailed, setFirstLoadFailed] = useState(false)
   const [detailRevision, setDetailRevision] = useState(0)
   const savedScroll = useRef<{ grid: number; detail: number } | null>(null)
   const layoutPaused = useRef(false)
@@ -98,19 +101,26 @@ export default function LibraryPage() {
       api.libraryKeyBindingsChanged.connect(keyBindingsChanged)
       shell.shellChanged.connect(shellChanged)
       disconnect = () => { api.thumbnailsChanged.disconnect(thumbnailsChanged); api.libraryChanged.disconnect(changed); api.libraryDetailsChanged.disconnect(detailsChanged); api.libraryFocusRequested.disconnect(focus); api.libraryError.disconnect(showError); api.libraryKeyBindingsChanged.disconnect(keyBindingsChanged); shell.shellChanged.disconnect(shellChanged) }
+      // 첫 스냅숏이 실패해도 뒤에 libraryChanged로 온 데이터를 조작할 수 있게 브리지를 먼저 잡는다.
+      setBridge(api)
       const initial = await getSnapshot(api)
       if (disposed) return
-      setBridge(api)
       optionsRef.current = initial.options
       setData(initial)
-    }).catch(showError)
+    }).catch(error => {
+      if (disposed) return
+      setFirstLoadFailed(true)
+      showError(error)
+    })
     return () => { disposed = true; disconnect() }
   }, [showError])
 
-  // effect는 첫 스냅숏의 격자가 DOM에 반영된 뒤 실행된다.
+  // effect는 첫 데이터의 격자가 DOM에 반영된 뒤 실행된다.
+  const loaded = data !== null
+  const firstLoad: FirstLoad = loaded ? "ready" : firstLoadFailed ? "failed" : "pending"
   useEffect(() => {
-    if (bridge) request(reply => bridge.ready(reply)).catch(showError)
-  }, [bridge, showError])
+    if (bridge && loaded) request(reply => bridge.ready(reply)).catch(showError)
+  }, [bridge, loaded, showError])
 
   useEffect(() => {
     let current = true
@@ -132,6 +142,8 @@ export default function LibraryPage() {
 
   const byId = useMemo(() => new Map(data?.videos.map(video => [video.id, video]) ?? []), [data?.videos])
   const visible = useMemo(() => data?.visibleIds.flatMap(id => byId.get(id) ?? []) ?? [], [data?.visibleIds, byId])
+  // 첫 데이터 전에는 기본 보기 조건으로 툴바를 같은 자리·같은 크기에 그린다. 저장된 조건을 먼저 받는 일은 #267이 맡는다.
+  const options = data?.options ?? libraryViewDefaults
   const foldersOpen = data?.options.mode === 'folders'
   const resultScope = useMemo(() => data?.visibleIds.join(",") ?? "", [data?.visibleIds])
 
@@ -210,26 +222,27 @@ export default function LibraryPage() {
     })
   }
   return <main aria-label="라이브러리" className="flex h-full flex-col gap-2 p-2">
-    {data && <>
-      <div className="flex shrink-0 items-center gap-2">
-        <div className="min-w-24 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목 검색" value={data.options.query}
-          onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter({ query: event.currentTarget.value }) }}
-          onChange={event => { const query = event.target.value; if (!composing.current) filter({ query }); else { optionsRef.current = { ...data.options, query }; setData({ ...data, options: { ...data.options, query } }) } }} /></div>
-        <LibraryChoice name="card_size" label="카드 크기" options={data.options} onChange={filter} />
-        <LibraryChoice name="sort" label="정렬" options={data.options} onChange={filter} />
-        <Button size="sm" variant="outline" aria-label="정렬 방향" onClick={() => filter({ descending: !data.options.descending })}>{data.options.descending ? "내림차순 ↓" : "오름차순 ↑"}</Button>
-        <LibraryFilters options={data.options} tags={data.tags} onChange={filter} />
-        <p aria-label="라이브러리 등록·표시 개수" className="shrink-0 text-xs text-muted-foreground">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
-        <RandomPlayButton menuRef={randomMenu} scopes={[
-          { key: "results", label: "현재 결과에서", onSelect: () => randomPlay() },
-          { key: "all", label: "영상 전체에서", onSelect: () => randomPlay("all"), shortcut: data.keyBindings.randomPlay },
-          { key: "tags", label: "태그에서…", onSelect: () => setTagDialogOpen(true), opensDialog: true },
-        ]} />
-        <RandomTagDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} tags={data.tags} load={loadTagCandidates}
-          onPlay={randomPlay} onReturnFocus={() => randomMenu.current?.focus()} />
-      </div>
-      <LibraryFilterChips options={data.options} chips={data.chips} onChange={filter} />
-    </>}
+    {/* 툴바는 첫 데이터 전에도 같은 자리에 그리고, 데이터가 올 때까지 누를 수 없다. */}
+    <div className="flex shrink-0 items-center gap-2">
+      <div className="min-w-24 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목 검색" value={options.query} disabled={!data}
+        onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter({ query: event.currentTarget.value }) }}
+        onChange={event => { const query = event.target.value; if (!composing.current) filter({ query }); else if (data) { optionsRef.current = { ...data.options, query }; setData({ ...data, options: { ...data.options, query } }) } }} /></div>
+      <LibraryChoice name="card_size" label="카드 크기" options={options} disabled={!data} onChange={filter} />
+      <LibraryChoice name="sort" label="정렬" options={options} disabled={!data} onChange={filter} />
+      <Button size="sm" variant="outline" aria-label="정렬 방향" disabled={!data} onClick={() => filter({ descending: !options.descending })}>{options.descending ? "내림차순 ↓" : "오름차순 ↑"}</Button>
+      <LibraryFilters options={options} tags={data?.tags ?? []} disabled={!data} onChange={filter} />
+      {/* 개수 자리는 9,999개까지 들어가는 폭을 잡아 두어 첫 데이터가 와도 옆 컨트롤이 밀리지 않는다. 그 전에는 "0개" 대신 기다림 표시를 둔다. */}
+      {data ? <p aria-label="라이브러리 등록·표시 개수" className="min-w-44 shrink-0 text-xs text-muted-foreground tabular-nums">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
+        : <PendingStatus pending={firstLoad === "pending"} className="min-w-44 shrink-0" />}
+      <RandomPlayButton menuRef={randomMenu} disabled={!data} scopes={[
+        { key: "results", label: "현재 결과에서", onSelect: () => randomPlay() },
+        { key: "all", label: "영상 전체에서", onSelect: () => randomPlay("all"), shortcut: data?.keyBindings.randomPlay },
+        { key: "tags", label: "태그에서…", onSelect: () => setTagDialogOpen(true), opensDialog: true },
+      ]} />
+      {data && <RandomTagDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} tags={data.tags} load={loadTagCandidates}
+        onPlay={randomPlay} onReturnFocus={() => randomMenu.current?.focus()} />}
+    </div>
+    {data && <LibraryFilterChips options={data.options} chips={data.chips} onChange={filter} />}
     <NoticeStack layout="yield" items={[
       error && { tone: "error", message: error, onDismiss: () => setError("") },
       randomNotice?.scope === resultScope && { tone: "info", message: randomNotice.message, onDismiss: () => setRandomNotice(null) },
@@ -237,11 +250,11 @@ export default function LibraryPage() {
     {/* 안내가 길어도 카드 격자·상세 패널이 최소 높이를 지킨다. */}
     <div className="flex min-h-40 flex-1 gap-2">
       {/* 패널을 닫아도 고른 폴더(folder)는 옵션에 남아 다시 열 때 복원된다. */}
-      {data && <Button size="icon-sm" variant={foldersOpen ? "secondary" : "outline"} aria-label="폴더 패널" aria-expanded={foldersOpen} aria-controls={foldersOpen ? "library-folder-panel" : undefined}
-        title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>}
+      <Button size="icon-sm" variant={foldersOpen ? "secondary" : "outline"} aria-label="폴더 패널" aria-expanded={foldersOpen} aria-controls={foldersOpen ? "library-folder-panel" : undefined} disabled={!data}
+        title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>
       {foldersOpen && <LibraryFolders collapsedIds={data.options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
-      <LibraryGrid cardSize={data?.options.card_size ?? 'medium'} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} />
-      <DetailPanel variant={data?.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} highlightGuidance={data?.keyBindings.highlightGuidance ?? ""} onRandomTag={tagId => randomPlay([tagId])} />
+      <LibraryGrid cardSize={options.card_size} load={firstLoad} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} />
+      <DetailPanel variant={!data ? (firstLoad === "failed" ? "failed" : "loading") : data.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} highlightGuidance={data?.keyBindings.highlightGuidance ?? ""} onRandomTag={tagId => randomPlay([tagId])} />
     </div>
   </main>
 }

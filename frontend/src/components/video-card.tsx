@@ -2,12 +2,13 @@ import { cva, type VariantProps } from "class-variance-authority"
 import type { ComponentProps } from "react"
 import { Film } from "lucide-react"
 import { StatusBadge } from "@/components/page-parts"
+import { Skeleton } from "@/components/ui/skeleton"
 import { VideoTags } from "@/components/video-tags"
 import type { VideoData } from "@/bridge-types"
 import { formatDate } from "@/lib/dates"
 
 const cardVariants = cva("group flex h-full min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring", {
-  variants: { variant: { default: "border-border bg-card hover:border-input", selected: "border-ring bg-card ring-1 ring-ring" } },
+  variants: { variant: { default: "border-border bg-card hover:border-input", selected: "border-ring bg-card ring-1 ring-ring", placeholder: "border-border bg-card" } },
   defaultVariants: { variant: "default" },
 })
 
@@ -57,4 +58,17 @@ export function VideoCard({ video, variant, cardSize = "medium", ...props }: Pro
       <span className="mt-auto min-w-0"><VideoTags tags={video.tags} /></span>
     </div>
   </button>
+}
+
+/** 영상 정보가 오기 전의 카드 자리. VideoCard와 같은 테두리·16:9 썸네일·정보 칸 높이를 써서 바뀔 때 크기가 같다. */
+export function VideoCardPlaceholder() {
+  return <div data-slot="video-card-placeholder" aria-hidden="true" className={cardVariants({ variant: "placeholder" })}>
+    <Skeleton shape="media" />
+    <div className="flex h-40 w-full shrink-0 flex-col gap-0.5 p-2">
+      <Skeleton shape="line" className="w-3/4" />
+      <span className="flex gap-1"><Skeleton shape="badge" className="w-10" /><Skeleton shape="badge" className="w-14" /></span>
+      <Skeleton shape="block" className="mt-1 h-12 w-full" />
+      <Skeleton shape="badge" className="mt-auto w-16" />
+    </div>
+  </div>
 }
