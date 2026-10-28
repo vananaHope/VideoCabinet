@@ -11,6 +11,7 @@ import { BackupSettings } from "@/components/backup-settings"
 import { UpdateSettings } from "@/components/update-settings"
 import { RecommendationPeriods } from "@/components/recommendation-periods"
 import type { KeyGuideGroup } from "@/lib/key-guide"
+import { useLayoutChange } from "@/lib/layout-change"
 
 const categories = [['general', '일반'], ['keys', '키 배치'], ['recommend', '추천'], ['translation', '번역'], ['transcription', '받아쓰기'], ['backup', '백업'], ['update', '업데이트']] as const
 
@@ -30,6 +31,8 @@ export default function SettingsPage() {
   const [category, setCategory] = useState('general')
   const [error, setError] = useState('')
   const [quit, setQuit] = useState(false)
+  // 분류를 바꾸면 이미 붙은 구역의 hidden만 바뀌므로 셸 안내 묶음에 배치가 바뀌었다고 알린다.
+  useLayoutChange(category, data, error)
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}

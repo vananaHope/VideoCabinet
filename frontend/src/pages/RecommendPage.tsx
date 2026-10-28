@@ -9,6 +9,7 @@ import { EmptyState, PageHeader } from "@/components/page-parts"
 import { RecommendationCard, RecommendationCardPlaceholder, RecommendationMenu } from "@/components/recommendation-card"
 import { openKeyboardMenu } from "@/components/library-grid"
 import { menuKeyRow, type KeyGuideGroup } from "@/lib/key-guide"
+import { useLayoutChange } from "@/lib/layout-change"
 
 type Cursor = { key: string; row: number; column: number; videoId: number }
 type Position = { row: number; column: number }
@@ -81,6 +82,7 @@ export default function RecommendPage() {
   const [dismissed, setDismissed] = useState<{ id: number; title: string } | null>(null)
   // 응답을 기다리는 관심 없음·되돌리기 요청 수. 그동안 이전 줄을 그대로 두고 기다림 표시만 보인다.
   const [requests, setRequests] = useState(0)
+  useLayoutChange(data, error, dismissed)
   // 줄마다 마지막으로 고른 카드. ↑/↓로 돌아오면 그 카드로 간다.
   const remembered = useRef(new Map<string, number>())
   const focusTarget = useRef(() => {})

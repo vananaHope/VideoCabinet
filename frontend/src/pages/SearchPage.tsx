@@ -6,6 +6,7 @@ import { NoticeStack } from "@/components/ui/notice"
 import { PendingStatus } from "@/components/ui/pending-status"
 import { MatchedText, ResultRow, SearchInput, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
 import type { KeyGuideGroup } from "@/lib/key-guide"
+import { useLayoutChange } from "@/lib/layout-change"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -23,6 +24,7 @@ export default function SearchPage() {
   const [pending, setPending] = useState(false)
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState("")
+  useLayoutChange(data, error)
   const composing = useRef(false)
   const draft = useRef("")
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)

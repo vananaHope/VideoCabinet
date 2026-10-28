@@ -366,7 +366,8 @@ def open_queue(window_factory, core, width, height, *, long_notices):
         expand = "[...document.querySelectorAll('button')].filter(b => b.textContent === '전체 보기' && b.getClientRects().length)"
         wait_for(lambda: js(f"{expand}.length") == 3)
         js(f"{expand}.forEach(b => b.click())")
-        wait_for(lambda: js("[...document.querySelectorAll('button')].filter(b => b.textContent === '접기').length") == 3)
+        # 셸 안내 묶음 머리 줄의 접기 단추는 안내 문구의 접기가 아니므로 세지 않는다.
+        wait_for(lambda: js("[...document.querySelectorAll('[data-slot=notice] button')].filter(b => b.textContent === '접기').length") == 3)
     rendered()
     return window, js, rendered
 
@@ -401,10 +402,11 @@ def test_expanding_every_long_notice_keeps_queue_rows_visible(window_factory, co
     capture(window, 'queue-long-notices-all-expanded')
 
 
-@pytest.mark.parametrize('width,height,long_notices', [(900, 600, True), (1100, 400, False)])
+@pytest.mark.parametrize('width,height,long_notices', [(900, 440, True), (1100, 400, False)])
 def test_small_window_scrolls_page_area_to_queue_actions(window_factory, core, width, height, long_notices):
     # 목록 최소 높이와 안내의 합이 창보다 크면 페이지 영역(탭 아래)이 세로로 스크롤해
     # 아래 작업 버튼에 닿을 수 있어야 한다. 목록 최소 높이는 그대로 지킨다(#134 재검토).
+    # 셸 안내는 페이지를 밀지 않고 떠 있으므로(#263) 대기열 자체 안내를 모두 펼친 900×440에서 넘친다.
     window, js, rendered = open_queue(window_factory, core, width, height, long_notices=long_notices)
     before = json.loads(js(QUEUE_LAYOUT))
     assert before['scrollHeight'] > before['clientHeight'], before

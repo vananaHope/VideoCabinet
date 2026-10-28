@@ -9,6 +9,7 @@ import { QueueList, queueKeyRows } from "@/components/queue-list"
 import { QueueStore } from "@/components/queue-store"
 import { QueueRules, queueRuleKeyRows } from "@/components/queue-rules"
 import type { KeyGuideGroup } from "@/lib/key-guide"
+import { useLayoutChange } from "@/lib/layout-change"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -31,6 +32,7 @@ export default function QueuePage() {
   const [confirmation, setConfirmation] = useState("")
   const refineTrigger = useRef<HTMLButtonElement>(null)
   const [busy, setBusy] = useState(false)
+  useLayoutChange(tab, rules, error, message)
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
   const select = useCallback((id: number) => setSelected(id), [])
 

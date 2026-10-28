@@ -7,6 +7,7 @@ import { ConfirmDialog, EmptyState, PageHeader, StatusBadge, Tabs } from "@/comp
 import { MinimumDuration } from "@/components/minimum-duration"
 import { ScanReport } from "@/components/scan-report"
 import type { KeyGuideGroup } from "@/lib/key-guide"
+import { useLayoutChange } from "@/lib/layout-change"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = []
@@ -17,6 +18,7 @@ export default function FoldersPage() {
   const [error, setError] = useState("")
   const [section, setSection] = useState("folders")
   const [remove, setRemove] = useState<string | null>(null)
+  useLayoutChange(section, data, error)
   const reportRevision = useRef(0)
   const dismissSequence = useRef(0)
   useEffect(() => { reportRevision.current = data?.report.revision ?? 0 }, [data])

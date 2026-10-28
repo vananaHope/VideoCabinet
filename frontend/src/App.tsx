@@ -9,7 +9,7 @@ import DialogsLayer from "@/dialogs/DialogsLayer"
 import ShellModals from "@/dialogs/ShellModals"
 import SubtitlePreparation from "@/components/subtitle-preparation"
 import UpdateNotice from "@/components/update-notice"
-import { NoticeStack } from "@/components/ui/notice"
+import { NoticeLayer, NoticeStack } from "@/components/ui/notice"
 import { shellStatusTone } from "@/lib/shell-status"
 
 // 탭을 바꿀 때만 새 탭 내용이 투명도로 짧게 들어온다. 첫 진입·재생 복귀·같은 탭 다시 열기에는 전환이 없다.
@@ -73,19 +73,22 @@ export default function App() {
       <Tabs label="페이지 이동" value={tab} items={tabs.map(([value, label], index) => ({ value, label, shortcut: `Ctrl+${index + 1}` }))} onChange={navigate} variant="navigation" />
       <KeyGuideButton onClick={() => setKeyGuide(true)} />
     </header>
-    {/* 셸 안내는 탭 아래 한곳에 쌓는다. 자막 기능 준비가 먼저, 그 아래 연결 오류와 작업 알림, 마지막에 새 버전 알림이 온다.
-        모두 펼쳐도 창 높이의 1/4까지만 쓰고 안에서 스크롤해 페이지 목록 자리를 남긴다. */}
-    <div aria-label="앱 안내" className="max-h-1/4 shrink-0 overflow-y-auto">
-      <SubtitlePreparation />
-      {(error || status) && <div className="border-b px-4 py-2"><NoticeStack items={[
-        error && { tone: "error", message: error, onDismiss: () => setError("") },
-        status && { tone: shellStatusTone(status), message: status, label: "작업 알림", onDismiss: () => setStatus("") },
-      ]} /></div>}
-      <UpdateNotice />
-    </div>
-    {/* 페이지 영역. 목록 최소 높이와 안내를 합친 높이가 창보다 크면(작은 창) 여기서 세로로 스크롤해 아래 작업 버튼에 닿는다.
+    {/* 페이지 영역. 목록 최소 높이보다 창이 작으면(작은 창) 여기서 세로로 스크롤해 아래 작업 버튼에 닿는다.
         기본 창에서는 각 페이지가 높이에 맞춰 내부 목록만 스크롤하므로 바깥 스크롤이 생기지 않는다. */}
-    {Object.entries(pages).map(([name, Page]) => Page && <div key={name} data-page={name} hidden={tab !== name} className={pageArea({ entering: view.entering && tab === name })}><Page /></div>)}
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {Object.entries(pages).map(([name, Page]) => Page && <div key={name} data-page={name} hidden={tab !== name} className={pageArea({ entering: view.entering && tab === name })}><Page /></div>)}
+      {/* 셸 안내는 페이지를 밀지 않고 페이지 영역 모서리(기본 오른쪽 아래)에 떠 있는 한 묶음으로 쌓는다. 머리글·탭 줄은 덮지 않고,
+          지금 페이지의 툴바·작업 단추 줄 같은 고정 조작 요소를 가장 적게 가리는 모서리를 고른다.
+          자막 기능 준비가 먼저, 그 아래 연결 오류와 작업 알림, 마지막에 새 버전 알림이 온다. 묶음은 접을 수 있고 넘치면 안에서 스크롤한다. */}
+      <NoticeLayer aria-label="앱 안내" avoid={`[data-page="${tab}"]`}>
+        <SubtitlePreparation />
+        <NoticeStack items={[
+          error && { tone: "error", message: error, onDismiss: () => setError("") },
+          status && { tone: shellStatusTone(status), message: status, label: "작업 알림", onDismiss: () => setStatus("") },
+        ]} />
+        <UpdateNotice />
+      </NoticeLayer>
+    </div>
     <DialogsLayer />
     {bridge && <KeyGuideDialog bridge={bridge} tab={tab} open={keyGuide} onOpenChange={setKeyGuide} />}
     <ShellModals />

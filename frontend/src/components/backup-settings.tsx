@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { InlineNotice, Notice, NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, StatusBadge } from "@/components/page-parts"
 import { formatDateTime } from "@/lib/dates"
+import { useLayoutChange } from "@/lib/layout-change"
 
 function size(bytes: number) {
   return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
@@ -27,6 +28,8 @@ export function BackupSettings({ bridge, active }: { bridge: SettingsBridge; act
   const lastOperation = useRef('')
   const returnFocus = useRef<HTMLElement | null>(null)
   const confirmTrigger = useRef<HTMLButtonElement>(null)
+  // 목록 새로고침·작업 안내로 아래 단추 자리가 바뀐다.
+  useLayoutChange(active, data, error, dismissed)
   useEffect(() => {
     let disposed = false
     const changed = (json: string) => { if (!disposed) setData(JSON.parse(json)) }
