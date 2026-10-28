@@ -167,6 +167,7 @@ print(json.dumps({"spoken_language": "ko", "model": "large-v3", "segments": []})
 def test_legacy_order_follows_new_direct_requests_and_preserves_relative_order():
     # 순서 없는 옛 항목은 현재 AppCore로 만들 수 없어 이전 버전 호환 정렬을 순수 함수로 검증한다.
     from my_video_manager.subtitle_queue import subtitle_order_key
-    positions = {1: (0, 0, 5), 2: (0, 1, 3), 3: (-1, 1, 2)}
+    positions = {(1, "transcription"): (0, 0, 5), (2, "transcription"): (0, 1, 3),
+                 (3, "transcription"): (-1, 1, 2)}
     videos = [8, 9, 2, 1, 3]
     assert sorted(videos, key=lambda video_id: subtitle_order_key(video_id, positions)) == [3, 1, 8, 9, 2]

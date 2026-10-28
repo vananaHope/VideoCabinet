@@ -8,6 +8,7 @@ from threading import Event, Lock
 from typing import Protocol
 from uuid import uuid4
 
+from .subtitle_queue_kind import TRANSCRIPTION
 from .subtitles import TranscriptLine, TranscriptSummary
 from .translation_kind import translation_task, TranslationTask
 from .translation_models import DEFAULT_PROVIDER, provider
@@ -151,6 +152,7 @@ class TranslationQueueEntry:
     error_detail: str | None
     notice: str = ""
     kind: str = "translation"
+    queue_kind: str = TRANSCRIPTION
 
 
 class Translations:
@@ -357,7 +359,7 @@ class Translations:
               AND NOT EXISTS (SELECT 1 FROM translation_queue q WHERE q.video_id=t.video_id)
               AND EXISTS (SELECT 1 FROM transcript_lines l WHERE l.transcript_id=t.id
                           AND NOT EXISTS (SELECT 1 FROM translation_lines tr WHERE tr.line_id=l.id))
-              AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=t.video_id
+              AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=t.video_id AND s.kind='transcription'
                               AND s.state IN ('queued', 'transcribing'))""").fetchall()
         return [r['video_id'] for r in rows if not r['omitted']], sum(r['omitted'] for r in rows)
 
@@ -562,7 +564,7 @@ class Translations:
                 raise TranslationCancelled
             with self._connect() as db:
                 current = db.execute("""SELECT 1 FROM translation_queue q WHERE q.id=?
-                    AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=q.video_id
+                    AND NOT EXISTS (SELECT 1 FROM subtitle_queue s WHERE s.video_id=q.video_id AND s.kind='transcription'
                                     AND s.state IN ('queued', 'transcribing'))""", (queue_id,)).fetchone()
             if not current:
                 raise TranslationCancelled
@@ -710,7 +712,7 @@ class Translations:
                     current = db.execute("SELECT * FROM translation_queue WHERE id = ?", (pending.id,)).fetchone()
                     # 재생성 중이거나 요청/원어 세대가 바뀌면 진행 중의 낡은 응답을 버린다.
                     if (current is None or current["transcript_id"] != transcript.id or db.execute(
-                            "SELECT 1 FROM subtitle_queue WHERE video_id = ? AND state IN ('queued', 'transcribing')",
+                            "SELECT 1 FROM subtitle_queue WHERE video_id = ? AND kind = 'transcription' AND state IN ('queued', 'transcribing')",
                             (pending.video_id,)).fetchone()):
                         return None
                     if self._cancellation.is_set():

@@ -107,7 +107,7 @@ class Review:
 
     @staticmethod
     def _editable(db, video_id):
-        if db.execute("SELECT 1 FROM subtitle_queue WHERE video_id = ? AND state IN ('queued', 'transcribing')",
+        if db.execute("SELECT 1 FROM subtitle_queue WHERE video_id = ? AND kind = 'transcription' AND state IN ('queued', 'transcribing')",
                       (video_id,)).fetchone():
             raise ValueError("원어 자막 재생성이 끝난 뒤 검수하세요.")
 
@@ -176,7 +176,7 @@ class Review:
             if transcript is None:
                 raise ValueError("먼저 원어 자막을 만드세요.")
             self._order.request(db, video_id, renew=True)
-            db.execute("DELETE FROM subtitle_queue WHERE video_id = ?", (video_id,))
+            db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = 'transcription'", (video_id,))
             language = transcript["spoken_language"]
             cursor = db.execute("INSERT INTO subtitle_queue(video_id, spoken_language, requested_at) VALUES (?, ?, ?)",
                                 (video_id, None if language == "und" else language, self._clock().isoformat()))

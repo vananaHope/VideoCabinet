@@ -27,6 +27,7 @@ from .viewing import Viewing, ViewingRecord, ViewingRecorder, ViewingSettings, V
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 from .translation import (Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection,
                           translation_skip_reason)
+from .subtitle_queue_kind import TRANSCRIPTION, queue_task_key
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
@@ -631,28 +632,30 @@ class AppCore:
     def subtitle_queue_items(self):
         return self._subtitle_queue.items()
 
-    def remove_from_subtitle_queue(self, video_id):
-        self._subtitles.remove(video_id)
-        self._translations.remove(video_id)
-        self._subtitle_queue.hide(video_id)
+    def remove_from_subtitle_queue(self, video_id, *, kind=TRANSCRIPTION):
+        self._subtitles.remove(video_id, kind=kind)
+        if kind == TRANSCRIPTION:
+            self._translations.remove(video_id)
+        self._subtitle_queue.hide(video_id, kind=kind)
 
-    def promote_subtitle(self, video_id):
-        if not any(e.video_id == video_id for e in (*self.subtitle_queue(), *self.translation_queue())):
+    def promote_subtitle(self, video_id, *, kind=TRANSCRIPTION):
+        if not any(queue_task_key(e) == (video_id, kind)
+                   for e in (*self.subtitle_queue(kind=kind), *self.translation_queue())):
             raise ValueError("대기열에 없는 영상입니다.")
-        self._queue_order.promote(video_id)
+        self._queue_order.promote(video_id, kind=kind)
 
-    def retry_failed_subtitles(self):
-        failed = [e for e in self.subtitle_queue() if e.state == "failed"]
-        translated = [e for e in self.translation_queue() if e.state == "failed"]
+    def retry_failed_subtitles(self, *, kind=TRANSCRIPTION):
+        failed = [e for e in self.subtitle_queue(kind=kind) if e.state == "failed"]
+        translated = [e for e in self.translation_queue() if e.state == "failed"] if kind == TRANSCRIPTION else []
         retried, skipped = set(), []
-        for entries, request in ((failed, lambda e: self._subtitles.retry_failed(e.id)),
+        for entries, request in ((failed, lambda e: self._subtitles.retry_failed(e.id, kind=e.queue_kind)),
                                  (translated, lambda e: self.request_translation(e.video_id))):
             for entry in entries:
                 try:
                     request(entry)
-                    retried.add(entry.video_id)
+                    retried.add(queue_task_key(entry))
                 except (ValueError, OSError, RuntimeError) as error:
-                    skipped.append(SubtitleRetrySkipped(entry.video_id, str(error)))
+                    skipped.append(SubtitleRetrySkipped(entry.video_id, str(error), queue_task_key(entry)[1]))
         return SubtitleRetryResult(len(retried), tuple(skipped))
 
     def resume_subtitle_processing(self):
@@ -668,8 +671,8 @@ class AppCore:
         self.settings.set("subtitle_queue.tray_notice_shown", True)
         return True
 
-    def subtitle_queue(self) -> tuple[SubtitleQueueEntry, ...]:
-        return self._subtitles.queue()
+    def subtitle_queue(self, *, kind=TRANSCRIPTION) -> tuple[SubtitleQueueEntry, ...]:
+        return self._subtitles.queue(kind=kind)
 
     def process_next_subtitle(self) -> SubtitleQueueEntry | None:
         with self._subtitle_queue.processing():

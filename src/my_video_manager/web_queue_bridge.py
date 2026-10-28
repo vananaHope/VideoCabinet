@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
+from .subtitle_queue_kind import TRANSCRIPTION
 from .web_queue_contract import QUEUE
 from .web_json import encode
 
@@ -99,7 +100,7 @@ class QueueBridge(QObject):
                 QThreadPool.globalInstance().start(_BulkRefinement(core, self._bulk_signals))
                 return {'pending': True}
             if name == 'retryFailed':
-                result = core.retry_failed_subtitles()
+                result = core.retry_failed_subtitles(kind=TRANSCRIPTION)
                 details = []
                 for item in result.skipped:
                     try:
@@ -109,12 +110,12 @@ class QueueBridge(QObject):
                     details.append(f'영상 {title}: {item.reason}')
                 return {'message': f'재시도 {result.retried}개 · 건너뜀 {result.skipped_count}개' +
                         ('\n' + '\n'.join(details) if details else '')}
-            if video_id not in {entry.video_id for entry in core.subtitle_queue_items()}:
+            if video_id not in {entry.video_id for entry in core.subtitle_queue_items() if entry.queue_kind == TRANSCRIPTION}:
                 raise ValueError('현재 대기열에 없는 영상입니다.')
             if name == 'promote':
-                core.promote_subtitle(video_id)
+                core.promote_subtitle(video_id, kind=TRANSCRIPTION)
             elif name == 'remove':
-                core.remove_from_subtitle_queue(video_id)
+                core.remove_from_subtitle_queue(video_id, kind=TRANSCRIPTION)
             elif name == 'retryHeld':
                 if any(e.video_id == video_id and e.state == 'held' for e in core.translation_queue()):
                     core.request_translation(video_id)
