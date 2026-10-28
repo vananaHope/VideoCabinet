@@ -36,7 +36,7 @@ class SettingsBridge(QObject):
 
     @SETTINGS.slot('snapshot')
     def snapshot(self):
-        return encode(self.page.payload())
+        return self.page.stamp(self.page.payload())
 
     @SETTINGS.slot('backupSnapshot')
     def backupSnapshot(self):
@@ -103,6 +103,8 @@ class SettingsBridge(QObject):
             if self.page.library.worker is not None:
                 raise ValueError('검사가 끝난 뒤 자동 감지를 바꿔 주세요.')
             self.page.window.folder_watch.set_enabled(enabled)
+            # 폴더 관리 탭도 자동 감지 상태를 보인다.
+            self.page.host.content_changed()
             self.page.refresh()
             return self.snapshot()
         except (ValueError, TypeError, OSError, sqlite3.Error) as error:
@@ -117,6 +119,8 @@ class SettingsBridge(QObject):
             except ValueError:
                 raise ValueError('일수를 숫자로 입력하세요.') from None
             self.page.core.set_recommendation_period_days(criterion, value)
+            # 추천 탭은 다시 보일 때 새 기간으로 다시 계산한다.
+            self.page.host.content_changed()
             self.page.refresh()
             return self.snapshot()
         except (ValueError, OSError, sqlite3.Error) as error:
@@ -126,6 +130,7 @@ class SettingsBridge(QObject):
     def resetRecommendationPeriod(self, criterion):
         try:
             self.page.core.reset_recommendation_period_days(criterion)
+            self.page.host.content_changed()
             self.page.refresh()
             return self.snapshot()
         except (ValueError, OSError, sqlite3.Error) as error:
@@ -224,14 +229,17 @@ class WebSettingsPage(WebPageController):
     def refresh(self):
         if not self.is_active():
             return
-        payload = encode(self.payload())
-        if payload != self.last_payload:
-            self.last_payload = payload
-            self.bridge.settingsChanged.emit(payload)
+        payload = self.payload()
+        encoded = encode(payload)
+        if encoded != self.last_payload:
+            self.last_payload = encoded
+            self.bridge.settingsChanged.emit(self.stamp(payload))
+
+    def reshown(self):
+        # 설정 값은 알림 없이도 바뀌므로(번역 대기열 등) 다시 보일 때 비교해 바뀐 때만 보낸다.
+        self.refresh()
 
     def activated(self):
-        # 비활성 동안 바뀐 값은 탭 진입의 refresh에서 반드시 보낸다.
-        self.last_payload = None
         self.timer.start()
 
     def deactivated(self):

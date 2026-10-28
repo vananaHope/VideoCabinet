@@ -47,6 +47,13 @@ def reply(value):
     return data
 
 
+def sent_delta(value):
+    """보낸 변경분. 세대(#265)는 전송 순서 정보라 비교에서 뺀다."""
+    data = json.loads(value)
+    data.pop('generation')
+    return data
+
+
 def test_queue_initial_add_promote_remove_and_counts(queue_page, setup):
     core, _, (a, b) = setup
     page = queue_page
@@ -72,7 +79,7 @@ def test_progress_delta_contains_only_changed_row_and_no_order(queue_page, setup
     page = queue_page
     page.refresh()
     changes = []
-    page.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+    page.bridge.queueChanged.connect(lambda value: changes.append(sent_delta(value)))
     page.refresh()
     assert changes == []
     # 공개 조회 경계의 진행률만 교체해 전송량을 관찰한다. 도메인 상태를 조작하지 않는다.
@@ -90,7 +97,7 @@ def test_queue_delta_reports_promoted_order_and_removed_ids(queue_page, setup):
     page = queue_page
     page.refresh()
     changes = []
-    page.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+    page.bridge.queueChanged.connect(lambda value: changes.append(sent_delta(value)))
 
     reply(page.bridge.action('promote', b.id))
     assert changes.pop() == dict(rows=[], removed=[], order=[b.id, a.id], counts=None, canRetryFailed=False)
@@ -248,7 +255,7 @@ def test_retry_failed_availability_tracks_failure_retry_and_empty(queue_page, se
     transcriber.error = RuntimeError('failure')
     core.process_next_subtitle()
     changes = []
-    page.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+    page.bridge.queueChanged.connect(lambda value: changes.append(sent_delta(value)))
     page.refresh()
     assert changes[-1]['canRetryFailed'] is True
     assert reply(page.bridge.snapshot())['canRetryFailed'] is True

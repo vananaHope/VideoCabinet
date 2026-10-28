@@ -2,7 +2,16 @@
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, TypedDict
+
+
+class GenerationData(TypedDict):
+    """페이지 상태 메시지(밀어 보내는 changed·요청 응답)의 공용 세대(#265).
+
+    페이지마다 단조 증가한다. 프런트는 마지막으로 반영한 세대보다 오래된 메시지를 버리므로
+    늦게 도착한 이전 응답이 현재 화면을 덮지 않는다.
+    """
+    generation: int
 
 
 @dataclass(frozen=True)

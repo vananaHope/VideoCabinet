@@ -1,6 +1,8 @@
 """모아보기 웹 경계 데이터. 재생 대상과 순서는 코어가 정한다."""
 from typing import TypedDict
 
+from .web_contract_types import GenerationData
+
 from .core import CommandType
 from .key_display import display_keys
 from .web_library_data import TagData
@@ -20,7 +22,7 @@ class ReelEntryData(TypedDict):
     missing: bool
 
 
-class ReelData(TypedDict):
+class ReelData(GenerationData):
     entries: list[ReelEntryData]
     tags: list[TagData]
     tagId: int

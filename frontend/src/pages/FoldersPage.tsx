@@ -8,6 +8,8 @@ import { MinimumDuration } from "@/components/minimum-duration"
 import { ScanReport } from "@/components/scan-report"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
+import { useGenerationGuard } from "@/lib/generation"
+import { restorePageFocus } from "@/lib/page-focus"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = []
@@ -15,6 +17,7 @@ export const keyGuide: readonly KeyGuideGroup[] = []
 export default function FoldersPage() {
   const [bridge, setBridge] = useState<FoldersBridge | null>(null)
   const [data, setData] = useState<FoldersData | null>(null)
+  const fresh = useGenerationGuard()
   const [error, setError] = useState("")
   const [section, setSection] = useState("folders")
   const [remove, setRemove] = useState<string | null>(null)
@@ -27,21 +30,24 @@ export default function FoldersPage() {
     let disconnect = () => {}
     connectBridge().then(async ({ folders: api }) => {
       if (disposed) return
-      const changed = (json: string) => setData(JSON.parse(json))
+      const changed = (json: string) => { const next: FoldersData = JSON.parse(json); if (fresh(next)) setData(next) }
       const focus = (target: string) => {
         const next = target.replace('folders-', '')
         if (['folders', 'excluded', 'dismissed'].includes(next)) setSection(next)
-        requestAnimationFrame(() => document.getElementById(target === 'folders-add' ? target : 'folders-section')?.focus())
+        // 탭 전환 렌더가 끝나 페이지가 보인 뒤에 초점을 둔다. 한 프레임만 기다리면 아직 숨은 단추라 초점을 주지 못할 때가 있다.
+        requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus('folders', target)) document.getElementById(target === 'folders-add' || target === 'restore' ? 'folders-add' : 'folders-section')?.focus() }))
       }
       api.foldersChanged.connect(changed)
       api.foldersError.connect(setError)
       api.foldersFocusRequested.connect(focus)
       disconnect = () => { api.foldersChanged.disconnect(changed); api.foldersError.disconnect(setError); api.foldersFocusRequested.disconnect(focus) }
       const initial = await request<FoldersData>(reply => api.snapshot(reply))
-      if (!disposed) { setData(initial); setBridge(api) }
+      if (disposed) return
+      if (fresh(initial)) setData(initial)
+      setBridge(api)
     }).catch(error => setError(String(error)))
     return () => { disposed = true; disconnect() }
-  }, [])
+  }, [fresh])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(error => setError(String(error))) }, [bridge])
   function dismissReport(revision: number, group: ScanNoticeGroup, index: number) {
     if (!bridge) return

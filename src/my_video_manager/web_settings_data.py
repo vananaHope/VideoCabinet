@@ -1,5 +1,7 @@
 """웹 설정의 표시 데이터. 저장 형식은 기존 키 배치·설정 API가 소유한다."""
 from typing import TypedDict
+
+from .web_contract_types import GenerationData
 from .web_translation_data import TranslationSettingsData
 from .web_update_data import UpdateStatusData
 
@@ -25,7 +27,7 @@ class RecommendationPeriodData(TypedDict):
     maximumDays: float
 
 
-class SettingsData(TypedDict):
+class SettingsData(GenerationData):
     version: str
     releasesUrl: str
     bindings: list[SettingKeyData]

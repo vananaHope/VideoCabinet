@@ -1,6 +1,8 @@
 """검색 결과의 원문과 정규화 일치 구간을 웹에 전달한다."""
 from typing import TypedDict
 
+from .web_contract_types import GenerationData
+
 from .search import SOURCE_LABELS
 from .search_matching import match_spans
 from .web_external_subtitle_data import language_label
@@ -22,7 +24,7 @@ class SearchResultData(TypedDict):
     missing: bool
 
 
-class SearchData(TypedDict):
+class SearchData(GenerationData):
     query: str
     results: list[SearchResultData]
     selectedIndex: int

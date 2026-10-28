@@ -10,6 +10,8 @@ import { RecommendationCard, RecommendationCardPlaceholder, RecommendationMenu }
 import { openKeyboardMenu } from "@/components/library-grid"
 import { menuKeyRow, type KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
+import { useGenerationGuard } from "@/lib/generation"
+import { restorePageFocus } from "@/lib/page-focus"
 
 type Cursor = { key: string; row: number; column: number; videoId: number }
 type Position = { row: number; column: number }
@@ -87,6 +89,7 @@ export default function RecommendPage() {
   const remembered = useRef(new Map<string, number>())
   const focusTarget = useRef(() => {})
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
+  const fresh = useGenerationGuard()
   const rows = data?.rows ?? []
   const loaded = data?.loaded ?? false
   const active = locate(rows, cursor)
@@ -97,18 +100,21 @@ export default function RecommendPage() {
     let disconnect = () => {}
     connectBridge().then(async ({ recommend: api, shell }) => {
       if (disposed) return
-      const changed = (json: string) => setData(JSON.parse(json))
+      const changed = (json: string) => { const next: RecommendData = JSON.parse(json); if (fresh(next)) setData(next) }
       // 다른 탭으로 가면 한 번 생긴 안내(요청 실패·관심 없음 되돌리기)를 지운다. 돌아왔을 때 지난 일이 남지 않는다.
       const shellChanged = (json: string) => { if (JSON.parse(json).tab !== "recommend") { setDismissed(null); setError("") } }
       // 재생에서 돌아오면 남아 있는 커서 자리의 카드에 초점을 둔다. 레이아웃이 다시 잡힌 뒤 보이게 한다.
-      const focus = () => requestAnimationFrame(() => requestAnimationFrame(() => focusTarget.current()))
+      // 탭을 다시 보이면 그 탭에 남은 초점(예: 관심 없음 되돌리기 단추)을 먼저 되살린다.
+      const focus = (target: string) => requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus("recommend", target)) focusTarget.current() }))
       api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError); shell.shellChanged.connect(shellChanged)
       disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError); shell.shellChanged.disconnect(shellChanged) }
       const initial = await request<RecommendData>(reply => api.snapshot(reply))
-      if (!disposed) { setData(initial); setBridge(api) }
+      if (disposed) return
+      if (fresh(initial)) setData(initial)
+      setBridge(api)
     }).catch(showError)
     return () => { disposed = true; disconnect() }
-  }, [showError])
+  }, [showError, fresh])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
   useEffect(() => {
     focusTarget.current = () => {

@@ -63,7 +63,11 @@ class WebQueuePage(WebPageController):
                      order=order if order != self.order else None,
                      counts=counts if counts != self.counts else None)
         self.entries, self.order, self.counts = entries, order, counts
-        self.bridge.queueChanged.emit(encode(delta))
+        self.bridge.queueChanged.emit(self.stamp(delta))
+
+    def reshown(self):
+        # 대기열은 알림 없이 바뀌므로 다시 보일 때 비교해 바뀐 행만 보낸다. 같으면 아무것도 보내지 않는다.
+        self.refresh()
 
     def refresh_rules(self):
         if self.is_active():

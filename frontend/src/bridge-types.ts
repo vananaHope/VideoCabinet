@@ -2,6 +2,10 @@
 
 export type Reply = (json: string) => void
 export type Signal<T> = { connect: (handler: (value: T) => void) => void; disconnect: (handler: (value: T) => void) => void }
+export interface GenerationData {
+  generation: number
+}
+
 export interface ShellData {
   tab: string
   status: string
@@ -223,6 +227,7 @@ export interface LibraryKeyBindingsData {
 }
 
 export interface LibraryData {
+  generation: number
   videos: Array<VideoData>
   tags: Array<TagUsageData>
   visibleIds: Array<number>
@@ -301,6 +306,7 @@ export interface RecommendationRowData {
 }
 
 export interface RecommendData {
+  generation: number
   loaded: boolean
   rows: Array<RecommendationRowData>
   error: string
@@ -364,6 +370,7 @@ export interface QueueCountData {
 }
 
 export interface QueueDeltaData {
+  generation: number
   canRetryFailed: boolean
   rows: Array<QueueRowData>
   removed: Array<number>
@@ -442,6 +449,7 @@ export interface ReelEntryData {
 }
 
 export interface ReelData {
+  generation: number
   entries: Array<ReelEntryData>
   tags: Array<TagData>
   tagId: number
@@ -493,6 +501,7 @@ export interface SearchResultData {
 }
 
 export interface SearchData {
+  generation: number
   query: string
   results: Array<SearchResultData>
   selectedIndex: number
@@ -598,6 +607,7 @@ export interface StatisticsDashboard {
 }
 
 export interface StatisticsData {
+  generation: number
   days: number
   loading: boolean
   message: string
@@ -758,6 +768,7 @@ export interface ScanReportData {
 }
 
 export interface FoldersData {
+  generation: number
   folders: Array<string>
   excluded: Array<RestorableVideoData>
   dismissed: Array<RestorableVideoData>
@@ -840,6 +851,7 @@ export interface RecommendationPeriodData {
 }
 
 export interface SettingsData {
+  generation: number
   version: string
   releasesUrl: string
   bindings: Array<SettingKeyData>

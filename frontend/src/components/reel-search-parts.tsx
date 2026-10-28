@@ -3,6 +3,7 @@ import { selectableItem } from "@/components/ui/selectable-item"
 import type { ComponentProps, KeyboardEvent } from "react"
 import type { SearchTextData } from "@/bridge-types"
 import type { KeyGuideRow } from "@/lib/key-guide"
+import { restorePageFocus } from "@/lib/page-focus"
 
 // stale: 새 결과를 기다리는 동안 흐리게 보이기만 하는 이전 결과. 비활성과 같은 50% 불투명도이고 포인터를 받지 않는다.
 const row = cva("flex min-w-0 gap-3 rounded-lg border p-3 text-left", {
@@ -46,9 +47,11 @@ export function listKey(event: KeyboardEvent<HTMLDivElement>, count: number, cur
   }
 }
 
-export function restoreListFocus(id: string, scrollTop: number) {
+// 목록 스크롤을 되살리고 목록에 초점을 둔다. 다시 보인 탭이면(target "restore") 그 페이지에 남은 초점을 먼저 되살린다.
+export function restoreListFocus(id: string, scrollTop: number, page?: string, target = "") {
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const element = document.getElementById(id)
-    if (element) { element.scrollTop = scrollTop; element.focus({ preventScroll: true }) }
+    if (element) element.scrollTop = scrollTop
+    if (!(page && restorePageFocus(page, target))) element?.focus({ preventScroll: true })
   }))
 }

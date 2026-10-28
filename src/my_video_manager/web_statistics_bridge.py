@@ -20,7 +20,7 @@ class StatisticsBridge(QObject):
 
     @STATISTICS.slot('snapshot')
     def snapshot(self):
-        return encode(self.page.payload())
+        return self.page.stamp(self.page.payload())
 
     @STATISTICS.slot('setPeriod')
     def setPeriod(self, days):

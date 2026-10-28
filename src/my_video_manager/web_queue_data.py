@@ -1,6 +1,8 @@
 """자막 대기열 웹 전송 값. 도메인 판단은 AppCore에 남긴다."""
 from typing import TypedDict
 
+from .web_contract_types import GenerationData
+
 
 STATES = {'queued': '대기', 'transcribing': '받아쓰는 중', 'translating': '자막 처리 중',
           'held': '보류', 'completed': '완료', 'failed': '실패'}
@@ -37,7 +39,7 @@ class QueueCountData(TypedDict):
     count: int
 
 
-class QueueDeltaData(TypedDict):
+class QueueDeltaData(GenerationData):
     canRetryFailed: bool
     rows: list[QueueRowData]
     removed: list[int]

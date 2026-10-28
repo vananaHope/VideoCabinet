@@ -10,6 +10,8 @@ import { QueueStore } from "@/components/queue-store"
 import { QueueRules, queueRuleKeyRows } from "@/components/queue-rules"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
+import { useGenerationGuard } from "@/lib/generation"
+import { restorePageFocus } from "@/lib/page-focus"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -35,15 +37,18 @@ export default function QueuePage() {
   useLayoutChange(tab, rules, error, message)
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
   const select = useCallback((id: number) => setSelected(id), [])
+  // 첫 전체 상태보다 먼저 만든 변경분은 그 상태에 이미 들어 있으므로 버린다.
+  const fresh = useGenerationGuard()
 
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}
     connectBridge().then(async ({ queue: api }) => {
       if (disposed) return
-      const changed = (json: string) => store.apply(JSON.parse(json))
+      const changed = (json: string) => { const delta: QueueDeltaData = JSON.parse(json); if (fresh(delta)) store.apply(delta) }
       const rulesChanged = (json: string) => setRules(JSON.parse(json))
-      const focus = () => requestAnimationFrame(() => document.getElementById(currentTab.current === "rules" ? "queue-rules" : "queue-list")?.focus({ preventScroll: true }))
+      // 탭 전환 렌더가 끝나 페이지가 보인 뒤(두 프레임)에 초점을 둔다.
+      const focus = (target: string) => requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus("queue", target)) document.getElementById(currentTab.current === "rules" ? "queue-rules" : "queue-list")?.focus({ preventScroll: true }) }))
       const bulkFinished = (json: string) => {
         const result = JSON.parse(json)
         setBusy(false)
@@ -57,12 +62,12 @@ export default function QueuePage() {
       disconnect = () => { api.bulkFinished.disconnect(bulkFinished); api.queueChanged.disconnect(changed); api.rulesChanged.disconnect(rulesChanged); api.queueFocusRequested.disconnect(focus) }
       const data = await request<QueueDeltaData>(reply => api.snapshot(reply))
       if (disposed) return
-      store.apply(data)
+      if (fresh(data)) store.apply(data)
       const ruleData = await request<QueueRulesData>(reply => api.rulesSnapshot(reply))
       if (!disposed) { setRules(ruleData); setBridge(api) }
     }).catch(showError)
     return () => { disposed = true; disconnect() }
-  }, [showError, store])
+  }, [showError, store, fresh])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
 
   const ids = meta.order.filter(id => !filter || store.rows.get(id)?.state === filter)

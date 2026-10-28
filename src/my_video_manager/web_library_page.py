@@ -26,6 +26,8 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.video_ids = set()
         self.visible_ids = []
         self.selected_id = None
+        # 코어가 바꾼 선택을 웹이 아직 받지 않았다. 다음 전체 상태는 웹의 이전 선택을 보존하지 않는다.
+        self.selection_moved = False
         self.options = self.core.library_view_options()
         self.index = None
         self.tags = []
@@ -67,6 +69,21 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.options['tags'] = [value] if value is not None else []
 
     def refresh(self, *, focus=False):
+        # 라이브러리를 다시 읽는 변경(검사·태그·제목·제외 등)은 다른 탭이 보이는 내용도 바꾼다.
+        self.host.content_changed()
+        self.rebuild()
+        self.publish_library()
+        self.refreshed.emit()
+        if focus and self.is_active():
+            self.request_focus('grid')
+
+    def reshown(self):
+        # 숨어 있던 동안 바뀐 것이 있을 때만 다시 만든다. 다른 탭에 알릴 새 변경은 아니다.
+        if self.outdated:
+            self.rebuild()
+            self.publish_library()
+
+    def rebuild(self):
         self.snapshot = self.core.library_snapshot()
         self.index = self.core.library_view_index(self.snapshot)
         self.cards = snapshot_data(self.snapshot, self.index.original)
@@ -76,10 +93,17 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         if self.options['folder'] not in self.index.members:
             self.options['folder'] = ''
         self.apply_filters()
-        self.bridge.libraryChanged.emit(encode(self.payload()))
-        self.refreshed.emit()
-        if focus and self.is_active():
-            self.request_focus('grid')
+
+    def publish_library(self, *, preserve_selection=False):
+        preserve = preserve_selection and not self.selection_moved
+        if self.publish(self.bridge.libraryChanged, self.payload(preserve_selection=preserve)):
+            self.selection_moved = False
+
+    def move_selection(self, video_id):
+        """코어가 웹 모르게 바꾼 선택(무작위 연속 재생의 마지막 영상 등). 보이면 지금, 숨었으면 다시 보일 때 알린다."""
+        self.selected_id = video_id
+        self.selection_moved = True
+        self.publish_library()
 
     def apply_filters(self):
         self.visible_ids = self.core.library_view_ids(self.options, index=self.index) if self.index else []
@@ -97,11 +121,12 @@ class WebLibraryPage(LibraryOperations, WebPageController):
     def refresh_details(self, changed_video_id=None, *, preserve_selection=False):
         # 자막·번역·하이라이트 변경은 현재 조건의 결과에도 즉시 반영한다.
         if changed_video_id is not None and self.snapshot is not None:
+            self.host.content_changed()
             self.index = self.core.library_view_index(self.snapshot)
             self.apply_filters()
             for card in self.cards:
                 card['hasSubtitles'] = card['id'] in self.index.original
-            self.bridge.libraryChanged.emit(encode(self.payload(preserve_selection=preserve_selection)))
+            self.publish_library(preserve_selection=preserve_selection)
         if self.selected_id is not None and (changed_video_id is None or changed_video_id == self.selected_id):
             self.bridge.libraryDetailsChanged.emit(self.selected_id)
         self.flush_thumbnails()
@@ -111,6 +136,8 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.bridge.libraryKeyBindingsChanged.emit(encode(key_bindings_data(self.core.key_bindings())))
 
     def refresh_thumbnails(self, video_ids):
+        # 다른 탭의 카드 썸네일도 바뀐다. 이 탭은 아래 썸네일 신호로 따로 받는다.
+        self.host.content_changed(self)
         for card in self.cards:
             if card['id'] in video_ids:
                 card['thumbnail'] = f"mvm-thumb://video/{card['id']}?v=640"
@@ -126,7 +153,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.flush_thumbnails()
 
     def selection_changed(self):
-        self.bridge.libraryChanged.emit(encode(self.payload()))
+        self.publish_library()
 
     def selected_video_id(self):
         return self.selected_id

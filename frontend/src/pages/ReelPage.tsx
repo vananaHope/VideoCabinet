@@ -10,6 +10,7 @@ import { ResultRow, listKey, listKeyRows, restoreListFocus, timestamp } from "@/
 import { formatDateTime } from "@/lib/dates"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
+import { useGenerationGuard } from "@/lib/generation"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -26,21 +27,24 @@ export default function ReelPage() {
   const scroll = useRef(0)
   const goHome = useRef(() => {})
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
+  const fresh = useGenerationGuard()
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}
     connectBridge().then(async ({ reel: api, shell }) => {
       if (disposed) return
       goHome.current = () => { request(reply => shell.navigate("library", reply)).catch(showError) }
-      const changed = (json: string) => setData(JSON.parse(json))
-      const focus = () => restoreListFocus("reel-list", scroll.current)
+      const changed = (json: string) => { const next: ReelData = JSON.parse(json); if (fresh(next)) setData(next) }
+      const focus = (target: string) => restoreListFocus("reel-list", scroll.current, "reel", target)
       api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError)
       disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError) }
       const initial = await request<ReelData>(reply => api.snapshot(reply))
-      if (!disposed) { setData(initial); setBridge(api) }
+      if (disposed) return
+      if (fresh(initial)) setData(initial)
+      setBridge(api)
     }).catch(showError)
     return () => { disposed = true; disconnect() }
-  }, [showError])
+  }, [showError, fresh])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
   // 완료 안내가 사라지면(새로고침·필터·탭 이동) 닫은 기록도 지워 다음 완료 때 다시 보인다.
   // 재생에서 돌아올 때는 빈 상태 없이 같은 문구가 다시 올 수 있어 play()에서도 지운다.

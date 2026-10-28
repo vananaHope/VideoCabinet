@@ -15,6 +15,8 @@ import { StatisticsCard } from "@/components/statistics/StatisticsCard"
 import { formatDate } from "@/lib/dates"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
+import { useGenerationGuard } from "@/lib/generation"
+import { restorePageFocus } from "@/lib/page-focus"
 
 const periods = [7, 30, 90, 365].map(days => ({ value: String(days), label: `${days}일` }))
 const metrics = [{ value: "watched_seconds", label: "시청 시간" }, { value: "viewing_count", label: "시청 횟수" }]
@@ -54,31 +56,33 @@ function Activity({ result, metric, onMetric, onPlay }: { result?: StatisticsDas
 export const keyGuide: readonly KeyGuideGroup[] = []
 
 export default function StatisticsPage() {
-  const [state, setState] = useState<StatisticsData>({ days: 30, loading: false, message: "", result: null })
+  const [state, setState] = useState<StatisticsData>({ days: 30, loading: false, message: "", result: null, generation: 0 })
   const [section, setSection] = useState("activity")
   const [metric, setMetric] = useState<Metric>("watched_seconds")
   const [error, setError] = useState("")
   useLayoutChange(section, state, error)
   const bridge = useRef<StatisticsBridge | null>(null)
   const root = useRef<HTMLElement>(null)
+  const fresh = useGenerationGuard()
   useEffect(() => {
     let disposed = false
     let cleanup = () => {}
     connectBridge().then(async ({ statistics }) => {
       if (disposed) return
       bridge.current = statistics
-      const update = (json: string) => { if (!disposed) setState(JSON.parse(json)) }
-      const focus = () => root.current?.querySelector<HTMLButtonElement>(`nav[aria-label="통계 기간"] button[aria-current="page"]`)?.focus()
+      const update = (json: string) => { const next: StatisticsData = JSON.parse(json); if (!disposed && fresh(next)) setState(next) }
+      // 탭 전환 렌더가 끝나 페이지가 보인 뒤(두 프레임)에 초점을 둔다. 숨은 단추에는 초점을 줄 수 없다.
+      const focus = (target: string) => requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus("statistics", target)) root.current?.querySelector<HTMLButtonElement>(`nav[aria-label="통계 기간"] button[aria-current="page"]`)?.focus() }))
       statistics.statisticsChanged.connect(update)
       statistics.statisticsFocusRequested.connect(focus)
       cleanup = () => { statistics.statisticsChanged.disconnect(update); statistics.statisticsFocusRequested.disconnect(focus) }
       const snapshot = await request<StatisticsData>(reply => statistics.snapshot(reply))
       if (disposed) return
-      setState(snapshot)
+      if (fresh(snapshot)) setState(snapshot)
       await request(reply => statistics.ready(reply))
     }).catch(reason => { if (!disposed) setError(String(reason)) })
     return () => { disposed = true; bridge.current = null; cleanup() }
-  }, [])
+  }, [fresh])
   const choose = (value: string) => {
     setError("")
     if (bridge.current) request(reply => bridge.current!.setPeriod(Number(value), reply)).catch(reason => setError(String(reason)))

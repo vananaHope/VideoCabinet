@@ -79,6 +79,10 @@ class WebShellHost(QWidget):
         self._frontend_ready = False
         self._loaded_notified = False
         self._ready_pages = set()
+        # 이번 웹 로드에서 한 번 이상 보인 탭. 다시 보일 때는 기본 위치 대신 그 탭에 남은 초점을 되살린다.
+        self._shown_tabs = set()
+        # 앱 안에서 보이는 내용이 바뀔 때마다 올라가는 번호(#265). 페이지는 이 번호로 다시 보낼지 정한다.
+        self.change = 0
         self._pending_focus = None
         self._return_generation = 0
         self._return_token = None
@@ -145,6 +149,15 @@ class WebShellHost(QWidget):
     def update_progressed(self):
         self.bridge.shellUpdateInstallChanged.emit(encode(update_install_data(self.window.updates.install)))
 
+    def content_changed(self, source=None):
+        """라이브러리·시청 기록·태그·자막처럼 여러 탭이 보이는 내용이 바뀌었다(#265).
+
+        지금 받지 않은 페이지는 다시 보일 때 한 번 갱신한다. source는 이 변경을 이미 웹에 보낸 페이지다.
+        """
+        previous, self.change = self.change, self.change + 1
+        if source is not None and source.synced_change == previous:
+            source.synced_change = self.change
+
     def register_page(self, controller):
         self._register_route(controller.tab, controller)
         self.controllers[controller.tab] = controller
@@ -167,6 +180,7 @@ class WebShellHost(QWidget):
         if set(self.channel.registeredObjects()) != {contract.name for contract in CONTRACTS}:
             raise ValueError('브리지 계약과 채널 등록부가 일치하지 않습니다.')
         self._pending_focus = self.controllers[self.active_tab].default_focus
+        self._shown_tabs = {self.active_tab}
         self.view.load(self.entry)
 
     def set_tab(self, tab):
@@ -185,6 +199,12 @@ class WebShellHost(QWidget):
             previous.deactivated()
         if controller is not None:
             controller.activated()
+
+    def reshow_active(self):
+        """트레이에서 다시 연 창처럼 탭 이동 없이 웹이 다시 보일 때. 바뀐 것만 보낸다."""
+        controller = self.controllers.get(self.active_tab)
+        if controller is not None:
+            controller.reshown()
 
     def remember_playback_tab(self):
         self._playback_return_tab = self.active_tab
@@ -250,8 +270,10 @@ class WebShellHost(QWidget):
             if returning:
                 route.return_from_playback()
             else:
-                route.refresh()
-                self.focus_content()
+                # 숨어 있던 동안 바뀐 것이 없으면 보내지 않는다. 웹은 숨긴 페이지의 상태를 그대로 갖고 있다.
+                route.reshown()
+                self.request_focus('restore' if tab in self._shown_tabs else route.default_focus)
+            self._shown_tabs.add(tab)
             self._return_focus_ready = True
             self.apply_pending_focus()
             self.prepare_return()
@@ -376,6 +398,10 @@ class WebShellHost(QWidget):
         self._frontend_ready = False
         self._loaded_notified = False
         self._ready_pages.clear()
+        # 새로 읽은 웹은 이전 상태를 모르므로 모든 페이지를 다시 보낼 대상으로 둔다.
+        self._shown_tabs = {self.active_tab}
+        for page in self.controllers.values():
+            page.synced_change = None
         controller = self.controllers.get(self.active_tab)
         self._pending_focus = self._pending_focus or (controller.default_focus if controller else 'shell')
 

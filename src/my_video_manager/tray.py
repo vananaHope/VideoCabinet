@@ -44,10 +44,9 @@ class TrayControls(QObject):
             self.window.show()
         else:
             self.window.showNormal()
-        host = self.window.web_host
-        if was_hidden and not emergency and host.active_tab in ('library', 'recommend'):
-            # 닫을 때 저장한 시청 상태를 복귀 시점에만 목록과 추천에 반영한다.
-            host.controllers[host.active_tab].refresh()
+        if was_hidden and not emergency:
+            # 숨어 있던 동안 바뀐 것(닫을 때 저장한 시청 상태·코어가 바꾼 선택 등)만 지금 탭에 반영한다(#265).
+            self.window.web_host.reshow_active()
         self.window.raise_()
         self.window.activateWindow()
         if emergency:

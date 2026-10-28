@@ -40,6 +40,9 @@ class Page(QWidget):
     def payload(self):
         return {'videos': self.cards, 'visibleIds': self.visible_ids, 'selectedId': self.selected_id}
 
+    def stamp(self, data):
+        return json.dumps(data)
+
     def apply_filters(self):
         self.visible_ids = filter_ids(self.cards, self.query, self.tag_id)
         if self.selected_id not in self.visible_ids:

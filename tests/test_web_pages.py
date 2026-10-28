@@ -88,8 +88,10 @@ def test_new_page_registers_its_bridge_refresh_and_focus_without_host_changes(wi
     window.navigate_web_tab('library')
     window.navigate_web_tab('example')
     assert host.active_tab == 'example'
+    # 전체 상태를 보낸 적이 없는 페이지는 다시 보일 때마다 갱신한다(#265).
     assert host.controllers['example'].refresh_count == 2
-    assert focus == ['query', 'query']
+    # 이미 보인 탭은 기본 위치 대신 그 탭에 남은 초점을 되살리라고 요청한다.
+    assert focus == ['query', 'restore']
 
 
 @pytest.mark.parametrize('change', ['missing', 'unknown', 'duplicate'])

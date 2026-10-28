@@ -1,6 +1,8 @@
 """폴더 관리 화면의 공개 JSON 데이터."""
 from typing import TypedDict
 
+from .web_contract_types import GenerationData
+
 from .external_subtitles import WARNING_PREFIX
 from .library import ScanIssueKind
 
@@ -34,7 +36,7 @@ class ScanReportData(TypedDict):
     notes: list[ScanIssueData]
 
 
-class FoldersData(TypedDict):
+class FoldersData(GenerationData):
     folders: list[str]
     excluded: list[RestorableVideoData]
     dismissed: list[RestorableVideoData]

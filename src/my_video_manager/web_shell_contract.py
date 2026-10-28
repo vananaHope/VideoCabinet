@@ -2,7 +2,7 @@
 
 from . import web_shell_data, web_update_data
 from .app_version import DISPLAY_NAME
-from .web_contract_types import Argument, BridgeContract, Constant, TypeAlias
+from .web_contract_types import Argument, BridgeContract, Constant, GenerationData, TypeAlias
 from .web_tabs import TABS
 
 SHELL = BridgeContract(
@@ -20,7 +20,8 @@ SHELL = BridgeContract(
              TypeAlias('UpdateChoice', ('update', 'later', 'skip', 'unskip')),
              TypeAlias('UpdateAction', ('cancel', 'install', 'later', 'retry', 'dismiss'))),
     constants=(Constant('tabs', TABS), Constant('appName', DISPLAY_NAME)),
-    data_types=(web_shell_data.ShellData, web_shell_data.KeyGuideEntryData, web_shell_data.KeyGuideData,
+    # 페이지 상태 메시지의 공용 세대는 셸 계약에 한 번만 내보낸다(#265).
+    data_types=(GenerationData, web_shell_data.ShellData, web_shell_data.KeyGuideEntryData, web_shell_data.KeyGuideData,
                 web_update_data.UpdateNoticeData, web_update_data.UpdateInstallResultData,
                 web_update_data.UpdateInstallData, web_update_data.ShellUpdateData),
 )
