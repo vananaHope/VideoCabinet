@@ -6,7 +6,7 @@ import { LibraryFolders, folderKeyRows } from "@/components/library-folders"
 import { Button } from "@/components/ui/button"
 import { NoticeStack } from "@/components/ui/notice"
 import { PendingStatus } from "@/components/ui/pending-status"
-import { LibraryGrid, gridKeyRows } from "@/components/library-grid"
+import { LibraryGrid, gridKeyRows, type FirstLoad } from "@/components/library-grid"
 import type { HighlightSnapshot } from "@/components/highlight-panel"
 import { DetailPanel } from "@/components/detail-panel"
 import { RandomPlayButton } from "@/components/random-play-button"
@@ -43,6 +43,8 @@ export default function LibraryPage() {
   const randomMenu = useRef<HTMLButtonElement>(null)
   const optionsRef = useRef<LibraryViewOptions | null>(null)
   const [error, setError] = useState("")
+  // 첫 데이터 요청이 실패했는지. 오류 안내를 닫아도 실패는 그대로이고, 뒤에 데이터가 오면 ready가 된다.
+  const [firstLoadFailed, setFirstLoadFailed] = useState(false)
   const [detailRevision, setDetailRevision] = useState(0)
   const savedScroll = useRef<{ grid: number; detail: number } | null>(null)
   const layoutPaused = useRef(false)
@@ -99,19 +101,26 @@ export default function LibraryPage() {
       api.libraryKeyBindingsChanged.connect(keyBindingsChanged)
       shell.shellChanged.connect(shellChanged)
       disconnect = () => { api.thumbnailsChanged.disconnect(thumbnailsChanged); api.libraryChanged.disconnect(changed); api.libraryDetailsChanged.disconnect(detailsChanged); api.libraryFocusRequested.disconnect(focus); api.libraryError.disconnect(showError); api.libraryKeyBindingsChanged.disconnect(keyBindingsChanged); shell.shellChanged.disconnect(shellChanged) }
+      // 첫 스냅숏이 실패해도 뒤에 libraryChanged로 온 데이터를 조작할 수 있게 브리지를 먼저 잡는다.
+      setBridge(api)
       const initial = await getSnapshot(api)
       if (disposed) return
-      setBridge(api)
       optionsRef.current = initial.options
       setData(initial)
-    }).catch(showError)
+    }).catch(error => {
+      if (disposed) return
+      setFirstLoadFailed(true)
+      showError(error)
+    })
     return () => { disposed = true; disconnect() }
   }, [showError])
 
-  // effect는 첫 스냅숏의 격자가 DOM에 반영된 뒤 실행된다.
+  // effect는 첫 데이터의 격자가 DOM에 반영된 뒤 실행된다.
+  const loaded = data !== null
+  const firstLoad: FirstLoad = loaded ? "ready" : firstLoadFailed ? "failed" : "pending"
   useEffect(() => {
-    if (bridge) request(reply => bridge.ready(reply)).catch(showError)
-  }, [bridge, showError])
+    if (bridge && loaded) request(reply => bridge.ready(reply)).catch(showError)
+  }, [bridge, loaded, showError])
 
   useEffect(() => {
     let current = true
@@ -224,7 +233,7 @@ export default function LibraryPage() {
       <LibraryFilters options={options} tags={data?.tags ?? []} disabled={!data} onChange={filter} />
       {/* 개수 자리는 9,999개까지 들어가는 폭을 잡아 두어 첫 데이터가 와도 옆 컨트롤이 밀리지 않는다. 그 전에는 "0개" 대신 기다림 표시를 둔다. */}
       {data ? <p aria-label="라이브러리 등록·표시 개수" className="min-w-44 shrink-0 text-xs text-muted-foreground tabular-nums">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
-        : <PendingStatus pending={!error} className="min-w-44 shrink-0" />}
+        : <PendingStatus pending={firstLoad === "pending"} className="min-w-44 shrink-0" />}
       <RandomPlayButton menuRef={randomMenu} disabled={!data} scopes={[
         { key: "results", label: "현재 결과에서", onSelect: () => randomPlay() },
         { key: "all", label: "영상 전체에서", onSelect: () => randomPlay("all"), shortcut: data?.keyBindings.randomPlay },
@@ -244,8 +253,8 @@ export default function LibraryPage() {
       <Button size="icon-sm" variant={foldersOpen ? "secondary" : "outline"} aria-label="폴더 패널" aria-expanded={foldersOpen} aria-controls={foldersOpen ? "library-folder-panel" : undefined} disabled={!data}
         title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>
       {foldersOpen && <LibraryFolders collapsedIds={data.options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
-      <LibraryGrid cardSize={options.card_size} loading={!data} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} />
-      <DetailPanel variant={!data ? "loading" : data.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} highlightGuidance={data?.keyBindings.highlightGuidance ?? ""} onRandomTag={tagId => randomPlay([tagId])} />
+      <LibraryGrid cardSize={options.card_size} load={firstLoad} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} />
+      <DetailPanel variant={!data ? (firstLoad === "failed" ? "failed" : "loading") : data.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} highlightGuidance={data?.keyBindings.highlightGuidance ?? ""} onRandomTag={tagId => randomPlay([tagId])} />
     </div>
   </main>
 }

@@ -66,15 +66,30 @@ FRAME_RECORDER = """(() => {
     if (!window.__stopLibraryFrames) requestAnimationFrame(sample)
   }
   requestAnimationFrame(sample)
-  // DOM이 바뀐 시각. 관찰자는 바뀐 작업이 끝날 때 불리므로 50ms 넘는 작업은 시작 시각도 남긴다.
-  const moments = window.__libraryMoments = {}, tasks = window.__libraryTasks = []
-  new PerformanceObserver(list => tasks.push(...list.getEntries().map(entry => [entry.startTime, entry.duration]))).observe({ type: 'longtask' })
+  // grid는 격자(자리 표시)가 문서에 붙은 때, pending은 기다림 표시 문구가 처음 채워진 때다.
+  // 노드를 붙이거나 글자를 바꾸는 DOM 호출 바로 뒤에 재므로 실제 변경과의 차이는 그 호출 하나다.
+  // 격자는 기다림 타이머를 거는 effect보다 먼저 붙는다.
+  const moments = window.__libraryMoments = {}, statuses = window.__libraryStatuses = []
+  const mark = () => {
+    if (moments.grid === undefined && document.getElementById('library-grid')) moments.grid = performance.now()
+    if (moments.pending === undefined && document.querySelector('[data-slot=pending-status]')?.textContent) moments.pending = performance.now()
+  }
+  for (const name of ['appendChild', 'insertBefore']) {
+    const original = Node.prototype[name]
+    Node.prototype[name] = function (...args) { const result = original.apply(this, args); mark(); return result }
+  }
+  for (const [prototype, name] of [[Node.prototype, 'textContent'], [Node.prototype, 'nodeValue'], [CharacterData.prototype, 'data']]) {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, name)
+    Object.defineProperty(prototype, name, { ...descriptor, set(value) { descriptor.set.call(this, value); mark() } })
+  }
+  // 나머지는 DOM이 바뀐 것을 본 시각이다. 관찰자는 바뀐 작업이 끝난 뒤 불리므로 실제로 바뀐 때보다 늦거나 같다.
+  // statuses는 기다림 표시 문구가 바뀔 때마다 남겨, 프레임 사이에 잠깐 나타났다 사라져도 놓치지 않는다.
   new MutationObserver(() => {
     const grid = document.getElementById('library-grid'), status = document.querySelector('[data-slot=pending-status]')
-    const now = performance.now()
-    if (grid && moments.grid === undefined) moments.grid = now
-    if (status?.textContent && moments.pending === undefined) moments.pending = now
+    const now = performance.now(), text = status?.textContent ?? null
+    if (text !== (statuses.at(-1)?.[1] ?? null)) statuses.push([now, text])
     if (grid?.getAttribute('aria-busy') === 'false' && moments.data === undefined) moments.data = now
+    if (moments.error === undefined && document.querySelector('main')?.innerText.includes('라이브러리를 읽지 못했습니다.')) moments.error = now
   }).observe(document, { subtree: true, childList: true, characterData: true, attributes: true })
 })()"""
 
@@ -82,6 +97,7 @@ FIRST_ROW = 'document.querySelectorAll("#library-grid [role=gridcell]").length'
 GRID_BUSY = 'document.getElementById("library-grid").getAttribute("aria-busy")'
 PENDING = 'document.querySelector("[data-slot=pending-status]")?.textContent ?? null'
 PAGE_TEXT = 'document.querySelector("main[aria-label=\\"라이브러리\\"]").innerText'
+SEARCH_DISABLED = 'document.querySelector("[aria-label=\\"영상 제목 빠른 검색\\"]").disabled'
 
 
 def js(window, source):
@@ -131,27 +147,22 @@ def release(window):
 
 def stop_recording(window):
     js(window, 'window.__stopLibraryFrames = true')
-    return json.loads(js(window, 'JSON.stringify({frames: window.__libraryFrames, moments: window.__libraryMoments, tasks: window.__libraryTasks})'))
+    return json.loads(js(window, 'JSON.stringify({frames: window.__libraryFrames, moments: window.__libraryMoments, statuses: window.__libraryStatuses})'))
 
 
-def pending_delay(recorded):
-    """자리 표시를 그린 작업이 시작한 때부터 기다림 표시가 나타날 때까지(ms). 기다림 타이머는 그 작업 안에서 시작한다."""
-    moments = recorded['moments']
-    starts = [start for start, duration in recorded['tasks'] if start <= moments['grid'] <= start + duration + 1]
-    # 50ms 넘는 작업만 기록되므로 기록이 없으면 그 작업은 관찰 시각보다 50ms 안쪽에서 시작했다.
-    began = starts[0] if starts else moments['grid'] - 50
-    return moments['pending'] - began
+def no_pending_text(statuses):
+    return all(text in ('', None) for _, text in statuses)
 
 
 def click(window, selector):
-    center = js(window, f"(() => {{ const r = document.querySelector('{selector}').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }})()")
+    # 배열 결과는 Python 목록으로 오지 않으므로 JSON으로 받는다.
+    center = json.loads(js(window, f"(() => {{ const r = document.querySelector('{selector}').getBoundingClientRect(); return JSON.stringify([r.x + r.width / 2, r.y + r.height / 2]) }})()"))
     QTest.mouseClick(window.web_host.view.focusProxy(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
                      QPoint(*map(round, center)))
 
 
 def test_first_entry_placeholders_keep_toolbar_and_first_row_in_place(open_window, core):
     window = open_window(hold_data=True)
-    assert js(window, "PerformanceObserver.supportedEntryTypes.includes('longtask')")
     # 데이터가 300ms 넘게 오지 않으면 개수 자리에 기다림 표시가 나타난다.
     wait_for(lambda: js(window, PENDING) == '불러오는 중…')
     assert js(window, GRID_BUSY) == 'true'
@@ -183,21 +194,31 @@ def test_first_entry_placeholders_keep_toolbar_and_first_row_in_place(open_windo
         assert '라이브러리가 비어 있습니다' not in frame['text'] and '선택한 영상 없음' not in frame['text']
     assert all(frame['placeholders'] == final['columns'] for frame in loading)
     # 기다림 표시는 자리 표시가 생기고 300ms가 지나서야 나타나고, 데이터가 오면 개수로 바뀐다.
-    assert pending_delay(recorded) >= 299, recorded['moments']
+    # 두 시각 모두 DOM 호출 바로 뒤에 쟀으므로 이 간격은 자리 표시가 생긴 뒤 문구가 나타날 때까지의 실제 시간이다
+    # (1ms는 시계 해상도와 호출 하나의 여유).
+    moments = recorded['moments']
+    assert moments['pending'] - moments['grid'] >= 299, moments
     assert any('불러오는 중…' not in frame['text'] for frame in loading)
     assert '불러오는 중…' not in final['text'] and '등록 영상 3개 · 표시 3개' in final['text']
 
 
 def test_pending_status_does_not_flash_when_data_arrives_quickly(open_window):
-    window = open_window()
-    wait_for(lambda: js(window, FIRST_ROW) > 0)
-    recorded = stop_recording(window)
-    moments = recorded['moments']
-    # 300ms 안에 데이터가 오면 기다림 표시는 한 번도 나타나지 않는다. 부하로 늦었다면 300ms 전에는 나타나지 않는다.
-    if moments['data'] - moments['grid'] < 290:
-        assert 'pending' not in moments, moments
+    # 300ms 안에 데이터가 오면 기다림 표시는 한 번도 나타나지 않는다.
+    # 격자가 붙은 시각(기다림 타이머 시작보다 늦지 않다)부터 데이터를 본 시각(실제 반영보다 이르지 않다)까지가
+    # 250ms 안일 때만 타이머가 끝나기 전에 데이터가 왔다고 말할 수 있다.
+    # 부하로 늦은 실행은 이 경우의 재현이 아니므로 검증 없이 통과시키지 않고, 창을 새로 열어 다시 재현한다.
+    attempts = []
+    for _ in range(3):
+        window = open_window()
+        wait_for(lambda: js(window, FIRST_ROW) > 0)
+        recorded = stop_recording(window)
+        moments = recorded['moments']
+        attempts.append(moments)
+        if moments['data'] - moments['grid'] < 250:
+            break
     else:
-        assert 'pending' not in moments or pending_delay(recorded) >= 299, moments
+        pytest.fail(f'데이터가 250ms 안에 오는 경우를 재현하지 못했다: {attempts}')
+    assert 'pending' not in moments and no_pending_text(recorded['statuses']), recorded
     assert '불러오는 중…' not in recorded['frames'][-1]['text']
 
 
@@ -218,11 +239,37 @@ def test_empty_library_message_appears_only_after_data(open_window, tmp_path):
     assert '선택한 영상 없음' in final and '등록 영상 0개 · 표시 0개' in final
 
 
-def test_failed_first_data_shows_error_without_false_empty_state(open_window):
+def test_failed_first_data_settles_and_recovers_when_library_arrives(open_window):
     window = open_window(fail_data=True)
     wait_for(lambda: '라이브러리를 읽지 못했습니다.' in js(window, PAGE_TEXT))
     text = js(window, PAGE_TEXT)
-    # 실패하면 기다림 표시를 멈추고 오류 안내를 보인다. 비었다는 거짓 안내나 누를 수 있는 컨트롤은 없다.
+    # 실패는 끝난 상태다. 기다림 표시와 aria-busy를 끝내고 격자 자리에 읽지 못했다는 안내를 보인다.
+    # 비었다는 거짓 안내, 누를 수 있는 컨트롤, 불러오는 중처럼 보이는 자리 표시는 없다.
     assert js(window, PENDING) == ''
+    assert js(window, GRID_BUSY) == 'false'
+    assert js(window, "document.querySelectorAll('[aria-busy=true], [data-slot=video-card-placeholder], [data-slot=skeleton]').length") == 0
+    assert '영상 목록을 읽지 못했습니다' in text
     assert '라이브러리가 비어 있습니다' not in text and '선택한 영상 없음' not in text and '0개' not in text
-    assert js(window, "document.querySelector('[aria-label=\"영상 제목 빠른 검색\"]').disabled")
+    assert js(window, SEARCH_DISABLED)
+
+    # 오류 안내를 닫아도 실패한 요청을 다시 기다리는 것처럼 바뀌지 않는다.
+    click(window, 'button[aria-label="안내 닫기"]')
+    wait_for(lambda: '라이브러리를 읽지 못했습니다.' not in js(window, PAGE_TEXT))
+    # 닫은 뒤 기다림 유예(300ms)의 두 배가 지날 때까지 페이지 시계로 조건 대기하고, 그동안 바뀐 문구 기록을 본다.
+    closed = js(window, 'performance.now()')
+    wait_for(lambda: js(window, 'performance.now()') - closed > 600)
+    recorded = stop_recording(window)
+    assert no_pending_text(entry for entry in recorded['statuses'] if entry[0] >= recorded['moments']['error']), recorded['statuses']
+    assert js(window, PENDING) == '' and js(window, GRID_BUSY) == 'false'
+    assert '영상 목록을 읽지 못했습니다' in js(window, PAGE_TEXT)
+
+    # 뒤에 라이브러리 데이터가 오면 정상 목록이 되고 영상을 고를 수 있다.
+    window.library_page.refresh()
+    wait_for(lambda: js(window, FIRST_ROW) == 3)
+    assert '등록 영상 3개 · 표시 3개' in js(window, PAGE_TEXT) and not js(window, SEARCH_DISABLED)
+    second = js(window, 'document.querySelectorAll("#library-grid [role=gridcell]")[1].id')
+    selected = f"document.getElementById('{second}').getAttribute('aria-selected')"
+    assert js(window, selected) == 'false'
+    click(window, f'#{second}')
+    wait_for(lambda: window.library_page.selected_id == int(second.removeprefix('video-')))
+    wait_for(lambda: js(window, selected) == 'true')

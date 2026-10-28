@@ -12,7 +12,8 @@ import { actions, lockedDuringScan, type Action } from "@/bridge"
 import { formatDate } from "@/lib/dates"
 
 const detailVariants = cva("flex h-full w-72 shrink-0 flex-col gap-2 overflow-hidden rounded-lg border border-border bg-card p-3", {
-  variants: { variant: { selected: "", loading: "", empty: "items-center justify-center text-center text-muted-foreground" } },
+  // failed: 첫 데이터를 읽지 못했다. 격자가 실패를 알리므로 패널은 자리만 지킨다.
+  variants: { variant: { selected: "", loading: "", failed: "", empty: "items-center justify-center text-center text-muted-foreground" } },
   defaultVariants: { variant: "selected" },
 })
 const actionVariants = cva("min-w-0", {
@@ -60,7 +61,7 @@ function translationSummary(details: DetailsData) {
 type Props = VariantProps<typeof detailVariants> & { video?: VideoData; details: DetailsData | null; highlights: HighlightSnapshot | null; revision: number; tab: string; onTabChange: (tab: string) => void; scanning: boolean; onAction: (action: Action, id: number) => void; onHighlight: (videoId: number, highlightId: number, edit: boolean) => void; highlightGuidance: string; onRandomTag: (tagId: number) => void }
 export function DetailPanel({ video, details, highlights, revision, tab, onTabChange, scanning, onAction, onHighlight, highlightGuidance, onRandomTag, variant }: Props) {
   return <aside aria-label="선택 영상 상세" className={detailVariants({ variant })}>
-    {variant === "loading" ? <DetailPlaceholder /> : !video ? <EmptyState title="선택한 영상 없음" description="영상을 선택하면 상세 정보와 작업이 표시됩니다." /> : <>
+    {variant === "loading" ? <DetailPlaceholder /> : variant === "failed" ? null : !video ? <EmptyState title="선택한 영상 없음" description="영상을 선택하면 상세 정보와 작업이 표시됩니다." /> : <>
       <h2 title={video.title} className="line-clamp-2 shrink-0 text-sm leading-5 font-semibold wrap-anywhere">{video.title}</h2>
       <Tabs variant="panel" label="영상 상세 탭" value={tab} onChange={onTabChange} items={[{ value: "info", label: "정보" }, { value: "highlights", label: `하이라이트${details ? ` · ${details.highlight_count}` : ""}` }]} />
       {tab === "highlights" ? <HighlightPanel key={video.id} videoId={video.id} snapshot={highlights} revision={revision} emptyDescription={highlightGuidance} onAction={onHighlight} /> : <>

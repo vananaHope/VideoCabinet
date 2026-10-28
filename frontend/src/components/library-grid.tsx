@@ -33,15 +33,26 @@ const gridVariants = cva("scroll-stable h-full min-w-0 flex-1 rounded-lg p-1 foc
   defaultVariants: { loading: false },
 })
 
-export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onSelect, onAction, layoutPaused, revealRequest = 0, loading = false }: {
+/** 첫 데이터의 상태. 실패는 끝난 상태라 기다림을 알리지 않는다. 뒤에 데이터가 오면 ready가 된다. */
+export type FirstLoad = "pending" | "failed" | "ready"
+
+function GridMessage({ title, description }: { title: string; description: string }) {
+  return <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
+    <h2 className="text-base font-semibold text-foreground">{title}</h2>
+    <p>{description}</p>
+  </div>
+}
+
+export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onSelect, onAction, layoutPaused, revealRequest = 0, load = "ready" }: {
   cardSize: string; videos: VideoData[]; selectedId: number | null; scanning: boolean; total: number;
   onSelect: (id: number) => void; onAction: (action: Action, id: number) => void;
   layoutPaused: RefObject<boolean>;
   /** 값이 바뀔 때마다 선택한 카드의 행이 보이도록 스크롤한다. */
   revealRequest?: number;
-  /** 첫 데이터가 오기 전이다. 빈 라이브러리 안내 대신 실제 카드와 같은 크기의 자리 표시로 보이는 줄을 채운다. */
-  loading?: boolean;
+  /** pending: 빈 라이브러리 안내 대신 실제 카드와 같은 크기의 자리 표시로 보이는 줄을 채운다. failed: 읽지 못했다고 알린다. */
+  load?: FirstLoad;
 }) {
+  const loading = load === "pending"
   const scroll = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ columns: 2, rowHeight: 256, visibleRows: 1 })
   useLayoutEffect(() => {
@@ -107,10 +118,10 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
       {Array.from({ length: visibleRows }, (_, row) => <div key={row} className="virtual-row gap-3 pb-3" style={{ "--virtual-top": `${row * rowHeight}px`, "--virtual-columns": columns } as CSSProperties}>
         {Array.from({ length: columns }, (_, column) => <VideoCardPlaceholder key={column} />)}
       </div>)}
-    </div> : !videos.length ? <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
-      <h2 className="text-base font-semibold text-foreground">{total ? "조건에 맞는 영상이 없습니다" : "라이브러리가 비어 있습니다"}</h2>
-      <p>{total ? "검색 조건이나 선택한 폴더를 바꿔 보세요." : "폴더 관리(Ctrl+7)에서 감시 폴더나 영상 파일을 추가하세요."}</p>
-    </div> : <div className="virtual-canvas" style={{ "--virtual-height": `${virtual.getTotalSize()}px` } as CSSProperties}>
+    </div> : load === "failed" ? <GridMessage title="영상 목록을 읽지 못했습니다" description="앱을 다시 시작하면 목록을 다시 읽습니다." />
+    : !videos.length ? <GridMessage title={total ? "조건에 맞는 영상이 없습니다" : "라이브러리가 비어 있습니다"}
+      description={total ? "검색 조건이나 선택한 폴더를 바꿔 보세요." : "폴더 관리(Ctrl+7)에서 감시 폴더나 영상 파일을 추가하세요."} />
+    : <div className="virtual-canvas" style={{ "--virtual-height": `${virtual.getTotalSize()}px` } as CSSProperties}>
       {virtual.getVirtualItems().map(row => <div key={row.key} role="row" aria-rowindex={row.index + 1} className="virtual-row gap-3 pb-3" style={{ "--virtual-top": `${row.start}px`, "--virtual-columns": columns } as CSSProperties}>
         {videos.slice(row.index * columns, (row.index + 1) * columns).map((video, index) => <VideoMenu key={video.id} id={video.id} scanning={scanning} onAction={onAction}>
           <VideoCard id={`video-${video.id}`} video={video} cardSize={cardSize} variant={selectedId === video.id ? "selected" : "default"} role="gridcell" aria-colindex={index + 1} aria-selected={selectedId === video.id} tabIndex={-1}

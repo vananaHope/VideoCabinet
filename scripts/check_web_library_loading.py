@@ -6,6 +6,10 @@
 python scripts/check_web_library_loading.py --offscreen --count 24
 python scripts/check_web_library_loading.py --offscreen --count 5000
 python scripts/check_web_library_loading.py --offscreen --count 24 --long-content
+python scripts/check_web_library_loading.py --offscreen --count 24 --fail-first
+
+기본 카드 크기(보통)에서 툴바나 첫 줄 카드가 움직이면 0이 아닌 종료 코드로 끝난다.
+--fail-first는 첫 스냅숏을 실패 응답으로 바꿔 실패 상태(안내를 보일 때와 닫은 뒤)를 찍는다.
 """
 import argparse
 from contextlib import closing
@@ -22,6 +26,7 @@ parser.add_argument('--offscreen', action='store_true')
 parser.add_argument('--count', type=int, default=24)
 parser.add_argument('--long-content', action='store_true', help='긴 제목·태그·시리즈 이름')
 parser.add_argument('--card-size', choices=('small', 'medium', 'large'), default='medium', help='저장된 카드 크기')
+parser.add_argument('--fail-first', action='store_true', help='첫 라이브러리 스냅숏이 실패한 상태')
 parser.add_argument('--output', type=Path, default=Path('.local/screens-260'))
 args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
@@ -79,14 +84,19 @@ if args.long_content:
             core.add_video_tag(video.id, f'{index} 긴 태그 이름 ' + '태그' * 12)
 
 # 문서가 만들어질 때 웹 채널의 첫 라이브러리 스냅숏 응답을 붙잡는다. 놓아주는 것은 window.__releaseLibrary().
+# --fail-first면 붙잡지 않고 실패 응답으로 바꾼다.
 HOLD = """(() => {
-  let held = true, release = null, channelClass
+  let held = %(hold)s, release = null, channelClass
+  const failed = %(fail)s
   window.__releaseLibrary = () => { held = false; release?.() }
   Object.defineProperty(window, 'QWebChannel', { configurable: true, get: () => channelClass, set(Original) {
     channelClass = function (transport, ready) {
       return new Original(transport, channel => {
         const library = channel.objects.library, snapshot = library.snapshot
-        library.snapshot = reply => snapshot.call(library, json => { if (held) release = () => reply(json); else reply(json) })
+        library.snapshot = reply => snapshot.call(library, json => {
+          if (failed) json = JSON.stringify({ error: '라이브러리를 읽지 못했습니다.' })
+          if (held) release = () => reply(json); else reply(json)
+        })
         ready(channel)
       })
     }
@@ -100,7 +110,7 @@ def hold_first_snapshot(host):
     script.setName('hold-library')
     script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
     script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-    script.setSourceCode(HOLD)
+    script.setSourceCode(HOLD % {'hold': json.dumps(not args.fail_first), 'fail': json.dumps(args.fail_first)})
     host.engine_page.scripts().insert(script)
     start(host)
 
@@ -149,6 +159,29 @@ LAYOUT = """JSON.stringify((() => {
     text: document.querySelector('main[aria-label="라이브러리"]').innerText }
 })())"""
 name = f'library-{args.count}{"-long" if args.long_content else ""}{"" if args.card_size == "medium" else "-" + args.card_size}'
+if args.fail_first:
+    # 실패는 끝난 상태다. 기다림 표시·aria-busy·자리 표시 없이 격자 자리에 읽지 못했다는 안내가 남는다.
+    wait(lambda: '라이브러리를 읽지 못했습니다.' in js("document.querySelector('main').innerText"))
+    frames()
+    failed = json.loads(js(LAYOUT))
+    assert window.grab().save(str(args.output / f'{name}-failed.png'))
+    js("document.querySelector('button[aria-label=\"안내 닫기\"]').click()")
+    wait(lambda: '라이브러리를 읽지 못했습니다.' not in js("document.querySelector('main').innerText"))
+    deadline = js('performance.now()') + 600
+    wait(lambda: js('performance.now()') > deadline)
+    frames()
+    dismissed = json.loads(js(LAYOUT))
+    assert window.grab().save(str(args.output / f'{name}-failed-dismissed.png'))
+    busy = js("document.querySelectorAll('[aria-busy=true], [data-slot=video-card-placeholder], [data-slot=skeleton]').length")
+    print(json.dumps({
+        'case': f'{name}-failed', 'busy': [failed['busy'], dismissed['busy']], 'status': [failed['status'], dismissed['status']],
+        'busy_or_placeholder_elements': busy, 'moved_after_dismiss': sorted(key for key in failed['toolbar'] if failed['toolbar'][key] != dismissed['toolbar'][key]),
+        'screenshots': [str((args.output / f'{name}-{state}.png').resolve()) for state in ('failed', 'failed-dismissed')],
+    }, ensure_ascii=False), flush=True)
+    assert failed['busy'] == dismissed['busy'] == 'false' and failed['status'] == dismissed['status'] == '' and busy == 0
+    assert all('영상 목록을 읽지 못했습니다' in state['text'] and '불러오는 중' not in state['text'] for state in (failed, dismissed))
+    window.tray.quit()
+    raise SystemExit(0)
 wait(lambda: js("document.querySelector('[data-slot=pending-status]')?.textContent") == '불러오는 중…')
 frames()
 loading = json.loads(js(LAYOUT))
@@ -167,4 +200,8 @@ print(json.dumps({
     'empty_message': '라이브러리가 비어 있습니다' in loaded['text'],
     'screenshots': [str((args.output / f'{name}-{state}.png').resolve()) for state in ('loading', 'loaded')],
 }, ensure_ascii=False), flush=True)
+# 저장된 카드 크기가 보통이 아니면 데이터 전에 알 수 없어 달라진다(#267). 기본 크기에서만 경계가 같아야 한다.
+if args.card_size == 'medium':
+    assert not moved, f'데이터 전후 툴바가 움직였다: {moved}'
+    assert cells_same is not False, '데이터 전후 첫 줄 카드 경계가 다르다'
 window.tray.quit()
