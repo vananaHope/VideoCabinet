@@ -49,6 +49,15 @@ def test_character_limit_split_prefers_last_punctuation():
     assert [line.text for line in lines] == ["あ" * 10 + "。", "い" * 14 + "う"]
 
 
+def test_gap_wins_over_character_limit_without_backtracking():
+    # 틈(0.8초)과 상한(25자)이 같은 단어에서 함께 걸리면 틈이 이긴다.
+    # 상한이 먼저였다면 "。" 뒤로 되돌아가 ["あ"*10 + "。", "い"*10 + "う"*10]이 된다.
+    words = [TimedWord(0.0, 0.4, "あ" * 10), TimedWord(0.4, 0.8, "。"),
+             TimedWord(0.8, 1.2, "い" * 10), TimedWord(2.0, 2.4, "う" * 10)]
+    lines = split_into_lines(words, "ja")
+    assert [line.text for line in lines] == ["あ" * 10 + "。" + "い" * 10, "う" * 10]
+
+
 def test_backtracked_words_are_checked_again():
     words = [TimedWord(0.0, 0.1, "。"), TimedWord(0.1, 0.2, "い" * 24), TimedWord(0.2, 0.3, "う" * 2)]
     lines = split_into_lines(words, "ja")
@@ -119,6 +128,7 @@ def test_child_entrypoint_passes_word_timestamps_and_balanced_vad(monkeypatch, c
     assert options["beam_size"] == 5
     assert options["condition_on_previous_text"] is False
     assert options["language"] is None
+    assert calls["model"][1]["compute_type"] == "float16"
     payload = json.loads(capsys.readouterr().out)
     assert payload["spoken_language"] == "ja"
     assert payload["segments"] == [{"start": 0.0, "end": 2.0, "text": "こんにちは世界"}]
