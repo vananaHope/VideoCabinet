@@ -120,7 +120,7 @@ def recommendations(core):
     finish(core, third)
 
 
-LONG_TITLE = '공백없는아주긴기준영상제목' * 6
+LONG_TITLE = '공백없는아주긴기준영상제목' * 20
 
 
 def long_title_recommendations(core):
