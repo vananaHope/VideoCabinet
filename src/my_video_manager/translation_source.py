@@ -12,7 +12,7 @@ TRANSCRIPT = "transcript"
 
 @dataclass(frozen=True)
 class TranslationSourceLines:
-    """한 영상·출처의 현재 세대. 제공자는 전달받은 DB의 같은 스냅숏을 읽는다."""
+    """한 영상·출처의 현재 세대. 읽는 함수는 전달받은 DB의 같은 스냅숏을 읽는다."""
 
     id: str
     video_id: int
@@ -20,31 +20,31 @@ class TranslationSourceLines:
     lines: tuple[TranscriptLine, ...]
 
 
-class LineProvider(Protocol):
+class SourceLineReader(Protocol):
     def __call__(self, video_id: int, *, connection=None) -> TranslationSourceLines | None: ...
 
 
 class TranslationSources:
     def __init__(self):
         self._kinds = {TRANSCRIPT: TRANSCRIPTION}
-        self._providers: dict[str, LineProvider] = {}
+        self._readers: dict[str, SourceLineReader] = {}
         self._protected: dict[str, Callable] = {}
 
-    def register(self, source, provider, *, queue_kind, protected_lines=None):
-        if not source or not queue_kind or source in self._providers:
+    def register(self, source, read_lines, *, queue_kind, protected_lines=None):
+        if not source or not queue_kind or source in self._readers:
             raise ValueError("새 번역 출처와 대기열 작업 종류를 확인하세요.")
         if any(kind == queue_kind and name != source for name, kind in self._kinds.items()):
             raise ValueError("대기열 작업 종류에는 번역 출처 하나만 연결할 수 있습니다.")
         self._kinds[source] = queue_kind
-        self._providers[source] = provider
+        self._readers[source] = read_lines
         self._protected[source] = protected_lines or (lambda db: set())
 
     def lines(self, source, video_id, *, connection=None):
         try:
-            provider = self._providers[source]
+            read_lines = self._readers[source]
         except KeyError:
             raise ValueError("등록되지 않은 번역 출처입니다.") from None
-        return provider(video_id, connection=connection)
+        return read_lines(video_id, connection=connection)
 
     def protected_lines(self, source, db):
         return self._protected[source](db)

@@ -451,9 +451,9 @@ class AppCore:
     def set_translation_cli(self, cli: str) -> None:
         self._translations.set_cli(cli)
 
-    def register_translation_source(self, source, line_provider, *, queue_kind, protected_lines=None):
+    def register_translation_source(self, source, read_lines, *, queue_kind, protected_lines=None):
         """앱 코어 모듈이 현재 줄 묶음과 보호된 줄 조회를 연결하는 등록 지점."""
-        self._translation_sources.register(source, line_provider, queue_kind=queue_kind,
+        self._translation_sources.register(source, read_lines, queue_kind=queue_kind,
                                            protected_lines=protected_lines)
 
     def request_translation(self, video_id: int, line_ids=None, *, source=TRANSCRIPT) -> TranslationQueueEntry | None:

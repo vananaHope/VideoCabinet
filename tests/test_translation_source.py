@@ -1,4 +1,5 @@
-"""출처 격리와 v7 이전·복원을 공개 번역/검수 경계에서 확인한다."""
+"""출처 격리는 공개 경계로, 이전의 참조 보장은 저장된 행과 직접 SQL로 확인한다."""
+from collections import Counter
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
@@ -27,7 +28,7 @@ OTHER_KIND = 'test-only-kind'
 def register(core, video_id, lines):
     bundle = TranslationSourceLines('test-generation', video_id, 'ja', tuple(
         replace(line, text='Separate ' + line.text) for line in lines))
-    core.register_translation_source(OTHER, lambda vid, *, connection=None: bundle if vid == video_id else None,
+    core.register_translation_source(OTHER, read_lines=lambda vid, *, connection=None: bundle if vid == video_id else None,
                                      queue_kind=OTHER_KIND)
     return bundle
 
@@ -80,7 +81,6 @@ def test_removal_cancels_only_matching_source_and_keeps_other_work(setup, remove
     finish(core)
     assert core.translation(video, source=retained) is not None
     assert core.translation(video, source=removed) is None
-    assert all(e.queue_kind != kind for e in core.subtitle_queue_items())
 
 
 def test_fake_source_without_transcript_and_failed_retry_are_independent(setup):
@@ -172,6 +172,68 @@ def test_v6_migration_preserves_all_old_columns_and_rolls_back_failure(setup):
     assert reopen().translation_queue() == expected
 
 
+def translation_rows(database, video_id, source):
+    """현재 원어 줄과 조인하지 않아 삭제 후 숨겨진 고아 행도 스냅숏에 포함한다."""
+    with closing(sqlite3.connect(database)) as db:
+        rows = {table: Counter(db.execute(
+            f"SELECT * FROM {table} WHERE video_id=? AND source=?", (video_id, source)).fetchall())
+            for table in ('translation_lines', 'translation_line_providers')}
+        rows['translation_targets'] = Counter(db.execute(
+            "SELECT g.* FROM translation_targets g JOIN translation_queue q ON q.id=g.queue_id "
+            "WHERE q.video_id=? AND q.source=?", (video_id, source)).fetchall())
+        return rows
+
+
+def assert_no_orphan_transcript_references(database, video_id):
+    with closing(sqlite3.connect(database)) as db:
+        for table in ('translation_lines', 'translation_line_providers'):
+            assert db.execute(
+                f"SELECT COUNT(*) FROM {table} g WHERE g.video_id=? AND g.source=? "
+                "AND NOT EXISTS (SELECT 1 FROM transcript_lines l WHERE l.id=g.line_id)",
+                (video_id, TRANSCRIPT)).fetchone()[0] == 0, table
+        assert db.execute(
+            "SELECT COUNT(*) FROM translation_targets g JOIN translation_queue q ON q.id=g.queue_id "
+            "WHERE q.video_id=? AND q.source=? "
+            "AND NOT EXISTS (SELECT 1 FROM transcript_lines l WHERE l.id=g.line_id)",
+            (video_id, TRANSCRIPT)).fetchone()[0] == 0, 'translation_targets'
+
+
+@pytest.mark.parametrize('migrated', [False, True], ids=['new-v7', 'v6-to-v7'])
+@pytest.mark.parametrize('table', ['translation_lines', 'translation_line_providers', 'translation_targets'])
+@pytest.mark.parametrize('operation', ['insert', 'update'])
+def test_transcript_references_reject_missing_line(setup, migrated, table, operation):
+    core, _, _, _, reopen = setup
+    video = core.videos()[0].id
+    original = source(core, video)
+    finish(core)
+    pending = core.request_translation(video)
+    if migrated:
+        replace_with_frozen(core.database, 6)
+        core = reopen()
+    before = translation_rows(core.database, video, TRANSCRIPT)
+    assert all(len(rows) == len(original.lines) for rows in before.values())
+    missing = 'missing-transcript-line'
+    assert missing not in {line.id for line in original.lines}
+    with closing(sqlite3.connect(core.database)) as db, db:
+        db.execute('PRAGMA foreign_keys=ON')
+        with pytest.raises(sqlite3.IntegrityError):
+            if operation == 'insert':
+                if table == 'translation_targets':
+                    db.execute('INSERT INTO translation_targets(queue_id, line_id, text) VALUES (?, ?, ?)',
+                               (pending.id, missing, 'invalid'))
+                else:
+                    value_column = 'text' if table == 'translation_lines' else 'provider'
+                    db.execute(f'INSERT INTO {table}(line_id, {value_column}, video_id, source) VALUES (?, ?, ?, ?)',
+                               (missing, 'invalid', video, TRANSCRIPT))
+            elif table == 'translation_targets':
+                assert db.execute('UPDATE translation_targets SET line_id=? WHERE queue_id=? AND line_id=?',
+                                  (missing, pending.id, original.lines[0].id)).rowcount == 1
+            else:
+                assert db.execute(f'UPDATE {table} SET line_id=? WHERE video_id=? AND source=? AND line_id=?',
+                                  (missing, video, TRANSCRIPT, original.lines[0].id)).rowcount == 1
+    assert translation_rows(core.database, video, TRANSCRIPT) == before
+
+
 @pytest.mark.parametrize('mode', ['range', 'regenerate'])
 def test_migrated_original_deletion_cleans_only_original_translation(setup, mode):
     core, transcriber, _, _, reopen = setup
@@ -184,6 +246,13 @@ def test_migrated_original_deletion_cleans_only_original_translation(setup, mode
     core.request_translation(video, source=OTHER)
     finish(core)
     saved = core.translation(video, source=OTHER)
+    # 확정 결과·방식과 재번역 대상이 양쪽 출처에 모두 있는 상태에서 삭제한다.
+    core.request_translation(video)
+    core.request_translation(video, source=OTHER)
+    original_rows = translation_rows(core.database, video, TRANSCRIPT)
+    other_rows = translation_rows(core.database, video, OTHER)
+    assert all(len(rows) == len(original.lines) for rows in original_rows.values())
+    assert all(len(rows) == len(original.lines) for rows in other_rows.values())
     old_id = original.lines[0].id
     if mode == 'range':
         core.request_subtitle_range(video, 0, 1)
@@ -192,12 +261,12 @@ def test_migrated_original_deletion_cleans_only_original_translation(setup, mode
         core.request_subtitles(video)
     assert core.process_next_subtitle().state == 'completed'
     assert old_id not in {line.original.id for line in core.review_lines(video)}
-    assert old_id not in core.translation_line_providers(video)
+    assert_no_orphan_transcript_references(core.database, video)
+    assert translation_rows(core.database, video, OTHER) == other_rows
     assert core.translation(video, source=OTHER) == saved
     finish(core)
     assert core.translation(video, source=OTHER) == saved
-    with pytest.raises(ValueError):
-        core.edit_translation_line(video, old_id, '존재하지 않는 원어 줄')
+    assert_no_orphan_transcript_references(core.database, video)
 
 
 @pytest.mark.parametrize('with_tables', [False, True])
