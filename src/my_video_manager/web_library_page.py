@@ -28,6 +28,8 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.selected_id = None
         # 코어가 바꾼 선택을 웹이 아직 받지 않았다. 다음 전체 상태는 웹의 이전 선택을 보존하지 않는다.
         self.selection_moved = False
+        # 목록 데이터를 마지막으로 다시 만든 때의 호스트 변경 번호. 숨어 있던 동안 이미 만든 목록은 다시 만들지 않는다.
+        self.built_change = None
         self.options = self.core.library_view_options()
         self.index = None
         self.tags = []
@@ -78,9 +80,10 @@ class WebLibraryPage(LibraryOperations, WebPageController):
             self.request_focus('grid')
 
     def reshown(self):
-        # 숨어 있던 동안 바뀐 것이 있을 때만 다시 만든다. 다른 탭에 알릴 새 변경은 아니다.
+        # 숨어 있던 동안 바뀐 것이 있을 때만 보낸다. 그 변경으로 이미 다시 만든 목록이면 다시 만들지 않는다.
         if self.outdated:
-            self.rebuild()
+            if self.built_change != self.host.change:
+                self.rebuild()
             self.publish_library()
 
     def rebuild(self):
@@ -93,6 +96,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         if self.options['folder'] not in self.index.members:
             self.options['folder'] = ''
         self.apply_filters()
+        self.built_change = self.host.change
 
     def publish_library(self, *, preserve_selection=False):
         preserve = preserve_selection and not self.selection_moved
@@ -121,7 +125,7 @@ class WebLibraryPage(LibraryOperations, WebPageController):
     def refresh_details(self, changed_video_id=None, *, preserve_selection=False):
         # 자막·번역·하이라이트 변경은 현재 조건의 결과에도 즉시 반영한다.
         if changed_video_id is not None and self.snapshot is not None:
-            self.host.content_changed()
+            self.changed_here()
             self.index = self.core.library_view_index(self.snapshot)
             self.apply_filters()
             for card in self.cards:
@@ -131,13 +135,20 @@ class WebLibraryPage(LibraryOperations, WebPageController):
             self.bridge.libraryDetailsChanged.emit(self.selected_id)
         self.flush_thumbnails()
 
+    def changed_here(self):
+        """이 탭이 가진 목록을 그 자리에서 고쳐 반영하는 변경. 다른 탭만 다시 보일 때 갱신한다."""
+        built = self.built_change == self.host.change
+        self.host.content_changed(self)
+        if built:
+            self.built_change = self.host.change
+
     def refresh_key_bindings(self):
         # 키 배치를 저장하면 영상 목록을 다시 보내지 않고 키 표시만 바꾼다.
         self.bridge.libraryKeyBindingsChanged.emit(encode(key_bindings_data(self.core.key_bindings())))
 
     def refresh_thumbnails(self, video_ids):
         # 다른 탭의 카드 썸네일도 바뀐다. 이 탭은 아래 썸네일 신호로 따로 받는다.
-        self.host.content_changed(self)
+        self.changed_here()
         for card in self.cards:
             if card['id'] in video_ids:
                 card['thumbnail'] = f"mvm-thumb://video/{card['id']}?v=640"
