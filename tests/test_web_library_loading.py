@@ -25,19 +25,30 @@ from my_video_manager.web_shell import WebShellHost
 
 # 문서가 만들어질 때부터 그린 프레임마다 사용자가 보는 배치를 기록한다.
 # hold면 웹 채널의 첫 라이브러리 스냅숏 응답을 window.__releaseLibrary()까지 붙잡고, fail이면 오류 응답으로 바꾼다.
+# fast_data면 공개 snapshot으로 준비한 응답을 격자 부착 뒤 120ms의 macrotask에서 전달한다.
 # Python 슬롯 안에서 기다리면 WebEngine 작업이 멈추므로 응답은 웹 쪽에서 늦춘다.
 FRAME_RECORDER = """(() => {
   const frames = window.__libraryFrames = []
   let held = %(hold)s, release = null, channelClass
   const failed = %(fail)s
   const fastData = %(fast_data)s
+  let fastScheduled = false
   window.__releaseLibrary = () => { held = false; release?.() }
   // 빠른 응답 시험은 공개 snapshot으로 미리 준비한 응답을 쓴다. Qt 왕복과 Python 폴링을
-  // 측정 구간에서 빼고, 격자와 응답 콜백이 모두 준비된 첫 microtask에서 전달한다.
+  // 측정 구간에서 뺀다. 120ms는 결과를 기다리는 시간이 아니라 데이터를 줄 시점이다.
+  // 별도 macrotask로 넘겨 PendingStatus 타이머도 실행될 수 있게 한다(같은 microtask 응답은 0ms 유예도 통과시킨다).
+  // 결과 단언은 Python에서 실제 데이터 반영과 마지막 rAF 표본의 완료 조건을 기다린 뒤 한다.
   const releaseFast = () => {
-    if (fastData !== null && held && release && document.getElementById('library-grid')) {
-      window.__libraryMoments.release = performance.now()
-      window.__releaseLibrary()
+    if (fastData !== null && held && release && !fastScheduled && document.getElementById('library-grid')) {
+      fastScheduled = true
+      const due = window.__libraryMoments.grid + 120
+      const deliver = () => {
+        const remaining = due - performance.now()
+        if (remaining > 0) { setTimeout(deliver, remaining); return }
+        window.__libraryMoments.release = performance.now()
+        window.__releaseLibrary()
+      }
+      setTimeout(deliver, Math.max(0, due - performance.now()))
     }
   }
   Object.defineProperty(window, 'QWebChannel', { configurable: true, get: () => channelClass, set(Original) {
@@ -129,7 +140,11 @@ def js(window, source):
 
 @pytest.fixture
 def open_window(core, monkeypatch, qapp):
-    """프레임 기록을 켠 MainWindow를 연다. hold_data면 첫 라이브러리 데이터가 오지 않은 채로 돌려주고, fail_data면 첫 데이터가 실패한다."""
+    """프레임 기록을 켠 MainWindow를 연다.
+
+    hold_data면 첫 응답을 붙잡고 fail_data면 실패시킨다. fast_data면 초기 snapshot을 준비한 뒤
+    격자 부착 후 120ms의 macrotask에서 전달한다. 결과 상태는 호출자가 조건 대기한다.
+    """
     windows = []
     start = WebShellHost.start
     first_reply = []
@@ -149,6 +164,7 @@ def open_window(core, monkeypatch, qapp):
 
     def start_recorded(host):
         # 빠른 응답은 MainWindow 초기 refresh가 끝난 공개 snapshot을 준비한 뒤 문서를 연다.
+        # 실제 앱보다 문서 시작만 뒤로 옮겨 응답 준비를 측정 구간 밖에 두며, React와 제품 타이머는 그대로 쓴다.
         if not first_reply[-1][2]:
             record_frames(host)
 
@@ -274,6 +290,8 @@ def test_pending_status_does_not_flash_when_data_arrives_quickly(open_window, tm
         open_window.close(window)
         if moments['data'] - moments['grid'] < 250:
             assert moments['grid'] <= moments['release'] <= moments['data'], moments
+            # 같은 작업 안의 즉시 응답이 아님을 확인한다(120ms 목표, 시계 해상도에 여유를 둔 하한).
+            assert moments['release'] - moments['grid'] >= 100, moments
             break
     else:
         pytest.fail(f'데이터가 250ms 안에 오는 경우를 재현하지 못했다: {attempts}')
