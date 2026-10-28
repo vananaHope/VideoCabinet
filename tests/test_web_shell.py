@@ -107,7 +107,6 @@ def test_tray_show_queue_refreshes_hidden_changes_immediately(window_factory, co
     window.tray.show_queue()
     # 이벤트 루프나 500ms 타이머를 기다리지 않고 새 행을 전달한다.
     assert len(changes) == 1
-    assert changes[0]['order'] == [video.id]
     assert [row['videoId'] for row in changes[0]['rows']] == [video.id]
 
 

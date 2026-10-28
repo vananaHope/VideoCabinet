@@ -201,9 +201,12 @@ class WebShellHost(QWidget):
             controller.activated()
 
     def reshow_active(self):
-        """트레이에서 다시 연 창처럼 탭 이동 없이 웹이 다시 보일 때. 바뀐 것만 보낸다."""
+        """트레이에서 다시 연 창처럼 탭 이동 없이 웹이 다시 보일 때. 바뀐 것만 보낸다.
+
+        재생 화면이 덮고 있으면(재생 중 긴급 탈출 복귀) 재생 복귀가 갱신하므로 지금은 만들지 않는다.
+        """
         controller = self.controllers.get(self.active_tab)
-        if controller is not None:
+        if controller is not None and self.isVisible():
             controller.reshown()
 
     def remember_playback_tab(self):

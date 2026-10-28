@@ -317,3 +317,85 @@ def test_playback_return_and_tray_restore_bring_hidden_changes(open_window):
     assert received(window).get('library', 0) == library + 1
     wait_for(lambda: js(window, SELECTED) == f'video-{last}')
     assert window.library_page.selected_id == last
+
+
+# 격자 보기 영역 위쪽에서 잰 카드의 세로 위치.
+CARD_TOP = 'document.getElementById("video-{}").getBoundingClientRect().top - ' + GRID + '.getBoundingClientRect().top'
+
+
+def test_emergency_hide_return_brings_changes_made_while_hidden(open_window):
+    window = open_window()
+    videos = window.core.videos()
+    js(window, f'{GRID}.scrollTop = 900; true')
+    wait_for(lambda: js(window, f'{GRID}.scrollTop') == 900)
+    keep = middle_card(window)
+    click(window, f'#video-{keep}')
+    wait_for(lambda: window.library_page.selected_id == keep and active_element(window) == 'library-grid')
+    place = js(window, CARD_TOP.format(keep))
+    gone, finished = [video.id for video in videos if video.id != keep][:2]
+    window.emergency_hide()
+    assert not window.isVisible()
+    library = received(window).get('library', 0)
+
+    # 긴급 탈출로 숨은 동안 검사 결과 반영(제외+refresh)과 자막 완료가 생긴다.
+    window.core.exclude_video(gone)
+    window.refresh()
+    window.subtitles.video_changed.emit(finished)
+
+    window.tray.open()
+    wait_for(lambda: window.isVisible() and window.web_host.active_tab == 'library')
+    wait_for(lambda: js(window, COUNT) == '등록 영상 59개 · 표시 59개')
+    assert received(window).get('library', 0) == library + 1
+    # 긴급 탈출 복귀의 기존 규칙(같은 선택·초점)은 그대로이고, 결과가 바뀌어도 보던 카드는 같은 세로 위치에 남는다.
+    assert js(window, SELECTED) == f'video-{keep}'
+    wait_for(lambda: abs(js(window, CARD_TOP.format(keep)) - place) <= 1)
+    wait_for(lambda: active_element(window) == 'library-grid')
+
+
+QUEUE_TITLES = '[...document.querySelectorAll("#queue-list [data-queue-row]")].map(row => row.textContent).join("|")'
+
+
+def test_late_queue_push_does_not_lose_other_rows_changes(open_window):
+    window = open_window()
+    window.subtitles.timer.stop()  # 받아쓰기는 시작하지 않고 대기열 표시만 본다.
+    first, second = window.core.videos()[:2]
+    for video in (first, second):
+        window.core.request_subtitles(video.id)
+    switch(window, 5, 'queue', 'queue-list')
+    page = window.web_host.controllers['queue']
+    wait_for(lambda: js(window, 'document.querySelectorAll("#queue-list [data-queue-row]").length') == 2)
+
+    # 첫 행의 제목 변경을 담은 전송이 늦는 동안 둘째 행의 제목 변경이 먼저 도착한다.
+    late = hold(window, "(kind, object, state) => kind === 'signal' && object === 'queue'")
+    window.core.rename_video(first.id, 'renamed first')
+    page.refresh()
+    wait_for(lambda: held(window, late))
+    window.core.rename_video(second.id, 'renamed second')
+    page.refresh()
+    wait_for(lambda: 'renamed second' in js(window, QUEUE_TITLES))
+    release(window, late)
+    titles = js(window, QUEUE_TITLES)
+    assert 'renamed first' in titles and 'renamed second' in titles, titles
+
+
+def test_newer_view_reply_does_not_discard_pending_library_data(open_window):
+    window = open_window()
+    first = window.library_page.visible_ids[0]
+    title = f'#video-{first}'
+    assert 'clip 000' in js(window, f'document.querySelector("{title}").textContent')
+    # 첫 카드 제목 변경을 담은 전체 목록이 늦는 동안 빠른 검색의 보기 응답이 먼저 도착한다.
+    late = hold(window, "(kind, object, state) => kind === 'signal' && object === 'library' && 'videos' in state")
+    window.core.rename_video(first, 'clip 000 renamed')
+    window.refresh()
+    wait_for(lambda: held(window, late))
+    reply = hold(window, "(kind, object, state) => kind === 'reply' && 'visibleIds' in state && !('videos' in state)")
+    click(window, '[aria-label="영상 제목 빠른 검색"]')
+    wait_for(lambda: active_element(window) == '영상 제목 빠른 검색')
+    QTest.keyClicks(view(window), 'c')
+    wait_for(lambda: window.library_page.options['query'] == 'c' and held(window, reply))
+    release(window, reply)
+    release(window, late)
+    # 늦게 온 전체 목록의 데이터는 반영되고, 보기 조건은 더 새 보기 응답의 것이 남는다.
+    wait_for(lambda: 'clip 000 renamed' in js(window, f'document.querySelector("{title}").textContent'))
+    assert js(window, f'{QUERY}.value') == 'c'
+    assert js(window, COUNT) == '등록 영상 60개 · 표시 60개'

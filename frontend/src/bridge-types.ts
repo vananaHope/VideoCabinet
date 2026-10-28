@@ -369,13 +369,11 @@ export interface QueueCountData {
   count: number
 }
 
-export interface QueueDeltaData {
+export interface QueueData {
   generation: number
   canRetryFailed: boolean
   rows: Array<QueueRowData>
-  removed: Array<number>
-  order: Array<number> | null
-  counts: Array<QueueCountData> | null
+  counts: Array<QueueCountData>
 }
 
 export interface QueueTargetData {

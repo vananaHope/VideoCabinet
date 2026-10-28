@@ -1,4 +1,4 @@
-"""활성 대기열만 조회하고 변경된 행만 웹에 보낸다."""
+"""활성 대기열만 조회하고 바뀌었을 때 전체 항목 목록을 웹에 보낸다."""
 from PySide6.QtCore import QTimer, Slot
 
 from .subtitle_queue_kind import TRANSCRIPTION
@@ -16,7 +16,6 @@ class WebQueuePage(WebPageController):
         super().__init__(host)
         self.entries = {}
         self.order = []
-        self.counts = counts_data(())
         self.rules = dict(targets=[], rules=[])
         self.bridge = QueueBridge(self)
         self.focus_requested = self.bridge.queueFocusRequested
@@ -43,9 +42,10 @@ class WebQueuePage(WebPageController):
         self.bridge.queueDeactivated.emit('')
 
     def payload(self):
-        return dict(rows=[row_data(self.entries[id]) for id in self.order], removed=[],
-                    order=self.order, counts=self.counts,
-                    canRetryFailed=any(item.state == 'failed' for item in self.entries.values()))
+        # 늦게 도착한 앞 메시지를 버려도 잃는 것이 없게 매번 전체 항목을 보낸다(#265). 웹은 바뀐 행만 다시 그린다.
+        entries = [self.entries[id] for id in self.order]
+        return dict(rows=[row_data(entry) for entry in entries], counts=counts_data(entries),
+                    canRetryFailed=any(entry.state == 'failed' for entry in entries))
 
     def refresh(self):
         if not self.is_active() or self.bridge.bulk_running:
@@ -53,20 +53,13 @@ class WebQueuePage(WebPageController):
         items = tuple(item for item in self.core.subtitle_queue_items() if item.queue_kind == TRANSCRIPTION)
         entries = {item.video_id: item for item in items}
         order = list(entries)
-        changed = [row_data(item) for item in items if self.entries.get(item.video_id) != item]
-        removed = list(self.entries.keys() - entries.keys())
-        if not changed and not removed and order == self.order:
+        if entries == self.entries and order == self.order:
             return
-        counts = counts_data(items)
-        delta = dict(rows=changed, removed=removed,
-                     canRetryFailed=any(item.state == 'failed' for item in items),
-                     order=order if order != self.order else None,
-                     counts=counts if counts != self.counts else None)
-        self.entries, self.order, self.counts = entries, order, counts
-        self.bridge.queueChanged.emit(self.stamp(delta))
+        self.entries, self.order = entries, order
+        self.bridge.queueChanged.emit(self.stamp(self.payload()))
 
     def reshown(self):
-        # 대기열은 알림 없이 바뀌므로 다시 보일 때 비교해 바뀐 행만 보낸다. 같으면 아무것도 보내지 않는다.
+        # 대기열은 알림 없이 바뀌므로 다시 보일 때 비교해 바뀌었을 때만 보낸다. 같으면 아무것도 보내지 않는다.
         self.refresh()
 
     def refresh_rules(self):

@@ -81,10 +81,11 @@ class WebLibraryPage(LibraryOperations, WebPageController):
 
     def reshown(self):
         # 숨어 있던 동안 바뀐 것이 있을 때만 보낸다. 그 변경으로 이미 다시 만든 목록이면 다시 만들지 않는다.
+        # 사용자가 하지 않은 갱신이므로 웹의 선택과 보던 자리를 지킨다(코어가 바꾼 선택은 예외).
         if self.outdated:
             if self.built_change != self.host.change:
                 self.rebuild()
-            self.publish_library()
+            self.publish_library(preserve_selection=True)
 
     def rebuild(self):
         self.snapshot = self.core.library_snapshot()

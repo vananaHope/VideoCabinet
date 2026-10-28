@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { connectBridge, request } from "@/bridge"
-import { queueStates, type QueueAction, type QueueBridge, type QueueDeltaData, type QueueRulesData } from "@/bridge-types"
+import { queueStates, type QueueAction, type QueueBridge, type QueueData, type QueueRulesData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select"
 import { NoticeStack } from "@/components/ui/notice"
@@ -37,7 +37,7 @@ export default function QueuePage() {
   useLayoutChange(tab, rules, error, message)
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
   const select = useCallback((id: number) => setSelected(id), [])
-  // 첫 전체 상태보다 먼저 만든 변경분은 그 상태에 이미 들어 있으므로 버린다.
+  // 브리지는 매번 전체 상태를 보내므로 늦게 도착한 앞 세대는 버려도 잃는 것이 없다.
   const fresh = useGenerationGuard()
 
   useEffect(() => {
@@ -45,7 +45,7 @@ export default function QueuePage() {
     let disconnect = () => {}
     connectBridge().then(async ({ queue: api }) => {
       if (disposed) return
-      const changed = (json: string) => { const delta: QueueDeltaData = JSON.parse(json); if (fresh(delta)) store.apply(delta) }
+      const changed = (json: string) => { const data: QueueData = JSON.parse(json); if (fresh(data)) store.apply(data) }
       const rulesChanged = (json: string) => setRules(JSON.parse(json))
       // 탭 전환 렌더가 끝나 페이지가 보인 뒤(두 프레임)에 초점을 둔다.
       const focus = (target: string) => requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus("queue", target)) document.getElementById(currentTab.current === "rules" ? "queue-rules" : "queue-list")?.focus({ preventScroll: true }) }))
@@ -60,7 +60,7 @@ export default function QueuePage() {
       api.rulesChanged.connect(rulesChanged)
       api.queueFocusRequested.connect(focus)
       disconnect = () => { api.bulkFinished.disconnect(bulkFinished); api.queueChanged.disconnect(changed); api.rulesChanged.disconnect(rulesChanged); api.queueFocusRequested.disconnect(focus) }
-      const data = await request<QueueDeltaData>(reply => api.snapshot(reply))
+      const data = await request<QueueData>(reply => api.snapshot(reply))
       if (disposed) return
       if (fresh(data)) store.apply(data)
       const ruleData = await request<QueueRulesData>(reply => api.rulesSnapshot(reply))

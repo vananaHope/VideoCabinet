@@ -1,4 +1,4 @@
-"""대기열 웹 비교 캡처·변경분 측정·실제 WebEngine 키보드 검사.
+"""대기열 웹 비교 캡처·전송 비용 측정·실제 WebEngine 키보드 검사.
 
 python scripts/check_web_queue.py --offscreen
 python <desktop_lock.py> run --owner issue-50 -- .venv/Scripts/python scripts/check_web_queue.py --verify
@@ -363,9 +363,9 @@ try:
         samples.append((time.perf_counter() - start) * 1000)
     settle()
     metrics['python_web_ms'] = {'median': median(samples), 'max': max(samples)}
-    metrics['delta_bytes'] = len(payloads[-1].encode('utf-8'))
-    assert len(json.loads(payloads[-1])['rows']) == 1
-    assert json.loads(payloads[-1])['order'] is None
+    # 늦은 앞 메시지를 버려도 잃는 것이 없게 매번 전체 항목을 보낸다(#265). 웹은 바뀐 행만 다시 그린다.
+    metrics['payload_bytes'] = len(payloads[-1].encode('utf-8'))
+    assert len(json.loads(payloads[-1])['rows']) == 300
     # DB 비용을 뺀 표시 계층 비교도 같은 300개 DTO, 같은 변경으로 따로 측정한다.
     frozen = display_items()
     core.subtitle_queue_items = lambda: (replace(frozen[0], progress=(tick % 90) / 100), *frozen[1:])
@@ -421,6 +421,8 @@ try:
       observer.observe(document.getElementById('queue-list'), {subtree:true,childList:true,characterData:true,attributes:true});
       const send = () => {
         data.rows[0].progress = sample / 100;
+        // 공용 세대 가드(#265)가 같은 세대의 반복을 늦은 메시지로 버리지 않게 매번 새 세대를 붙인다.
+        data.generation += 1;
         start = performance.now();
         // QWebChannel transport dispatch는 실제 Python 신호와 같은 객체/구독자를 거친다.
         window.qt.webChannelTransport.onmessage({data: JSON.stringify({type:1,object:'queue',signal:signalIndex,args:[JSON.stringify(data)]})});
@@ -440,7 +442,7 @@ try:
     metrics['web_commit_ms'] = {'median': median(web['commitMs']), 'max': max(web['commitMs'])}
     metrics['web_next_frame_ms'] = {'median': median(web['nextFrameMs']), 'max': max(web['nextFrameMs'])}
     metrics['web_changed_rows'] = web['changedRows']
-    metrics['checks'].append('300개 중 진행률 1행 전송·DOM 1행 변경, 무변경 시 신호 없음')
+    metrics['checks'].append('300개 전체 전송 중 진행률 1행만 DOM 변경, 무변경 시 신호 없음')
     unchanged = len(payloads)
     page.refresh()
     assert len(payloads) == unchanged

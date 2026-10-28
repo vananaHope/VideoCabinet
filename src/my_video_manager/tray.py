@@ -40,12 +40,13 @@ class TrayControls(QObject):
         emergency = was_hidden and self._emergency_hidden
         self._emergency_hidden = False
         if emergency:
-            # 긴급 탈출 전 화면을 그대로 보인다. 최대화 상태를 지키고 목록도 새로 고치지 않는다.
+            # 긴급 탈출 전 화면을 그대로 보인다. 최대화 상태와 선택·스크롤·초점을 지킨다.
             self.window.show()
         else:
             self.window.showNormal()
-        if was_hidden and not emergency:
-            # 숨어 있던 동안 바뀐 것(닫을 때 저장한 시청 상태·코어가 바꾼 선택 등)만 지금 탭에 반영한다(#265).
+        if was_hidden:
+            # 숨어 있던 동안 바뀐 것(닫을 때 저장한 시청 상태·코어가 바꾼 선택, 긴급 탈출 중 끝난 검사·자막 등)만
+            # 지금 탭에 반영한다(#265). 바뀐 것이 없으면 아무것도 보내지 않는다.
             self.window.web_host.reshow_active()
         self.window.raise_()
         self.window.activateWindow()
