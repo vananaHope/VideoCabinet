@@ -57,6 +57,14 @@ function DialogHeader({ title, description }: { title: React.ReactNode; descript
 }
 
 /**
+ * 머리글과 단추 줄 사이의 본문. 내용이 창보다 길면 본문만 스크롤해 제목과 단추 줄이 늘 보인다.
+ * 초점 테두리가 스크롤 가장자리에서 잘리지 않게 안쪽으로 조금 띄운다.
+ */
+function DialogBody({ children }: { children: React.ReactNode }) {
+  return <div data-slot="dialog-body" className="-m-1 flex min-h-0 flex-col gap-4 overflow-y-auto p-1">{children}</div>
+}
+
+/**
  * 단추 줄. 대화상자를 끝내는 동작은 오른쪽 끝에 [취소·닫기(outline)][확인(default, 위험하면 destructive)] 순서로 둔다.
  * 선택한 항목에 대한 보조 동작이나 짧은 안내는 start로 같은 줄 왼쪽에 둔다. 좁으면 왼쪽 묶음 아래로 오른쪽 묶음이 내려간다.
  */
@@ -97,5 +105,5 @@ const AlertDialogAction = AlertDialogPrimitive.Action
 
 export {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader,
-  Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader,
+  Dialog, DialogBody, DialogClose, DialogContent, DialogFooter, DialogHeader,
 }

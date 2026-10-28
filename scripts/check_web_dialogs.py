@@ -138,6 +138,9 @@ def js(code):
 def capture(name, widget=window):
     if args.real:
         return  # 실창에서는 데스크톱 캡처를 하지 않는다.
+    # 바뀐 DOM이 실제로 그려진 뒤 찍는다. offscreen grab은 마지막으로 그린 프레임을 돌려준다.
+    js("window.capturePainted = false; requestAnimationFrame(() => requestAnimationFrame(() => { window.capturePainted = true }))")
+    wait(lambda: js('window.capturePainted'))
     settle()
     path = args.output / f'web-{name}.png'
     captured = widget.grab()
