@@ -266,6 +266,8 @@ try:
     long_tags = [core.add_video_tag(video.id, '모든 영상에 붙은 아주 긴 태그 이름 ' + '태그' * 6) for video in core.videos()][0]
     for video in core.videos():
         core.add_video_tag(video.id, '둘째 긴 태그 ' + '이름' * 8)
+        for index in range(6):
+            core.add_video_tag(video.id, f'넘치는 칩 {index} ' + '긴태그' * 4)
     open_window(core, card_size='small')
     selected = choose_middle_card()
     many = capture('many')
@@ -300,9 +302,17 @@ try:
     settle()
     chips = capture('many-chips')
     assert chips['grid'] == many['grid'] and card_y(selected) == y, (many, chips)
-    row = json.loads(js("JSON.stringify((() => { const e = document.querySelector('[aria-label=\"적용한 검색 조건\"]'); return [e.clientHeight, e.scrollWidth, e.clientWidth] })())"))
+    row = json.loads(js("""JSON.stringify((() => { const e = document.querySelector('[aria-label="적용한 검색 조건"]')
+      const tops = [...e.querySelectorAll('button')].map(b => Math.round(b.getBoundingClientRect().top))
+      return [e.clientHeight, e.scrollWidth, e.clientWidth, new Set(tops).size] })())"""))
     count = int(js("document.querySelectorAll('[aria-label=\"적용한 검색 조건\"] button').length"))
-    checks.append(f'칩 {count}개(긴 태그 2개 포함, "모두 지우기" 포함): 한 줄({row[0]}px), 넘치면 그 줄 안에서 가로 스크롤(지금 내용 폭 {row[1]}px · 보이는 폭 {row[2]}px), 격자·선택 카드 그대로')
+    # 칩이 실제로 넘친다: 내용 폭이 보이는 폭보다 넓고 칩은 모두 한 줄(같은 세로 위치)에 있다. 끝까지 가로로 넘겨도 격자는 그대로다.
+    assert row[1] > row[2] and row[3] == 1, row
+    js("document.querySelector('[aria-label=\"적용한 검색 조건\"]').scrollLeft = 1e6; true")
+    scrolled = capture('many-chips-overflow-end')
+    assert scrolled['grid'] == many['grid'] and js("document.querySelector('[aria-label=\"적용한 검색 조건\"]').scrollLeft") > 0
+    checks.append(f'칩 {count}개(긴 태그 8개, "모두 지우기" 포함): 한 줄({row[0]}px) 안에서 가로로 넘김(내용 폭 {row[1]}px > 보이는 폭 {row[2]}px, 끝까지 가로 스크롤), 격자·선택 카드 그대로')
+    # 끝까지 넘긴 채로 둔다. 줄 끝의 “모두 지우기”를 눌러 칩을 지운다.
     click('[aria-label="적용한 검색 조건"] button:last-child')
     wait(lambda: js("document.querySelectorAll('[aria-label=\"적용한 검색 조건\"] button').length") == 0, '칩 모두 지우기')
     assert capture('many-chips-cleared')['grid'] == many['grid']
@@ -318,16 +328,53 @@ try:
     assert abs(card_y(selected) - y) <= 1
     checks.append(f"폴더 패널 열기·닫기: 열 {many['grid']['columns']}→{folders['grid']['columns']}→3, 선택 카드 세로 위치 ±1px")
 
-    # 긴 제목 카드.
-    long_video = next(video.id for video in core.videos() if 'LongVideoTitle' in video.title)
-    click(f'#video-{long_video}') if js(f"!!document.getElementById('video-{long_video}')") else None
+    # 폴더 패널 위쪽 경계: 열린 패널의 맨 위에서 둘째 줄 첫 카드를 고르고 닫으면, 같은 자리에 두려면 음수 스크롤이 필요해
+    # 스크롤은 0으로 제한되고 카드는 새 첫 줄에서 완전히 보인다.
+    click('button[aria-label="폴더 패널"]')
+    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == '2', '열 수')
     js(f'{GRID}.scrollTop = 0; true')
-    settle()
-    capture('many-long-title')
-    checks.append('긴 제목 카드: 카드·상세 패널 경계 안에서 줄임')
+    edge = window.library_page.visible_ids[2]
+    wait(lambda: js(f"!!document.getElementById('video-{edge}')"), '둘째 줄 카드')
+    click(f'#video-{edge}')
+    wait(lambda: window.library_page.selected_id == edge, '둘째 줄 카드 선택')
+    capture('many-folders-edge-open')
+    open_y = card_y(edge)
+    click('button[aria-label="폴더 패널"]')
+    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == '3', '열 수 복원')
+    capture('many-folders-edge-closed')
+    full = js(f"""(() => {{ const grid = {GRID}, g = grid.getBoundingClientRect(), c = document.getElementById('video-{edge}').getBoundingClientRect()
+      return c.top >= g.top && c.bottom <= g.top + grid.clientTop + grid.clientHeight }})()""")
+    assert js(f'{GRID}.scrollTop') == 0 and full, (open_y, card_y(edge))
+    checks.append(f"폴더 패널 위쪽 경계(열린 패널 맨 위 둘째 줄 카드 → 닫기): 스크롤 0으로 제한, 카드 완전히 보임(세로 {open_y}px → {card_y(edge)}px)")
 
-    # 다른 탭에서 셸 묶음이 고른 모서리와 덮는 조작 요소를 기록한다. 짧은 안내 세 개는 고정 조작 요소를 덮지 않아야 한다.
-    # 긴 안내 세 개(묶음이 높이 상한까지 자람)는 모든 모서리가 무언가를 덮을 수 있어 가장 적게 덮는 모서리를 기록만 한다.
+    # 긴 제목 카드: 그 카드가 있는 줄로 스크롤해 화면에 드러내고 고른 뒤, 카드·상세 제목의 글자와 경계·넘침을 잰다.
+    long_video = next(video for video in core.videos() if 'LongVideoTitle' in video.title)
+    assert long_video.id in window.library_page.visible_ids, '긴 제목 영상이 결과에 없음'
+    index = window.library_page.visible_ids.index(long_video.id)
+    js(f"""(() => {{ const grid = {GRID}, row = parseFloat(getComputedStyle(grid).getPropertyValue('--grid-row-height')) * parseFloat(getComputedStyle(document.documentElement).fontSize)
+      grid.scrollTop = Math.floor({index} / Number(grid.getAttribute('aria-colcount'))) * row; return true }})()""")
+    wait(lambda: js(f"!!document.getElementById('video-{long_video.id}')"), '긴 제목 카드가 그려짐')
+    click(f'#video-{long_video.id}')
+    wait(lambda: window.library_page.selected_id == long_video.id, '긴 제목 카드 선택')
+    wait(lambda: js("document.querySelector('aside[aria-label=\"선택 영상 상세\"] h2')?.textContent") == long_video.title, '상세 제목')
+    title = json.loads(js(f"""JSON.stringify((() => {{
+      const rect = e => {{ const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom] }}
+      const inside = (a, b) => a[0] >= b[0] - 0.5 && a[1] >= b[1] - 0.5 && a[2] <= b[2] + 0.5 && a[3] <= b[3] + 0.5
+      const grid = {GRID}, g = grid.getBoundingClientRect(), card = document.getElementById('video-{long_video.id}')
+      const text = [...card.querySelectorAll('span')].find(e => e.textContent === {json.dumps(long_video.title)})
+      const aside = document.querySelector('aside[aria-label="선택 영상 상세"]'), h2 = aside.querySelector('h2')
+      return {{ cardShown: rect(card)[1] >= g.top && rect(card)[3] <= g.top + grid.clientTop + grid.clientHeight,
+        cardText: !!text, cardInside: !!text && inside(rect(text), rect(card)), cardTruncated: !!text && text.scrollWidth > text.clientWidth,
+        detailInside: inside(rect(h2), rect(aside)), detailClamped: h2.scrollHeight > h2.clientHeight,
+        detailLines: Math.round(h2.clientHeight / parseFloat(getComputedStyle(h2).lineHeight)) }}
+    }})())"""))
+    assert title['cardShown'] and title['cardText'] and title['cardInside'] and title['cardTruncated'], title
+    assert title['detailInside'] and title['detailClamped'] and title['detailLines'] == 2, title
+    capture('many-long-title')
+    checks.append(f"긴 제목 카드(결과 {index}번째로 스크롤해 선택): 카드 제목 한 줄 말줄임·카드 안, 상세 제목 {title['detailLines']}줄 말줄임·상세 패널 안, 가로 넘침 없음")
+
+    # 다른 탭에서 셸 묶음이 고른 모서리와 덮는 조작 요소를 기록한다. 짧은 안내·긴 안내(묶음이 높이 상한까지 자람) 모두
+    # 고정 조작 요소를 덮지 않아야 한다. 스크롤 목록 안 요소와 설명 문구는 덮을 수 있다(스크롤·접기로 되찾는다).
     clear_notices()
     for size in ('short', 'long'):
         notices(long=size == 'long')
@@ -338,8 +385,16 @@ try:
             layout = capture(f'tab-{tab}-{size}')
             corner = js(f"document.querySelector('{SHELL}').dataset.corner")
             checks.append(f"{tab} 탭 안내 {size}: 셸 묶음 {corner}, 덮는 고정 조작 요소 {layout['fixedCovered'] or '없음'}(스크롤 목록 안 {len(layout['covered']) - len(layout['fixedCovered'])}개)")
-            if size == 'short':
-                assert not layout['fixedCovered'], (tab, layout)
+            assert not layout['fixedCovered'], (tab, size, layout)
+        # 설정의 백업 분류: 분류 전환은 hidden만 바꾸고 자동 백업 목록을 비동기로 새로 읽는다. 다 읽은 뒤에도 단추를 덮지 않는다.
+        click('#settings-category [data-category="backup"]')
+        automatic = '[data-page="settings"] section[aria-label="자동 백업"] > div:first-child button'
+        wait(lambda: js(f"[...document.querySelectorAll('{automatic}')].length === 2 && [...document.querySelectorAll('{automatic}')].every(b => b.checkVisibility() && !b.disabled)"), '자동 백업 단추')
+        layout = capture(f'tab-settings-backup-{size}')
+        corner = js(f"document.querySelector('{SHELL}').dataset.corner")
+        assert not layout['fixedCovered'], ('settings-backup', size, layout)
+        checks.append(f"설정 백업 분류 안내 {size}: 셸 묶음 {corner}, 덮는 고정 조작 요소 없음(새로고침·폴더 열기 포함)")
+        click('#settings-category [data-category="general"]')
         window.navigate_web_tab('library')
         settle()
         clear_notices()
