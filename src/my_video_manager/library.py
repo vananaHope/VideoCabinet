@@ -190,6 +190,7 @@ def migrate_library(db, *, before_upgrade=None) -> None:
         # 자막 모듈을 아직 시작하지 않은 라이브러리에는 이 테이블이 없다.
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transcripts'").fetchone():
             # 이전 릴리스의 모델은 역사적 사실이므로 현재 어댑터 상수를 쓰지 않는다.
+            # 기본값은 기존 행을 채우기 위한 것이며, 새 저장은 항상 모델을 명시한다.
             db.execute("ALTER TABLE transcripts ADD COLUMN model TEXT NOT NULL DEFAULT 'large-v3'")
         db.execute("PRAGMA user_version = 5")
 

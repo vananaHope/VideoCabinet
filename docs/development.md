@@ -130,7 +130,7 @@ TanStack Virtual은 행 단위 가상화·overscan·scrollToIndex를 제공하�
 화면과 배치 측정, 붙이기·새 태그·조합 중 Enter·Esc 순서를 확인하고, `--verify`는 데스크톱 잠금 안의 실창에서 키보드만으로
 고르기·새 태그 만들기·Esc 순서와 실제 한국어 IME 조합 중 Enter 무시를 확인합니다.
 썸네일 크기 버전은 `.640.jpg` 파일명, 실패 진행 커서는 공용 Settings의 `thumbnail.cursor`에 저장합니다.
-기존 `videos.thumbnail` 열과 Settings 형식은 그대로이며 대기 대상 부분 인덱스만 추가하므로 DB 버전은 v4를 유지합니다.
+기존 `videos.thumbnail` 열과 Settings 형식은 그대로이며 대기 대상 부분 인덱스만 추가하므로 그 변경은 DB 버전을 올리지 않았습니다.
 
 화면 검증과 대량 목록 측정은 Windows에서 `scripts/check_web_library.py`를 사용합니다.
 `--prepare --count 24 --source <테스트 영상 폴더>`는 원본을 `.local/issue46/`로 복사하고 데모 데이터를 등록합니다.

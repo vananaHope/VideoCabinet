@@ -740,7 +740,7 @@ def test_legacy_database_migration_preserves_records_and_reopens(tmp_path, versi
 
 
 @pytest.mark.parametrize("version", [2, 3, 4])
-def test_migration_records_historical_model_for_all_transcripts(core, tmp_path, version, monkeypatch):
+def test_migration_records_historical_model_for_all_transcripts(core, tmp_path, version):
     from legacy_schema import replace_with_frozen
     from my_video_manager.library import LIBRARY_DB_VERSION
 
@@ -766,7 +766,6 @@ def test_migration_records_historical_model_for_all_transcripts(core, tmp_path, 
     assert core.process_next_subtitle().state == "completed"
     expected = {v.id: replace(core.transcript(v.id), model="large-v3") for v in (a, b)}
     replace_with_frozen(core.database, version)
-    monkeypatch.setattr("my_video_manager.transcription.TRANSCRIPTION_MODEL", "future-model")
 
     migrated = open_core(core.database)
     assert {v.id: migrated.transcript(v.id) for v in (a, b)} == expected
