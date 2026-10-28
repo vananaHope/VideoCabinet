@@ -52,7 +52,7 @@ function reveal(videoId: number) {
 
 // 첫 추천이 오기 전의 줄 자리. 실제 줄과 같은 머리글 높이·카드 줄(다섯 장 폭)로 첫 화면을 채운다.
 function RecommendationsPlaceholder() {
-  return <div data-recommend-list className="min-h-0 flex-1 overflow-y-auto scroll-stable rounded-lg p-1">
+  return <div data-recommend-list className="min-h-0 flex-1 overflow-hidden scroll-stable rounded-lg p-1">
     <Placeholder label="추천을 불러오는 중"><div className="space-y-3">
       {[0, 1, 2].map(row => <section key={row} className="flex flex-col gap-1">
         <div className="flex h-5 items-center px-1"><Skeleton shape="text" className="w-28" /></div>

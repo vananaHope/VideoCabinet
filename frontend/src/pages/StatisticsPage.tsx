@@ -87,12 +87,13 @@ export default function StatisticsPage() {
   // 실패하면 자리 표시를 끝내고 오류 안내를 따른다. 다시 계산할 때는 이전 결과를 그대로 두고 기다림 표시만 보인다.
   const failed = !!(error || state.message)
   const firstPending = !result && !failed
+  const description = section === "inventory" ? "현재 라이브러리 현황 · 기간 선택과 무관" : data ? `${formatDate(data.start_date)} ~ ${formatDate(data.end_date)} · 1회 평균 ${duration(data.average_seconds)}` : ""
   const content = section === "inventory" ? <Inventory inventory={result?.inventory} library={data?.library} /> : <Activity result={result} metric={metric} onMetric={setMetric} onPlay={play} />
   return <main ref={root} aria-label="통계" className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
     <PageHeader title="시청 통계" description="오늘을 포함한 로컬 날짜 기준 · 틀어보기와 모아보기 복습 제외" actions={<Tabs label="통계 기간" value={String(state.days)} items={periods} onChange={choose} />} />
     {/* 표시 중인 결과의 범위와 기다림 표시를 한 줄에 둔다. 줄 높이는 문구가 생기고 사라져도 같다. */}
     <div data-statistics-status className="flex h-5 min-w-0 shrink-0 items-center gap-3 text-sm text-muted-foreground">
-      <p className="min-w-0 truncate">{section === "inventory" ? "현재 라이브러리 현황 · 기간 선택과 무관" : data ? `${formatDate(data.start_date)} ~ ${formatDate(data.end_date)} · 1회 평균 ${duration(data.average_seconds)}` : ""}</p>
+      {description && <p className="min-w-0 truncate">{description}</p>}
       <PendingStatus pending={state.loading} label={`${state.days}일 시청 기록을 계산하고 있어요…`} className="shrink-0" />
     </div>
     {failed && <Notice tone="error" action={<Button variant="outline" size="sm" onClick={() => choose(String(state.days))}>다시 시도</Button>}><p>{error || state.message}</p>{data && <p className="text-muted-foreground">표시 중인 결과: {formatDate(data.start_date)} ~ {formatDate(data.end_date)} ({data.days}일){data.days !== state.days && ` · 선택한 ${state.days}일 결과가 아닙니다`}</p>}</Notice>}
