@@ -281,7 +281,17 @@ components:
 - `muted` 면, `sm` 둥글기, Label 글자, `muted-foreground`. 키 안내와 툴팁에서 키를 보여 준다.
 
 ### Motion
-지금은 shadcn 기본 색 전환(`transition-colors`)과 진행 중 표시의 `animate-pulse`만 있다. #258에 따라 전환 시간·곡선을 `web_tokens.json`에 토큰으로 한곳에 정의하고 대화상자·메뉴·탭 내용·안내가 함께 쓴다. 전환은 입력을 막지 않고, `prefers-reduced-motion`이면 끈다.
+전환 시간·곡선은 `web_tokens.json`의 `motion` 한곳에 있고(#259), `index.css`의 `@theme inline`이 Tailwind 기본 전환 값과 `animate-*` 유틸리티로 잇는다.
+
+- **Quick** (`motion-duration-quick`, 100ms): 단추·탭·카드·입력란의 hover 색 전환(`transition-colors`)과 탭 내용 전환(`animate-tab-enter`).
+- **Enter** (`motion-duration-enter`, 150ms): 떠 있는 층과 안내가 열릴 때. 대화상자·경고 대화상자·키 안내·덮개와 안내(Notice)는 투명도만(`animate-fade-enter`), 메뉴·우클릭 메뉴·선택 목록·필터 팝오버는 투명도와 트리거 쪽에서 커지는 작은 크기 변화(`animate-layer-enter`, `motion-enter-scale` 0.97).
+- **곡선** (`motion-ease`): `cubic-bezier(0.23, 1, 0.32, 1)`. 처음에 빨리 다가와 바로 반응한 느낌을 준다.
+
+**The Instant Close Rule.** 열 때만 전환하고 닫힘은 즉시다. 닫히는 층이 초점 가두기·포인터 차단으로 다음 입력을 막지 않는다. 열리는 도중에도 키·클릭은 바로 새 화면이 받는다.
+
+**The Composite-Only Rule.** 투명도와 transform만 움직인다. 높이·너비·위치처럼 배치를 다시 계산하는 속성과 블러는 전환하지 않는다. `transition-all`은 쓰지 않는다.
+
+**The Reduced Motion Rule.** `prefers-reduced-motion: reduce`이면 `index.css`의 전역 규칙 하나가 앱의 모든 전환·애니메이션(`animate-pulse` 포함)을 끈다. 진행 상태는 움직임 없이 막대·문구로 보인다. 첫 진입과 재생 복귀에는 탭 내용 전환이 없다(복귀 첫 프레임이 반투명하지 않게).
 
 ## Do's and Don'ts
 

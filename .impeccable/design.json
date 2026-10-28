@@ -36,7 +36,8 @@
       { "name": "hairline", "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)", "purpose": "입력란·윤곽선 단추(shadow-xs)." }
     ],
     "motion": [
-      { "name": "color-transition", "value": "150ms cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Tailwind 기본 transition-colors. #258에서 전환 토큰을 web_tokens.json에 정의할 예정." }
+      { "name": "quick", "value": "100ms cubic-bezier(0.23, 1, 0.32, 1)", "purpose": "hover 색 전환(transition-colors)과 탭 내용 전환. web_tokens.json의 motion-duration-quick·motion-ease." },
+      { "name": "enter", "value": "150ms cubic-bezier(0.23, 1, 0.32, 1)", "purpose": "대화상자·메뉴·선택 목록·팝오버·안내가 열릴 때. 닫힘은 즉시. motion-duration-enter·motion-ease, 메뉴의 크기 변화는 motion-enter-scale(0.97)." }
     ],
     "breakpoints": [
       { "name": "baseline-window", "value": "1100px" }
@@ -49,7 +50,7 @@
       "refersTo": "button-primary",
       "description": "주 동작. 화면에 하나 정도만.",
       "html": "<button class=\"ds-btn-primary\">재생</button>",
-      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; height: 2.25rem; padding: 0.5rem 1rem; border: none; border-radius: 0.625rem; background: var(--primary, #4f46e5); color: var(--primary-foreground, #ffffff); font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; } .ds-btn-primary:hover { background: color-mix(in srgb, var(--primary, #4f46e5) 90%, transparent); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring, #818cf8); }"
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; height: 2.25rem; padding: 0.5rem 1rem; border: none; border-radius: 0.625rem; background: var(--primary, #4f46e5); color: var(--primary-foreground, #ffffff); font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; transition: background-color 100ms cubic-bezier(0.23, 1, 0.32, 1); cursor: pointer; } .ds-btn-primary:hover { background: color-mix(in srgb, var(--primary, #4f46e5) 90%, transparent); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring, #818cf8); }"
     },
     {
       "name": "Outline Button",
@@ -73,7 +74,7 @@
       "refersTo": "tab-navigation-selected",
       "description": "머리글의 페이지 탭. 선택에도 강조색을 쓰지 않는다.",
       "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-tab ds-nav-tab-selected\">라이브러리</button><button class=\"ds-nav-tab\">추천</button><button class=\"ds-nav-tab\">검색</button></nav>",
-      "css": ".ds-nav { display: flex; gap: 0.25rem; } .ds-nav-tab { padding: 0.5rem 0.75rem; border: none; border-radius: 0.625rem; background: transparent; color: var(--muted-foreground, #a1a1aa); font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-nav-tab:hover { background: var(--muted, #27272a); color: var(--foreground, #fafafa); } .ds-nav-tab-selected { background: var(--accent, #27272a); color: var(--accent-foreground, #fafafa); } .ds-nav-tab:focus-visible { outline: 2px solid var(--ring, #818cf8); outline-offset: 2px; }"
+      "css": ".ds-nav { display: flex; gap: 0.25rem; } .ds-nav-tab { padding: 0.5rem 0.75rem; border: none; border-radius: 0.625rem; background: transparent; color: var(--muted-foreground, #a1a1aa); font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; cursor: pointer; transition: background-color 100ms cubic-bezier(0.23, 1, 0.32, 1), color 100ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-nav-tab:hover { background: var(--muted, #27272a); color: var(--foreground, #fafafa); } .ds-nav-tab-selected { background: var(--accent, #27272a); color: var(--accent-foreground, #fafafa); } .ds-nav-tab:focus-visible { outline: 2px solid var(--ring, #818cf8); outline-offset: 2px; }"
     },
     {
       "name": "Status Badge",
@@ -89,7 +90,7 @@
       "refersTo": "video-card",
       "description": "라이브러리 격자의 영상 하나. 썸네일이 주인공이다.",
       "html": "<button class=\"ds-video-card\"><span class=\"ds-video-thumb\"></span><span class=\"ds-video-body\"><span class=\"ds-video-title\">영상 제목</span><span class=\"ds-video-meta\">1:24:05</span></span></button>",
-      "css": ".ds-video-card { display: flex; flex-direction: column; width: 16rem; overflow: hidden; padding: 0; border: 1px solid var(--border, #3f3f46); border-radius: 0.75rem; background: var(--card, #18181b); color: var(--card-foreground, #fafafa); text-align: left; cursor: pointer; transition: border-color 150ms; } .ds-video-card:hover { border-color: var(--input, #71717a); } .ds-video-card:focus-visible { outline: none; border-color: var(--ring, #818cf8); box-shadow: 0 0 0 1px var(--ring, #818cf8); } .ds-video-thumb { display: block; aspect-ratio: 16 / 9; background: var(--muted, #27272a); } .ds-video-body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.5rem; } .ds-video-title { font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-video-meta { font: 400 0.75rem/1rem \"Malgun Gothic\", sans-serif; color: var(--muted-foreground, #a1a1aa); font-variant-numeric: tabular-nums; }"
+      "css": ".ds-video-card { display: flex; flex-direction: column; width: 16rem; overflow: hidden; padding: 0; border: 1px solid var(--border, #3f3f46); border-radius: 0.75rem; background: var(--card, #18181b); color: var(--card-foreground, #fafafa); text-align: left; cursor: pointer; transition: border-color 100ms cubic-bezier(0.23, 1, 0.32, 1); } .ds-video-card:hover { border-color: var(--input, #71717a); } .ds-video-card:focus-visible { outline: none; border-color: var(--ring, #818cf8); box-shadow: 0 0 0 1px var(--ring, #818cf8); } .ds-video-thumb { display: block; aspect-ratio: 16 / 9; background: var(--muted, #27272a); } .ds-video-body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.5rem; } .ds-video-title { font: 500 0.875rem/1.25rem \"Malgun Gothic\", sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-video-meta { font: 400 0.75rem/1rem \"Malgun Gothic\", sans-serif; color: var(--muted-foreground, #a1a1aa); font-variant-numeric: tabular-nums; }"
     },
     {
       "name": "Notice",
