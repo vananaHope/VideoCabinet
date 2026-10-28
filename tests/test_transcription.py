@@ -41,10 +41,12 @@ def test_gpu_probe_cancellation_terminates_child(tmp_path):
 
 
 def test_application_dispatches_child_before_qt(monkeypatch):
-    from my_video_manager import __main__, transcription
+    from my_video_manager import __main__, cuda_runtime, transcription
     calls = []
     monkeypatch.setattr(sys, 'argv', ['app.exe', 'transcription', '--probe-cuda'])
     monkeypatch.setattr(transcription, 'main', lambda args: calls.append(args) or 7)
+    monkeypatch.setattr(cuda_runtime.SubtitlePreparation, 'start_cleanup_if_ready',
+                        lambda self: pytest.fail('받아쓰기 자식에서 이전 모델 정리'))
     assert __main__.main() == 7
     assert calls == [['--probe-cuda']]
 
@@ -120,18 +122,20 @@ def test_missing_model_in_child_response_is_format_error(tmp_path):
     assert "받아쓰기 응답 형식 오류" in caught.value.detail
 
 
-@pytest.mark.parametrize("model", ["large-v3", "future-model"])
+@pytest.mark.parametrize("model", ["large-v3-turbo", "future-model"])
 @pytest.mark.parametrize("no_speech", [False, True])
 def test_child_entry_point_reports_the_downloaded_model(tmp_path, model, no_speech):
     transcriber = adapter(tmp_path, f'''
 import sys
 from types import SimpleNamespace
 from my_video_manager import transcription
-transcription.TRANSCRIPTION_MODEL = {model!r}
+if {model!r} != "large-v3-turbo":
+    transcription.TRANSCRIPTION_MODEL = {model!r}
 transcription.prepare_cuda_runtime = lambda *_: None
 sys.modules['ctranslate2'] = SimpleNamespace(get_cuda_device_count=lambda: 1)
 def download_model(name, **kwargs):
     assert name == {model!r}
+    assert kwargs["revision"] == "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf"
     return 'fake-model-path'
 def make_model(path, **kwargs):
     assert path == 'fake-model-path'

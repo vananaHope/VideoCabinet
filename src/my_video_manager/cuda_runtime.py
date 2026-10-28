@@ -8,16 +8,18 @@ import http.client
 import json
 from pathlib import Path, PurePosixPath
 import shutil
+import stat
 import subprocess
 import sys
 import time
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 from typing import Callable
 import urllib.request
 import zipfile
 
-from .runtime_assets import CUDA_WHEELS, WHISPER_FILES, WHISPER_REVISION, DownloadAsset
-from .subtitle_preparation_state import safe_detail, log_failure
+from .runtime_assets import (CUDA_WHEELS, WHISPER_FILES, WHISPER_MODEL, WHISPER_REPOSITORY,
+                             WHISPER_REVISION, DownloadAsset)
+from .subtitle_preparation_state import safe_detail, log_failure, log_notice
 
 
 class PreparationError(RuntimeError):
@@ -261,6 +263,12 @@ class PreparedSubtitles:
     model_directory: Path
 
 
+def _plain_directory(path: Path) -> bool:
+    info = path.lstat()
+    return (stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode)
+            and not getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 class SubtitlePreparation:
     """한 번에 하나의 준비 작업을 실행한다. 완료 결과는 재설치 후에도 재사용한다.
 
@@ -305,6 +313,7 @@ class SubtitlePreparation:
             # 강제 종료도 다음 시작에서 자동 다운로드로 이어지지 않게 한다.
             history.save('interrupted')
             result = self._prepare(cancellation=cancellation, progress=report)
+            self.cleanup_previous_models()
             try:
                 history.save('ready')
             except OSError as error:
@@ -377,8 +386,50 @@ class SubtitlePreparation:
 
     def _model_directories(self):
         models = self.data_directory / "models"
-        return (models / "large-v3" / self.model_revision,
-                models / "models--Systran--faster-whisper-large-v3" / "snapshots" / self.model_revision)
+        return (models / WHISPER_MODEL / self.model_revision,
+                models / ('models--' + WHISPER_REPOSITORY.replace('/', '--')) / "snapshots" / self.model_revision)
+
+    def start_cleanup_if_ready(self) -> Thread | None:
+        """설치판 앱 시작에서 한 번 호출한다. 삭제는 시작을 막지 않는 뒤 작업이다."""
+        try:
+            self.prepared()
+            worker = Thread(target=self.cleanup_previous_models, name='previous-model-cleanup', daemon=True)
+            worker.start()
+            return worker
+        except PreparationError:
+            return None
+        except (OSError, RuntimeError) as error:
+            log_failure(self.data_directory, 'storage', '이전 모델 정리를 시작하지 못했습니다.', error)
+            return None
+
+    def cleanup_previous_models(self):
+        """turbo 게시 뒤 앱 전용 large-v3만 정리한다. 실패는 다음 준비/시작에서 재시도한다."""
+        try:
+            self.prepared()
+            models = self.data_directory / 'models'
+            # models 자체가 정션인 경우에도 외부 저장소를 따라 들어가지 않는다.
+            if not _plain_directory(models) or models.resolve().parent != self.data_directory:
+                log_notice(self.data_directory, 'cleanup',
+                           f'models 폴더가 링크이거나 데이터 폴더 밖을 가리켜 이전 모델 정리를 건너뜁니다: {models}')
+                return
+            for target in models.iterdir():
+                name = target.name
+                legacy = (name == 'large-v3' or
+                          (name.startswith('large-v3') and name.endswith('.partial')
+                           and not name.startswith(WHISPER_MODEL)))
+                if not legacy:
+                    continue
+                try:
+                    if (target.parent == models and _plain_directory(target)
+                            and target.resolve().parent == models):
+                        # Python 3.8+ rmtree는 하위 symlink/Windows junction을 따라가지 않는다.
+                        shutil.rmtree(target)
+                except OSError as error:
+                    log_failure(self.data_directory, 'storage', '이전 모델 폴더를 정리하지 못했습니다.', error)
+        except PreparationError:
+            return
+        except OSError as error:
+            log_failure(self.data_directory, 'storage', '이전 모델 폴더를 정리하지 못했습니다.', error)
 
     def _prepare_model(self, cancellation, progress):
         target, cached = self._model_directories()

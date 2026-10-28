@@ -56,7 +56,7 @@ def reopen(core, adapter):
 def test_full_transcription_records_result_model_and_replaces_it_on_regeneration(setup, no_speech):
     core, adapter, (video, _) = setup
     segments = () if no_speech else adapter.result.segments
-    for model in ("large-v3", "future-model"):
+    for model in ("large-v3", "large-v3-turbo", "future-model"):
         adapter.result = TranscriberResult("en", segments, model=model)
         core.request_subtitles(video.id)
         assert core.process_next_subtitle().state == "completed"

@@ -12,22 +12,36 @@ from .app_logging import safe_detail, file_log_handler
 _log_lock = Lock()
 
 
-def log_failure(directory, kind, message, detail):
-    """실패는 ERROR, 사용자 취소·중단은 INFO로 기록한다. 로그 오류는 무시한다."""
+def _write(directory, level, text):
     try:
         with _log_lock:
             handler = file_log_handler(Path(directory) / 'logs/subtitle-preparation.log')
             try:
                 logger = logging.getLogger('my_video_manager.preparation')
-                cancelled = kind in ('cancelled', 'interrupted')
-                text = f'{kind}: {safe_detail(message)} · {safe_detail(detail)}'.strip(' ·')
-                if cancelled:
-                    text = ' '.join(text.split())
-                record = logger.makeRecord(logger.name, logging.INFO if cancelled else logging.ERROR,
-                                           '', 0, text, (), None)
+                record = logger.makeRecord(logger.name, level, '', 0, text, (), None)
                 handler.handle(record)
             finally:
                 handler.close()
+    except (OSError, ValueError):
+        pass
+
+
+def log_failure(directory, kind, message, detail):
+    """실패는 ERROR, 사용자 취소·중단은 INFO로 기록한다. 로그 오류는 무시한다."""
+    try:
+        cancelled = kind in ('cancelled', 'interrupted')
+        text = f'{kind}: {safe_detail(message)} · {safe_detail(detail)}'.strip(' ·')
+        if cancelled:
+            text = ' '.join(text.split())
+        _write(directory, logging.INFO if cancelled else logging.ERROR, text)
+    except (OSError, ValueError):
+        pass
+
+
+def log_notice(directory, kind, message):
+    """동작을 바꾸지 않고 건너뛴 일은 INFO로 기록한다. 로그 오류는 무시한다."""
+    try:
+        _write(directory, logging.INFO, ' '.join(f'{kind}: {safe_detail(message)}'.split()))
     except (OSError, ValueError):
         pass
 

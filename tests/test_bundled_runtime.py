@@ -82,7 +82,7 @@ def test_transcription_model_path_keeps_source_cache_and_uses_prepared_installat
     monkeypatch.setattr(sys, "frozen", frozen, raising=False)
     calls = []
     model_directory = tmp_path / "models"
-    prepared_path = model_directory / "large-v3/pinned"
+    prepared_path = model_directory / "large-v3-turbo/pinned"
     monkeypatch.setattr(transcription, "prepare_cuda_runtime", lambda data: calls.append(("cuda", data)))
     monkeypatch.setitem(sys.modules, "ctranslate2", SimpleNamespace(get_cuda_device_count=lambda: 1))
     class Model:
@@ -90,8 +90,8 @@ def test_transcription_model_path_keeps_source_cache_and_uses_prepared_installat
             calls.append(("model", path))
         def transcribe(self, audio, **kwargs):
             return [], SimpleNamespace(language="ko", language_probability=1)
-    def download(name, *, cache_dir):
-        calls.append(("download", name, cache_dir))
+    def download(name, *, cache_dir, revision):
+        calls.append(("download", name, cache_dir, revision))
         return "source-cache"
     monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=Model))
     monkeypatch.setitem(sys.modules, "faster_whisper.audio", SimpleNamespace(decode_audio=lambda path: []))
@@ -104,13 +104,14 @@ def test_transcription_model_path_keeps_source_cache_and_uses_prepared_installat
     monkeypatch.setattr(cuda_runtime, "SubtitlePreparation", Preparation)
     result = transcription.transcribe_on_gpu(tmp_path / "video.mkv", model_directory, "ko")
     assert result.spoken_language == "ko"
+    assert result.model == "large-v3-turbo"
     assert ("cuda", tmp_path) in calls
     if frozen:
         assert ("prepare", tmp_path) in calls
         assert ("model", str(prepared_path)) in calls
         assert not any(call[0] == "download" for call in calls)
     else:
-        assert ("download", "large-v3", str(model_directory)) in calls
+        assert ("download", "large-v3-turbo", str(model_directory), transcription.WHISPER_REVISION) in calls
         assert ("model", "source-cache") in calls
         assert not any(call[0] == "prepare" for call in calls)
 
@@ -139,3 +140,34 @@ def test_unprepared_frozen_transcription_never_downloads(tmp_path, monkeypatch):
     assert caught.value.kind == "preparation_required"
     assert "준비" in str(caught.value)
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize('frozen', [False, True])
+def test_application_starts_model_cleanup_once_only_for_installation(tmp_path, monkeypatch, frozen):
+    from my_video_manager import __main__
+    calls = []
+    signal = SimpleNamespace(connect=lambda callback: None)
+    app = SimpleNamespace(setWindowIcon=lambda icon: None, setQuitOnLastWindowClosed=lambda value: None,
+                          aboutToQuit=signal, exec=lambda: calls.append('exec') or 0,
+                          property=lambda name: False)
+    window = SimpleNamespace(tray=SimpleNamespace(open=lambda: None), show=lambda: calls.append('show'))
+    instance = SimpleNamespace(start=lambda: True, close=lambda: None, activated=signal)
+    monkeypatch.setattr(sys, 'frozen', frozen, raising=False)
+    monkeypatch.setattr(sys, 'argv', ['app.exe', '--data-dir', str(tmp_path)])
+    modules = {
+        'PySide6.QtWidgets': SimpleNamespace(QApplication=lambda args: app, QMessageBox=SimpleNamespace(
+            critical=lambda *args: pytest.fail(str(args)))),
+        'PySide6.QtGui': SimpleNamespace(QIcon=lambda path: None),
+        'my_video_manager.ui': SimpleNamespace(MainWindow=lambda core: window),
+        'my_video_manager.single_instance': SimpleNamespace(SingleInstance=lambda *args: instance),
+        'my_video_manager.web_thumbnail': SimpleNamespace(register_thumbnail_scheme=lambda: None),
+        'my_video_manager.theme': SimpleNamespace(apply_theme=lambda app: None),
+        'my_video_manager.app_logging': SimpleNamespace(configure_app_logging=lambda directory: None),
+        'my_video_manager.backup_recovery': SimpleNamespace(open_with_backup_recovery=lambda *args: object()),
+    }
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(cuda_runtime.SubtitlePreparation, 'start_cleanup_if_ready',
+                        lambda self: calls.append(('cleanup', self.data_directory)))
+    assert __main__.main() == 0
+    assert calls == (['show', ('cleanup', tmp_path), 'exec'] if frozen else ['show', 'exec'])

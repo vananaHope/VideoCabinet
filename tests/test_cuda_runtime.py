@@ -252,16 +252,18 @@ def test_unresponsive_server_is_network(tmp_path, server, monkeypatch, stall):
 
 def test_matching_hf_cache_is_hashed_and_reused_without_model_download(tmp_path, server):
     service = preparation(tmp_path, server)
-    cached = tmp_path / "models/models--Systran--faster-whisper-large-v3/snapshots/test-revision"
+    legacy = legacy_model_files(tmp_path)
+    cached = tmp_path / "models/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/test-revision"
     cached.mkdir(parents=True)
     (cached / "model.bin").write_bytes(server[0].bodies["/model.bin"])
-    partial = tmp_path / 'models/large-v3/test-revision.partial'
+    partial = tmp_path / 'models/large-v3-turbo/test-revision.partial'
     partial.mkdir(parents=True)
     (partial / 'model.bin.part').write_bytes(b'incomplete')
     events = []
     result = service.prepare(progress=events.append)
     assert result.model_directory == cached
     assert not partial.exists()
+    assert all(not path.exists() for path in legacy)
     assert (cached / "ready.json").is_file()
     assert any(event.phase == "verify" and event.asset == "model.bin" for event in events)
     assert "/model.bin" not in server[0].requests
@@ -274,7 +276,7 @@ def test_matching_hf_cache_is_hashed_and_reused_without_model_download(tmp_path,
 @pytest.mark.parametrize("wrong", [b"x", b"bad whisper!"])
 def test_invalid_hf_cache_is_preserved_and_model_downloaded(tmp_path, server, wrong):
     service = preparation(tmp_path, server)
-    cached = tmp_path / "models/models--Systran--faster-whisper-large-v3/snapshots/test-revision"
+    cached = tmp_path / "models/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/test-revision"
     cached.mkdir(parents=True)
     (cached / "model.bin").write_bytes(wrong)
     result = service.prepare()
@@ -532,7 +534,7 @@ def test_cache_verification_uses_bytes_and_redownload_resets_progress(tmp_path, 
     from my_video_manager import cuda_runtime
     monkeypatch.setattr(cuda_runtime, '_CHUNK', 4)
     service = preparation(tmp_path, server)
-    cached = tmp_path / 'models/models--Systran--faster-whisper-large-v3/snapshots/test-revision'
+    cached = tmp_path / 'models/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/test-revision'
     cached.mkdir(parents=True)
     (cached / 'model.bin').write_bytes(b'x' * service.model_assets[0].size)
     events = []
@@ -545,3 +547,210 @@ def test_cache_verification_uses_bytes_and_redownload_resets_progress(tmp_path, 
     assert downloads[0].overall_completed == baseline
     assert downloads[1].overall_completed == baseline + 4
     assert downloads[-1].overall_completed == baseline + service.model_assets[0].size
+
+
+def legacy_model_files(root):
+    paths = [root / name for name in (
+        'models/large-v3/old-revision/model.bin',
+        'models/large-v3/another-revision/model.bin',
+        'models/large-v3/old-revision.partial/model.bin.part',
+        'models/large-v3.partial/model.bin.part',
+        'models/large-v3-old.partial/model.bin.part')]
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'previous model')
+    return paths
+
+
+def test_turbo_upgrade_reuses_cuda_and_only_removes_managed_legacy_models(tmp_path, server):
+    service = preparation(tmp_path, server)
+    ready = service.prepare()
+    # 직전 판의 완료 모델만 있는 상태. CUDA 완료본은 그대로 둔다.
+    ready.model_directory.parent.rename(tmp_path / 'models/large-v3')
+    legacy = legacy_model_files(tmp_path)
+    preserved = [tmp_path / name for name in (
+        'models/models--Systran--faster-whisper-large-v3/snapshots/old/model.bin',
+        'models/large-v3-turbo.partial/model.bin.part',
+        'models/large-v3-turbo-old.partial/model.bin.part',
+        'models/other-model/model.bin', 'video.mkv', 'library.sqlite3')]
+    for path in preserved:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'keep')
+    server[0].requests.clear()
+    assert service.status()['kind'] != 'ready'
+    events = []
+    result = service.prepare(progress=events.append)
+    assert result.model_directory == tmp_path / 'models/large-v3-turbo/test-revision'
+    assert server[0].requests == ['/model.bin']
+    assert {e.asset for e in events if e.phase == 'verify'} == {'model.bin'}
+    assert result.cuda_directories == ready.cuda_directories
+    assert (result.cuda_directories[0] / 'test.dll').read_bytes() == b'dll' * 800000
+    assert all(not path.exists() for path in legacy)
+    assert not (tmp_path / 'models/large-v3').exists()
+    assert all(path.read_bytes() == b'keep' for path in preserved)
+    assert service.prepared() == result
+
+
+@pytest.mark.parametrize('failure', ['network', 'hash_mismatch', 'cancel_download', 'cancel_verify', 'cancel_ready'])
+def test_failed_or_cancelled_turbo_preparation_keeps_legacy_models(tmp_path, server, failure):
+    service = preparation(tmp_path, server)
+    legacy = legacy_model_files(tmp_path)
+    cancellation = Event()
+    if failure == 'hash_mismatch':
+        server[0].bodies['/model.bin'] = b'x' * service.model_assets[0].size
+    def progress(event):
+        if event.asset == 'model.bin' and event.phase == 'download' and event.completed == 0 and failure == 'network':
+            server[0].status = 503
+        if ((event.asset == 'model.bin' or event.phase == 'ready')
+                and failure == 'cancel_' + event.phase and event.completed):
+            cancellation.set()
+    with pytest.raises(PreparationError) as caught:
+        service.prepare(cancellation=cancellation, progress=progress)
+    expected = 'server' if failure == 'network' else 'hash_mismatch' if failure == 'hash_mismatch' else 'cancelled'
+    assert caught.value.kind == expected
+    assert all(path.read_bytes() == b'previous model' for path in legacy)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="열린 파일의 삭제를 막는 Windows 파일 잠금")
+@pytest.mark.parametrize('retry', ['prepare', 'startup'])
+def test_cleanup_failure_is_logged_and_retried_without_affecting_ready(tmp_path, server, retry):
+    service = preparation(tmp_path, server)
+    legacy = legacy_model_files(tmp_path)
+    locked = tmp_path / 'models/large-v3/old-revision/model.bin'
+    with locked.open('rb') as handle:  # Windows에서는 열린 파일을 지울 수 없다.
+        result = service.prepare()
+        assert handle.read() == b'previous model'
+        assert locked.exists() and (tmp_path / 'models/large-v3').exists()
+        assert service.status()['kind'] == 'ready'
+        assert service.prepared() == result
+        assert locked.exists()  # 조회는 삭제하지 않는다.
+        logged = (tmp_path / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+        assert '이전 모델 폴더를 정리하지 못했습니다.' in logged
+        # 실제 파일 잠금 때문에 난 OSError(Errno 13)와 대상 경로가 기록된다.
+        assert '[Errno 13]' in logged
+        assert str(Path('models/large-v3/old-revision/model.bin')) in logged
+    requests = server[0].requests[:]
+    if retry == 'prepare':
+        assert service.prepare() == result
+    else:
+        worker = service.start_cleanup_if_ready()
+        assert worker is not None
+        worker.join(CHILD_READY_TIMEOUT)
+        assert not worker.is_alive()
+    assert all(not path.exists() for path in legacy)
+    assert not (tmp_path / 'models/large-v3').exists()
+    assert service.prepared() == result
+    assert server[0].requests == requests
+
+
+def test_startup_cleanup_runs_in_background_and_unprepared_start_preserves_old_model(tmp_path, server, monkeypatch):
+    from my_video_manager import cuda_runtime
+    service = preparation(tmp_path, server)
+    legacy = legacy_model_files(tmp_path)
+    assert service.start_cleanup_if_ready() is None
+    service.cleanup_previous_models()
+    assert all(path.exists() for path in legacy)
+    assert server[0].requests == []
+    service.prepare()
+    legacy_model_files(tmp_path)
+    entered, release = Event(), Event()
+    original = cuda_runtime.shutil.rmtree
+    def slow_delete(path, *args, **kwargs):
+        entered.set()
+        assert release.wait(CHILD_READY_TIMEOUT)
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(cuda_runtime.shutil, 'rmtree', slow_delete)
+    worker = service.start_cleanup_if_ready()
+    try:
+        assert worker is not None
+        assert entered.wait(CHILD_READY_TIMEOUT)
+        assert worker.is_alive()  # 시작 호출은 삭제를 기다리지 않고 반환했다.
+        assert service.status()['kind'] == 'ready'
+    finally:
+        release.set()
+        if worker is not None:
+            worker.join(CHILD_READY_TIMEOUT)
+    assert not worker.is_alive()
+    assert all(not path.exists() for path in legacy)
+
+
+def directory_link(link, destination, kind):
+    if sys.platform == 'win32' and kind == 'junction':
+        # Windows junction은 symlink 생성 권한 없이도 만들 수 있다. 둘 다 pytest 임시 폴더다.
+        quoted_link = "'" + str(link).replace("'", "''") + "'"
+        quoted_destination = "'" + str(destination).replace("'", "''") + "'"
+        subprocess.run(['powershell', '-NoProfile', '-Command',
+                        f'New-Item -ErrorAction Stop -ItemType Junction -Path {quoted_link} '
+                        f'-Target {quoted_destination} | Out-Null'],
+                       check=True, capture_output=True, timeout=CHILD_READY_TIMEOUT)
+    else:
+        try:
+            link.symlink_to(destination, target_is_directory=True)
+        except OSError as error:
+            if getattr(error, 'winerror', None) == 1314:
+                pytest.skip('Windows symlink 생성 권한 없음; junction은 별도로 검사')
+            raise
+
+
+@pytest.mark.parametrize('location', ['models', 'models/large-v3', 'models/large-v3.partial',
+                                      'models/large-v3/old/external'])
+@pytest.mark.parametrize('kind', ['junction', 'symlink'])
+def test_cleanup_never_follows_directory_links(tmp_path, server, location, kind):
+    data, outside = tmp_path / 'data', tmp_path / 'outside'
+    outside.mkdir()
+    sentinel = outside / 'keep.bin'
+    sentinel.write_bytes(b'untouched')
+    service = preparation(data, server)
+    service.prepare()
+    link = data / location
+    if location == 'models':
+        (data / 'models').rename(outside / 'prepared-models')
+        directory_link(link, outside / 'prepared-models', kind)
+        legacy_model_files(outside / 'other')
+        (outside / 'other/models/large-v3').rename(outside / 'prepared-models/large-v3')
+        protected = outside / 'prepared-models/large-v3/old-revision/model.bin'
+    else:
+        link.parent.mkdir(parents=True, exist_ok=True)
+        directory_link(link, outside, kind)
+        protected = sentinel
+    service.cleanup_previous_models()
+    assert sentinel.read_bytes() == b'untouched'
+    assert protected.is_file()
+    assert service.status()['kind'] == 'ready'
+    if location == 'models':
+        # 링크라서 건너뛴 이유가 남아야 사용자가 남은 이전 모델을 알 수 있다.
+        logged = (data / 'logs/subtitle-preparation.log').read_text(encoding='utf-8')
+        assert '이전 모델 정리를 건너뜁니다' in logged
+
+
+def test_cleanup_preserves_regular_file_named_like_old_model(tmp_path, server):
+    service = preparation(tmp_path, server)
+    service.prepare()
+    for name in ('large-v3', 'large-v3.partial'):
+        (tmp_path / 'models' / name).write_bytes(b'not a directory')
+    service.cleanup_previous_models()
+    assert (tmp_path / 'models/large-v3').read_bytes() == b'not a directory'
+    assert (tmp_path / 'models/large-v3.partial').read_bytes() == b'not a directory'
+
+
+def test_turbo_asset_pins_match_installed_engine_and_download_notice(tmp_path, monkeypatch):
+    from faster_whisper.utils import _MODELS
+    from my_video_manager.runtime_assets import (WHISPER_FILES, WHISPER_MODEL, WHISPER_REPOSITORY,
+                                                  WHISPER_REVISION, preparation_download_label)
+    assert WHISPER_MODEL == 'large-v3-turbo'
+    assert WHISPER_REPOSITORY == _MODELS['large-v3-turbo']
+    assert WHISPER_REVISION == '0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf'
+    assert [(a.name, a.size, a.sha256) for a in WHISPER_FILES] == [
+        ('config.json', 2263, 'b0253ea6c0d3bea6b1e19e91a02acfd3b53f4467362efcb5a3e6b16c9b3a9b7e'),
+        ('model.bin', 1617884929, 'e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da'),
+        ('preprocessor_config.json', 340, '7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711'),
+        ('tokenizer.json', 2710337, '297b13372ac43916285644fb9687add3cc62ee2a1adb60da3dc25cc94c1871fd'),
+        ('vocabulary.json', 1068114, 'c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1'),
+    ]
+    assert all(a.url == f'https://huggingface.co/{WHISPER_REPOSITORY}/resolve/{WHISPER_REVISION}/{a.name}'
+               for a in WHISPER_FILES)
+    assert sum(a.size for a in CUDA_WHEELS + WHISPER_FILES) == 2873840566
+    assert preparation_download_label() == '약 2.9 GB'
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    core = AppCore(media=None, clock=datetime.now, database=tmp_path / 'library.sqlite3')
+    assert '약 2.9 GB' in core.subtitle_preparation_notice()
