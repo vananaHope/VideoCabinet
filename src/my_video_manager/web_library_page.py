@@ -34,12 +34,12 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.bridge = LibraryBridge(self)
         self.focus_requested = self.bridge.libraryFocusRequested
         host.register_page(self)
-        window.subtitles.video_changed.connect(self.refresh_details)
-        window.translations.video_changed.connect(self.refresh_details)
+        window.subtitles.video_changed.connect(self.refresh_subtitle_details)
+        window.translations.video_changed.connect(self.refresh_subtitle_details)
 
-    def payload(self):
+    def payload(self, *, preserve_selection=False):
         return dict(videos=self.cards, tags=self.tags, scanning=self.worker is not None, folders=self.index.folders if self.index else [],
-                    keyBindings=key_bindings_data(self.core.key_bindings()), **self.view_payload())
+                    keyBindings=key_bindings_data(self.core.key_bindings()), preserveSelection=preserve_selection, **self.view_payload())
 
     def view_payload(self):
         return dict(visibleIds=self.visible_ids, selectedId=self.selected_id, options=self.options,
@@ -89,14 +89,19 @@ class WebLibraryPage(LibraryOperations, WebPageController):
     def return_from_playback(self):
         self.refresh(focus=True)
 
-    def refresh_details(self, changed_video_id=None):
+    def refresh_subtitle_details(self, video_id):
+        # 완료 알림은 전송 중 사용자가 바꾼 선택을 되돌리지 않는다.
+        # 전경 작업·재생 복귀의 명시적인 선택 변경과 구별한다.
+        self.refresh_details(video_id, preserve_selection=True)
+
+    def refresh_details(self, changed_video_id=None, *, preserve_selection=False):
         # 자막·번역·하이라이트 변경은 현재 조건의 결과에도 즉시 반영한다.
         if changed_video_id is not None and self.snapshot is not None:
             self.index = self.core.library_view_index(self.snapshot)
             self.apply_filters()
             for card in self.cards:
                 card['hasSubtitles'] = card['id'] in self.index.original
-            self.bridge.libraryChanged.emit(encode(self.payload()))
+            self.bridge.libraryChanged.emit(encode(self.payload(preserve_selection=preserve_selection)))
         if self.selected_id is not None and (changed_video_id is None or changed_video_id == self.selected_id):
             self.bridge.libraryDetailsChanged.emit(self.selected_id)
         self.flush_thumbnails()

@@ -227,6 +227,7 @@ export interface LibraryData {
   tags: Array<TagUsageData>
   visibleIds: Array<number>
   selectedId: number | null
+  preserveSelection: boolean
   scanning: boolean
   options: LibraryViewOptions
   folders: Array<LibraryFolder>

@@ -242,22 +242,28 @@ def test_detail_panel_shows_no_speech_and_translation_skip_reason(window_factory
     assert '번역 자막 없음 · 원어 자막 줄이 없어 만들지 않았습니다.' in text
     # 자막 완료 push가 WebChannel에서 늦게 전달돼도 그사이 고른 영상은 유지한다.
     # 실제 공개 신호가 만든 snapshot 한 개만 보류하고 나머지 메시지는 통과시킨다.
-    js("""(() => {
-      const transport = qt.webChannelTransport, receive = transport.onmessage;
-      transport.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        if (data.type === 1 && data.object === 'library' && typeof data.args?.[0] === 'string'
-            && JSON.parse(data.args[0]).videos) {
-          transport.onmessage = receive;
-          window.releaseLibraryUpdate = () => receive.call(transport, event);
-        } else receive.call(transport, event);
-      };
-    })()""")
-    window.subtitles.video_changed.emit(auto)
-    wait_for(lambda: js("typeof window.releaseLibraryUpdate === 'function'"))
+    def hold_update(signal, video_id):
+        js("""(() => {
+          window.releaseLibraryUpdate = null;
+          window.libraryUpdateRendered = false;
+          const transport = qt.webChannelTransport, receive = transport.onmessage;
+          transport.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === 1 && data.object === 'library' && typeof data.args?.[0] === 'string'
+                && JSON.parse(data.args[0]).videos) {
+              transport.onmessage = receive;
+              window.releaseLibraryUpdate = () => receive.call(transport, event);
+            } else receive.call(transport, event);
+          };
+        })()""")
+        signal.emit(video_id)
+        wait_for(lambda: js("typeof window.releaseLibraryUpdate === 'function'"))
+
+    hold_update(window.subtitles.video_changed, auto)
     text = select(specified, '원어: ja · 말소리를 찾지 못했습니다.', release_update=True)
     assert '번역 자막 없음 · 원어 자막 줄이 없어 만들지 않았습니다.' in text
-    text = select(spoken, '원어: en · 1줄')
+    hold_update(window.translations.video_changed, specified)
+    text = select(spoken, '원어: en · 1줄', release_update=True)
     assert '말소리' not in text and '만들지 않았습니다' not in text
 
     # 다시 받아써서 말소리를 찾으면 선택 영상의 안내가 정상 요약으로 바뀐다.
@@ -268,3 +274,18 @@ def test_detail_panel_shows_no_speech_and_translation_skip_reason(window_factory
     window.subtitles.video_changed.emit(auto)
     wait_for(lambda: '원어: en · 1줄' in details())
     assert '말소리' not in details() and '만들지 않았습니다' not in details()
+
+    # 완료 갱신에서 선택이 결과 밖으로 빠지면 코어가 정한 대체 선택을 쓴다.
+    page.bridge.view(json.dumps({**page.options, 'query': core.video(specified).title}))
+    window.subtitles.video_changed.emit(auto)
+    wait_for(lambda: js("document.getElementById('library-grid').getAttribute('aria-activedescendant')") == f'video-{specified}')
+    wait_for(lambda: '원어: ja · 말소리를 찾지 못했습니다.' in details())
+    assert page.selected_id == specified
+
+    # 일반 갱신/재생 복귀는 현재 웹 선택보다 코어의 명시적인 선택을 우선한다.
+    page.bridge.view(json.dumps({**page.options, 'query': ''}))
+    page.bridge.select(spoken)
+    page.return_from_playback()
+    wait_for(lambda: js("document.getElementById('library-grid').getAttribute('aria-activedescendant')") == f'video-{spoken}')
+    wait_for(lambda: '원어: en · 1줄' in details())
+    assert page.selected_id == spoken
