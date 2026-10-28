@@ -93,13 +93,60 @@ def test_child_json_and_arguments_are_decoded(tmp_path):
 import json, sys
 assert sys.argv[1].endswith('영상.mkv')
 assert sys.argv[3] == 'ko'
-print(json.dumps({'spoken_language':'ko', 'language_probability':0.9,
+print(json.dumps({'spoken_language':'ko', 'language_probability':0.9, 'model':'custom-model',
                   'segments':[{'start':0.5, 'end':1.25, 'text':'안녕'}]}, ensure_ascii=False))
 """)
     result = transcriber.transcribe(tmp_path / "영상.mkv", "ko")
     assert result.spoken_language == "ko" and result.language_probability == 0.9
     assert result.segments[0].text == "안녕"
     assert result.segments[0].start == 0.5
+    assert result.model == "custom-model"
+
+
+@pytest.mark.parametrize("model", [None, 1, True, [], {}, "", " \t\n"])
+def test_invalid_model_in_child_response_is_format_error(tmp_path, model):
+    payload = {"spoken_language": "en", "segments": [], "model": model}
+    transcriber = adapter(tmp_path, f"print({json.dumps(payload)!r})")
+    with pytest.raises(TranscriberError) as caught:
+        transcriber.transcribe(tmp_path / "video", None)
+    assert caught.value.kind == "other"
+    assert "받아쓰기 응답 형식 오류" in caught.value.detail
+
+
+def test_missing_model_in_child_response_is_format_error(tmp_path):
+    transcriber = adapter(tmp_path, 'print(\'{"spoken_language":"en","segments":[]}\')')
+    with pytest.raises(TranscriberError) as caught:
+        transcriber.transcribe(tmp_path / "video", None)
+    assert "받아쓰기 응답 형식 오류" in caught.value.detail
+
+
+@pytest.mark.parametrize("model", ["large-v3", "future-model"])
+@pytest.mark.parametrize("no_speech", [False, True])
+def test_child_entry_point_reports_the_downloaded_model(tmp_path, model, no_speech):
+    transcriber = adapter(tmp_path, f'''
+import sys
+from types import SimpleNamespace
+from my_video_manager import transcription
+transcription.TRANSCRIPTION_MODEL = {model!r}
+transcription.prepare_cuda_runtime = lambda *_: None
+sys.modules['ctranslate2'] = SimpleNamespace(get_cuda_device_count=lambda: 1)
+def download_model(name, **kwargs):
+    assert name == {model!r}
+    return 'fake-model-path'
+def make_model(path, **kwargs):
+    assert path == 'fake-model-path'
+    segments = [] if {no_speech!r} else [SimpleNamespace(start=1, end=2, text='hello')]
+    return SimpleNamespace(transcribe=lambda *a, **kw: (
+        iter(segments), SimpleNamespace(language='en', language_probability=0.9)))
+sys.modules['faster_whisper'] = SimpleNamespace(WhisperModel=make_model)
+sys.modules['faster_whisper.audio'] = SimpleNamespace(decode_audio=lambda _: [])
+sys.modules['faster_whisper.utils'] = SimpleNamespace(download_model=download_model)
+raise SystemExit(transcription.main())
+''')
+    result = transcriber.transcribe(tmp_path / "video", None)
+    assert result.model == model
+    assert result.spoken_language == "en"
+    assert bool(result.segments) is not no_speech
 
 
 @pytest.mark.parametrize("kind, message", [("gpu_unavailable", "GPU"), ("decode", "음성"),

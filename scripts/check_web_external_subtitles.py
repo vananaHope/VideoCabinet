@@ -122,7 +122,7 @@ def cue(text='찾을 장면', start='00:00:12,125'):
 
 class Transcriber:
     def transcribe(self, path, spoken_language, **kwargs):
-        return TranscriberResult('en', (TranscriptSegment(7, 9, '찾을 장면 원어'),))
+        return TranscriberResult('en', (TranscriptSegment(7, 9, '찾을 장면 원어'),), model="large-v3")
 
 
 class Translator:

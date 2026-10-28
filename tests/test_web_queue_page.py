@@ -311,7 +311,7 @@ def test_no_speech_completion_status_and_tray_notice(setup, qapp, monkeypatch):
     from my_video_manager.subtitles import TranscriberResult
     from my_video_manager.ui import MainWindow
     core, adapter, (a, _) = setup
-    adapter.result = TranscriberResult("nn", (), 0.61)
+    adapter.result = TranscriberResult("nn", (), 0.61, model="large-v3")
     window = MainWindow(core)
     try:
         window.subtitles.timer.stop()

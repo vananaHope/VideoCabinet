@@ -144,7 +144,7 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 4
+LIBRARY_DB_VERSION = 5
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
@@ -186,6 +186,12 @@ def migrate_library(db, *, before_upgrade=None) -> None:
             source TEXT NOT NULL, target TEXT NOT NULL, ordinal INTEGER NOT NULL,
             PRIMARY KEY(queue_id, source))""")
         db.execute("PRAGMA user_version = 4")
+    if version < 5:
+        # 자막 모듈을 아직 시작하지 않은 라이브러리에는 이 테이블이 없다.
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='transcripts'").fetchone():
+            # 이전 릴리스의 모델은 역사적 사실이므로 현재 어댑터 상수를 쓰지 않는다.
+            db.execute("ALTER TABLE transcripts ADD COLUMN model TEXT NOT NULL DEFAULT 'large-v3'")
+        db.execute("PRAGMA user_version = 5")
 
 
 class Library:

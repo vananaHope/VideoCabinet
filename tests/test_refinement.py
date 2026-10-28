@@ -6,6 +6,7 @@ import sys
 
 import pytest
 
+from my_video_manager.library import LIBRARY_DB_VERSION
 from my_video_manager.core import AppCore
 from my_video_manager.review import ReviewConfirmationRequired
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment, TranscriptLine
@@ -34,7 +35,7 @@ class Adapter:
 def refinement(tmp_path):
     transcriber, adapter = Transcriber(), Adapter()
     transcriber.result = TranscriberResult('ko', tuple(
-        TranscriptSegment(i * 2, i * 2 + 1, f'한빛 {i} 할수 있어요.') for i in range(5)))
+        TranscriptSegment(i * 2, i * 2 + 1, f'한빛 {i} 할수 있어요.') for i in range(5)), model="large-v3")
     now = [datetime(2026, 10, 15, tzinfo=timezone.utc)]
 
     def reopen():
@@ -69,7 +70,7 @@ def test_automatic_kind_and_independent_storage(refinement, language):
     assert adapter.calls[1][2]['glossary'] == (GlossaryEntry('한빛', '한빛'),)
     assert len(adapter.calls[1][2]['context']) == 2
     with sqlite3.connect(core.database) as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 4
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION
 
 
 def test_existing_korean_requires_explicit_bulk_or_individual_request(refinement):
@@ -168,7 +169,7 @@ def test_range_replacement_deletes_old_refinement_and_only_processes_new_lines(r
     old = source(core, vid)
     finish(core)
     core.edit_translation_line(vid, old.lines[0].id, '직접 수정')
-    transcriber.result = TranscriberResult('ko', (TranscriptSegment(0, 1, '새로 할수 있어요'),))
+    transcriber.result = TranscriberResult('ko', (TranscriptSegment(0, 1, '새로 할수 있어요'),), model="large-v3")
     adapter.calls.clear()
     core.request_subtitle_range(vid, 0, 1)
     assert core.process_next_subtitle().state == 'completed'
@@ -267,7 +268,7 @@ def test_generation_change_during_refinement_drops_old_result(refinement):
 def test_refinement_format_shrink_failure_retry_and_settings_snapshot(refinement):
     core, transcriber, adapter, _, reopen = refinement
     vid = core.videos()[0].id
-    transcriber.result = TranscriberResult('ko', tuple(TranscriptSegment(i, i+1, '원어') for i in range(25)))
+    transcriber.result = TranscriberResult('ko', tuple(TranscriptSegment(i, i+1, '원어') for i in range(25)), model="large-v3")
     # 공개 생성자 기본 묶음으로 실패 시 줄이기를 검사한다.
     core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database,
                    transcriber=transcriber, translator=adapter)
@@ -355,7 +356,7 @@ def test_refinement_blank_response_keeps_original_and_translation_rejects(refine
 @pytest.mark.parametrize('language,segments', [('und', (TranscriptSegment(0, 1, '음'),)), ('ko', ())])
 def test_completed_without_result_is_transcription(refinement, language, segments):
     core, transcriber, _, _, _ = refinement
-    transcriber.result = TranscriberResult(language, segments)
+    transcriber.result = TranscriberResult(language, segments, model="large-v3")
     vid = core.videos()[0].id
     source(core, vid, None)
     assert core.subtitle_queue_items()[0].task_label == '받아쓰기'
@@ -401,7 +402,7 @@ def test_search_prefers_matching_refinement_once_in_time_order(refinement, query
     core, transcriber, _, _, _ = refinement
     vid = core.videos()[0].id
     transcriber.result = TranscriberResult('ko', tuple(
-        TranscriptSegment(i, i + 1, f'한빛 공통 원어 {i}') for i in range(4)))
+        TranscriptSegment(i, i + 1, f'한빛 공통 원어 {i}') for i in range(4)), model="large-v3")
     original = source(core, vid)
     finish(core)
     # 원어/결과 양쪽 일치, 원어만 일치, 결과만 일치, 다듬은 결과 없음.
@@ -424,7 +425,7 @@ def test_search_limit_counts_unique_refined_lines(refinement):
     core, transcriber, _, _, _ = refinement
     vid = core.videos()[0].id
     transcriber.result = TranscriberResult('ko', tuple(
-        TranscriptSegment(i, i + 1, f'대량일치 원어 {i}') for i in range(501)))
+        TranscriptSegment(i, i + 1, f'대량일치 원어 {i}') for i in range(501)), model="large-v3")
     original = source(core, vid)
     with sqlite3.connect(core.database) as db:
         db.executemany('INSERT INTO translation_lines VALUES (?,?)',

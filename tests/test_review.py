@@ -20,7 +20,7 @@ class Media:
 
 class Transcriber:
     def __init__(self):
-        self.result = TranscriberResult("en", tuple(TranscriptSegment(i, i + 2, f"source {i}") for i in (0, 10, 20, 30)))
+        self.result = TranscriberResult("en", tuple(TranscriptSegment(i, i + 2, f"source {i}") for i in (0, 10, 20, 30)), model="large-v3")
         self.calls = []
         self.error = None
 
@@ -191,7 +191,7 @@ def test_range_preserves_nonoverlapping_ids_and_reviews(setup, count):
     before = core.transcript(vid)
     core.edit_translation_line(vid, before.lines[0].id, "유지")
     core.edit_translation_line(vid, before.lines[1].id, "삭제")
-    transcriber.result = TranscriberResult("en", tuple(TranscriptSegment(i, i + .5, f"new {i}") for i in range(count)))
+    transcriber.result = TranscriberResult("en", tuple(TranscriptSegment(i, i + .5, f"new {i}") for i in range(count)), model="range-model")
     core.request_subtitle_range(vid, 5, 20)
     with pytest.raises(ValueError, match="재생성"):
         core.edit_transcript_line(vid, before.lines[0].id, "blocked")
@@ -202,6 +202,7 @@ def test_range_preserves_nonoverlapping_ids_and_reviews(setup, count):
     assert transcriber.calls[-1]["duration"] == 15
     after = core.transcript(vid)
     assert after.id == before.id
+    assert after.model == before.model == "large-v3"
     assert after.lines[0] == before.lines[0]
     assert after.lines[-2:] == before.lines[-2:]  # 끝 시각에 시작하는 줄도 유지
     assert len(after.lines) == 3 + count
@@ -231,7 +232,7 @@ def test_range_failure_or_cancel_keeps_original_and_translation(setup, error):
 def test_invalid_range_result_rolls_back_deletions(setup):
     core, vid, transcriber, _, _, _ = setup
     before = core.transcript(vid)
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, float("nan"), "invalid"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, float("nan"), "invalid"),), model="large-v3")
     core.request_subtitle_range(vid, 1, 20)
     assert core.process_next_subtitle().state == "failed"
     assert core.transcript(vid) == before
@@ -248,7 +249,7 @@ def test_invalid_range_is_rejected(setup, start, end):
 @pytest.mark.parametrize("language", ["und"])
 def test_noneligible_source_can_be_edited_and_range_regenerated_without_translation(setup, language):
     core, vid, transcriber, translator, _, _ = setup
-    transcriber.result = TranscriberResult(language, transcriber.result.segments)
+    transcriber.result = TranscriberResult(language, transcriber.result.segments, model="large-v3")
     core.request_subtitles(vid)
     core.process_next_subtitle()
     line = core.transcript(vid).lines[0]
@@ -256,7 +257,7 @@ def test_noneligible_source_can_be_edited_and_range_regenerated_without_translat
     assert not core.translation_queue()
     with pytest.raises(ValueError):
         core.edit_translation_line(vid, line.id, "번역")
-    transcriber.result = TranscriberResult(language, (TranscriptSegment(0, 1, "새 줄"),))
+    transcriber.result = TranscriberResult(language, (TranscriptSegment(0, 1, "새 줄"),), model="large-v3")
     core.request_subtitle_range(vid, 0, 5)
     assert core.process_next_subtitle().state == "completed"
     assert not core.translation_queue()
@@ -367,7 +368,7 @@ def test_core_range_passes_start_and_duration_to_process_adapter(setup, tmp_path
 import sys, json
 assert sys.argv[3] == 'en'
 assert list(map(float, sys.argv[4:])) == [10, 10]
-print(json.dumps({'spoken_language': 'en', 'segments': [{'start': 0.5, 'end': 2, 'text': 'range'}]}))
+print(json.dumps({'spoken_language': 'en', 'model': 'large-v3', 'segments': [{'start': 0.5, 'end': 2, 'text': 'range'}]}))
 ''', encoding="utf-8")
     core = AppCore(media=Media(), clock=lambda: datetime.now(timezone.utc), database=core.database,
                    transcriber=FasterWhisperTranscriber(tmp_path / "models", command=(sys.executable, str(worker))))
@@ -437,7 +438,7 @@ def test_search_survives_range_replacement_and_repeated_two_phase_reordering(set
         old_ids = {line.id for line in core.transcript(vid).lines}
         word = f"구간세대{generation}"
         transcriber.result = TranscriberResult("en", tuple(
-            TranscriptSegment(i * 2 + .5, i * 2 + 1.5, f"{word} 문장{i}") for i in range(count)))
+            TranscriptSegment(i * 2 + .5, i * 2 + 1.5, f"{word} 문장{i}") for i in range(count)), model="large-v3")
         core.request_subtitle_range(vid, 10, 20)
         assert core.process_next_subtitle().state == "completed"
         current = core.transcript(vid)
@@ -473,7 +474,7 @@ def test_search_removes_all_reviewed_lines_on_whole_regeneration(setup):
     assert_search_hits(core, vid, "이전검수", [("transcript", "이전 검수 원어", 10)])
     assert_search_hits(core, vid, "이전직접", [("translation", "이전 직접 번역", 10)])
     assert len(core.search("source").results) == 6
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(7.125, 9, "전체 재생성 문장"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(7.125, 9, "전체 재생성 문장"),), model="large-v3")
     core.request_subtitles(vid)
     assert core.process_next_subtitle().state == "completed"
     assert {line.id for line in old_lines}.isdisjoint(line.id for line in core.transcript(vid).lines)
@@ -494,14 +495,14 @@ def test_search_removes_all_reviewed_lines_on_whole_regeneration(setup):
 def test_range_expands_across_both_boundaries_without_loss_or_duplicates(setup, old_start, old_end, bounds):
     core, vid, transcriber, _, _, reopen = setup
     transcriber.result = TranscriberResult("en", (
-        TranscriptSegment(old_start, old_end, "boundary old"), TranscriptSegment(20, 22, "retained")))
+        TranscriptSegment(old_start, old_end, "boundary old"), TranscriptSegment(20, 22, "retained")), model="large-v3")
     core.request_subtitles(vid)
     core.process_next_subtitle()
     finish(core)
     before = core.transcript(vid)
     assert core.subtitle_range_bounds(vid, 5, 10) == bounds
     transcriber.result = TranscriberResult("en", (
-        TranscriptSegment(old_start - bounds[0], old_end - bounds[0], "boundary new"),))
+        TranscriptSegment(old_start - bounds[0], old_end - bounds[0], "boundary new"),), model="large-v3")
     core.request_subtitle_range(vid, 5, 10)
     assert core.process_next_subtitle().state == "completed"
     assert (transcriber.calls[-1]["start"], transcriber.calls[-1]["duration"]) == (bounds[0], bounds[1] - bounds[0])
@@ -517,14 +518,14 @@ def test_range_expands_across_both_boundaries_without_loss_or_duplicates(setup, 
 def test_range_expands_transitively_and_clips_output_to_video_bounds(setup):
     core, vid, transcriber, *_ = setup
     transcriber.result = TranscriberResult("en", tuple(
-        TranscriptSegment(start, end, f"old {start}") for start, end in ((0, 4), (4, 10), (9, 50), (49, 105))))
+        TranscriptSegment(start, end, f"old {start}") for start, end in ((0, 4), (4, 10), (9, 50), (49, 105))), model="large-v3")
     core.request_subtitles(vid)
     core.process_next_subtitle()
     before = core.transcript(vid)
     assert core.subtitle_range_bounds(vid, 5, 6) == (4, 100)
     transcriber.result = TranscriberResult("en", (
         TranscriptSegment(-2, 2, "front"), TranscriptSegment(94, 110, "end"),
-        TranscriptSegment(100, 102, "outside")))
+        TranscriptSegment(100, 102, "outside")), model="large-v3")
     core.request_subtitle_range(vid, 5, 6)
     assert core.process_next_subtitle().state == "completed"
     after = core.transcript(vid)
@@ -548,7 +549,7 @@ def test_srt_normalizes_blank_lines_for_export_and_playback(setup, translated, e
         stored = core.translation(vid) if translated else core.transcript(vid)
         assert stored.lines[0].text == normalized
     else:
-        transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, raw),))
+        transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, raw),), model="large-v3")
         core.request_subtitles(vid)
         core.process_next_subtitle()
         translator.translate = lambda lines, language, **kwargs: tuple(TranslatedLine(line.id, raw) for line in lines)
@@ -584,7 +585,7 @@ def test_empty_exports_are_rejected(setup):
     core, vid, transcriber, *_ = setup
     with pytest.raises(ValueError, match="^내보낼 자막 줄이 없습니다$"):
         core.subtitle_export(vid, translated=True)
-    transcriber.result = TranscriberResult("en", ())
+    transcriber.result = TranscriberResult("en", (), model="large-v3")
     core.request_subtitle_range(vid, 0, 100)
     core.process_next_subtitle()
     for translated in (False, True):
@@ -657,7 +658,7 @@ def test_range_preserves_translation_backoff_failure_and_completed_batches(setup
             time[0] += timedelta(minutes=16)
         core.process_next_translation()
     before = core.translation_queue()[0]
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 1, "added"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 1, "added"),), model="large-v3")
     core.request_subtitle_range(vid, 25, 27)
     core.process_next_subtitle()
     core = reopen()
@@ -679,7 +680,7 @@ def test_range_queue_reports_progress_and_blocks_edits_until_translation(setup):
     core, vid, transcriber, *_ = setup
     finish(core)
     original = core.transcript(vid)
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "new range"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "new range"),), model="large-v3")
     original_call = transcriber.transcribe
     def transcribe(*args, **kwargs):
         assert kwargs["start"] == 10 and kwargs["duration"] == 10
@@ -723,7 +724,7 @@ def test_active_range_cancellation_preserves_review_and_original_lines(setup, re
     assert core.translation(vid) == translated
     assert core.reviewed_line_count(vid) == 1
     transcriber.transcribe = original_call
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "retried"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "retried"),), model="large-v3")
     core = reopen()
     if remove:
         assert not core.subtitle_queue_items()
@@ -747,7 +748,7 @@ def test_interrupted_range_recovers_same_bounds_and_keeps_reviews(setup):
     assert core.subtitle_queue_items()[0].state == "transcribing"
     assert core.transcript(vid) == before
     transcriber.error = None
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "recovered"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "recovered"),), model="large-v3")
     core = reopen()
     assert core.subtitle_queue_items()[0].state == "queued"
     core.process_next_subtitle()
@@ -770,7 +771,7 @@ def test_bulk_retry_preserves_failed_range_and_outside_review(setup):
     assert result.retried == 1 and not result.skipped
     assert core.subtitle_queue_items()[0].state == "queued"
     transcriber.error = None
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "retry"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "retry"),), model="large-v3")
     core.process_next_subtitle()
     assert (transcriber.calls[-1]["start"], transcriber.calls[-1]["duration"]) == (10, 10)
     after = core.transcript(vid)
@@ -833,7 +834,7 @@ def test_replacing_active_translation_request_discards_old_result_and_queues_new
     def change():
         assert core.subtitle_queue_items()[0].state == "translating"
         if range_change:
-            transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "second change"),))
+            transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "second change"),), model="large-v3")
             core.request_subtitle_range(vid, 10, 20)
             core.process_next_subtitle()
         else:
@@ -885,14 +886,14 @@ def test_failed_range_retry_reports_unscanned_missing_file_without_changing_requ
     core.add_file(path)
     assert core.retry_failed_subtitles().retried == 1
     transcriber.error = None
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "retried"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(1, 2, "retried"),), model="large-v3")
     core.process_next_subtitle()
     assert (transcriber.calls[-1]["start"], transcriber.calls[-1]["duration"]) == (10, 10)
 
 
 def test_review_line_after_video_end_is_clamped_for_play_and_seek(setup):
     core, vid, transcriber, _, _, _ = setup
-    transcriber.result = TranscriberResult("en", (TranscriptSegment(105, 107, "late line"),))
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(105, 107, "late line"),), model="large-v3")
     core.request_subtitles(vid)
     assert core.process_next_subtitle().state == "completed"
     line = core.transcript(vid).lines[0]

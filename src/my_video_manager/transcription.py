@@ -13,6 +13,9 @@ from threading import Event
 from .subtitles import TranscriberCancelled, TranscriberError, TranscriberResult, TranscriptSegment
 
 
+TRANSCRIPTION_MODEL = "large-v3"
+
+
 @lru_cache(maxsize=None)
 def prepare_cuda_runtime(data_directory: Path | None = None):
     if sys.platform != "win32":
@@ -94,9 +97,12 @@ class FasterWhisperTranscriber:
                     raise TranscriberError("other", detail)
             try:
                 payload = json.loads(output)
+                model = payload["model"]
+                if not isinstance(model, str) or not model.strip():
+                    raise ValueError("모델 이름은 비어 있지 않은 문자열이어야 합니다.")
                 return TranscriberResult(payload["spoken_language"],
                                          tuple(TranscriptSegment(**s) for s in payload["segments"]),
-                                         float(payload.get("language_probability", 1.0)))
+                                         float(payload.get("language_probability", 1.0)), model=model)
             except (ValueError, KeyError, TypeError) as error:
                 raise TranscriberError("other", f"받아쓰기 응답 형식 오류: {error}") from error
         finally:
@@ -147,7 +153,7 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
         raise TranscriberError("decode", str(error)) from error
     try:
         model_path = (str(prepared.model_directory) if prepared else
-                      download_model("large-v3", cache_dir=str(model_directory)))
+                      download_model(TRANSCRIPTION_MODEL, cache_dir=str(model_directory)))
     except Exception as error:
         raise TranscriberError("model_download", str(error)) from error
     try:
@@ -162,7 +168,7 @@ def transcribe_on_gpu(path: Path, model_directory: Path, spoken_language: str | 
             lines.append(TranscriptSegment(segment.start, min(segment.end, duration) if duration is not None else segment.end, segment.text.strip()))
         if progress:
             progress(segment.end)
-    return TranscriberResult(info.language, tuple(lines), info.language_probability)
+    return TranscriberResult(info.language, tuple(lines), info.language_probability, model=TRANSCRIPTION_MODEL)
 
 
 def report_progress(seconds):

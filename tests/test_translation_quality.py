@@ -40,7 +40,7 @@ def quality(tmp_path):
 
     def create(count=500, *, batch_size=None, translator=adapter, transport=None):
         transcriber.result = TranscriberResult('en', tuple(
-            TranscriptSegment(i, i + 1, f'Jon line {i}') for i in range(count)))
+            TranscriptSegment(i, i + 1, f'Jon line {i}') for i in range(count)), model="large-v3")
         core = AppCore(media=Media(), clock=lambda: clock[0], database=tmp_path / 'data/library.sqlite3',
                        transcriber=transcriber, translator=translator, translation_batch_size=batch_size,
                        translation_transport=transport)

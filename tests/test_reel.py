@@ -681,7 +681,7 @@ def test_subtitle_language_survives_same_video_reel_moves_but_resets_on_new_vide
 
     class Transcriber:
         def transcribe(self, *args, **kwargs):
-            return TranscriberResult("en", (TranscriptSegment(0, 100, "source"),))
+            return TranscriberResult("en", (TranscriptSegment(0, 100, "source"),), model="large-v3")
 
     class Translator:
         def translate(self, lines, language, **kwargs):

@@ -466,7 +466,7 @@ def test_go_response_timeout_shrinks_then_uses_existing_retry_and_recovery(tmp_p
 
     transcriber = Transcriber()
     transcriber.result = TranscriberResult(language, tuple(
-        TranscriptSegment(i, i + 1, f'Line {i}') for i in range(20)))
+        TranscriptSegment(i, i + 1, f'Line {i}') for i in range(20)), model="large-v3")
     http = SlowHTTP()
     core = AppCore(database=tmp_path / 'data/library.sqlite3', media=Media(), transcriber=transcriber,
                    clock=lambda: datetime(2026, 10, 15, tzinfo=timezone.utc),

@@ -133,7 +133,7 @@ def test_completed_subtitles_refresh_unselected_card_badge(window_factory, core)
 
     class Transcriber:
         def transcribe(self, *args, **kwargs):
-            return TranscriberResult('ko', ())
+            return TranscriberResult('ko', (), model="large-v3")
 
     writer = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
                      database=core.database, transcriber=Transcriber())
@@ -190,7 +190,7 @@ def test_detail_panel_shows_no_speech_and_translation_skip_reason(window_factory
     from test_web_statistics import wait_for
 
     class Transcriber:
-        result = TranscriberResult('nn', (), 0.61)
+        result = TranscriberResult('nn', (), 0.61, model="large-v3")
 
         def transcribe(self, *args, **kwargs):
             return self.result
@@ -199,7 +199,7 @@ def test_detail_panel_shows_no_speech_and_translation_skip_reason(window_factory
     writer = AppCore(media=Media(), clock=lambda: datetime(2026, 1, 1, tzinfo=timezone.utc),
                      database=core.database, transcriber=transcriber)
     auto, specified, spoken = (v.id for v in core.videos())
-    speech = TranscriberResult('en', (TranscriptSegment(0, 1, 'Hello'),))
+    speech = TranscriberResult('en', (TranscriptSegment(0, 1, 'Hello'),), model="large-v3")
     for video_id, language, result in ((auto, None, transcriber.result), (specified, 'ja', transcriber.result),
                                        (spoken, 'en', speech)):
         transcriber.result = result

@@ -24,7 +24,7 @@ class FakeTranscriber:
     def __init__(self):
         self.calls = []
         self.result = TranscriberResult("en", (TranscriptSegment(1.25, 3.5, "Hello"),
-                                           TranscriptSegment(5, 7, "World")))
+                                           TranscriptSegment(5, 7, "World")), model="large-v3")
         self.error = None
 
     def transcribe(self, path, spoken_language, *, cancellation, progress=None):
@@ -50,6 +50,21 @@ def setup(tmp_path):
 
 def reopen(core, adapter):
     return AppCore(media=FakeMedia(), clock=lambda: NOW, transcriber=adapter, database=core.database)
+
+
+@pytest.mark.parametrize("no_speech", [False, True])
+def test_full_transcription_records_result_model_and_replaces_it_on_regeneration(setup, no_speech):
+    core, adapter, (video, _) = setup
+    segments = () if no_speech else adapter.result.segments
+    for model in ("large-v3", "future-model"):
+        adapter.result = TranscriberResult("en", segments, model=model)
+        core.request_subtitles(video.id)
+        assert core.process_next_subtitle().state == "completed"
+        transcript = core.transcript(video.id)
+        assert transcript.model == model
+        assert transcript.no_speech is no_speech
+        core = reopen(core, adapter)
+        assert core.transcript(video.id) == transcript
 
 
 def test_queue_persists_fifo_and_duplicate_request_preserves_order(setup):
@@ -127,7 +142,7 @@ def test_empty_speech_is_success_and_replaces_old_lines(setup):
     core, adapter, (a, _) = setup
     core.request_subtitles(a.id)
     core.process_next_subtitle()
-    adapter.result = TranscriberResult("en", ())
+    adapter.result = TranscriberResult("en", (), model="large-v3")
     core.request_subtitles(a.id)
     assert core.process_next_subtitle().state == "completed"
     assert core.transcript(a.id).lines == ()
@@ -157,7 +172,7 @@ def test_invalid_adapter_result_does_not_replace_saved_transcript(setup, segment
     core.request_subtitles(a.id)
     core.process_next_subtitle()
     old = core.transcript(a.id)
-    adapter.result = TranscriberResult("en", (segment,))
+    adapter.result = TranscriberResult("en", (segment,), model="large-v3")
     core.request_subtitles(a.id)
     assert core.process_next_subtitle().state == "failed"
     assert core.transcript(a.id) == old
@@ -262,7 +277,7 @@ def test_stop_before_worker_starts_preserves_pending_request(setup):
 @pytest.mark.parametrize("probability, segments", [(1, ()), (0.49, (TranscriptSegment(0, 1, "Hello"),))])
 def test_unknown_language_is_not_eligible_for_translation(setup, probability, segments):
     core, adapter, (a, _) = setup
-    adapter.result = TranscriberResult("nn", segments, probability)
+    adapter.result = TranscriberResult("nn", segments, probability, model="large-v3")
     core.request_subtitles(a.id)
     core.process_next_subtitle()
     transcript = reopen(core, adapter).transcript(a.id)
@@ -273,7 +288,7 @@ def test_unknown_language_is_not_eligible_for_translation(setup, probability, se
 @pytest.mark.parametrize("language, probability, expected", [(None, 0.5, "en"), ("ko", 0.1, "ko"), ("ja", 0.1, "ja")])
 def test_confident_or_specified_language_is_retained(setup, language, probability, expected):
     core, adapter, (a, _) = setup
-    adapter.result = TranscriberResult("en", (TranscriptSegment(0, 1, "Hello"),), probability)
+    adapter.result = TranscriberResult("en", (TranscriptSegment(0, 1, "Hello"),), probability, model="large-v3")
     core.request_subtitles(a.id, language)
     core.process_next_subtitle()
     transcript = core.transcript(a.id)
@@ -285,7 +300,7 @@ def test_confident_or_specified_language_is_retained(setup, language, probabilit
                                              (3599.9995, "01:00:00,000"), (3661.125, "01:01:01,125")])
 def test_srt_rounding_carries_to_minutes_and_hours(seconds, timestamp):
     transcript = Transcript(1, "transcript", "en", False, NOW,
-                            (TranscriptLine("line", seconds, seconds + 1, "Hello"),))
+                            (TranscriptLine("line", seconds, seconds + 1, "Hello"),), model="large-v3")
     assert transcript_srt(transcript).startswith(f"1\n{timestamp} --> ")
 
 

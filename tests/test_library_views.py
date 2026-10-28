@@ -6,6 +6,7 @@ import sqlite3
 
 import pytest
 
+from my_video_manager.library import LIBRARY_DB_VERSION
 from my_video_manager.core import AppCore, Command, CommandType
 from my_video_manager.library_views import FILTER_DEFAULTS, default_options, filter_chips
 from test_library_details import Media, Transcriber, Translator
@@ -157,7 +158,7 @@ def test_options_persist_and_invalid_options_preserve_saved_settings(library):
             core.save_library_view_options({**options, **invalid})
         assert core.library_view_options() == options
     with sqlite3.connect(core.database) as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 4
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION
 
 
 def test_date_chips_and_reset_follow_python_defaults():
