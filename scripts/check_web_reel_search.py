@@ -33,6 +33,7 @@ register_thumbnail_scheme()
 from my_video_manager.adapters import executable
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.ui import MainWindow
+from my_video_manager.web_tabs import TABS
 from my_video_manager.web_tokens import web_tokens
 
 app = QApplication([])
@@ -96,6 +97,11 @@ def query(window, text):
 def key(window, value, modifiers=Qt.KeyboardModifier.NoModifier):
     QTest.keyClick(window.focusWidget() or window, value, modifiers)
     settle(100)
+
+
+def tab_key(name):
+    """탭 이동 예약 키(Ctrl+순번). 탭 순서는 web_tabs에서 읽는다."""
+    return Qt.Key(Qt.Key.Key_1.value + [tab for tab, _ in TABS].index(name))
 
 
 def mark(core, video, start, end=None, note='기억할 장면'):
@@ -236,7 +242,7 @@ def verify():
     window = make_window(core)
     try:
         # 예약 탭 키는 Qt가, 입력·목록 키는 Chromium이 처리한다.
-        key(window, Qt.Key.Key_3, Qt.KeyboardModifier.ControlModifier)
+        key(window, tab_key('search'), Qt.KeyboardModifier.ControlModifier)
         wait_until(lambda: read(window, "document.activeElement.id === 'search-query'"))
         page = window.web_host.controllers['search']
         calls = []
@@ -269,7 +275,7 @@ def verify():
         assert read(window, "document.getElementById('search-results').getAttribute('aria-activedescendant')") == selected
         assert read(window, "window.searchResultBefore === document.getElementById('search-result-1')")
         checks.append('검색 Enter/↓ 목록 이동·Enter 실제 mpv 장면 재생·Esc 검색어/선택/DOM 유지')
-        key(window, Qt.Key.Key_2, Qt.KeyboardModifier.ControlModifier)
+        key(window, tab_key('reel'), Qt.KeyboardModifier.ControlModifier)
         wait_until(lambda: read(window, "document.activeElement.id === 'reel-list'"))
         key(window, Qt.Key.Key_End)
         assert read(window, "document.getElementById('reel-list').getAttribute('aria-activedescendant')") == f'reel-{second.id}'
