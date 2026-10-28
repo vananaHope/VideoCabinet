@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 from test_subtitles import setup
 from test_web_library_page import window_factory
 from test_web_library_data import core
+from my_video_manager.app_version import DISPLAY_NAME
 from my_video_manager.web_queue_page import WebQueuePage
 
 
@@ -322,7 +323,7 @@ def test_no_speech_completion_status_and_tray_notice(setup, qapp, monkeypatch):
         messages = []
         monkeypatch.setattr(window.tray.icon, 'showMessage', lambda *args: messages.append(args))
         window.tray.notify_completion()
-        assert messages == [("자막 대기열 처리 종료", "이번 처리: 완료 0개 · 말소리 없음 1개 · 실패 0개")]
+        assert messages == [(DISPLAY_NAME, "자막 대기열 처리를 마쳤습니다. 이번 처리: 완료 0개 · 말소리 없음 1개 · 실패 0개")]
     finally:
         window.tray.quit()
         window.deleteLater()

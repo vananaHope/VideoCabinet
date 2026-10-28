@@ -7,6 +7,7 @@ from PySide6.QtGui import QGuiApplication, QShortcut
 from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QMessageBox, QStackedWidget, QWidget, QVBoxLayout
 
 from .adapters import MpvPlayer
+from .app_version import DISPLAY_NAME
 from .core import AppCore, Command, CommandType
 from .random_continuous_play import RandomPlayScope
 from .subtitle_controls import SubtitleControls
@@ -63,7 +64,7 @@ class MainWindow(QMainWindow):
         self.tray = TrayControls(self)
         from .update_controls import UpdateControls
         self.updates = UpdateControls(self, **(update_check_options or {}))
-        self.setWindowTitle("영상 라이브러리")
+        self.setWindowTitle(DISPLAY_NAME)
         self.resize(1100, 720)
         self.pages = QStackedWidget()
         self.settings_menu = self.menuBar().addMenu("설정(&S)")

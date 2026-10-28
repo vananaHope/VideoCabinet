@@ -7,6 +7,8 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QLockFile, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
+from .app_version import DISPLAY_NAME
+
 
 def instance_name(data_directory):
     canonical = os.path.normcase(str(Path(data_directory).resolve()))
@@ -40,7 +42,7 @@ class SingleInstance(QObject):
         socket.connectToServer(self.name)
         if not socket.waitForConnected(3000):
             raise RuntimeError("같은 데이터 폴더의 앱에 연결할 수 없습니다. 잠시 뒤 다시 실행하세요.\n"
-                               "계속 실패하면 작업 관리자에서 영상 라이브러리 프로세스가 모두 종료됐는지 확인한 뒤, "
+                               f"계속 실패하면 작업 관리자에서 {DISPLAY_NAME} 프로세스가 모두 종료됐는지 확인한 뒤, "
                                f"아래 잠금 파일만 삭제하고 다시 실행하세요.\n잠금 파일: {self.lock_path}")
         socket.disconnectFromServer()
         return False
