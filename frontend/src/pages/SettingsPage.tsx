@@ -12,6 +12,8 @@ import { UpdateSettings } from "@/components/update-settings"
 import { RecommendationPeriods } from "@/components/recommendation-periods"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
+import { useGenerationGuard } from "@/lib/generation"
+import { restorePageFocus } from "@/lib/page-focus"
 
 const categories = [['general', '일반'], ['keys', '키 배치'], ['recommend', '추천'], ['translation', '번역'], ['transcription', '받아쓰기'], ['backup', '백업'], ['update', '업데이트']] as const
 
@@ -28,6 +30,7 @@ export default function SettingsPage() {
   const [bridge, setBridge] = useState<SettingsBridge | null>(null)
   const [shell, setShell] = useState<ShellBridge | null>(null)
   const [data, setData] = useState<SettingsData | null>(null)
+  const fresh = useGenerationGuard()
   const [category, setCategory] = useState('general')
   const [error, setError] = useState('')
   const [quit, setQuit] = useState(false)
@@ -38,21 +41,23 @@ export default function SettingsPage() {
     let disconnect = () => {}
     connectBridge().then(async ({ settings: api, shell }) => {
       if (disposed) return
-      const changed = (json: string) => setData(JSON.parse(json))
+      const changed = (json: string) => { const next: SettingsData = JSON.parse(json); if (fresh(next)) setData(next) }
       const focus = (target: string) => {
         if (target === 'settings-keys') setCategory('keys')
         // 탭 전환 렌더가 끝나 설정 페이지가 보인 뒤에 초점을 둔다. 한 프레임만 기다리면 숨은 단추에 초점을 주지 못할 때가 있다.
-        requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('#settings-category [aria-current="true"]')?.focus()))
+        requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus('settings', target)) document.querySelector<HTMLButtonElement>('#settings-category [aria-current="true"]')?.focus() }))
       }
       api.settingsChanged.connect(changed)
       api.settingsError.connect(setError)
       api.settingsFocusRequested.connect(focus)
       disconnect = () => { api.settingsChanged.disconnect(changed); api.settingsError.disconnect(setError); api.settingsFocusRequested.disconnect(focus) }
       const initial = await request<SettingsData>(reply => api.snapshot(reply))
-      if (!disposed) { setData(initial); setBridge(api); setShell(shell) }
+      if (disposed) return
+      if (fresh(initial)) setData(initial)
+      setBridge(api); setShell(shell)
     }).catch(error => setError(String(error)))
     return () => { disposed = true; disconnect() }
-  }, [])
+  }, [fresh])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(error => setError(String(error))) }, [bridge])
   function action(name: 'translation' | 'quit' | 'releases') {
     setError('')

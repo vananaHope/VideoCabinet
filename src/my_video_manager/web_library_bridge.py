@@ -24,7 +24,7 @@ class LibraryBridge(QObject):
 
     @LIBRARY.slot('snapshot')
     def snapshot(self):
-        return encode(self.page.payload())
+        return self.page.stamp(self.page.payload())
 
     @LIBRARY.slot('ready')
     def ready(self):
@@ -35,13 +35,13 @@ class LibraryBridge(QObject):
     def filter(self, query, tag_id):
         self.page.query, self.page.tag_id = query, tag_id if tag_id > 0 else None
         self.page.apply_filters()
-        return encode({'visibleIds': self.page.visible_ids, 'selectedId': self.page.selected_id})
+        return self.page.stamp({'visibleIds': self.page.visible_ids, 'selectedId': self.page.selected_id})
 
     @LIBRARY.slot('view')
     def view(self, options):
         try:
             self.page.set_view(json.loads(options))
-            return encode(self.page.view_payload())
+            return self.page.stamp(self.page.view_payload())
         except (ValueError, TypeError, OSError) as error:
             return encode({'error': str(error)})
 

@@ -3,6 +3,8 @@
 from dataclasses import replace
 from typing import TypedDict
 
+from .web_contract_types import GenerationData
+
 from .web_library_data import VideoData, snapshot_data
 
 
@@ -18,7 +20,7 @@ class RecommendationRowData(TypedDict):
     items: list[RecommendationItemData]
 
 
-class RecommendData(TypedDict):
+class RecommendData(GenerationData):
     loaded: bool
     rows: list[RecommendationRowData]
     error: str

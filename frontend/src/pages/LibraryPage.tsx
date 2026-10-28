@@ -15,6 +15,8 @@ import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, ty
 import { libraryViewDefaults, type LibraryData, type DetailsData, type HighlightData, type LibraryKeyBindingsData, type LibraryViewOptions, type TagCandidatesData } from "@/bridge-types"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
+import { useGenerationGuard } from "@/lib/generation"
+import { restorePageFocus } from "@/lib/page-focus"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -27,6 +29,10 @@ export const keyGuide: readonly KeyGuideGroup[] = [
     { keys: ["Enter", "메뉴 키"], label: "태그 칩 메뉴 (이 태그에서 무작위 재생)" },
   ] },
 ]
+
+/** 목록 데이터만 새 전체 상태로 바꾸고 보기 조건(결과·선택·검색어·칩)은 이미 반영한 더 새 보기 응답의 것을 남긴다. */
+const keepView = (next: LibraryData) => (previous: LibraryData | null) =>
+  previous && { ...next, visibleIds: previous.visibleIds, selectedId: previous.selectedId, options: previous.options, chips: previous.chips }
 
 export default function LibraryPage() {
   const [bridge, setBridge] = useState<LibraryBridge | null>(null)
@@ -56,6 +62,10 @@ export default function LibraryPage() {
   // 격자 스크롤·썸네일 도착은 고정 조작 요소를 옮기지 않으므로 결과·선택·상세가 바뀔 때만 알린다.
   useLayoutChange(data?.options, data?.visibleIds, data?.selectedId, details, detailTab, error)
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
+  // 늦게 도착한 이전 세대가 지금 화면을 덮지 않게 한다. 전체 상태는 목록 데이터와 보기 조건을, 보기 응답은 보기 조건만
+  // 담으므로 담은 상태마다 따로 비교한다. 더 새 보기 응답을 먼저 받았어도 늦게 온 전체 상태의 목록 데이터는 반영한다.
+  const freshData = useGenerationGuard()
+  const freshView = useGenerationGuard()
 
   useEffect(() => {
     let disposed = false
@@ -64,13 +74,21 @@ export default function LibraryPage() {
       if (disposed) return
       const changed = (json: string) => {
         const next: LibraryData = JSON.parse(json)
+        const newView = freshView(next)
+        if (!freshData(next)) return
+        if (!newView) {
+          setData(keepView(next))
+          setDetailRevision(n => n + 1)
+          return
+        }
         if (composing.current && optionsRef.current) next.options.query = optionsRef.current.query
         optionsRef.current = next.options
-        // 자막·번역 완료가 늦게 도착해도 그사이 고른 영상이 결과에 남아 있으면 유지한다.
+        // 자막·번역 완료나 숨어 있던 동안의 변경이 늦게 도착해도 그사이 고른 영상이 결과에 남아 있으면 유지하고,
+        // 결과가 바뀌어도 맨 위로 올리지 않고 보던 자리를 지킨다.
         // 조건에서 빠진 영상이나 명시적인 선택 변경은 코어가 보낸 선택을 따른다.
         setData(previous => next.preserveSelection && previous?.selectedId != null && next.visibleIds.includes(previous.selectedId)
           ? { ...next, selectedId: previous.selectedId } : next)
-        setKeepPlace(false)
+        setKeepPlace(next.preserveSelection)
         setDetailRevision(n => n + 1)
       }
       const thumbnailsChanged = (json: string) => {
@@ -105,7 +123,7 @@ export default function LibraryPage() {
           highlightReturn.current = false
           // 무작위로 고른 영상은 화면 밖일 수 있어 복원한 스크롤에서 그 카드까지 보이게 한다.
           if (randomReturn.current) { randomReturn.current = false; setRevealRequest(n => n + 1) }
-          destination?.focus({ preventScroll: true })
+          if (!restorePageFocus("library", target)) destination?.focus({ preventScroll: true })
         }))
       }
       api.thumbnailsChanged.connect(thumbnailsChanged)
@@ -120,6 +138,12 @@ export default function LibraryPage() {
       setBridge(api)
       const initial = await getSnapshot(api)
       if (disposed) return
+      const newView = freshView(initial)
+      if (!freshData(initial)) return
+      if (!newView) {
+        setData(keepView(initial))
+        return
+      }
       optionsRef.current = initial.options
       setData(initial)
     }).catch(error => {
@@ -128,7 +152,7 @@ export default function LibraryPage() {
       showError(error)
     })
     return () => { disposed = true; disconnect() }
-  }, [showError])
+  }, [showError, freshData, freshView])
 
   // effect는 첫 데이터의 격자가 DOM에 반영된 뒤 실행된다.
   const loaded = data !== null
@@ -169,8 +193,9 @@ export default function LibraryPage() {
     optionsRef.current = next
     setData(data => data && { ...data, options: next })
     const revision = ++filterRevision.current
-    request<Pick<LibraryData, "visibleIds" | "selectedId" | "options" | "chips">>(reply => bridge.view(JSON.stringify(next), reply)).then(result => {
-      if (revision === filterRevision.current) { optionsRef.current = result.options; setData(data => data && { ...data, ...result }); setKeepPlace("mode" in patch) }
+    // 요청 번호는 입력 중인 보기 조건보다 먼저 보낸 요청의 응답을, 보기 세대는 그 뒤 도착한 새 전체 상태보다 오래된 응답을 버린다.
+    request<Pick<LibraryData, "visibleIds" | "selectedId" | "options" | "chips" | "generation">>(reply => bridge.view(JSON.stringify(next), reply)).then(result => {
+      if (revision === filterRevision.current && freshView(result)) { optionsRef.current = result.options; setData(data => data && { ...data, ...result }); setKeepPlace("mode" in patch) }
     }).catch(error => {
       if (revision === filterRevision.current) { optionsRef.current = previous; setData(data => data && { ...data, options: previous }); showError(error) }
     })

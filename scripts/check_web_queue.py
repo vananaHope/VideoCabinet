@@ -1,4 +1,4 @@
-"""대기열 웹 비교 캡처·변경분 측정·실제 WebEngine 키보드 검사.
+"""대기열 웹 비교 캡처·전송 비용 측정·실제 WebEngine 키보드 검사.
 
 python scripts/check_web_queue.py --offscreen
 python <desktop_lock.py> run --owner issue-50 -- .venv/Scripts/python scripts/check_web_queue.py --verify
@@ -363,9 +363,9 @@ try:
         samples.append((time.perf_counter() - start) * 1000)
     settle()
     metrics['python_web_ms'] = {'median': median(samples), 'max': max(samples)}
-    metrics['delta_bytes'] = len(payloads[-1].encode('utf-8'))
-    assert len(json.loads(payloads[-1])['rows']) == 1
-    assert json.loads(payloads[-1])['order'] is None
+    # 늦은 앞 메시지를 버려도 잃는 것이 없게 매번 전체 항목을 보낸다(#265). 웹은 바뀐 행만 다시 그린다.
+    metrics['payload_bytes'] = len(payloads[-1].encode('utf-8'))
+    assert len(json.loads(payloads[-1])['rows']) == 300
     # DB 비용을 뺀 표시 계층 비교도 같은 300개 DTO, 같은 변경으로 따로 측정한다.
     frozen = display_items()
     core.subtitle_queue_items = lambda: (replace(frozen[0], progress=(tick % 90) / 100), *frozen[1:])
@@ -380,6 +380,23 @@ try:
         samples.append((time.perf_counter() - start) * 1000)
     metrics['presentation_web_ms'] = {'median': median(samples), 'max': max(samples)}
     settle()
+
+    # 아래 합성 측정은 웹 가드의 세대를 Python보다 앞서게 하므로 실제 진행률 갱신은 그 전에 본다.
+    js("document.getElementById('queue-list').focus()")
+    keys(Qt.Key.Key_End)
+    scroll = js("document.getElementById('queue-list').scrollTop")
+    selection = js("document.getElementById('queue-list').getAttribute('aria-activedescendant')")
+    first_progress = f"document.getElementById('queue-row-{videos[0].id}').querySelector('[role=progressbar]').getAttribute('aria-valuenow')"
+    tick += 1
+    progress = str(round((tick % 90) / 100 * 100))
+    assert js(first_progress) != progress
+    page.refresh()
+    wait(lambda: js(first_progress) == progress)
+    settle()
+    assert js("document.getElementById('queue-list').scrollTop") == scroll
+    assert js("document.getElementById('queue-list').getAttribute('aria-activedescendant')") == selection
+    assert js('document.activeElement.id') == 'queue-list'
+    metrics['checks'].append('진행률 갱신 반영 뒤 선택·스크롤·포커스 유지')
 
     # 실제 QWebChannel 신호를 JS에서 40회 발행, React/DOM commit 비용만 잰다.
     # 타이밍 동안 Python 폴링 없이 titleChanged로 종료한다. DOM MutationObserver로 행 범위를 검증한다.
@@ -421,6 +438,8 @@ try:
       observer.observe(document.getElementById('queue-list'), {subtree:true,childList:true,characterData:true,attributes:true});
       const send = () => {
         data.rows[0].progress = sample / 100;
+        // 공용 세대 가드(#265)가 같은 세대의 반복을 늦은 메시지로 버리지 않게 매번 새 세대를 붙인다.
+        data.generation += 1;
         start = performance.now();
         // QWebChannel transport dispatch는 실제 Python 신호와 같은 객체/구독자를 거친다.
         window.qt.webChannelTransport.onmessage({data: JSON.stringify({type:1,object:'queue',signal:signalIndex,args:[JSON.stringify(data)]})});
@@ -440,21 +459,10 @@ try:
     metrics['web_commit_ms'] = {'median': median(web['commitMs']), 'max': max(web['commitMs'])}
     metrics['web_next_frame_ms'] = {'median': median(web['nextFrameMs']), 'max': max(web['nextFrameMs'])}
     metrics['web_changed_rows'] = web['changedRows']
-    metrics['checks'].append('300개 중 진행률 1행 전송·DOM 1행 변경, 무변경 시 신호 없음')
+    metrics['checks'].append('300개 전체 전송 중 진행률 1행만 DOM 변경, 무변경 시 신호 없음')
     unchanged = len(payloads)
     page.refresh()
     assert len(payloads) == unchanged
-    js("document.getElementById('queue-list').focus()")
-    keys(Qt.Key.Key_End)
-    scroll = js("document.getElementById('queue-list').scrollTop")
-    selection = js("document.getElementById('queue-list').getAttribute('aria-activedescendant')")
-    tick += 1
-    page.refresh()
-    settle()
-    assert js("document.getElementById('queue-list').scrollTop") == scroll
-    assert js("document.getElementById('queue-list').getAttribute('aria-activedescendant')") == selection
-    assert js('document.activeElement.id') == 'queue-list'
-    metrics['checks'].append('진행률 갱신 중 선택·스크롤·포커스 유지')
     result_path = args.output / ('live-results.json' if args.verify else 'offscreen-results.json')
     result_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(metrics, ensure_ascii=False), flush=True)

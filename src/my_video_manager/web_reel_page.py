@@ -56,7 +56,7 @@ class ReelBridge(QObject):
 
     @REEL.slot('snapshot')
     def snapshot(self):
-        return encode(self.page.payload())
+        return self.page.stamp(self.page.payload())
 
     @REEL.slot('refresh')
     def refresh(self):
@@ -126,5 +126,10 @@ class WebReelPage(WebPageController):
             self.selected_id = self.entries[0]['id'] if self.entries else None
         self.refresh_guidance()
 
+    def reshown(self):
+        # 모아보기 완료 안내는 탭에 돌아오면 지운다.
+        if self.outdated or self.status:
+            self.refresh()
+
     def refresh_guidance(self):
-        self.bridge.changed.emit(encode(self.payload()))
+        self.publish(self.bridge.changed, self.payload())

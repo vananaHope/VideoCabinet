@@ -25,8 +25,15 @@ class ReelPlayer(Player):
         return None
 
 
+def state(value):
+    """보낸 페이지 상태. 세대(#265)는 전송 순서 정보라 비교에서 뺀다."""
+    data = json.loads(value)
+    data.pop('generation')
+    return data
+
+
 def snapshot(page):
-    return json.loads(page.bridge.snapshot())
+    return state(page.bridge.snapshot())
 
 
 def test_reel_play_uses_web_filter_without_populating_hidden_qt_list(window_factory, core):
@@ -75,7 +82,7 @@ def test_result_changes_have_one_data_message_and_small_ack(window_factory, core
     page.bridge.changed.connect(changes.append)
     assert json.loads(getattr(page.bridge, action)(*args)) == {'ok': True}
     assert len(changes) == 1
-    assert json.loads(changes[0]) == snapshot(page)
+    assert state(changes[0]) == snapshot(page)
 
 
 def test_reel_filter_selection_missing_and_current_keys(window_factory, core):

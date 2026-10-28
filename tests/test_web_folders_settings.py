@@ -412,13 +412,13 @@ def test_folders_reactivation_delivers_changes_skipped_while_hidden(window_facto
     window.navigate_web_tab('folders')
     changes = []
     bridges(window)['folders'].foldersChanged.connect(lambda value: changes.append(json.loads(value)))
-    window.web_host.hide()
+    window.navigate_web_tab('library')
     folder = tmp_path / '비활성 동안 추가한 폴더'
     folder.mkdir()
     core.add_watched_folder(folder)
-    window.library_page.refreshed.emit()
+    window.refresh()
     assert changes == []
-    window.web_host.show()
+    window.navigate_web_tab('folders')
     assert len(changes) == 1
     assert str(folder.resolve()) in changes[0]['folders']
 

@@ -144,6 +144,8 @@ def test_recommendation_failure_stays_on_recommend_tab_and_keeps_rows(recommend,
     before = rows(page)
     assert before
     core.settings.set('recommend.revisit_days', -1)
+    # 앱 밖에서 바꾼 저장값은 앱 안의 다음 변경 알림 뒤, 탭이 다시 보일 때 계산한다(#265).
+    window.web_host.content_changed()
     window.navigate_web_tab('recommend')
     state = json.loads(page.bridge.snapshot())
     # 다시 계산하다 실패해도 보던 줄은 그대로 두고 오류만 알린다.

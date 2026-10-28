@@ -29,7 +29,7 @@ class FoldersBridge(QObject):
 
     @FOLDERS.slot('snapshot')
     def snapshot(self):
-        return encode(self.page.payload())
+        return self.page.stamp(self.page.payload())
 
     @FOLDERS.slot('dismissReport')
     def dismissReport(self, revision, group):
@@ -120,8 +120,12 @@ class WebFoldersPage(WebPageController):
         host.register_page(self)
 
     def activated(self):
-        self.refresh()
         self.timer.start()
+
+    def reshown(self):
+        # 감시 실패는 알림 없이 바뀌므로 숨어 있던 동안 바뀌었는지 함께 본다.
+        if self.outdated or tuple(map(str, self.window.folder_watch.unwatched_folders())) != self.unwatched:
+            self.refresh()
 
     def deactivated(self):
         self.timer.stop()
@@ -161,4 +165,6 @@ class WebFoldersPage(WebPageController):
 
     def refresh(self):
         if self.is_active():
-            self.bridge.foldersChanged.emit(encode(self.payload()))
+            self.publish(self.bridge.foldersChanged, self.payload())
+        else:
+            self.synced_change = None

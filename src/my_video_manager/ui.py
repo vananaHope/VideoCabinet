@@ -364,8 +364,12 @@ class MainWindow(QMainWindow):
 
     def end_playback(self):
         session = self.core.playback.session
-        if session is not None and self.core.random_continuous_enabled:
-            self.library_page.selected_id = session.video_id
+        if session is not None:
+            # 시청 기록이 바뀌므로 숨은 탭은 다시 보일 때 한 번 갱신한다(#265).
+            self.web_host.content_changed()
+            if self.core.random_continuous_enabled:
+                # 코어가 바꾼 선택은 웹이 이전 선택을 보존하지 않는 갱신으로 알린다.
+                self.library_page.move_selection(session.video_id)
         self.stop_player()
         self.core.end_playback()
         self.reel.shown = None

@@ -4,7 +4,6 @@ from weakref import ref
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
-from .web_json import encode
 from .web_page import WebPageController
 from .web_statistics_bridge import StatisticsBridge
 
@@ -59,6 +58,8 @@ class WebStatisticsPage(WebPageController):
         self.days, self.result, self.message = 30, None, ''
         self.loading, self._running, self._generation = False, False, 0
         self._pending = False
+        # 계산을 시작한 때의 호스트 변경 번호. 결과가 그때까지의 변경을 반영한다.
+        self._started_change = None
         self._signals = _Result()
         self._signals.completed.connect(self._completed)
         self._signals.viewingEnded.connect(self.refresh)
@@ -75,12 +76,12 @@ class WebStatisticsPage(WebPageController):
         return dict(days=self.days, loading=self.loading, message=self.message, result=self.result)
 
     def _publish(self):
-        self.bridge.statisticsChanged.emit(encode(self.payload()))
-
-    def activated(self):
-        self.refresh()
+        self.bridge.statisticsChanged.emit(self.stamp(self.payload()))
 
     def deactivated(self):
+        if self.loading:
+            # 버리는 계산 결과는 다시 보일 때 새로 계산한다.
+            self.synced_change = None
         self._generation += 1
         self._pending = False
         self._timer.stop()
@@ -90,6 +91,7 @@ class WebStatisticsPage(WebPageController):
         self._generation += 1
         self._pending = self.is_active()
         if not self._pending:
+            self.synced_change = None
             return
         self.loading, self.message = True, ''
         self._publish()
@@ -99,6 +101,7 @@ class WebStatisticsPage(WebPageController):
         if self._running or not self._pending or not self.is_active():
             return
         self._pending, self._running = False, True
+        self._started_change = self.host.change
         QThreadPool.globalInstance().start(_Calculation(self.core, self.days, self._generation, self._signals))
 
     @Slot(int, object, str)
@@ -109,5 +112,7 @@ class WebStatisticsPage(WebPageController):
                 self.result = result
             self.message, self.loading = message, False
             self._publish()
+            # 실패한 계산은 다시 보일 때 다시 시도한다.
+            self.synced_change = self._started_change if result is not None else None
         if self._pending and self.is_active():
             self._timer.start()

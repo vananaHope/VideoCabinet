@@ -7,6 +7,7 @@ import { PendingStatus } from "@/components/ui/pending-status"
 import { MatchedText, ResultRow, SearchInput, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
+import { useGenerationGuard } from "@/lib/generation"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -30,17 +31,27 @@ export default function SearchPage() {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scroll = useRef(0)
   const focusAfterSearch = useRef(false)
+  // 새 검색어의 결과를 기다리는지. 기다리지 않을 때 같은 검색어로 온 결과는 숨어 있던 동안 바뀐 내용을 다시 찾은 것이다.
+  const awaiting = useRef(false)
+  awaiting.current = pending
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
+  const fresh = useGenerationGuard()
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}
     connectBridge().then(async ({ search: api }) => {
       if (disposed) return
+      // 첫 상태를 받기 전에는 화면의 검색어가 아직 정해지지 않았다. 웹 셸을 다시 불러오면 첫 응답보다 더 새 결과가
+      // 먼저 올 수 있으므로, 첫 응답이든 먼저 온 결과든 더 새 쪽이 검색어와 결과를 함께 정한다.
+      let started = false
+      const start = (initial: SearchData) => { started = true; setData(initial); setQuery(initial.query); draft.current = initial.query }
       const changed = (json: string) => {
         const next: SearchData = JSON.parse(json)
-        if (!composing.current && next.query === draft.current) {
-          // 새 결과는 첫 항목을 고른 채 오므로 이전 결과를 내렸던 스크롤도 처음으로 돌린다.
-          document.getElementById("search-results")?.scrollTo(0, 0)
+        if (!started) { if (fresh(next)) start(next); return }
+        if (!composing.current && next.query === draft.current && fresh(next)) {
+          // 새 검색 결과는 첫 항목을 고른 채 오므로 이전 결과를 내렸던 스크롤도 처음으로 돌린다.
+          // 같은 검색어를 다시 찾은 결과는 코어가 고르던 결과를 지켜 보내므로 보던 자리를 그대로 둔다.
+          if (awaiting.current) document.getElementById("search-results")?.scrollTo(0, 0)
           setData(next); setPending(false); setSearching(false)
           if (focusAfterSearch.current && next.state !== "preparing") {
             focusAfterSearch.current = false
@@ -48,14 +59,16 @@ export default function SearchPage() {
           }
         }
       }
-      const focus = () => restoreListFocus(document.querySelector('#search-results [role="option"]') ? "search-results" : "search-query", scroll.current)
+      const focus = (target: string) => restoreListFocus(document.querySelector('#search-results [role="option"]') ? "search-results" : "search-query", scroll.current, "search", target)
       api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError)
       disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError) }
       const initial = await request<SearchData>(reply => api.snapshot(reply))
-      if (!disposed) { setData(initial); setQuery(initial.query); draft.current = initial.query; setBridge(api) }
+      if (disposed) return
+      if (fresh(initial)) start(initial)
+      setBridge(api)
     }).catch(showError)
     return () => { disposed = true; disconnect(); clearTimeout(timer.current) }
-  }, [showError])
+  }, [showError, fresh])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
   function find(value: string) {
     clearTimeout(timer.current)

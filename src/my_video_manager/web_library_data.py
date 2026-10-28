@@ -4,6 +4,7 @@ from dataclasses import asdict
 from typing import TypedDict
 from urllib.parse import urlsplit
 
+from .web_contract_types import GenerationData
 from .web_external_subtitle_data import subtitle_file_data
 from .translation_kind import translation_task
 from .core import CommandType
@@ -96,7 +97,7 @@ class LibraryKeyBindingsData(TypedDict):
     highlightGuidance: str
 
 
-class LibraryData(TypedDict):
+class LibraryData(GenerationData):
     videos: list[VideoData]
     tags: list[TagUsageData]
     visibleIds: list[int]

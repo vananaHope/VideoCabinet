@@ -26,7 +26,7 @@ class SearchBridge(QObject):
 
     @SEARCH.slot('snapshot')
     def snapshot(self):
-        return encode(self.page.payload())
+        return self.page.stamp(self.page.payload())
 
     @SEARCH.slot('find')
     def find(self, query):
@@ -87,8 +87,11 @@ class WebSearchPage(WebPageController):
                     truncated=self.truncated, error=self.error, limit=SEARCH_LIMIT)
 
     def refresh(self):
-        if not self.dirty:
+        # 검색어가 바뀌었거나, 숨어 있던 동안 제목·태그·자막처럼 찾는 내용이 바뀌었을 때만 다시 찾는다(#265).
+        if not self.dirty and not self.outdated:
             return
+        # 같은 검색어를 다시 찾으면 고르던 결과를 지킨다. 검색어가 바뀌면 첫 결과부터다.
+        kept = None if self.dirty or not 0 <= self.selected_index < len(self.results) else self.results[self.selected_index]
         self.timer.stop()
         self.truncated, self.error = False, ''
         try:
@@ -99,15 +102,17 @@ class WebSearchPage(WebPageController):
             else:
                 response = self.core.search(self.query)
                 self.results, self.truncated = list(response.results), response.truncated
-                self.selected_index = 0 if self.results else -1
+                self.selected_index = next((i for i, result in enumerate(self.results) if kept is not None
+                                            and (result.video_id, result.source, result.start) == (kept.video_id, kept.source, kept.start)),
+                                           0 if self.results else -1)
                 self.state = 'results' if self.results else 'no-results' if self.query.strip() else 'empty'
                 self.dirty = False
         except Exception as error:
             self.error, self.state = str(error), 'error'
-        self.bridge.changed.emit(encode(self.payload()))
-
-    def activated(self):
-        self.refresh()
+        self.publish(self.bridge.changed, self.payload())
+        if self.state in ('preparing', 'error'):
+            # 준비 중이거나 실패한 검색은 다시 보일 때 다시 시도한다.
+            self.synced_change = None
 
     def deactivated(self):
         self.timer.stop()

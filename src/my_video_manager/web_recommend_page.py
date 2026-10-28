@@ -24,7 +24,7 @@ class RecommendBridge(QObject):
 
     @RECOMMEND.slot('snapshot')
     def snapshot(self):
-        return encode(self.page.payload())
+        return self.page.stamp(self.page.payload())
 
     @RECOMMEND.slot('play')
     def play(self, video_id):
@@ -61,6 +61,8 @@ class RecommendBridge(QObject):
             self.page.core.dismiss_video(video_id)
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
+        # 폴더 관리의 관심 없음 목록도 바뀐다.
+        self.page.host.content_changed()
         self.page.refresh()
         return encode({'ok': True})
 
@@ -72,6 +74,7 @@ class RecommendBridge(QObject):
             self.page.core.restore_dismissed_video(video_id)
         except (ValueError, OSError) as error:
             return encode({'error': str(error)})
+        self.page.host.content_changed()
         self.page.refresh()
         return encode({'ok': True})
 
@@ -110,7 +113,10 @@ class WebRecommendPage(WebPageController):
             # 보던 줄은 비우지 않고 그대로 둔다(하던 자리를 잃지 않는다).
             self.error = str(error)
         self.loaded = True
-        self.bridge.changed.emit(encode(self.payload()))
+        self.publish(self.bridge.changed, self.payload())
+        if self.error:
+            # 실패한 계산은 다시 보일 때 다시 시도한다.
+            self.synced_change = None
 
     def refresh_if_active(self):
         if self.is_active():

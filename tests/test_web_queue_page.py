@@ -47,6 +47,17 @@ def reply(value):
     return data
 
 
+def sent(value):
+    """보낸 전체 상태. 세대(#265)는 전송 순서 정보라 비교에서 뺀다."""
+    data = json.loads(value)
+    data.pop('generation')
+    return data
+
+
+def order(data):
+    return [row['videoId'] for row in data['rows']]
+
+
 def test_queue_initial_add_promote_remove_and_counts(queue_page, setup):
     core, _, (a, b) = setup
     page = queue_page
@@ -55,53 +66,56 @@ def test_queue_initial_add_promote_remove_and_counts(queue_page, setup):
     core.request_subtitles(b.id)
     page.refresh()
     snapshot = reply(page.bridge.snapshot())
-    assert snapshot['order'] == [a.id, b.id]
+    assert order(snapshot) == [a.id, b.id]
     assert snapshot['counts'][0]['count'] == 2
     assert {row['queueKind'] for row in snapshot['rows']} == {'transcription'}
     reply(page.bridge.action('promote', b.id))
-    assert reply(page.bridge.snapshot())['order'] == [b.id, a.id]
+    assert order(reply(page.bridge.snapshot())) == [b.id, a.id]
     reply(page.bridge.action('remove', b.id))
-    assert reply(page.bridge.snapshot())['order'] == [a.id]
+    assert order(reply(page.bridge.snapshot())) == [a.id]
     assert [row.video_id for row in core.subtitle_queue_items()] == [a.id]
 
 
-def test_progress_delta_contains_only_changed_row_and_no_order(queue_page, setup, monkeypatch):
+def test_progress_change_sends_whole_queue_and_nothing_when_unchanged(queue_page, setup, monkeypatch):
     core, _, (a, b) = setup
     for video in (a, b):
         core.request_subtitles(video.id)
     page = queue_page
     page.refresh()
     changes = []
-    page.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+    page.bridge.queueChanged.connect(lambda value: changes.append(sent(value)))
     page.refresh()
     assert changes == []
-    # 공개 조회 경계의 진행률만 교체해 전송량을 관찰한다. 도메인 상태를 조작하지 않는다.
+    # 공개 조회 경계의 진행률만 교체해 전송 내용을 관찰한다. 도메인 상태를 조작하지 않는다.
     entries = core.subtitle_queue_items()
     monkeypatch.setattr(core, 'subtitle_queue_items', lambda: (replace(entries[0], progress=.5), entries[1]))
     page.refresh()
-    assert changes == [dict(rows=[dict(videoId=a.id, queueKind='transcription', title=a.title, state='queued', progress=.5, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기')],
-                            removed=[], order=None, counts=None, canRetryFailed=False)]
+    # 늦은 앞 메시지를 버려도 잃는 것이 없게 바뀌지 않은 행까지 전체를 보낸다(#265).
+    assert len(changes) == 1
+    assert changes[0]['rows'] == [
+        dict(videoId=a.id, queueKind='transcription', title=a.title, state='queued', progress=.5, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기'),
+        dict(videoId=b.id, queueKind='transcription', title=b.title, state='queued', progress=0.0, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기')]
+    assert changes[0]['canRetryFailed'] is False
+    assert {entry['state']: entry['count'] for entry in changes[0]['counts']}['queued'] == 2
 
 
-def test_queue_delta_reports_promoted_order_and_removed_ids(queue_page, setup):
+def test_queue_change_reports_promoted_order_and_removed_rows(queue_page, setup):
     core, _, (a, b) = setup
     for video in (a, b):
         core.request_subtitles(video.id)
     page = queue_page
     page.refresh()
     changes = []
-    page.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+    page.bridge.queueChanged.connect(lambda value: changes.append(sent(value)))
 
     reply(page.bridge.action('promote', b.id))
-    assert changes.pop() == dict(rows=[], removed=[], order=[b.id, a.id], counts=None, canRetryFailed=False)
+    assert order(changes.pop()) == [b.id, a.id]
 
     for removed_id, remaining in ((b.id, [a.id]), (a.id, [])):
         reply(page.bridge.action('remove', removed_id))
-        delta = changes.pop()
-        assert delta['rows'] == []
-        assert delta['removed'] == [removed_id]
-        assert delta['order'] == remaining
-        assert {entry['state']: entry['count'] for entry in delta['counts']} == {
+        data = changes.pop()
+        assert order(data) == remaining
+        assert {entry['state']: entry['count'] for entry in data['counts']} == {
             'queued': len(remaining), 'transcribing': 0, 'translating': 0,
             'held': 0, 'completed': 0, 'failed': 0,
         }
@@ -248,7 +262,7 @@ def test_retry_failed_availability_tracks_failure_retry_and_empty(queue_page, se
     transcriber.error = RuntimeError('failure')
     core.process_next_subtitle()
     changes = []
-    page.bridge.queueChanged.connect(lambda value: changes.append(json.loads(value)))
+    page.bridge.queueChanged.connect(lambda value: changes.append(sent(value)))
     page.refresh()
     assert changes[-1]['canRetryFailed'] is True
     assert reply(page.bridge.snapshot())['canRetryFailed'] is True

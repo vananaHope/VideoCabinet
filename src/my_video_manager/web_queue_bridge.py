@@ -68,7 +68,7 @@ class QueueBridge(QObject):
 
     @QUEUE.slot('snapshot')
     def snapshot(self):
-        return encode(self.page.payload())
+        return self.page.stamp(self.page.payload())
 
     @QUEUE.slot('rulesSnapshot')
     def rulesSnapshot(self):

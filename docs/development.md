@@ -613,6 +613,15 @@ python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-204 -- .venv
    이전 컨트롤러의 `deactivated()` 뒤 새 컨트롤러의 `activated()`를 호출합니다.
    `activated()`는 가볍게 유지하고, 무거운 계산은 지연하거나 취소할 수 있게 합니다(트레이 복원 때 잠깐 다른 탭이 활성화될 수 있습니다).
    재생에서 복귀할 때는 시청 종료 후 `activated()`가 호출되므로 통계 등을 다시 계산할 수 있습니다.
+   **다시 보인 탭(#265)**: 탭 이동·트레이 복원으로 탭이 다시 보이면 호스트는 `refresh()` 대신 `reshown()`을 부릅니다.
+   기본 `reshown()`은 웹이 마지막으로 전체 상태를 받은 뒤 앱 안의 내용이 바뀌었을 때(`host.content_changed()`)만
+   `refresh()`를 부르고, 바뀐 것이 없으면 아무것도 보내지 않습니다. 전체 상태는 `self.publish(신호, 데이터)`로 보냅니다.
+   보이는 동안만 보내고, 숨어 있으면 다시 보일 때 한 번 보내도록 표시만 합니다. 여러 탭이 보이는 내용을 바꾸는 작업
+   (태그·제목·제외·시청 기록·자막 완료 등)은 `host.content_changed()`를 부릅니다. 알림 없이 바뀌는 상태(대기열처럼 주기적으로 읽는 값)는
+   `reshown()`을 재정의해 비교한 뒤 바뀌었을 때만 보냅니다. 늦게 온 메시지를 버려도 잃는 것이 없게 바뀐 행만 담는
+   델타가 아니라 매번 전체 상태를 보냅니다(웹이 바뀐 행만 다시 그립니다).
+   **세대(#265)**: 페이지 상태 메시지(밀어 보내는 changed와 `snapshot` 등 상태를 담은 요청 응답)는 `self.stamp(데이터)`로 JSON을 만들어
+   페이지마다 하나씩 올라가는 `generation`을 붙이고, 데이터 TypedDict는 `GenerationData`를 상속합니다.
    활성 상태는 `is_active()`로 확인합니다. QWidget의 `isVisible()`은 자체 화면 표시 여부입니다.
    복귀 시 기본 `return_from_playback()`은 `refresh()`와 포커스 복원을 수행하며,
    라이브러리는 이를 재정의해 `refresh(focus=True)`로 격자 초점을 요청합니다.
@@ -621,12 +630,18 @@ python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-204 -- .venv
    자체 포커스가 필요하면 `default_focus`와
    `focus_requested` 신호를 지정하고, 웹 첫 렌더 후 호출하는 `ready` 슬롯에서
    `self.page.frontend_ready()`를 호출합니다. 포커스 요청은 호스트가 준비될 때까지 보존합니다.
+   이미 한 번 보인 탭을 다시 보일 때는 기본 위치 대신 `'restore'`를 요청하므로, 웹 페이지의 초점 처리는
+   `restorePageFocus(탭, target)`(`@/lib/page-focus`)이 참이 아닐 때만 기본 위치에 초점을 둡니다.
 3. `web_page_registry.py`에 컨트롤러를 import하고 `WEB_PAGES`에 한 줄 등록합니다.
    새 탭이면 `web_tabs.py`의 `TABS`에도 `('search', '검색'),` 한 줄을 추가합니다. 모든 탭은 웹 컨트롤러로 등록합니다.
 4. 새 `frontend/src/pages/SearchPage.tsx`를 작성합니다. `connectBridge()`에서
    `{ search, shell }`을 받아 생성된 공개 메서드만 사용하고, 효과를 정리할 때 신호 구독을 해제합니다.
    페이지 사이 브리지 호출은 공통 `shell` 외에는 하지 않습니다.
-   페이지는 숨겨져도 마운트를 유지하므로 선택·검색어·스크롤을 보존할 수 있습니다.
+   페이지는 숨겨져도 마운트를 유지하므로 선택·검색어·스크롤을 보존할 수 있습니다. 숨긴 페이지가 잃는 안쪽 스크롤 위치는
+   셸이 탭을 떠날 때 저장했다가 다시 보일 때 되살립니다. 상태 메시지는 `useGenerationGuard()`(`@/lib/generation`)가 돌려주는
+   함수로 거르고(반영할 메시지면 참), 밀어 보내는 신호와 요청 응답에 같은 가드를 씁니다. 세대는 메시지가 담은 상태마다
+   비교합니다. 상태 일부만 담은 응답이 있으면(라이브러리의 보기 응답) 담은 상태마다 가드를 따로 두고, 전체 상태는 각 가드를
+   통과한 부분만 반영합니다.
    구역 전환·비동기 준비 완료처럼 툴바·작업 단추의 자리가 바뀌는 상태는 `useLayoutChange(...)`(`@/lib/layout-change`)에 넘겨, 떠 있는 셸 안내 묶음이 그 단추를 피해 모서리를 다시 고르게 합니다(목록 스크롤에는 쓰지 않습니다). 공용 `Notice`·`NoticeStack`은 생기고 사라질 때와 펼치기·접기에서 스스로 신호를 보내므로 안내 상태는 넘기지 않아도 됩니다.
    `pages/index.ts`에 컴포넌트 import와 `search: SearchPage` 한 줄을 추가합니다. 웹 페이지만 등록하고 `null` 항목은 두지 않습니다.
    키 안내 '지금 화면'에 보일 이 페이지만의 키는 페이지 파일에 `export const keyGuide: readonly KeyGuideGroup[]`(`@/lib/key-guide`, 키가 없으면 `[]`)로 두고, `pages/index.ts`에 `import { keyGuide as searchKeys } from "./SearchPage"`와 `pageKeyGuides`의 `search: searchKeys,`를 한 줄씩 추가합니다(빠지면 typecheck가 실패합니다). 키 배치로 바꿀 수 있는 키는 여기에 글자로 쓰지 않고 `key_guide.py`가 지금 키 배치에서 읽어 넘깁니다.

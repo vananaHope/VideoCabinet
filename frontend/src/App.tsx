@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import { cva } from "class-variance-authority"
 import { pages } from "@/pages"
 import { connectBridge, request, type ShellBridge } from "@/bridge"
@@ -11,16 +12,21 @@ import SubtitlePreparation from "@/components/subtitle-preparation"
 import UpdateNotice from "@/components/update-notice"
 import { NoticeLayer, NoticeStack } from "@/components/ui/notice"
 import { shellStatusTone } from "@/lib/shell-status"
+import { rememberPageFocus } from "@/lib/page-focus"
+import { restorePageScroll, savePageScroll } from "@/lib/page-scroll"
 
 // 탭을 바꿀 때만 새 탭 내용이 투명도로 짧게 들어온다. 첫 진입·재생 복귀·같은 탭 다시 열기에는 전환이 없다.
-// 숨은 탭은 그대로 남아 있으므로 이전 탭의 선택·스크롤·초점이 유지된다.
+// 숨은 탭은 그대로 남아 있으므로 이전 탭의 선택·스크롤·초점이 유지된다. 페이지 안에서 마지막으로 초점을 받은 요소를
+// 기억해 두고, 셸이 그 탭을 다시 보이며 "restore"를 보내면 페이지가 그 요소에 초점을 되돌린다(#265).
 const pageArea = cva("min-h-0 flex-1 overflow-y-auto", { variants: { entering: { true: "animate-tab-enter", false: "" } } })
 
 export default function App() {
   const [bridge, setBridge] = useState<ShellBridge | null>(null)
   const [view, setView] = useState({ tab: "library", entering: false })
   const tab = view.tab
-  const setTab = (next: string) => setView(previous => previous.tab === next ? previous : { tab: next, entering: false })
+  // 지금 보이는 탭. 탭 변경 신호에서 떠나는 페이지의 스크롤을 저장할 때 쓴다.
+  const shown = useRef("library")
+  const setTab = (next: string) => { shown.current = next; setView(previous => previous.tab === next ? previous : { tab: next, entering: false }) }
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [keyGuide, setKeyGuide] = useState(false)
@@ -31,7 +37,14 @@ export default function App() {
       if (disposed) return
       const changed = (json: string) => {
         const next = JSON.parse(json).tab
-        setView(previous => previous.tab === next ? previous : { tab: next, entering: true })
+        const leaving = shown.current
+        if (leaving === next) return
+        shown.current = next
+        savePageScroll(leaving)
+        // 뒤따르는 페이지 갱신·초점 요청이 이미 보이는 탭에 닿도록 탭 전환을 바로 그린다(#265).
+        // 미뤄 그리면 페이지의 초점 처리가 아직 숨은 요소를 만나 초점을 잃을 때가 있다.
+        flushSync(() => setView({ tab: next, entering: true }))
+        restorePageScroll(next)
       }
       api.shellChanged.connect(changed)
       api.shellStatusChanged.connect(setStatus)
@@ -76,7 +89,7 @@ export default function App() {
     {/* 페이지 영역. 목록 최소 높이보다 창이 작으면(작은 창) 여기서 세로로 스크롤해 아래 작업 버튼에 닿는다.
         기본 창에서는 각 페이지가 높이에 맞춰 내부 목록만 스크롤하므로 바깥 스크롤이 생기지 않는다. */}
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {Object.entries(pages).map(([name, Page]) => Page && <div key={name} data-page={name} hidden={tab !== name} className={pageArea({ entering: view.entering && tab === name })}><Page /></div>)}
+      {Object.entries(pages).map(([name, Page]) => Page && <div key={name} data-page={name} hidden={tab !== name} onFocus={event => rememberPageFocus(name, event.target)} className={pageArea({ entering: view.entering && tab === name })}><Page /></div>)}
       {/* 셸 안내는 페이지를 밀지 않고 페이지 영역 모서리(기본 오른쪽 아래)에 떠 있는 한 묶음으로 쌓는다. 머리글·탭 줄은 덮지 않고,
           지금 페이지의 툴바·작업 단추 줄 같은 고정 조작 요소를 가장 적게 가리는 모서리를 고른다.
           자막 기능 준비가 먼저, 그 아래 연결 오류와 작업 알림, 마지막에 새 버전 알림이 온다. 묶음은 접을 수 있고 넘치면 안에서 스크롤한다. */}
