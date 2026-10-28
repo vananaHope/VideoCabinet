@@ -7,6 +7,9 @@ from .web_tokens import web_tokens
 # 웹과 네이티브 재생의 단일 원본.
 _WEB = web_tokens()
 PLAYBACK_COLORS = _WEB["colors"]
+# 웹은 번들 글꼴(토큰의 첫 이름)을 쓰지만 Qt 글꼴 데이터베이스에는 아직 등록하지 않는다(#297).
+# 토큰의 대체 글꼴인 맑은 고딕을 명시해 재생 화면·트레이 메뉴·공용 경고가 시스템 기본 글꼴로 떨어지지 않게 한다.
+NATIVE_FONT = "Malgun Gothic"
 
 
 def playback_pixels(group, name):
@@ -15,7 +18,7 @@ def playback_pixels(group, name):
 
 
 def playback_font(size="text-sm"):
-    font = QFont(_WEB["typography"]["font-sans"].split(",")[0].strip('"'))
+    font = QFont(NATIVE_FONT)
     font.setPixelSize(playback_pixels("typography", size))
     return font
 
@@ -26,7 +29,7 @@ def playback_stylesheet():
     spacing = playback_pixels("layout", "spacing")
     return f"""
     QWidget {{ color: {c['foreground']}; background: {c['background']};
-        font-family: {_WEB['typography']['font-sans'].split(',')[0]};
+        font-family: "{NATIVE_FONT}";
         font-size: {playback_pixels('typography', 'text-sm')}px; }}
     QLabel {{ background: transparent; }}
     QWidget#playbackHeader, QWidget#playbackBar, QWidget#playbackHighlights,

@@ -44,7 +44,7 @@
   --motion-enter-scale: 0.97;
 }
 @theme {
-  --font-sans: "Malgun Gothic", sans-serif;
+  --font-sans: "Pretendard Variable", "Malgun Gothic", sans-serif;
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-base: 1rem;

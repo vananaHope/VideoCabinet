@@ -5,7 +5,20 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* 번들 글꼴. 실행 중 네트워크에서 받지 않고 웹 번들의 가변 글꼴 하나로 모든 굵기를 그린다.
+   main.tsx가 첫 렌더 전에 읽기를 기다리므로 대체 글꼴이 먼저 보였다가 바뀌지 않는다(block). */
+@font-face {
+  font-family: "Pretendard Variable";
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: block;
+  src: url("../node_modules/pretendard/dist/web/variable/woff2/PretendardVariable.woff2") format("woff2");
+}
+
 @theme inline {
+  /* 고정폭 표시(시각·길이)도 같은 글꼴의 고정폭 숫자로 그린다. */
+  --font-mono: var(--font-sans);
+  --font-mono--font-feature-settings: "tnum";
   --color-status-info-foreground: var(--status-info-foreground);
   --color-status-info: var(--status-info);
   --color-status-success-foreground: var(--status-success-foreground);
