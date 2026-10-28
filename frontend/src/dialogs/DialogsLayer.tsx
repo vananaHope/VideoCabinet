@@ -15,8 +15,9 @@ import { RandomScopeForm, randomScopeReady } from './RandomScopeForm'
 type FormValues = Omit<DialogValues, 'start' | 'end'> & { start: number | string; end: number | string }
 type Draft = { form: FormValues; selected: string; member: string; available: string; scroll: number[] }
 
-// 번역 설정·결과가 늘어나도 확인/취소 단추는 항상 본문 아래에 남는다.
-const body = cva('flex min-h-0 flex-col gap-4', { variants: { scroll: { true: 'overflow-y-auto', false: '' } } })
+// 번역 설정·결과나 무작위 범위의 태그 후보가 늘어나도 본문만 스크롤해 확인/취소 단추는 항상 본문 아래에 남는다.
+// 초점 테두리가 스크롤 가장자리에서 잘리지 않게 공용 DialogBody처럼 안쪽으로 조금 띄운다.
+const body = cva('flex min-h-0 flex-col gap-4', { variants: { scroll: { true: '-m-1 overflow-y-auto p-1', false: '' } } })
 
 export default function DialogsLayer() {
   const [bridge, setBridge] = useState<DialogsBridge | null>(null)
@@ -91,7 +92,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   if (kind === 'video-exclude') return <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }}
     title={data.confirm_title} description={data.confirmation} variant="destructive" onConfirm={() => void act('confirm')} />
   return <DialogFrame title={data.title} description={data.description} onClose={() => { if (!data.confirmation) void act('close') }} composing={composing} onSize={onSize} wide={['review', 'series', 'highlights'].includes(kind)}>
-    <div ref={content} data-dialog-body={kind} className={body({ scroll: kind === 'translation' })} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
+    <div ref={content} data-dialog-body={kind} className={body({ scroll: kind === 'translation' || kind === 'random-scope' })} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
       onKeyDown={event => {
         // 태그 고르기 검색 칸처럼 Enter를 먼저 쓴 입력(defaultPrevented)에서는 저장하지 않는다.
         if (editable && event.target instanceof HTMLInputElement && event.target.type !== 'checkbox'

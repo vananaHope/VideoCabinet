@@ -34,6 +34,7 @@ from PySide6.QtWidgets import QApplication
 from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
+from my_video_manager.random_continuous_play import RandomPlayScope
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.translation import TranslatedLine
 from my_video_manager.ui import MainWindow
@@ -154,6 +155,20 @@ def capture(name, widget=window):
     else:
         assert captured.save(str(path))
     metrics['screens'].append(path.name)
+
+
+def footer_layout(name):
+    """맨 위 대화상자의 끝 단추 차례·모양과 틀 안쪽 오른쪽·아래 끝까지의 거리(px)를 기록한다. 전·후를 같은 방식으로 잰다."""
+    layout = js("""(() => {
+      const content = Array.from(document.querySelectorAll('[role=dialog], [role=alertdialog]')).filter(e => e.getClientRects().length).at(-1)
+      const style = getComputedStyle(content), frame = content.getBoundingClientRect(), box = e => e.getBoundingClientRect()
+      const right = frame.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight)
+      const bottom = frame.bottom - parseFloat(style.borderBottomWidth) - parseFloat(style.paddingBottom)
+      const buttons = Array.from(content.querySelectorAll('button')).filter(b => b.getClientRects().length).slice(-3)
+      return JSON.stringify({frame: [Math.round(frame.width), Math.round(frame.height)], radius: style.borderTopLeftRadius,
+        buttons: buttons.map(b => [b.textContent, b.dataset.variant ?? '', Math.round(right - box(b).right), Math.round(bottom - box(b).bottom)])})
+    })()""")
+    metrics.setdefault('footers', {})[name] = json.loads(layout)
 
 
 def click(text):
@@ -364,6 +379,8 @@ try:
         selected_tag = js("document.querySelector('[aria-label=\"붙은 태그\"] [role=option][aria-selected=true]').id")
         click('모든 태그 관리')
         click('이름 변경')
+        capture('tag-rename')
+        footer_layout('tag-rename')
         input_value('새 이름', '이름 변경 검증')
         QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Return)
         wait(lambda: any(tag.name == '이름 변경 검증' for tag in core.tags()))
@@ -443,6 +460,23 @@ try:
                 metrics.setdefault('container_sizes', {})[kind] = rect
                 capture(f'container-{kind}', container)
             web_modal(kind, context, container_check)
+        # #296 무작위 이어 재생 범위는 재생 화면에서만 열린다(컨테이너). 플레이어 없이 재생 세션만 만들어 켜고,
+        # 긴 이름 태그 35개 중 3개를 고른 태그 범위로 연다.
+        core.playback.start(video.id, 0)
+        core.set_random_continuous_enabled(True)
+        core.set_random_continuous_scope(RandomPlayScope('tags', tag_ids=tuple(tag.id for tag in core.video_tags(video.id)[:3])))
+        def random_scope_check():
+            wait(lambda: dialogs.container is not None)
+            settle(300)
+            container = dialogs.container
+            assert container.width() <= window.width() and container.height() <= window.height()
+            metrics.setdefault('container_sizes', {})['random-scope'] = [container.width(), container.height()]
+            footer_layout('random-scope')
+            capture('container-random-scope', container)
+        web_modal('random-scope', {}, random_scope_check)
+        core.set_random_continuous_enabled(False)
+        core.playback.end()
+        metrics['checks'].append('무작위 이어 재생 범위(재생 중 컨테이너)·태그 이름 변경 촬영과 끝 단추 배치 기록')
         window.pages.setCurrentWidget(host)
         settle(300)
         assert js("JSON.stringify([document.getElementById('library-grid').scrollTop, document.getElementById('library-grid').clientWidth, document.getElementById('library-grid').clientHeight])") == before, (before, js("JSON.stringify([document.getElementById('library-grid').scrollTop, document.getElementById('library-grid').clientWidth, document.getElementById('library-grid').clientHeight])"))

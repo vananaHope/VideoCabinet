@@ -1,9 +1,10 @@
 """#296 공용 대화상자 틀: 어느 대화상자든 같은 면·제목·설명·단추 줄이고, 끝내는 동작은 오른쪽 아래 [취소][확인]이다."""
 import json
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
+from my_video_manager.random_continuous_play import RandomPlayScope
 from my_video_manager.web_dialogs_entries import TagManager
 from test_emergency_hide_ui import app, window
 from test_emergency_hide_dialogs_ui import js, rename_dialog, settle, view
@@ -127,3 +128,57 @@ def test_every_dialog_shares_frame_and_bottom_right_buttons(window):
     assert shots['guide']['end'] == [['닫기', 'outline']] and shots['guide']['start']
     assert shots['random']['end'] == [['취소', 'outline'], ['재생', 'primary']]
     assert shots['capture']['end'] == [['캡처 취소', 'outline']]
+
+
+# 재생 중 컨테이너의 틀 위치·모서리, 본문과 단추 줄이 겹치지 않는지, 확인 단추 가운데 좌표.
+CONTAINED = """(() => {
+  const frame = document.querySelector('[data-dialog-frame]'), body = frame.querySelector('[data-dialog-body]'), footer = frame.querySelector('footer')
+  const box = e => e.getBoundingClientRect(), confirm = Array.from(footer.querySelectorAll('button')).at(-1), target = box(confirm)
+  return JSON.stringify({
+    frame: [Math.round(box(frame).left), Math.round(box(frame).top), Math.ceil(box(frame).width), Math.ceil(box(frame).height)],
+    radius: getComputedStyle(frame).borderTopLeftRadius,
+    frame_scrolls: frame.scrollHeight > frame.clientHeight,
+    body_spills: getComputedStyle(body).overflowY === 'visible' && body.scrollHeight > body.clientHeight,
+    body_scrolls: body.scrollHeight > body.clientHeight,
+    gap: Math.round(box(footer).top - box(body).bottom),
+    confirm: [Math.round(target.left + target.width / 2), Math.round(target.top + target.height / 2)],
+  })
+})()"""
+
+
+def test_playback_container_stays_in_window_and_long_body_keeps_buttons_reachable(window):
+    """재생 중 무작위 범위(태그 35개, 긴 이름)는 원래 창 안의 각진 틀에 들고, 본문만 스크롤해 [취소][확인]이 보이고 눌린다."""
+    window.resize(1100, 720)
+    wait_for(lambda: window.loaded)
+    core, dialogs = window.core, window.web_host.dialogs
+    first, other = core.videos()
+    for index in range(35):
+        core.add_video_tag(other.id, f'{index:02d} 긴 태그 이름 ' + '한글태그' * 8)
+    chosen = tuple(tag.id for tag in core.video_tags(other.id)[:3])
+    window.play(first.id, random_scope=RandomPlayScope('tags', tag_ids=chosen))
+    shots = {}
+
+    def check():
+        wait_for(lambda: dialogs.container is not None and dialogs.container.isVisible())
+        container = dialogs.container
+        shots['frame'] = measure(window)
+        wait_for(lambda: [container.width(), container.height()] == json.loads(js(window, CONTAINED))['frame'][2:])
+        shots['contained'] = layout = json.loads(js(window, CONTAINED))
+        shots['container'] = [container.width(), container.height()]
+        # 화면에서 확인 단추를 누른다. 단추가 본문에 덮여 있거나 틀 밖으로 밀려 있으면 대화상자가 닫히지 않는다.
+        QTest.mouseClick(view(window), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(*layout['confirm']))
+        wait_for(lambda: not dialogs.active)
+    within(window.playback_page.random_scope_button.click, dialogs, check)
+    # 옮겨 띄운 웹 뷰의 JS 응답이 창을 닫은 뒤에 오지 않게 한 번 왕복해 둔다.
+    js(window, '1')
+
+    contained, frame = shots['contained'], shots['frame']
+    # 틀은 원래 창 크기 안에서 내용 크기를 갖고, 컨테이너 창은 그 크기다. 왼쪽 위에 붙고 모서리가 각지다.
+    assert contained['frame'][:2] == [0, 0] and contained['radius'] == '0px', contained
+    assert shots['container'] == contained['frame'][2:], shots
+    assert shots['container'][0] <= window.width() and shots['container'][1] <= window.height(), shots
+    # 태그 후보가 창보다 길어도 본문만 스크롤하고, 본문이 단추 줄 위로 넘치지 않는다.
+    assert contained['body_scrolls'] and not contained['body_spills'] and not contained['frame_scrolls'], contained
+    assert contained['gap'] >= 0, contained
+    assert frame['end'] == [['취소', 'outline'], ['확인', 'primary']] and frame['right'] == 0 and frame['bottom'] == 0, frame
+    assert core.random_continuous_scope == RandomPlayScope('tags', tag_ids=chosen)
