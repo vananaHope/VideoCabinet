@@ -8,6 +8,7 @@ import subprocess
 
 from bundle_licenses import PYTHON_METADATA_ONLY
 from bundle_ffmpeg import EXECUTABLES, SHA256, URL, VERSION, digest
+from my_video_manager.web_tokens import web_tokens
 
 
 MAX_BUNDLE_BYTES = 950_000_000  # MB (decimal), not MiB
@@ -27,9 +28,10 @@ REQUIRED_LICENSES = (
     'licenses/web/node_modules/react-dom/LICENSE',
     'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
 )
-# 웹 셸의 번들 글꼴: 굵기마다 첫 렌더용 부분 집합과 나머지 한글 음절용 전체 파일. Vite가 이름 뒤에 내용 해시를 붙인다.
-BUNDLED_FONTS = tuple(f'my_video_manager/web/assets/Pretendard-{weight}{kind}-*.woff2'
-                      for weight in ('Regular', 'Medium', 'SemiBold') for kind in ('.subset', ''))
+# 웹 셸의 번들 글꼴: 토큰의 굵기마다 첫 렌더용 부분 집합과 그 밖의 글자용 전체 파일. Vite가 이름 뒤에 내용 해시를 붙인다.
+BUNDLED_FONT_FAMILY = web_tokens()['typography']['font-sans'].split(',')[0].strip().strip('"')
+BUNDLED_FONTS = tuple(f'my_video_manager/web/assets/{BUNDLED_FONT_FAMILY}-{stem}{kind}-*.woff2'
+                      for stem in web_tokens()['bundled-font']['weights'].values() for kind in ('.subset', ''))
 
 
 def check_licenses(directory):

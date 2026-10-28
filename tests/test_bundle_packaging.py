@@ -134,9 +134,7 @@ def bundle(packaging, tmp_path, monkeypatch):
         'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak',
         'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe', 'ffmpeg/LICENSE.txt', 'ffmpeg/README.txt',
         'THIRD-PARTY-NOTICES.txt', 'licenses/LGPL-3.0.txt', *checker.REQUIRED_LICENSES,
-        'my_video_manager/web/assets/Pretendard-Regular.subset-AbCd1234.woff2', 'my_video_manager/web/assets/Pretendard-Medium.subset-AbCd1234.woff2',
-        'my_video_manager/web/assets/Pretendard-SemiBold.subset-AbCd1234.woff2', 'my_video_manager/web/assets/Pretendard-Regular-AbCd1234.woff2',
-        'my_video_manager/web/assets/Pretendard-Medium-AbCd1234.woff2', 'my_video_manager/web/assets/Pretendard-SemiBold-AbCd1234.woff2',
+        *(pattern.replace('*', 'AbCd1234') for pattern in checker.BUNDLED_FONTS),
     ]
     for name in files:
         path = tmp_path / name
