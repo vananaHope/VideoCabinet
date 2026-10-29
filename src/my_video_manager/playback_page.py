@@ -17,7 +17,7 @@ from .key_display import display_keys
 from .qt_keys import key_name
 from .playback_help import REEL_MEANINGS, PlaybackHelp
 from .translation_kind import translation_task
-from .theme import playback_stylesheet, playback_font
+from .theme import playback_stylesheet, playback_font, set_type_role
 from .video_click import VideoClick, VideoClickJudge
 
 # 속도 단추 목록. ↑/↓ 키는 이 목록과 관계없이 MIN~MAX_PLAYBACK_SPEED를 0.25씩 움직인다.
@@ -114,11 +114,12 @@ class PlaybackPage(QWidget):
         top.addWidget(self.back_button)
         self.title_label = QLabel()
         self.title_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.title_label.setProperty('playbackRole', 'title')
+        set_type_role(self.title_label, 'section-title')
         self.title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         top.addWidget(self.title_label, 1)
         self.reel_label = QLabel()
         self.reel_label.setProperty('playbackRole', 'muted')
+        set_type_role(self.reel_label, 'body')
         top.addWidget(self.reel_label)
         self.highlights_button = QPushButton()
         self.highlights_button.setCheckable(True)
@@ -208,6 +209,7 @@ class PlaybackPage(QWidget):
             "자막 없음", "자막 종류 자막 없음", CommandType.TOGGLE_SUBTITLE_LANGUAGE)
         self.subtitle_work_label = QLabel()
         self.subtitle_work_label.setProperty('playbackRole', 'muted')
+        set_type_role(self.subtitle_work_label, 'body')
         self.subtitle_work_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.key_guide_button = ControlButton("⌨", "키 안내")
         self.key_guide_button.setCheckable(True)
@@ -260,6 +262,7 @@ class PlaybackPage(QWidget):
         self.message_label.setWordWrap(True)
         self.message_label.setTextFormat(Qt.TextFormat.PlainText)
         self.message_label.setProperty('playbackRole', 'warning')
+        set_type_role(self.message_label, 'body')
         self.message_label.hide()
         self.notice_timer = QTimer(self)
         self.notice_timer.setSingleShot(True)

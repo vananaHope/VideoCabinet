@@ -21,10 +21,10 @@ export function NumberCard({ label, value, description, variant }: { label: stri
   return <section className={number({ variant })}><h3 className="text-body text-muted-foreground">{label}</h3><p className="my-3 text-display tabular-nums">{value}</p>{description && <p className="text-label text-muted-foreground">{description}</p>}</section>
 }
 const status = cva("inline-flex w-fit items-center rounded-md px-2 py-0.5 text-label-strong", { variants: { variant: { success: "bg-status-success text-status-success-foreground", info: "bg-status-info text-status-info-foreground", highlight: "bg-highlight text-highlight-foreground", destructive: "bg-destructive text-destructive-foreground", muted: "bg-muted text-muted-foreground", selectedMuted: "bg-muted-foreground text-background", outline: "bg-transparent text-muted-foreground ring-1 ring-inset ring-input" } }, defaultVariants: { variant: "muted" } })
-export function StatusBadge({ children, variant }: { children: ReactNode } & VariantProps<typeof status>) { return <span className={status({ variant })}>{children}</span> }
+export function StatusBadge({ children, variant }: { children: ReactNode } & VariantProps<typeof status>) { return <span data-slot="status-badge" className={status({ variant })}>{children}</span> }
 
 const tabList = cva("flex min-w-0 items-center gap-1", { variants: { variant: { navigation: "flex-1", section: "rounded-lg bg-muted p-1", panel: "shrink-0 rounded-lg border p-1" } }, defaultVariants: { variant: "section" } })
-const tabButton = cva("shrink-0 rounded-md px-3 py-2 text-body-strong transition-colors focus-visible:outline-2 focus-visible:outline-ring", { variants: { variant: { navigation: "", section: "", panel: "" }, selected: { true: "", false: "" }, last: { true: "ml-auto", false: "" } }, compoundVariants: [
+const tabButton = cva("shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring", { variants: { variant: { navigation: "", section: "", panel: "" }, selected: { true: "", false: "" }, last: { true: "ml-auto", false: "" } }, compoundVariants: [
   // 머리글·패널 탭은 고를 수 있는 목록 항목(호버 muted, 선택 accent)이다. 구역 탭은 묶음 면이 muted라 호버가 한 단계 밝은 accent, 선택은 primary다.
   { variant: ["navigation", "panel"], selected: true, class: selectableItem({ selected: true }) },
   { variant: ["navigation", "panel"], selected: false, class: selectableItem({ selected: false, tone: "quiet" }) },

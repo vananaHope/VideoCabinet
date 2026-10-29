@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from .highlights import nearest_highlight
-from .theme import PLAYBACK_COLORS, playback_font, playback_pixels
+from .theme import PLAYBACK_COLORS, playback_font, playback_pixels, set_type_role
 from .time_display import timestamp
 
 
@@ -182,13 +182,14 @@ class PlaybackHighlights(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 12, 8, 8)
         self.heading = QLabel('하이라이트 · 0')
-        self.heading.setProperty('playbackRole', 'title')
+        set_type_role(self.heading, 'section-title')
         layout.addWidget(self.heading)
         self.empty = QLabel('아직 하이라이트가 없습니다.\nInsert로 지금 순간을 남겨 보세요.')
         self.empty.setWordWrap(True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.empty.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.empty.setProperty('playbackRole', 'muted')
+        set_type_role(self.empty, 'body')
         layout.addWidget(self.empty)
         self.list = QListWidget()
         self.list.setAccessibleName('현재 영상의 하이라이트 시각과 메모')
@@ -208,6 +209,7 @@ class PlaybackHighlights(QWidget):
         self.hint = QLabel('클릭 / Enter로 이동 · 노랑은 가까운 항목')
         self.hint.setWordWrap(True)
         self.hint.setProperty('playbackRole', 'muted')
+        set_type_role(self.hint, 'body')
         layout.addWidget(self.hint)
 
     def activate(self, item):

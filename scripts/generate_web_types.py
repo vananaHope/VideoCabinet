@@ -82,6 +82,12 @@ def render_tokens():
             + ''.join(f'  --{key}: {value};\n' for key, value in {**scale, **roles}.items()) + '}\n')
 
 
+def render_type_roles():
+    # cn()의 tailwind-merge가 text-<역할>을 글자 색이 아니라 글자 크기 묶음으로 알게 하는 이름 목록.
+    return ('// scripts/generate_web_types.py로 생성. web_tokens.json의 typography.roles를 수정하세요.\n'
+            f'export const typeRoles = {json.dumps(list(type_roles()))} as const\n')
+
+
 def render_tag_name_key():
     tables = tag_name_key_tables()
 
@@ -103,7 +109,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1] / 'frontend/src'
     for filename, text in [('bridge-types.ts', render_types()), ('tokens.css', render_tokens()),
-                           ('lib/tag-name-key-data.ts', render_tag_name_key())]:
+                           ('lib/type-roles.ts', render_type_roles()), ('lib/tag-name-key-data.ts', render_tag_name_key())]:
         path = root / filename
         if args.check:
             if not path.exists() or path.read_text(encoding='utf-8') != text:
