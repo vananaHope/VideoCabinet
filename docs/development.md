@@ -296,7 +296,7 @@ Release에서 읽습니다. 태그는 `vX.Y.Z`여야 하며 새 버전 이상이
 배포 저장소에는 그 태그가 없으므로 `gh release create --target main`으로 배포 저장소 기본 브랜치에 같은 이름의 태그를 만들며
 전체 설치 파일·체크섬·매니페스트·서명과 해당하는 패치를 게시합니다.
 노트는 현재 main에 포함된 가장 높은 버전 태그 이후의 커밋 제목입니다(태그가 없으면 전체).
-이름이 바뀐 첫 Release에는 노트 맨 앞에 "앱 이름이 상영실로 바뀌었고 라이브러리·설정 데이터와 설치 위치는 그대로"라는 안내를 넣습니다(`release.ps1`의 `$RenameNote`·`$IncludeRenameNote`). 이 Release를 발행한 뒤 두 변수를 지웁니다.
+이름이 바뀐 첫 Release에는 노트 맨 앞에 "앱 이름이 상영실로 바뀌었고 라이브러리·설정 데이터와 설치 위치는 그대로"라는 안내를 넣습니다(`release.ps1`의 `$RenameNote`·`$IncludeRenameNote`). 이 Release를 발행한 뒤 `$RenameNote`·`$IncludeRenameNote` 선언, 이를 쓰는 DryRun·노트 분기, `tests/test_release_script.py`의 이름 안내 단언, 이 문서 문단을 함께 지웁니다.
 설치 파일은 `dist/installer/MyVideoManager-Setup-<version>.exe`, 체크섬은 그 옆의 `.exe.sha256`입니다.
 패치는 `dist/installer/MyVideoManager-Patch-<version>.exe`, 메타데이터는
 `dist/installer/<version>/update-manifest.json`과 `update-manifest.json.sig`에 보존합니다.
