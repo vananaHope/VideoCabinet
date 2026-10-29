@@ -25,17 +25,31 @@ function arrive(part: keyof typeof startScreen) {
   if (startScreen[part]) return
   startScreen[part] = true
   // 시작 화면을 한 번 그린 뒤 브라우저가 쉬는 틈에 놓아 준다. 숨은 탭의 요청·그리기(폴더 탭의 제외 목록 등)가
-  // 첫 화면 그리기와 준비 알림 처리를 막지 않는다. 보이지 않는 문서는 프레임을 그리지 않으므로 바로 쉬는 틈을 기다린다.
+  // 첫 화면 그리기와 준비 알림 처리를 막지 않는다. 보이지 않는 문서는 그릴 화면이 없으므로 바로 놓아 준다.
   if (startScreen.shell && startScreen.page) {
-    const idle = () => requestIdleCallback(release)
-    if (document.hidden) idle()
-    else requestAnimationFrame(idle)
+    if (document.hidden) setTimeout(release)
+    else requestAnimationFrame(() => requestIdleCallback(release))
   }
 }
 
-/** 첫 데이터 요청 전에 기다린다. 시작 탭은 바로, 숨은 탭은 시작 화면이 준비된 뒤에 풀린다. */
+// 시작 화면보다 먼저 사용자가 연 탭. 기다리던 그 탭의 요청은 바로 놓아 준다.
+const openedTabs = new Set<string>([startTab])
+const waitingTabs = new Map<string, () => void>()
+
+/** 첫 데이터 요청 전에 기다린다. 시작 탭과 이미 연 탭은 바로, 숨은 탭은 시작 화면이 준비되거나 그 탭을 열 때 풀린다. */
 export function waitForStartTab(tab: Tab): Promise<void> {
-  return tab === startTab ? Promise.resolve() : startScreenPromise
+  if (openedTabs.has(tab)) return Promise.resolve()
+  return new Promise(resolve => {
+    waitingTabs.set(tab, resolve)
+    void startScreenPromise.then(resolve)
+  })
+}
+
+/** 셸이 탭을 보였다. 그 탭이 첫 데이터를 기다리고 있으면 시작 화면을 기다리지 않고 요청하게 한다. */
+export function tabOpened(tab: string) {
+  openedTabs.add(tab)
+  waitingTabs.get(tab)?.()
+  waitingTabs.delete(tab)
 }
 
 /** 페이지가 첫 데이터를 그렸거나 읽지 못했다. 시작 탭이면 숨은 탭의 요청을 놓아 줄 조건 하나를 채운다. */

@@ -455,8 +455,11 @@ class WebShellHost(QWidget):
 
     def page_ready(self, tab):
         self._ready_pages.add(tab)
-        self.apply_pending_focus()
-        self.notify_loaded()
+        # 숨은 탭은 첫 화면 뒤에 준비된다(#267). 지금 탭이 아니면 초점·재생 복귀·첫 진입 알림과 상관없으므로
+        # 그 준비가 재생 복귀 준비 신호를 다시 보내지 않게 한다.
+        if tab == self.active_tab:
+            self.apply_pending_focus()
+            self.notify_loaded()
 
     def notify_loaded(self):
         self.prepare_return()

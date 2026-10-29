@@ -14,7 +14,7 @@ import { NoticeLayer, NoticeStack } from "@/components/ui/notice"
 import { shellStatusTone } from "@/lib/shell-status"
 import { focusPage, markPageShown, rememberPageFocus } from "@/lib/page-focus"
 import { restorePageScroll, savePageScroll } from "@/lib/page-scroll"
-import { shellShown, startTab } from "@/lib/entry"
+import { shellShown, startTab, tabOpened } from "@/lib/entry"
 
 // 탭을 바꿀 때만 새 탭 내용이 투명도로 짧게 들어온다. 첫 진입·재생 복귀·같은 탭 다시 열기에는 전환이 없다.
 // 숨은 탭은 그대로 남아 있으므로 이전 탭의 선택·스크롤·초점이 유지된다. 페이지 안에서 마지막으로 초점을 받은 요소를
@@ -28,7 +28,7 @@ export default function App() {
   const tab = view.tab
   // 지금 보이는 탭. 탭 변경 신호에서 떠나는 페이지의 스크롤을 저장할 때 쓴다.
   const shown = useRef<string>(startTab)
-  const setTab = (next: string) => { shown.current = next; setView(previous => previous.tab === next ? previous : { tab: next, entering: false }) }
+  const setTab = (next: string) => { tabOpened(next); shown.current = next; setView(previous => previous.tab === next ? previous : { tab: next, entering: false }) }
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [keyGuide, setKeyGuide] = useState(false)
@@ -39,6 +39,7 @@ export default function App() {
       if (disposed) return
       const changed = (json: string) => {
         const next = JSON.parse(json).tab
+        tabOpened(next)
         const leaving = shown.current
         // 탭 전환·재생 복귀(같은 탭)마다 셸이 보낸다. 이 뒤의 사용자 입력만 늦게 온 초점 요청을 건너뛰게 한다.
         markPageShown(next)

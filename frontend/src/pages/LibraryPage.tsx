@@ -69,8 +69,9 @@ export default function LibraryPage() {
   // 빠른 검색 입력란의 초안. 입력란은 초안을 곧바로 그리고, 보기 조건(options.query)과 칩은 실제로 요청한 검색어를 따른다.
   // 글자는 입력할 때마다 곧바로 요청하고(5,000개에서 지연을 두면 결과만 늦었다, #266), 한글 조합 중인 초안은 조합을 마칠 때 요청한다.
   // 조합 중에 다른 조건을 바꾸면 그 요청에 초안을 함께 담는다.
-  const [draft, setDraft] = useState("")
-  const draftRef = useRef("")
+  // 첫 데이터 전에는 저장된 검색어를 보인다(#267). 데이터가 오면 실제 보기 조건의 검색어로 맞춘다.
+  const [draft, setDraft] = useState(entry?.options.query ?? "")
+  const draftRef = useRef(entry?.options.query ?? "")
   const filterRevision = useRef(0)
   // 마지막으로 보낸 보기 요청의 응답을 기다리는지. 오래 기다리면 공용 기다림 표시를 보인다.
   const awaitingView = useRef(false)
