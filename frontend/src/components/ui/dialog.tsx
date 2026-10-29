@@ -31,8 +31,8 @@ const contentVariants = cva("flex max-h-full w-full min-w-0 flex-col gap-4 overf
 
 type FrameProps = VariantProps<typeof contentVariants>
 
-const titleStyle = "text-lg font-semibold"
-const descriptionStyle = "text-sm text-muted-foreground"
+const titleStyle = "text-section-title"
+const descriptionStyle = "text-body text-muted-foreground"
 
 function Dialog(props: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />

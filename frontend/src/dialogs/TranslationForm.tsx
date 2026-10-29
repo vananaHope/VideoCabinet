@@ -53,13 +53,13 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
       </div>
       <div className="space-y-2 border-t pt-3">
         <div className="grid grid-cols-2 gap-3">
-          <p className="col-start-1 row-start-1 self-center text-sm font-medium">모델</p>
+          <p className="col-start-1 row-start-1 self-center text-body-strong">모델</p>
           <Choice label="모델 목록" rows={rows([
             ...(selected.cli_default ? [{ id: '', label: '기본(CLI 기본값)' }] : []),
             ...selected.models,
             ...(!selected.models.some(m => m.id === current.model) && current.model ? [{ id: current.model, label: current.model }] : []),
           ])} value={current.model} onChange={selectModel} />
-          <label className="flex flex-col gap-2 text-sm">모델 직접 입력<Input aria-label="모델 직접 입력" value={current.model} title={current.model} onChange={event => selectModel(event.target.value)} /></label>
+          <label className="flex flex-col gap-2 text-body">모델 직접 입력<Input aria-label="모델 직접 입력" value={current.model} title={current.model} onChange={event => selectModel(event.target.value)} /></label>
           {efforts.length > 0 && <Choice label="추론 강도" rows={rows([{ id: '', label: '기본(모델 기본값)' }, ...efforts.map(id => ({ id, label: id }))])}
             value={current.effort} onChange={effort => update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, effort } : s) })} />}
           {/* 기본값 버튼은 제공자와 관계없이 묶음 머리 행 오른쪽 끝에 보인다. Tab은 입력 칸 다음에 오도록 DOM에서는 맨 뒤에 둔다. */}
@@ -75,7 +75,7 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
         {notice && <Notice tone="warning" clamp={false}>{notice}</Notice>}
       </div>
       <section className="space-y-2 border-t pt-3" aria-label="OpenCode Go 키">
-        <p className="text-sm font-medium">OpenCode Go 키 · {form.key_action === 'delete' ? '삭제 예정' : form.key_action === 'replace' ? '교체 예정' : registered ? `등록됨 (${data.key_masked})` : '없음'}</p>
+        <p className="text-body-strong">OpenCode Go 키 · {form.key_action === 'delete' ? '삭제 예정' : form.key_action === 'replace' ? '교체 예정' : registered ? `등록됨 (${data.key_masked})` : '없음'}</p>
         <Input type="password" autoComplete="off" aria-label="OpenCode Go 키 입력" placeholder="새 키 입력 (확인할 때 저장)" value={form.key} onChange={event => update({ key: event.target.value, key_action: event.target.value ? 'replace' : 'keep', fallback: !data.key_masked && !form.key && !!event.target.value ? true : form.fallback })} />
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => send('check-key')}>키 확인</Button>
@@ -93,7 +93,7 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
             : fresh && request.information && { tone: 'success', message: request.information },
         ]} />
         {!direct && <>
-          <label className="flex items-center gap-2 pt-1 text-sm"><input type="checkbox" disabled={!hasKey} checked={hasKey && form.fallback} onChange={event => update({ fallback: event.target.checked })} />실패하면 OpenCode Go로 이어서</label>
+          <label className="flex items-center gap-2 pt-1 text-body"><input type="checkbox" disabled={!hasKey} checked={hasKey && form.fallback} onChange={event => update({ fallback: event.target.checked })} />실패하면 OpenCode Go로 이어서</label>
           {data.fallback_notice && <Notice tone="info" size="compact" role="note">{data.fallback_notice}</Notice>}
         </>}
       </section>

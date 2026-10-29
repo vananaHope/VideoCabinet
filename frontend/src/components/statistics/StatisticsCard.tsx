@@ -6,12 +6,12 @@ import { Skeleton } from "@/components/ui/skeleton"
  */
 export function StatisticsCard({ label, value, description }: { label: string; value?: string; description?: string }) {
   return <section className="min-w-0 space-y-2 rounded-xl border bg-card p-4">
-    <h2 className="text-sm text-muted-foreground">{label}</h2>
+    <h2 className="text-body text-muted-foreground">{label}</h2>
     {value === undefined
-      ? <div className="flex h-7 items-center"><Skeleton className="w-20" /></div>
-      : <p className="break-words text-xl font-semibold tabular-nums">{value}</p>}
+      ? <div className="flex h-line-display items-center"><Skeleton className="w-20" /></div>
+      : <p className="break-words text-display tabular-nums">{value}</p>}
     {description === undefined
-      ? <div className="min-h-8"><Skeleton shape="text" className="w-3/4" /></div>
-      : <p className="line-clamp-2 min-h-8 text-xs text-muted-foreground" title={description}>{description}</p>}
+      ? <div className="min-h-lines-label-2"><Skeleton shape="text" className="w-3/4" /></div>
+      : <p className="line-clamp-2 min-h-lines-label-2 text-label text-muted-foreground" title={description}>{description}</p>}
   </section>
 }

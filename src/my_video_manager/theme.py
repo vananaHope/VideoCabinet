@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 
-from .web_tokens import web_tokens
+from .web_tokens import type_roles, web_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,8 @@ BUNDLED_FONT, FALLBACK_FONT = (name.strip().strip('"') for name in _WEB["typogra
 # Qt는 웹 번들의 woff2를 읽지 못해 웹 빌드가 같은 글꼴의 정적 TrueType을 굵기별로 이 폴더에 둔다(frontend/vite.config.ts).
 QT_FONT_DIRECTORY = Path(__file__).with_name("web") / "qt-fonts"
 QT_FONT_FILES = tuple(f"{BUNDLED_FONT}-{stem}.ttf" for stem in _WEB["bundled-font"]["weights"].values())
+# 글자 역할(크기·줄 높이·굵기·자간). 웹 text-<역할> 유틸리티와 같은 원본이다.
+TYPE_ROLES = type_roles(_WEB)
 # 번들 글꼴을 등록하기 전과 등록에 실패했을 때는 대체 글꼴만 쓴다. 등록하면 웹처럼 번들 글꼴 뒤에 대체 글꼴을 둔다.
 _font_families = [FALLBACK_FONT]
 
@@ -31,6 +33,30 @@ def playback_font(size="text-sm"):
     font.setFamilies(_font_families)
     font.setPixelSize(playback_pixels("typography", size))
     return font
+
+
+def role_pixels(role, field):
+    """역할 토큰의 rem 값(크기·줄 높이)을 Qt 논리 픽셀로."""
+    return round(float(TYPE_ROLES[role][field].removesuffix("rem")) * 16)
+
+
+def role_letter_spacing(role):
+    """역할 토큰의 자간(em)을 그 역할 크기의 픽셀로. Qt 스타일시트에는 자간 속성이 없어 글꼴에 둔다."""
+    return float(TYPE_ROLES[role]["letter-spacing"].removesuffix("em")) * role_pixels(role, "size")
+
+
+def set_type_role(widget, role):
+    """위젯 글자를 역할 토큰으로 맞춘다. 크기·굵기는 스타일시트의 typeRole 규칙이, 자간은 위젯 글꼴이 맡는다."""
+    widget.setProperty("typeRole", role)
+    font = widget.font()
+    font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, role_letter_spacing(role))
+    widget.setFont(font)
+
+
+def _type_role_rules():
+    return "".join(f"""
+    *[typeRole="{role}"] {{ font-size: {role_pixels(role, 'size')}px; font-weight: {values['weight']}; }}"""
+                   for role, values in TYPE_ROLES.items())
 
 
 def playback_stylesheet():
@@ -50,7 +76,6 @@ def playback_stylesheet():
     QWidget#playbackHelp {{ border: 1px solid {c['border']}; border-radius: {radius}px; }}
     QLabel[playbackRole="muted"] {{ color: {c['muted-foreground']}; }}
     QLabel[playbackRole="warning"] {{ color: {c['highlight-open']}; }}
-    QLabel[playbackRole="title"] {{ font-weight: 600; }}
     QPushButton, QToolButton {{ background: {c['secondary']}; color: {c['foreground']};
         border: 1px solid {c['input']}; border-radius: {radius}px;
         padding: {spacing}px {spacing * 2}px; }}
@@ -68,6 +93,7 @@ def playback_stylesheet():
     QScrollBar::handle:hover {{ background: {c['muted-foreground']}; }}
     QScrollBar::add-page, QScrollBar::sub-page {{ background: {c['card']}; }}
     QWidget#videoSurface {{ background: {VIDEO_BACKGROUND}; border: 0; }}
+    {_type_role_rules()}
     """
 
 VIDEO_BACKGROUND = '#000000'

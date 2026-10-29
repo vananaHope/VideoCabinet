@@ -20,7 +20,7 @@ export function RandomTagFields({ tags, selected, onChange, count, error = "" }:
 }) {
   return <>
     <TagPicker tags={tags} label="태그" mode="multiple" chips selected={selected} onChange={onChange} />
-    <p role="status" className="text-sm text-muted-foreground empty:hidden">{error ? `후보를 세지 못했습니다. ${error}`
+    <p role="status" className="text-body text-muted-foreground empty:hidden">{error ? `후보를 세지 못했습니다. ${error}`
       : !tags.length ? ""
       : !selected.length ? "태그를 하나 이상 고르세요."
       : count === null ? "후보를 세는 중…"

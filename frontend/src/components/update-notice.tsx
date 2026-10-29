@@ -16,7 +16,7 @@ function kindLabel(kind: string | null) {
 
 /** 새 버전 알림 제목. 버전과 받을 크기(서명된 매니페스트 값)를 한 줄에 둔다. */
 export function UpdateTitle({ version, kind, downloadSize }: { version: string; kind: string; downloadSize: number | null }) {
-  return <>새 버전이 있습니다 · {version}<span className="font-normal text-muted-foreground"> · {kindLabel(kind)}{megabytes(downloadSize)}</span></>
+  return <>새 버전이 있습니다 · {version}<span className="text-body text-muted-foreground"> · {kindLabel(kind)}{megabytes(downloadSize)}</span></>
 }
 
 /** 셸 알림과 설정 업데이트 구역의 같은 선택지. 잠금은 aria-disabled로만 보여 키보드 포커스가 빠지지 않게 한다. */
@@ -69,7 +69,7 @@ export function UpdateProgress({ idPrefix, install, locked, onAction, readyDismi
   const act = (name: UpdateAction) => () => { if (!locked) onAction(name) }
   const downloading = install.phase === 'downloading' || install.phase === 'cancelling'
   const tone: NoticeTone = install.phase === 'failed' ? 'error' : install.phase === 'confirm' ? 'warning' : 'info'
-  const title = <>{activeTitle[install.phase] ?? '업데이트'} · {install.version}<span className="font-normal text-muted-foreground"> · {kindLabel(install.kind)}</span></>
+  const title = <>{activeTitle[install.phase] ?? '업데이트'} · {install.version}<span className="text-body text-muted-foreground"> · {kindLabel(install.kind)}</span></>
   const action = downloading
     ? <Button id={`${idPrefix}-cancel`} size="sm" variant="outline" aria-disabled={locked || install.phase === 'cancelling' || undefined} onClick={install.phase === 'downloading' ? act('cancel') : undefined}>{install.phase === 'cancelling' ? '취소 중…' : '취소'}</Button>
     : install.phase === 'ready' || install.phase === 'confirm'
@@ -97,7 +97,7 @@ function UpdateResult({ result, locked, onAction }: { result: UpdateInstallResul
     onDismiss={() => { if (!locked) onAction('dismiss') }}>
     {(result.message || result.logPath) && <>
       {result.message && <p>{result.message}</p>}
-      {result.logPath && <p className="text-xs text-muted-foreground">설치 기록: <span className="select-text wrap-anywhere">{result.logPath}</span></p>}
+      {result.logPath && <p className="text-label text-muted-foreground">설치 기록: <span className="select-text wrap-anywhere">{result.logPath}</span></p>}
     </>}
   </Notice>
 }

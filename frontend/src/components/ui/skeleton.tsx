@@ -10,14 +10,14 @@ import { cn } from "@/lib/utils"
 const skeletonVariants = cva("shrink-0 bg-muted", {
   variants: {
     shape: {
-      /** 본문 한 줄(leading-5)과 같은 높이. */
-      line: "h-5 rounded-sm",
-      /** 작은 글자 한 줄(text-xs). */
-      text: "h-4 rounded-sm",
+      /** 본문 한 줄(text-body 줄 높이)과 같은 높이. */
+      line: "h-line-body rounded-sm",
+      /** 작은 글자 한 줄(text-label). */
+      text: "h-line-label rounded-sm",
       /** 작은 단추·탭(size sm)과 같은 높이. */
       control: "h-8 rounded-md",
       /** 상태 배지와 같은 높이. */
-      badge: "h-5 rounded-md",
+      badge: "h-badge rounded-md",
       /** 카드 안 묶음처럼 높이를 쓰는 곳에서 정한다. */
       block: "rounded-lg",
       /** 16:9 썸네일 자리. */

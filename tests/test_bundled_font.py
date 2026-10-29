@@ -18,7 +18,7 @@ from my_video_manager import theme
 from my_video_manager.library_views import default_options
 from my_video_manager.theme import FALLBACK_FONT
 from my_video_manager.web_contract import TABS
-from my_video_manager.web_tokens import web_tokens
+from my_video_manager.web_tokens import type_roles, web_tokens
 from qt_wait import wait_for
 from test_emergency_hide_dialogs_ui import js, rename_dialog, settle, view
 from test_emergency_hide_ui import app, open_window as open_native_window, window
@@ -231,8 +231,8 @@ def test_rare_syllable_title_swaps_to_bundled_font_without_moving_cards(open_win
     core.rename_video(video.id, RARE_TITLE)
     window = open_window()
     wait_for(lambda: js(window, FIRST_ROW) > 0)
-    # 카드 제목(500)의 드문 음절 때문에 그 굵기의 전체 파일만 읽는다.
-    wait_for(lambda: font_state(window)['rest'].get('500') == 'loaded')
+    # 카드 제목(본문 강조 역할 굵기)의 드문 음절 때문에 그 굵기의 전체 파일만 읽는다.
+    wait_for(lambda: font_state(window)['rest'].get(type_roles()['body-strong']['weight']) == 'loaded')
     settle(window)
     frames = stop_recording(window)['frames']
     final = frames[-1]
@@ -275,9 +275,10 @@ def test_native_playback_tray_and_alerts_use_bundled_font(window):
     register_system_font('seguisym.ttf')
     fonts = native_fonts(window)
     assert all(fonts.values()) and fonts == dict.fromkeys(fonts, {BUNDLED}), fonts
-    # 제목 굵기(600)도 번들 글꼴의 해당 굵기 파일로 그린다.
+    # 제목 굵기(구역 제목 역할)도 번들 글꼴의 해당 굵기 파일로 그린다.
     title = window.playback_page.title_label
-    assert (QFontInfo(title.font()).family(), QFontInfo(title.font()).weight()) == (BUNDLED, 600)
+    weight = int(type_roles()['section-title']['weight'])
+    assert (QFontInfo(title.font()).family(), QFontInfo(title.font()).weight()) == (BUNDLED, weight)
     # 재생 기호는 컬러 이모지가 아닌 단색 기호 글꼴로 그린다.
     symbols = [button for button in window.playback_page.findChildren(QToolButton) if button.property('playbackRole') == 'symbol']
     for button in symbols:

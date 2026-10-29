@@ -487,6 +487,8 @@ def real(app, directory, result):
     wait(page.bottom_bar.isVisible, '조작 줄 다시 표시')
     click(page.list_button)
     wait(lambda: core.playback.session is None, '목록으로 단추')
+    # 세션이 끝난 뒤에도 웹이 준비·프레임 완료될 때까지 재생 화면을 앞에 둔다. 복귀가 끝난 뒤 확인한다.
+    wait(lambda: not window.web_host.return_pending and window.pages.currentWidget() is window.web_host, '목록으로 웹 복귀')
     assert not window.isFullScreen() and window.pages.currentWidget() is window.web_host
     passed('fullscreen-list-button')
     real_reel(window, page, directory, click, press, passed)

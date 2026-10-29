@@ -16,10 +16,10 @@ export function KeyGuideButton({ onClick }: { onClick: () => void }) {
 // 표의 키 열은 가장 긴 키 칩에 맞춰 넓어지므로 Ctrl+Alt+Shift+Win+Page Down 같은 키도 설명과 겹치지 않는다.
 function KeyRows({ rows }: { rows: readonly (KeyGuideRow | KeyGuideEntryData)[] }) {
   return <table className="w-full text-left"><tbody className="divide-y">{rows.map(row => <tr key={`${row.keys.join("+")}:${row.label}`} className="align-top">
-    <th scope="row" className="w-40 py-1.5 pr-3 font-normal">{row.keys.length
+    <th scope="row" className="w-40 py-1.5 pr-3 text-body">{row.keys.length
       ? <KbdGroup>{row.keys.map(key => <Kbd key={key}>{key}</Kbd>)}</KbdGroup>
-      : <span className="text-xs whitespace-nowrap text-muted-foreground">키 미할당</span>}</th>
-    <td className="py-1.5 text-sm break-keep wrap-break-word">{row.label}{"detail" in row && row.detail && <p className="text-xs text-muted-foreground">{row.detail}</p>}</td>
+      : <span className="text-label whitespace-nowrap text-muted-foreground">키 미할당</span>}</th>
+    <td className="py-1.5 text-body break-keep wrap-break-word">{row.label}{"detail" in row && row.detail && <p className="text-label text-muted-foreground">{row.detail}</p>}</td>
   </tr>)}</tbody></table>
 }
 
@@ -30,9 +30,9 @@ function focusable(element: Element | null): element is HTMLElement {
 }
 
 function Groups({ groups }: { groups: readonly KeyGuideGroup[] }) {
-  if (!groups.length) return <p className="text-sm text-muted-foreground">이 화면에만 쓰는 키는 없습니다. 앱 전체 키와 Tab으로 단추·입력 칸을 오갑니다.</p>
+  if (!groups.length) return <p className="text-body text-muted-foreground">이 화면에만 쓰는 키는 없습니다. 앱 전체 키와 Tab으로 단추·입력 칸을 오갑니다.</p>
   return <div className="space-y-4">{groups.map(group => <section key={group.title} aria-label={group.title} className="space-y-1">
-    <h4 className="text-xs font-semibold text-muted-foreground">{group.title}</h4>
+    <h4 className="text-label-strong text-muted-foreground">{group.title}</h4>
     <KeyRows rows={group.rows} />
   </section>)}</div>
 }
@@ -84,15 +84,15 @@ export function KeyGuideDialog({ bridge, tab, open, onOpenChange }: { bridge: Sh
       <DialogHeader title={`키 안내 · ${label}`} description="바꿀 수 있는 키는 설정 → 키 배치에서 바꾸며, 여기에는 지금 키 배치가 보입니다." />
       <div tabIndex={0} aria-label="키 목록" className="grid min-h-0 grid-cols-2 gap-6 overflow-y-auto rounded-md focus-visible:outline-2 focus-visible:outline-ring">
         <section aria-label="앱 전체" className="min-w-0 space-y-2">
-          <h3 className="font-semibold">앱 전체</h3>
-          {error ? <Notice tone="error">{error}</Notice> : app ? <KeyRows rows={app} /> : <p role="status" className="text-sm text-muted-foreground">키 배치를 읽는 중…</p>}
+          <h3 className="text-body-strong">앱 전체</h3>
+          {error ? <Notice tone="error">{error}</Notice> : app ? <KeyRows rows={app} /> : <p role="status" className="text-body text-muted-foreground">키 배치를 읽는 중…</p>}
         </section>
         <section aria-label="지금 화면" className="min-w-0 space-y-2">
-          <h3 className="font-semibold">지금 화면 · {label}</h3>
+          <h3 className="text-body-strong">지금 화면 · {label}</h3>
           <Groups groups={groups} />
         </section>
       </div>
-      <DialogFooter start={<p className="text-xs text-muted-foreground">Esc · F1 · 바깥 누르기로도 닫습니다.</p>}>
+      <DialogFooter start={<p className="text-label text-muted-foreground">Esc · F1 · 바깥 누르기로도 닫습니다.</p>}>
         <DialogClose asChild><Button variant="outline">닫기</Button></DialogClose>
       </DialogFooter>
     </DialogContent>

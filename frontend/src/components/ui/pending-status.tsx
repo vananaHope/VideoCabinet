@@ -18,8 +18,8 @@ function usePendingVisible(pending: boolean, delay = PENDING_DELAY_MS) {
 
 const pendingStatusVariants = cva("text-muted-foreground", {
   variants: {
-    /** xs: 툴바·개수 자리 같은 작은 글자. sm: 본문 상태 줄(text-sm)에 나란히 놓일 때. */
-    size: { xs: "text-xs", sm: "text-sm" },
+    /** xs: 툴바·개수 자리 같은 작은 글자. sm: 본문 상태 줄(text-body)에 나란히 놓일 때. */
+    size: { xs: "text-label", sm: "text-body" },
   },
   defaultVariants: { size: "xs" },
 })

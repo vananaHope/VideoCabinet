@@ -34,8 +34,8 @@ export default function SubtitlePreparation() {
     <Notice tone={tone} title="자막 기능 준비" clamp={false}
       action={failed ? <Button size="sm" onClick={() => action('retry')}>다시 시도</Button> : <Button size="sm" variant="outline" disabled={data.state === 'cancelling'} onClick={() => action('cancel')}>취소</Button>}>
       <div className="flex min-w-0 items-start gap-3"><p className="line-clamp-2 min-w-0 flex-1" title={data.message}>{data.message}</p>{data.percent !== null && <span className="shrink-0 tabular-nums">{data.percentLabel}</span>}</div>
-      {data.state === 'preparing' && <><p className="text-xs text-muted-foreground">{data.summary}</p><Progress value={data.percent} aria-label="자막 기능 준비 진행률" /></>}
-      {data.guidance && <p className="text-xs text-muted-foreground">{data.guidance}</p>}
+      {data.state === 'preparing' && <><p className="text-label text-muted-foreground">{data.summary}</p><Progress value={data.percent} aria-label="자막 기능 준비 진행률" /></>}
+      {data.guidance && <p className="text-label text-muted-foreground">{data.guidance}</p>}
     </Notice>
     <NoticeStack items={[error && { tone: 'error', message: error, onDismiss: () => setError('') }]} />
   </section>

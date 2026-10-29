@@ -34,7 +34,7 @@ export function DailyChart({ daily, metric }: { daily?: DailyViewingStatistics[]
   const unit = metric === "viewing_count" ? "회" : divisor === 3600 ? "시간" : divisor === 60 ? "분" : "초"
   const data = daily.map(day => ({ ...day, [metric]: day[metric] / divisor }))
   const format = (value: number) => metric === "watched_seconds" ? exactDuration(value * divisor) : `${value.toLocaleString()}회`
-  return <div className="space-y-2"><p className="text-xs text-muted-foreground">단위: {unit} · 시작한 날짜 기준</p><ChartContainer config={chartConfig} label={`일별 ${chartConfig[metric].label}`}>
+  return <div className="space-y-2"><p className="text-label text-muted-foreground">단위: {unit} · 시작한 날짜 기준</p><ChartContainer config={chartConfig} label={`일별 ${chartConfig[metric].label}`}>
     <BarChart accessibilityLayer data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
       <CartesianGrid vertical={false} stroke="var(--border)" />
       <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={32} interval="preserveStartEnd" tick={{ fill: "var(--muted-foreground)" }} tickFormatter={value => formatShortDate(String(value))} />

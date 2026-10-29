@@ -19,7 +19,7 @@ export function SearchInput(props: ComponentProps<"input">) {
 }
 
 export function MatchedText({ parts }: { parts: SearchTextData[] }) {
-  return <>{parts.map((part, index) => part.matched ? <mark key={index} className="bg-transparent font-semibold text-primary-text">{part.text}</mark> : part.text)}</>
+  return <>{parts.map((part, index) => part.matched ? <mark key={index} className="bg-transparent text-body-strong text-primary-text">{part.text}</mark> : part.text)}</>
 }
 
 export function timestamp(value: number) {

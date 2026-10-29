@@ -27,14 +27,17 @@ const noticeVariants = cva("flex min-w-0 animate-fade-enter items-start rounded-
       info: "border-status-info/40 bg-status-info/10",
       success: "border-status-success/50 bg-status-success/10",
     },
-    size: { default: "gap-2 px-3 py-2 text-sm", compact: "gap-1.5 px-2 py-1 text-xs leading-5" },
+    size: { default: "gap-2 px-3 py-2 text-body", compact: "gap-1.5 px-2 py-1 text-label" },
   },
   defaultVariants: { tone: "info", size: "default" },
 })
+// 제목은 안내 크기의 강조 변형이다.
+const noticeTitle = cva("", { variants: { size: { default: "text-body-strong", compact: "text-label-strong" } }, defaultVariants: { size: "default" } })
+// 아이콘은 첫 줄(본문 20px·라벨 16px)의 가운데에 맞춘다.
 const toneText = cva("shrink-0", {
   variants: {
     tone: { error: "text-destructive", warning: "text-status-warning", info: "text-status-info", success: "text-status-success" },
-    size: { default: "mt-0.5 size-4", compact: "mt-1 size-3", inline: "size-3.5" },
+    size: { default: "mt-0.5 size-4", compact: "mt-0.5 size-3", inline: "size-3.5" },
   },
   defaultVariants: { size: "default" },
 })
@@ -90,7 +93,7 @@ function Notice({ tone, size = "default", title, action, onDismiss, clamp = size
     <div data-slot="notice" data-tone={tone} role={role ?? (tone === "error" ? "alert" : "status")} className={cn(noticeVariants({ tone, size }), className)} {...props}>
       <Icon aria-hidden="true" className={toneText({ tone, size })} />
       <div className="min-w-0 flex-1 space-y-1">
-        {title && <div className="font-medium">{title}</div>}
+        {title && <div className={noticeTitle({ size })}>{title}</div>}
         {children !== undefined && children !== null && children !== "" && <NoticeMessage clamp={!!clamp}>{children}</NoticeMessage>}
         {action && below && <div className="flex flex-wrap items-center gap-2 pt-1">{action}</div>}
       </div>
@@ -281,7 +284,7 @@ function NoticeLayer({ children, avoid, ...props }: Omit<React.ComponentProps<"s
   }, [avoid, total, collapsed])
   return (
     <section ref={layer} data-slot="notice-layer" data-corner={corner} className={layerVariants({ empty: total === 0, corner })} {...props}>
-      <div className="flex shrink-0 items-center gap-2 border-b py-1 pr-1 pl-3 text-xs text-muted-foreground">
+      <div className="flex shrink-0 items-center gap-2 border-b py-1 pr-1 pl-3 text-label text-muted-foreground">
         <span className="flex min-w-0 flex-1 items-center gap-1.5 tabular-nums">
           안내 {total}개
           {errors > 0 && <span className="flex items-center gap-1 text-destructive"><CircleAlert aria-hidden="true" className="size-3.5" />오류 {errors}개</span>}

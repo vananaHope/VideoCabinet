@@ -45,6 +45,15 @@
   --radius-md: calc(var(--radius) - 0.125rem);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 0.25rem);
+  /* 글자 역할 한 줄의 높이. 자리 표시와 한 줄짜리 칸이 web_tokens.json 글자 역할의 줄 높이를 그대로 따른다. */
+  --spacing-line-body: var(--text-body--line-height);
+  --spacing-line-label: var(--text-label--line-height);
+  --spacing-line-display: var(--text-display--line-height);
+  /* 라벨 두 줄 자리(추천 이유·통계 설명)와 상태 배지(라벨 한 줄 + 위아래 여백). */
+  --spacing-lines-label-2: calc(var(--text-label--line-height) * 2);
+  --spacing-badge: calc(var(--text-label--line-height) + var(--spacing));
+  /* 라이브러리 카드 정보 칸. 격자 줄 높이 계산(library-grid.tsx)도 같은 토큰을 읽는다. */
+  --spacing-card-info: var(--library-card-info-height);
   /* 대기열 고정 머리글 높이. 머리글 높이와 목록 scroll-padding이 같은 값을 쓴다. */
   --spacing-queue-header: calc(var(--spacing) * 7.25);
   /* 전환은 web_tokens.json의 motion 값 하나를 쓴다. transition-colors 같은 유틸리티도 이 기본 시간·곡선을 따른다.
@@ -62,7 +71,7 @@
 @layer base {
   :root { color-scheme: dark; }
   * { @apply border-border; }
-  body { @apply m-0 bg-background text-foreground font-sans text-sm; }
+  body { @apply m-0 bg-background text-foreground font-sans text-body; }
   html, body, #root { height: 100%; overflow: hidden; }
   :focus-visible { @apply outline-2 outline-offset-2 outline-ring; }
   ::-webkit-scrollbar { @apply w-2 h-2; }
