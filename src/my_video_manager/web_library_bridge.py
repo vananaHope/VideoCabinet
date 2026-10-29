@@ -47,10 +47,21 @@ class LibraryBridge(QObject):
 
     @LIBRARY.slot('select')
     def select(self, video_id):
-        if video_id not in self.page.visible_ids:
-            return encode({'error': '현재 목록에 없는 영상입니다.'})
+        # 보기 요청은 응답 전에 코어의 결과를 새 조건으로 바꾼다. 웹은 그 응답을 기다리는 동안 이전 결과를 그대로 두고
+        # 그 카드도 고르게 하므로, 지금 조건의 결과가 아니라 라이브러리에 있는지로 받는다(#266).
+        # 새 결과를 반영할 때 그 선택이 결과에 없으면 웹이 결과의 선택을 다시 알린다.
+        if video_id not in self.page.video_ids:
+            return encode({'error': '현재 라이브러리에 없는 영상입니다.'})
         self.page.selected_id = video_id
         return encode({'selectedId': video_id})
+
+    @LIBRARY.slot('clearSelection')
+    def clearSelection(self):
+        # 기다리는 동안 이전 결과에서 고른 영상이 0개가 된 마지막 결과에 없으면 웹은 선택을 비운다. 코어도 따라 비운다.
+        # 늦게 도착해도 그사이 결과에 든 선택은 지우지 않는다(#266).
+        if self.page.selected_id not in self.page.visible_ids:
+            self.page.selected_id = None
+        return encode({'selectedId': self.page.selected_id})
 
     @LIBRARY.slot('details')
     def details(self, video_id):

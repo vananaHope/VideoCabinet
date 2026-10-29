@@ -4,6 +4,7 @@ python scripts/check_web_library.py --prepare --count 24 --source <읽기 전용
 python scripts/check_web_library.py --count 24 --verify --stay
 python scripts/check_web_library.py --verify-contrast --offscreen
 python scripts/check_web_library.py --prepare --count 5000
+python scripts/check_web_library.py --count 5000 --profile-search --no-screenshots
 """
 import time
 STARTED = time.perf_counter()
@@ -28,6 +29,7 @@ parser.add_argument('--verify', action='store_true')
 parser.add_argument('--verify-shell', action='store_true')
 parser.add_argument('--verify-library', action='store_true', help='카드 통계·태그와 하이라이트 재생·편집·복귀 확인')
 parser.add_argument('--profile-refresh', action='store_true', help='갱신의 Python·JSON 파싱·후속 웹 프레임 비용 측정')
+parser.add_argument('--profile-search', action='store_true', help='빠른 검색 연속 입력의 입력란 반영·결과 반영 시간 측정')
 parser.add_argument('--long-content', action='store_true')
 parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-46')
 parser.add_argument('--verify-contrast', action='store_true', help='제외 버튼·메뉴 글자 대비 검증')
@@ -272,6 +274,8 @@ def library_layout():
 
 
 if core.videos():
+    # 큰 라이브러리는 첫 렌더 뒤에 첫 목록이 도착할 수 있다. 카드 행이 그려진 뒤에 잰다.
+    wait_until(lambda: js("!!document.querySelector('#library-grid [role=row]')"))
     metrics['layout'] = library_layout()
 
 
@@ -661,6 +665,84 @@ if args.verify_library:
     js("document.querySelector('aside [data-tab=info]').click()")
     settle()
 
+# 빠른 검색 연속 입력: 키를 누를 예정 시각부터 입력란에 그 글자가 그려진 프레임까지(입력란 반영)와
+# 마지막 키부터 마지막 검색어의 결과·칩이 그려진 프레임까지(결과 반영). 키는 Qt 타이머로 일정 간격에 보내므로
+# Qt 메인 스레드가 보기 요청을 처리하느라 늦으면 그 지연도 입력란 반영에 들어간다.
+if args.profile_search:
+    SEARCH_INPUT = 'document.querySelector(\'[aria-label="영상 제목 빠른 검색"]\')'
+    view_calls = []
+    set_view = page.set_view
+
+    def timed_set_view(options):
+        started = time.perf_counter()
+        set_view(options)
+        view_calls.append(round((time.perf_counter() - started) * 1000, 2))
+    page.set_view = timed_set_view
+    # 입력 중에 도착한 전체 목록(검사·썸네일 등 다른 원인의 갱신)도 입력란 반영을 늦출 수 있어 함께 센다.
+    pushes = []
+    page.bridge.libraryChanged.connect(lambda _: pushes.append(True))
+    point = js_json(f"(() => {{const r = {SEARCH_INPUT}.getBoundingClientRect(); return [r.x + 10, r.y + 10]}})()")
+    QTest.mouseClick(host.view.focusProxy(), Qt.MouseButton.LeftButton, pos=QPoint(*map(int, point)))
+    wait_until(lambda: js(f'document.activeElement === {SEARCH_INPUT}'))
+
+    def clear_search():
+        QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Backspace)
+        wait_until(lambda: page.query == '' and js(f'{SEARCH_INPUT}.value') == '')
+        wait_until(lambda: js("document.querySelector('[aria-label=\"라이브러리 등록·표시 개수\"]').textContent") == f'등록 영상 {args.count}개 · 표시 {args.count}개')
+        settle(300)
+
+    def clock_offset():
+        """웹 시계(performance.timeOrigin + now) - Python 시계(time.time). 왕복 가운데로 맞춘다."""
+        before = time.time() * 1000
+        web = js('performance.timeOrigin + performance.now()')
+        after = time.time() * 1000
+        return web - (before + after) / 2
+
+    search_runs = []
+    for text, interval in (('python', 40), ('python', 40), ('python', 80), ('python', 150), ('0123', 80)):
+        clear_search()
+        view_calls.clear()
+        pushes.clear()
+        offset = clock_offset()
+        expected = len(core.library_view_ids({**page.options, 'query': text}, index=page.index))
+        planned = []
+        base = time.time() * 1000 + 150
+        for index, char in enumerate(text):
+            planned.append(base + index * interval)
+            QTimer.singleShot(150 + index * interval, lambda char=char: QTest.keyClick(host.view.focusProxy(), char))
+        run_web_frames(f"""
+          const input = {SEARCH_INPUT}, target = {json.dumps(text)}, chip = '제목: ' + target;
+          const profile = window.__searchProfile = {{input: [], result: null}};
+          const stamp = () => performance.timeOrigin + performance.now();
+          const typed = () => {{ const value = input.value; requestAnimationFrame(() => profile.input.push([value, stamp()])) }};
+          input.addEventListener('input', typed);
+          const deadline = performance.now() + 10000;
+          const finish = () => {{ input.removeEventListener('input', typed); done() }};
+          function step() {{
+            const shown = [...document.querySelectorAll('[aria-label="적용한 검색 조건"] button')].some(b => b.title === chip)
+              && document.querySelector('[aria-label="라이브러리 등록·표시 개수"]').textContent.endsWith('표시 {expected}개');
+            if (shown && input.value === target) {{ profile.result = stamp(); finish(); return }}
+            if (performance.now() > deadline) {{ finish(); return }}
+            requestAnimationFrame(step);
+          }}
+          requestAnimationFrame(step);
+        """)
+        profile = js_json('window.__searchProfile')
+        reflected = [round(at - offset - planned[index], 1) for index, (_, at) in enumerate(profile['input'][:len(text)])]
+        search_runs.append({
+            'query': text, 'interval_ms': interval, 'expected': expected, 'typed': [value for value, _ in profile['input']],
+            'input_reflect_ms': reflected, 'input_reflect_max_ms': max(reflected),
+            # 결과가 마지막 검색어로 오지 않았으면(글자를 잃는 등) None과 함께 그때 입력란에 남은 값을 적는다.
+            'result_after_last_key_ms': None if profile['result'] is None else round(profile['result'] - offset - planned[-1], 1),
+            'final_input': js(f'{SEARCH_INPUT}.value'),
+            'view_requests': len(view_calls), 'python_view_ms': list(view_calls), 'library_pushes': len(pushes),
+        })
+    clear_search()
+    page.set_view = set_view
+    metrics['quick_search'] = search_runs
+    metrics['checks'].append('빠른 검색 연속 입력: 입력란 반영·결과 반영·보기 요청 수')
+
 # 목록 갱신: Python 조회부터 다음 웹 프레임/Qt paint까지.
 if args.profile_refresh:
     js("""(() => {
@@ -723,6 +805,7 @@ print(json.dumps({
     'refresh_median_ms': median(metrics['refresh_ms']),
     'scroll_frame_median_ms': median(metrics['scroll_frame_ms']),
     'working_set_mib': metrics['working_set_mib'], 'checks': metrics['checks'],
+    **({'quick_search': metrics['quick_search']} if 'quick_search' in metrics else {}),
     'report': str(out),
 }, ensure_ascii=False), flush=True)
 if args.stay:

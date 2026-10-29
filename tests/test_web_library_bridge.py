@@ -75,6 +75,25 @@ def test_slots_serialize_core_data_filter_and_selection(bridge):
     assert 'error' in json.loads(bridge.details(999999))
 
 
+def test_clear_selection_keeps_a_selection_in_the_result(bridge):
+    bridge, page, app = bridge
+    # 늦게 도착해도 지금 결과에 든 선택은 지우지 않는다.
+    video_id = page.selected_id
+    assert json.loads(bridge.clearSelection()) == {'selectedId': video_id}
+    assert page.selected_id == video_id
+
+
+def test_clear_selection_clears_a_selection_outside_the_result(bridge):
+    bridge, page, app = bridge
+    # 0개 결과를 기다리는 동안 이전 결과에서 고른 영상은 라이브러리에 있어 받아들이고, 결과 반영 뒤 비운다.
+    picked = page.selected_id
+    assert json.loads(bridge.filter('없는 제목', 0))['visibleIds'] == []
+    assert json.loads(bridge.select(picked)) == {'selectedId': picked}
+    assert json.loads(bridge.clearSelection()) == {'selectedId': None}
+    assert page.selected_id is None
+    assert json.loads(bridge.clearSelection()) == {'selectedId': None}
+
+
 def test_details_include_external_tracks_partial_success_and_failure(bridge, monkeypatch):
     bridge, page, app = bridge
     core = page.core

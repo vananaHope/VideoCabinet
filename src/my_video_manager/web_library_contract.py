@@ -17,7 +17,7 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
     'ready': (), 'snapshot': (),
     'filter': (Argument('query', str, 'string'), Argument('tag', int, 'number')),
     'view': (Argument('options', str, 'string'),),
-    'select': (Argument('id', int, 'number'),), 'details': (Argument('id', int, 'number'),),
+    'select': (Argument('id', int, 'number'),), 'clearSelection': (), 'details': (Argument('id', int, 'number'),),
     'action': (Argument('name', str, 'Action'), Argument('id', int, 'number')),
     'highlights': (Argument('videoId', int, 'number'),),
     'playHighlight': (Argument('videoId', int, 'number'), Argument('highlightId', int, 'number')),
