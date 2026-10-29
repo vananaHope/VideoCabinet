@@ -211,8 +211,9 @@ class WebShellHost(QWidget):
         if controller is not None and self.isVisible():
             controller.reshown()
             # 숨기기 전 초점이 아직 보이면 그대로 두고, 숨는 동안 사라졌거나 숨었으면 그 탭의 규칙대로 옮긴다(#264).
-            # 다시 보이면서 이미 보낸 초점 요청(재생 중 닫을 때 정한 탭의 기본 위치 등)이 있으면 그것이 먼저다.
-            if not self._focus_since_hidden and self._pending_focus is None:
+            # 다시 보이면서 이미 보낸 초점 요청(재생 중 닫을 때 정한 탭의 기본 위치 등)이 있으면 그것이 먼저고,
+            # 웹 대화상자가 열려 있으면 초점은 그 대화상자의 것이라 보내지 않는다.
+            if not self._focus_since_hidden and self._pending_focus is None and not self.dialogs.blocks_shell_actions:
                 self.request_focus('resume')
 
     def remember_playback_tab(self):
@@ -394,7 +395,9 @@ class WebShellHost(QWidget):
         if self._frontend_ready and ready and self._pending_focus and self.isVisible():
             target, self._pending_focus = self._pending_focus, None
             self._focus_since_hidden = True
-            self.view.setFocus()
+            # 'resume'은 웹 안의 초점만 확인한다. Qt 초점은 트레이 복귀가 숨기기 전 위젯으로 되돌린다.
+            if target != 'resume':
+                self.view.setFocus()
             if controller and controller.focus_requested is not None:
                 controller.focus_requested.emit(target)
             else:
