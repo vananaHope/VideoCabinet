@@ -5,12 +5,13 @@ from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
 root = Path(SPECPATH).parent
 stage = root / 'build' / 'bundle-assets'
-datas = collect_data_files('my_video_manager', includes=['web/**', 'web_tokens.json'])
+# app.ico는 scripts/app_icon.py가 원본에서 만든 커밋 산출물이다. 개발 실행과 설치본이 같은 파일을 창 아이콘으로 읽는다.
+app_icon = root / 'src' / 'my_video_manager' / 'app.ico'
+datas = collect_data_files('my_video_manager', includes=['web/**', 'web_tokens.json', 'app.ico'])
 datas += collect_data_files('faster_whisper') + copy_metadata('my-video-manager')
 datas += [(str(root / 'installer' / 'THIRD-PARTY-NOTICES.txt'), '.'),
           (str(root / 'installer' / 'licenses'), 'licenses')]
-datas += [(str(stage / 'build-version.txt'), 'my_video_manager'),
-          (str(stage / 'app.ico'), 'my_video_manager')]
+datas += [(str(stage / 'build-version.txt'), 'my_video_manager')]
 # 외부 프로그램은 공식 배포 폴더 그대로 동봉한다.
 datas += [(str(stage / 'ffmpeg'), 'ffmpeg'), (str(root / '.runtime' / 'mpv'), 'mpv')]
 a = Analysis([str(root / 'installer' / 'entry.py')], pathex=[str(root / 'src')],
@@ -60,5 +61,5 @@ pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='my-video-manager',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
           console=False, contents_directory='.',
-          icon=str(stage / 'app.ico'))
+          icon=str(app_icon))
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='my-video-manager')

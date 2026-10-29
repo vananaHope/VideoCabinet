@@ -1,0 +1,51 @@
+{
+  "frames": {
+    "16": {
+      "source": "assets/icon/app-icon-16.png",
+      "source_sha256": "abfd452b841388789ac1166a70539fc27b5031c96779bfec28d688125c49aee1",
+      "pixels_sha256": "e8fb7e474eee23b1c5796cac542e0a5f6cf59366329f0e946ecf5a36fed56899"
+    },
+    "20": {
+      "source": "assets/icon/app-icon-20.png",
+      "source_sha256": "dbf5644fd068d4101c3046e8e24e485a485a64756dfb75f222035b46408d8815",
+      "pixels_sha256": "47ed26682181ef54dd46de5d73857f0bb8ec9d4f0bd7b6257ef3f686e8211053"
+    },
+    "24": {
+      "source": "assets/icon/app-icon-24.png",
+      "source_sha256": "4f2f6b858a26f532602897a72dfa01d594c390c6812c06bdb844f85afba53037",
+      "pixels_sha256": "8fe898c12fafd20056a8d1a047893e3e28765c1ab2f01edcb5e1748886a446cf"
+    },
+    "32": {
+      "source": "assets/icon/app-icon-32.png",
+      "source_sha256": "96c3b2a0ebfb03a2e51346f95a8144a0b1388877a04b783738f0055326bee5c3",
+      "pixels_sha256": "0cb8f694f32a96476cd8592b8c8402def27aa1bfcc285cd3958edc8bb4d761d8"
+    },
+    "40": {
+      "source": "assets/icon/app-icon.svg",
+      "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
+      "pixels_sha256": "863fb005f805400687174a192655ad5e2153fdf56b2942029a487e9696574df3"
+    },
+    "48": {
+      "source": "assets/icon/app-icon.svg",
+      "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
+      "pixels_sha256": "a3c9e519283b555ff36955649a1267bfcdd7500a8da4a4d16a5b6a3dda65bcae"
+    },
+    "64": {
+      "source": "assets/icon/app-icon.svg",
+      "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
+      "pixels_sha256": "e6f153aa422f8314cffa2bfbb61d8b814a7572ffaba731d4891b0ba256e2c27c"
+    },
+    "256": {
+      "source": "assets/icon/app-icon.svg",
+      "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
+      "pixels_sha256": "cf541b5dafbba9a7a30e1a2bb7f9caf88a32900e100130e67825c3600bf8740d"
+    }
+  },
+  "web": {
+    "path": "frontend/src/assets/app-icon.png",
+    "size": 128,
+    "source": "assets/icon/app-icon.svg",
+    "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
+    "pixels_sha256": "2dc20ba6016d1002d287447ad56fa6d1a2e3a586e6e59d793c0e92ff7dc2b47d"
+  }
+}
