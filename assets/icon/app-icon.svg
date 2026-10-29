@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="256" height="256" viewBox="0 0 256 256">
+  <!-- 상영실 앱 아이콘 벡터 원본. 40·48·64·256px은 빌드가 이 파일을 그 크기로 렌더링한다(scripts/app_icon.py).
+       테두리 #7c7c85(input), 판 #09090b(background), 글자 #4f46e5(primary): web_tokens.json 색. -->
+  <rect x="0" y="0" width="256" height="256" rx="36" ry="36" fill="#7c7c85"/>
+  <rect x="10" y="10" width="236" height="236" rx="27" ry="27" fill="#09090b"/>
+  <g fill="none" stroke="#4f46e5" stroke-width="26">
+    <path d="M97,30 C97,76 80,102 40,122"/>
+    <path d="M101,72 C108,96 124,108 152,118"/>
+    <path d="M174,30 L174,140"/>
+    <path d="M187,85 L222,85"/>
+    <circle cx="124" cy="182" r="37"/>
+  </g>
+</svg>

@@ -168,6 +168,12 @@ libmpv·FFmpeg·ffprobe를 포함합니다. CUDA·Whisper 모델은 넣지 않�
 `-Version 0.2.0`은 소스를 바꾸지 않고 설치 파일과 앱 표시 버전을 함께 지정합니다(Release DryRun용).
 이미 만든 실행 폴더로 설치 파일만 다시 만들 때는 `-SkipPyInstaller -AppDirectory <실행 폴더>`를 사용합니다.
 
+앱 아이콘은 `assets/icon/`의 벡터 원본(`app-icon.svg`)과 16·20·24·32px 손본 PNG가 원본입니다.
+원본을 바꾸면 `python scripts/app_icon.py`로 산출물(`src/my_video_manager/app.ico`, `frontend/src/assets/app-icon.png`,
+`assets/icon/build-manifest.json`)을 다시 만들어 함께 커밋합니다. 개발 실행과 설치본이 같은 `app.ico`를 창 아이콘으로 읽고,
+실행 파일·설치 프로그램·설치된 앱 목록도 이 파일을 씁니다. 빌드의 생성 검사는 `scripts/app_icon.py --check`로
+원본 내용 해시와 픽셀 규칙(DESIGN.md "App Icon")을 확인하고 어긋나면 멈춥니다.
+
 앱 부분만 담은 패치도 만들려면 `scripts/build.ps1 -Patch`를 사용합니다.
 전체 설치 파일과 함께 `dist/installer/MyVideoManager-Patch-<version>.exe`를 만듭니다.
 기본 빌드는 패치를 추가 압축하지 않습니다. 기존 번들에서는 `-SkipPyInstaller -Patch`를 함께 쓰며,

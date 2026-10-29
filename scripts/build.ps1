@@ -75,6 +75,9 @@ if (-not $PatchOnly) {
     # 2. 생성 검사: 생성 파일은 여기서 변경하지 않는다.
     & $Python scripts/generate_web_types.py --check
     Confirm-Exit 'Generated contracts'
+    # 앱 아이콘 산출물(ICO·웹 이미지)이 원본보다 낡았거나 픽셀 검사를 통과하지 못하면 멈춘다.
+    & $Python scripts/app_icon.py --check
+    Confirm-Exit 'App icon (python scripts/app_icon.py로 다시 만들기)'
 }
 # 3. onedir: CUDA는 제외하고 Qt WebEngine·웹·미디어 도구를 동봉한다.
 if (-not $SkipPyInstaller) {

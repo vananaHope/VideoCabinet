@@ -27,7 +27,8 @@ UsePreviousAppDir=no
 #else
 Uninstallable=yes
 #endif
-UninstallDisplayIcon={app}\my-video-manager.exe
+; 설치 폴더의 다중 크기 ICO를 가리켜 패치 설치로 아이콘 파일만 바뀌어도 설치된 앱 목록 아이콘이 따라 바뀐다.
+UninstallDisplayIcon={app}\my_video_manager\app.ico
 SetupIconFile={#AppDirectory}\my_video_manager\app.ico
 OutputDir={#InstallerOutput}
 #ifdef PatchInclude

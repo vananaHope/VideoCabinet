@@ -140,6 +140,7 @@ def bundle(packaging, tmp_path, monkeypatch):
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b'asset')
+    (tmp_path / checker.APP_ICON).write_bytes(checker.SOURCE_APP_ICON.read_bytes())
     for kind, file in [('python', 'faster-whisper/metadata/LICENSE'), ('web', 'node_modules/react/LICENSE')]:
         (tmp_path / 'licenses' / kind / 'manifest.json').write_text(json.dumps([
             {'name': 'example', 'files': [{'path': file, 'sha256': hashlib.sha256(b'asset').hexdigest()}]}
@@ -169,7 +170,8 @@ def test_bundle_logs_pinned_ffmpeg_version(bundle, capsys):
     'my_video_manager/web/assets/Pretendard-Medium.subset-AbCd1234.woff2', 'my_video_manager/web/assets/Pretendard-SemiBold-AbCd1234.woff2',
     'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
     'my_video_manager/web/qt-fonts/Pretendard-Regular.ttf', 'my_video_manager/web/qt-fonts/Pretendard-SemiBold.ttf',
-    'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak'])
+    'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak',
+    'my_video_manager/app.ico'])
 def test_bundle_missing_required_runtime_fails(bundle, name):
     checker, directory = bundle
     (directory / name).unlink()
@@ -225,6 +227,28 @@ runpy.run_path(entry, run_name='__main__')
     assert result.returncode == 0
     assert json.loads(result.stdout.decode('utf-8')) == {'text': '한국어 자막'}
     assert json.loads(result.stderr.decode('utf-8')) == {'detail': '준비 필요'}
+
+
+def test_bundle_rejects_icon_other_than_built_artifact(bundle):
+    # 옛 임시 아이콘이나 낡은 빌드 입력이 섞인 설치물은 Inno에 넘기기 전에 멈춘다.
+    checker, directory = bundle
+    (directory / checker.APP_ICON).write_bytes(b'old icon')
+    with pytest.raises(RuntimeError, match='앱 아이콘'):
+        checker.check_bundle(directory)
+
+
+def test_executable_installer_and_uninstall_entry_use_built_icon():
+    # 실행 파일 리소스·설치 프로그램·설치된 앱 목록이 모두 설치물의 다중 크기 ICO를 쓴다. 식별자는 그대로다.
+    root = Path(__file__).resolve().parents[1]
+    spec = (root / 'installer/my-video-manager.spec').read_text(encoding='utf-8')
+    assert "app_icon = root / 'src' / 'my_video_manager' / 'app.ico'" in spec
+    assert "'app.ico'])" in spec and 'icon=str(app_icon)' in spec and "stage / 'app.ico'" not in spec
+    setup = dict(line.split('=', 1) for line in (root / 'installer/my-video-manager.iss').read_text(encoding='utf-8').splitlines()
+                 if '=' in line and not line.startswith((';', '#', 'Name:', 'Source:')))
+    assert setup['SetupIconFile'] == r'{#AppDirectory}\my_video_manager\app.ico'
+    assert setup['UninstallDisplayIcon'] == r'{app}\my_video_manager\app.ico'
+    assert setup['AppId'] == '{{C50CA559-BED4-4FA2-AD83-C399DAEF2FBD}'
+    assert setup['DefaultDirName'] == r'{localappdata}\Programs\MyVideoManager'
 
 
 def test_bundle_rejects_size_regression(bundle, monkeypatch):

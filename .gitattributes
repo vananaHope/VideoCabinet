@@ -6,3 +6,4 @@ installer/THIRD-PARTY-NOTICES.txt text eol=lf
 installer/hooks/*.py text eol=lf
 installer/licenses/** -text
 installer/license-sources/**/LICENSE -text
+assets/icon/*.svg -text
