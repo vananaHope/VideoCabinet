@@ -11,7 +11,7 @@ import { QueueRules, queueRuleKeyRows } from "@/components/queue-rules"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
-import { restorePageFocus } from "@/lib/page-focus"
+import { focusPage } from "@/lib/page-focus"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -32,7 +32,6 @@ export default function QueuePage() {
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
   const [confirmation, setConfirmation] = useState("")
-  const refineTrigger = useRef<HTMLButtonElement>(null)
   const [busy, setBusy] = useState(false)
   useLayoutChange(tab, rules, error, message)
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
@@ -47,8 +46,8 @@ export default function QueuePage() {
       if (disposed) return
       const changed = (json: string) => { const data: QueueData = JSON.parse(json); if (fresh(data)) store.apply(data) }
       const rulesChanged = (json: string) => setRules(JSON.parse(json))
-      // 탭 전환 렌더가 끝나 페이지가 보인 뒤(두 프레임)에 초점을 둔다.
-      const focus = (target: string) => requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus("queue", target)) document.getElementById(currentTab.current === "rules" ? "queue-rules" : "queue-list")?.focus({ preventScroll: true }) }))
+      // 기본 초점(보고 있는 목록)과 시점은 공용 규칙이 정한다.
+      const focus = (target: string) => focusPage("queue", target)
       const bulkFinished = (json: string) => {
         const result = JSON.parse(json)
         setBusy(false)
@@ -89,7 +88,7 @@ export default function QueuePage() {
     if (value === "rules" && bridge) request<QueueRulesData>(reply => bridge.rulesSnapshot(reply)).then(setRules).catch(showError)
   }
   return <main className="flex h-full min-h-0 flex-col gap-3 p-4">
-    <ConfirmDialog open={!!confirmation} onOpenChange={open => { if (!open) { setConfirmation(""); requestAnimationFrame(() => refineTrigger.current?.focus()) } }} title="기존 한국어 자막 모두 다듬기" description={confirmation} confirmLabel="다듬기 요청" onConfirm={() => void action("refineExisting")} />
+    <ConfirmDialog open={!!confirmation} onOpenChange={open => { if (!open) setConfirmation("") }} title="기존 한국어 자막 모두 다듬기" description={confirmation} confirmLabel="다듬기 요청" onConfirm={() => void action("refineExisting")} />
     <PageHeader title="자막 대기열" />
     <Tabs label="대기열 영역" value={tab} onChange={changeTab} items={[{ value: "status", label: "처리 상태" }, { value: "rules", label: "자동 자막 규칙" }]} />
     {/* 요청 실패와 일괄 작업 결과는 탭 아래 한곳에 쌓는다. */}
@@ -103,7 +102,7 @@ export default function QueuePage() {
       <div className="flex items-center justify-between gap-4"><SelectField aria-label="대기열 상태 필터" value={filter} options={[["", "모든 상태"], ...queueStates]} onValueChange={setFilter} className="max-w-48" /><p className="text-label text-muted-foreground">↑ / ↓ 선택 · Tab 버튼 이동 · Space 실행</p></div>
       <QueueList store={store} ids={ids} selected={active} onSelect={select} emptyState={<EmptyState variant="page" title={meta.order.length ? "이 상태의 항목이 없습니다" : "자막 대기열이 비어 있습니다"} description={meta.order.length ? "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다." : "라이브러리 상세 패널의 '자막 만들기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요."} />} />
       <p aria-label="상태별 개수" className="text-label text-muted-foreground">{meta.counts.map(item => `${item.label} ${item.count}개`).join(" · ")}</p>
-      <div className="flex flex-wrap gap-2"><Button ref={refineTrigger} disabled={!bridge || busy} onClick={() => action("previewRefineExisting")}>기존 한국어 자막 모두 다듬기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("promote")}>앞당기기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("remove")}>빼기</Button><Button disabled={!bridge || busy || !meta.canRetryFailed} onClick={() => action("retryFailed")}>실패 항목 모두 재시도</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("retryHeld")}>선택한 보류 재시도</Button></div>
+      <div className="flex flex-wrap gap-2"><Button disabled={!bridge || busy} onClick={() => action("previewRefineExisting")}>기존 한국어 자막 모두 다듬기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("promote")}>앞당기기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("remove")}>빼기</Button><Button disabled={!bridge || busy || !meta.canRetryFailed} onClick={() => action("retryFailed")}>실패 항목 모두 재시도</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("retryHeld")}>선택한 보류 재시도</Button></div>
     </section>
     <section hidden={tab !== "rules"} className="flex min-h-0 flex-1 flex-col"><QueueRules bridge={bridge} data={rules} showError={showError} /></section>
   </main>

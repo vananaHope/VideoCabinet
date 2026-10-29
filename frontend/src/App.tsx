@@ -12,12 +12,12 @@ import SubtitlePreparation from "@/components/subtitle-preparation"
 import UpdateNotice from "@/components/update-notice"
 import { NoticeLayer, NoticeStack } from "@/components/ui/notice"
 import { shellStatusTone } from "@/lib/shell-status"
-import { rememberPageFocus } from "@/lib/page-focus"
+import { focusPage, markPageShown, rememberPageFocus } from "@/lib/page-focus"
 import { restorePageScroll, savePageScroll } from "@/lib/page-scroll"
 
 // 탭을 바꿀 때만 새 탭 내용이 투명도로 짧게 들어온다. 첫 진입·재생 복귀·같은 탭 다시 열기에는 전환이 없다.
 // 숨은 탭은 그대로 남아 있으므로 이전 탭의 선택·스크롤·초점이 유지된다. 페이지 안에서 마지막으로 초점을 받은 요소를
-// 기억해 두고, 셸이 그 탭을 다시 보이며 "restore"를 보내면 페이지가 그 요소에 초점을 되돌린다(#265).
+// 기억해 두고, 셸이 그 탭을 다시 보이며 "restore"를 보내면 그 요소에 초점을 되돌린다(#265). 초점 규칙은 lib/page-focus(#264).
 const pageArea = cva("min-h-0 flex-1 overflow-y-auto", { variants: { entering: { true: "animate-tab-enter", false: "" } } })
 
 export default function App() {
@@ -38,6 +38,8 @@ export default function App() {
       const changed = (json: string) => {
         const next = JSON.parse(json).tab
         const leaving = shown.current
+        // 탭 전환·재생 복귀(같은 탭)마다 셸이 보낸다. 이 뒤의 사용자 입력만 늦게 온 초점 요청을 건너뛰게 한다.
+        markPageShown(next)
         if (leaving === next) return
         shown.current = next
         savePageScroll(leaving)
@@ -48,9 +50,7 @@ export default function App() {
       }
       api.shellChanged.connect(changed)
       api.shellStatusChanged.connect(setStatus)
-      const focus = (target: string) => {
-        if (target === 'shell') requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('nav [aria-current="page"]')?.focus())
-      }
+      const focus = (target: string) => focusPage(shown.current, target)
       api.shellFocusRequested.connect(focus)
       // F1 예약 키. 대화상자·IME 조합 중에는 셸이 보내지 않는다.
       const openKeyGuide = () => setKeyGuide(true)
@@ -70,7 +70,7 @@ export default function App() {
       api.shellPrepareReturn.connect(prepareReturn)
       disconnect = () => { api.shellChanged.disconnect(changed); api.shellFocusRequested.disconnect(focus); api.shellStatusChanged.disconnect(setStatus); api.shellKeyGuideRequested.disconnect(openKeyGuide); api.shellPrepareReturn.disconnect(prepareReturn) }
       const state = await request<ShellData>(reply => api.shellSnapshot(reply))
-      if (!disposed) { setBridge(api); setTab(state.tab); setStatus(state.status) }
+      if (!disposed) { markPageShown(state.tab); setBridge(api); setTab(state.tab); setStatus(state.status) }
     }).catch(error => setError(String(error)))
     return () => { disposed = true; disconnect() }
   }, [])

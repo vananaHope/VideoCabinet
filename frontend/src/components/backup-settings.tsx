@@ -27,7 +27,6 @@ export function BackupSettings({ bridge, active }: { bridge: SettingsBridge; act
   const section = useRef<HTMLElement>(null)
   const lastOperation = useRef('')
   const returnFocus = useRef<HTMLElement | null>(null)
-  const confirmTrigger = useRef<HTMLButtonElement>(null)
   // 목록 새로고침·작업 안내로 아래 단추 자리가 바뀐다.
   useLayoutChange(active, data, error, dismissed)
   useEffect(() => {
@@ -96,7 +95,7 @@ export function BackupSettings({ bridge, active }: { bridge: SettingsBridge; act
       <h3 tabIndex={-1} data-backup-preview className="text-body-strong">백업 미리보기</h3><p className="break-all text-label text-muted-foreground">{data.previewPath}</p>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-body"><div><dt className="text-muted-foreground">만든 시각</dt><dd>{formatDateTime(data.preview.created_at)}</dd></div><div><dt className="text-muted-foreground">영상 수</dt><dd>{data.preview.video_count.toLocaleString()}개</dd></div><div><dt className="text-muted-foreground">앱 / DB 버전</dt><dd>{data.preview.app_version} / {data.preview.db_version}</dd></div><div><dt className="text-muted-foreground">썸네일</dt><dd>{data.preview.includes_thumbnails ? '포함' : '제외'}</dd></div></dl>
       <Notice tone="info">{data.preview.version_message}</Notice>
-      <div className="flex gap-2"><Button ref={confirmTrigger} variant="destructive" disabled={busy} onClick={() => setConfirm(true)}>이 백업으로 복원 예약</Button><Button variant="outline" disabled={busy} onClick={() => void action('discard')}>선택 취소</Button></div>
+      <div className="flex gap-2"><Button variant="destructive" disabled={busy} onClick={() => setConfirm(true)}>이 백업으로 복원 예약</Button><Button variant="outline" disabled={busy} onClick={() => void action('discard')}>선택 취소</Button></div>
     </section>}
     <section className="space-y-3 rounded-xl border bg-card p-4" aria-label="자동 백업">
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-body-strong">자동 백업 <span className="text-body text-muted-foreground">최근 {data.keep}개 보관</span></h3><div className="flex gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => void action('refresh')}>새로고침</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void action('openFolder')}>폴더 열기</Button></div></div>
@@ -104,6 +103,6 @@ export function BackupSettings({ bridge, active }: { bridge: SettingsBridge; act
       {data.automatic.length === 0 ? <p className="py-2 text-body text-muted-foreground">자동 백업이 아직 없습니다. 백업 복원이나 DB 형식 변경 전에 자동으로 만듭니다.</p> : <ul className="divide-y">{data.automatic.map(row => <li key={row.path} className="flex items-center justify-between gap-3 py-3"><div className="min-w-0 space-y-1"><p className="text-body">{formatDateTime(row.created_at)} · {size(row.size)}</p><p className="break-words text-label text-muted-foreground">{row.reason}</p>{row.error && <p className="text-label"><InlineNotice tone="error" text={row.error} /></p>}</div><Button size="sm" variant="outline" className="shrink-0" disabled={busy} onClick={() => void action('preview', row.path)}>복원 미리보기</Button></li>)}</ul>}
     </section>
     <p className="text-body text-muted-foreground">다른 PC·드라이브로 옮겼나요? {data.guidance}</p>
-    <ConfirmDialog open={confirm} onOpenChange={open => { setConfirm(open); if (!open) requestAnimationFrame(() => confirmTrigger.current?.focus()) }} title="이 백업으로 복원을 예약할까요?" description={`${data.preview ? `${formatDateTime(data.preview.created_at)} · 영상 ${data.preview.video_count}개. ` : ''}다음 시작 때 현재 라이브러리 기록과 설정을 선택한 백업으로 바꿉니다. 진행 중인 자막 처리는 재시작 시 안전하게 멈추고, 적용 전 데이터를 자동 백업으로 남깁니다.${data.pending ? ' 기존 예약은 이 백업으로 바뀝니다.' : ''} 다시 시작하기 전까지 예약을 취소할 수 있습니다.`} confirmLabel="백업 복원 예약" variant="destructive" onConfirm={() => void action('schedule')} />
+    <ConfirmDialog open={confirm} onOpenChange={setConfirm} title="이 백업으로 복원을 예약할까요?" description={`${data.preview ? `${formatDateTime(data.preview.created_at)} · 영상 ${data.preview.video_count}개. ` : ''}다음 시작 때 현재 라이브러리 기록과 설정을 선택한 백업으로 바꿉니다. 진행 중인 자막 처리는 재시작 시 안전하게 멈추고, 적용 전 데이터를 자동 백업으로 남깁니다.${data.pending ? ' 기존 예약은 이 백업으로 바뀝니다.' : ''} 다시 시작하기 전까지 예약을 취소할 수 있습니다.`} confirmLabel="백업 복원 예약" variant="destructive" onConfirm={() => void action('schedule')} />
   </section>
 }

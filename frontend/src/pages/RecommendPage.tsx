@@ -11,7 +11,7 @@ import { openKeyboardMenu } from "@/components/library-grid"
 import { menuKeyRow, type KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
-import { restorePageFocus } from "@/lib/page-focus"
+import { focusPage, setDefaultFocus } from "@/lib/page-focus"
 
 type Cursor = { key: string; row: number; column: number; videoId: number }
 type Position = { row: number; column: number }
@@ -87,7 +87,6 @@ export default function RecommendPage() {
   useLayoutChange(data, error, dismissed)
   // 줄마다 마지막으로 고른 카드. ↑/↓로 돌아오면 그 카드로 간다.
   const remembered = useRef(new Map<string, number>())
-  const focusTarget = useRef(() => {})
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
   const fresh = useGenerationGuard()
   const rows = data?.rows ?? []
@@ -103,9 +102,9 @@ export default function RecommendPage() {
       const changed = (json: string) => { const next: RecommendData = JSON.parse(json); if (fresh(next)) setData(next) }
       // 다른 탭으로 가면 한 번 생긴 안내(요청 실패·관심 없음 되돌리기)를 지운다. 돌아왔을 때 지난 일이 남지 않는다.
       const shellChanged = (json: string) => { if (JSON.parse(json).tab !== "recommend") { setDismissed(null); setError("") } }
-      // 재생에서 돌아오면 남아 있는 커서 자리의 카드에 초점을 둔다. 레이아웃이 다시 잡힌 뒤 보이게 한다.
+      // 재생에서 돌아오면 남아 있는 커서 자리의 카드에 초점을 둔다(아래 기본 초점). 시점은 공용 규칙이 정한다.
       // 탭을 다시 보이면 그 탭에 남은 초점(예: 관심 없음 되돌리기 단추)을 먼저 되살린다.
-      const focus = (target: string) => requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus("recommend", target)) focusTarget.current() }))
+      const focus = (target: string) => focusPage("recommend", target)
       api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError); shell.shellChanged.connect(shellChanged)
       disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError); shell.shellChanged.disconnect(shellChanged) }
       const initial = await request<RecommendData>(reply => api.snapshot(reply))
@@ -116,13 +115,12 @@ export default function RecommendPage() {
     return () => { disposed = true; disconnect() }
   }, [showError, fresh])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
-  useEffect(() => {
-    focusTarget.current = () => {
-      if (activeId === null) { document.getElementById("recommend-dismissed")?.focus({ preventScroll: true }); return }
-      document.getElementById("recommendations")?.focus({ preventScroll: true })
-      reveal(activeId)
-    }
-  }, [activeId])
+  // 기본 초점: 커서 자리 카드가 있으면 추천 줄(그 카드가 보이게), 없으면 관심 없음 되돌리기 단추.
+  useEffect(() => setDefaultFocus("recommend", () => {
+    if (activeId === null) return document.getElementById("recommend-dismissed")
+    reveal(activeId)
+    return document.getElementById("recommendations")
+  }), [activeId])
 
   // 화면에 보이는 카드를 커서로 확정한다. 관심 없음으로 대신 고른 카드도 재생·관심 없음 전에 확정해야
   // 돌아왔을 때 줄 순서가 바뀌어도 그 카드를 따라간다.

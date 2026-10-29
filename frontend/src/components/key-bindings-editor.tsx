@@ -42,7 +42,7 @@ export function KeyBindingsEditor({ rows, bridge }: { rows: SettingKeyData[]; br
         setDraft(previous => ({ ...previous, [result.command]: { keys: [result.key], display: result.display } }))
         setMessage({ tone: "info", text: `${result.display}로 바꿨습니다. 적용을 누르면 바로 반영됩니다.` })
       }
-      requestAnimationFrame(() => origin.current?.focus())
+      // 캡처 창이 닫히면 공용 대화상자 틀이 '키 바꾸기' 단추로 초점을 돌려준다.
     }
     bridge.keyCaptured.connect(captured)
     return () => bridge.keyCaptured.disconnect(captured)
@@ -101,7 +101,7 @@ export function KeyBindingsEditor({ rows, bridge }: { rows: SettingKeyData[]; br
       <table className="w-full text-left text-body" aria-label="명령별 키 배치"><thead className="sticky top-0 bg-muted"><tr><th className="px-3 py-2 text-body-strong">명령</th><th className="px-3 py-2 text-body-strong">현재 키 / 기본 키</th><th className="px-3 py-2 text-body-strong">초안</th><th className="px-3 py-2 text-body-strong">편집</th></tr></thead><tbody>{rows.map(row => <tr key={row.id} className="border-t" data-changed={changedIds.has(row.id)}><th scope="row" className="px-3 py-2 text-body-strong"><p>{row.label}</p>{row.note && <p className="mt-1 max-w-xs text-label text-muted-foreground">{row.note}</p>}</th><td className="px-3 py-2"><p>{row.display}</p><p className="text-label text-muted-foreground">기본: {row.defaultDisplay}</p></td><td className="px-3 py-2">{changedIds.has(row.id) && <div className="rounded-md bg-accent p-2 text-accent-foreground"><p className="text-label-strong">변경</p><p>{draft[row.id].display}</p></div>}</td><td className="px-3 py-2"><div className="flex gap-2"><Button variant="outline" size="sm" disabled={saving} aria-label={`${row.label} 키 바꾸기`} data-command={row.id} onClick={event => void begin(row.id, event.currentTarget)}>키 바꾸기</Button><Button variant="ghost" size="sm" disabled={saving} aria-label={`${row.label} 기본값`} onClick={() => { setDraft({ ...draft, [row.id]: { keys: row.defaults, display: row.defaultDisplay } }); setError(''); setMessage({ tone: 'info', text: '기본값을 선택했습니다. 적용을 눌러 저장하세요.' }) }}>기본값</Button></div></td></tr>)}</tbody></table>
     </div>
     <Dialog open={capturing !== null} onOpenChange={open => { if (!open) cancel() }}>
-      <DialogContent size="compact" onEscapeKeyDown={event => { event.preventDefault(); cancel() }} onCloseAutoFocus={event => { event.preventDefault(); origin.current?.focus() }}>
+      <DialogContent size="compact" onEscapeKeyDown={event => { event.preventDefault(); cancel() }}>
         <DialogHeader title="새 키 입력" description={`${rows.find(row => row.id === capturing)?.label}에 할당할 키를 누르세요. 문자·숫자·방향키·기능키와 Ctrl/Alt/Shift 조합을 사용할 수 있습니다. Esc로 취소합니다.`} />
         {captureHint && <Notice tone="warning">{captureHint}</Notice>}
         <DialogFooter><Button variant="outline" onClick={cancel}>캡처 취소</Button></DialogFooter>

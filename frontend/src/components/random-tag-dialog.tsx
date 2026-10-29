@@ -29,9 +29,9 @@ export function RandomTagFields({ tags, selected, onChange, count, error = "" }:
 }
 
 /** 무작위 재생 범위를 태그로 고르는 창. 고른 태그 중 하나라도 붙은 영상(OR)이 후보다. */
-export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onReturnFocus }: {
+export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay }: {
   open: boolean; onOpenChange: (open: boolean) => void; tags: TagUsageData[]
-  load: () => Promise<TagCandidatesData[]>; onPlay: (tagIds: number[]) => void; onReturnFocus: () => void
+  load: () => Promise<TagCandidatesData[]>; onPlay: (tagIds: number[]) => void
 }) {
   // 고른 태그는 창을 닫아도 남겨 같은 범위로 다시 고르기 쉽게 한다. 지워진 태그는 빼고 본다.
   const [selected, setSelected] = useState<number[]>([])
@@ -71,7 +71,6 @@ export function RandomTagDialog({ open, onOpenChange, tags, load, onPlay, onRetu
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent ref={content} size="compact"
       onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLElement>("[role=combobox]")?.focus() }}
-      onCloseAutoFocus={event => { event.preventDefault(); onReturnFocus() }}
       onEscapeKeyDown={event => { if (tagPickerKeepsEscape(event)) event.preventDefault() }}>
       <DialogHeader title="태그에서 무작위 재생" description="고른 태그 중 하나라도 붙은 영상에서 하나를 골라 재생합니다. 후보 수는 파일 없음·제외 영상을 뺀 수라 태그 옆 숫자(붙은 영상 수)보다 적을 수 있습니다." />
       <DialogBody><RandomTagFields tags={tags} selected={chosen} onChange={setSelected} count={count} error={error} /></DialogBody>

@@ -35,7 +35,7 @@ export default function ReelPage() {
       if (disposed) return
       goHome.current = () => { request(reply => shell.navigate("library", reply)).catch(showError) }
       const changed = (json: string) => { const next: ReelData = JSON.parse(json); if (fresh(next)) setData(next) }
-      const focus = (target: string) => restoreListFocus("reel-list", scroll.current, "reel", target)
+      const focus = (target: string) => restoreListFocus("reel", "reel-list", scroll.current, target)
       api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError)
       disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError) }
       const initial = await request<ReelData>(reply => api.snapshot(reply))

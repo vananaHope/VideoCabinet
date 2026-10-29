@@ -9,7 +9,7 @@ import { ScanReport } from "@/components/scan-report"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
-import { restorePageFocus } from "@/lib/page-focus"
+import { focusPage } from "@/lib/page-focus"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = []
@@ -34,8 +34,8 @@ export default function FoldersPage() {
       const focus = (target: string) => {
         const next = target.replace('folders-', '')
         if (['folders', 'excluded', 'dismissed'].includes(next)) setSection(next)
-        // 탭 전환 렌더가 끝나 페이지가 보인 뒤에 초점을 둔다. 한 프레임만 기다리면 아직 숨은 단추라 초점을 주지 못할 때가 있다.
-        requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus('folders', target)) document.getElementById(target === 'folders-add' || target === 'restore' ? 'folders-add' : 'folders-section')?.focus() }))
+        // 구역을 바꾼 렌더가 끝난 뒤 공용 규칙이 초점을 둔다.
+        focusPage('folders', target)
       }
       api.foldersChanged.connect(changed)
       api.foldersError.connect(setError)

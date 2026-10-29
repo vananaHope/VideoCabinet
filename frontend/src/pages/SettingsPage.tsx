@@ -13,7 +13,7 @@ import { RecommendationPeriods } from "@/components/recommendation-periods"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
-import { restorePageFocus } from "@/lib/page-focus"
+import { focusPage } from "@/lib/page-focus"
 // 앱 아이콘: scripts/app_icon.py가 벡터 원본에서 만든 커밋 산출물. 웹 번들에 들어가 실행 중 네트워크를 쓰지 않는다.
 import appIcon from "@/assets/app-icon.png"
 
@@ -46,8 +46,8 @@ export default function SettingsPage() {
       const changed = (json: string) => { const next: SettingsData = JSON.parse(json); if (fresh(next)) setData(next) }
       const focus = (target: string) => {
         if (target === 'settings-keys') setCategory('keys')
-        // 탭 전환 렌더가 끝나 설정 페이지가 보인 뒤에 초점을 둔다. 한 프레임만 기다리면 숨은 단추에 초점을 주지 못할 때가 있다.
-        requestAnimationFrame(() => requestAnimationFrame(() => { if (!restorePageFocus('settings', target)) document.querySelector<HTMLButtonElement>('#settings-category [aria-current="true"]')?.focus() }))
+        // 분류를 바꾼 렌더가 끝난 뒤 공용 규칙이 지금 분류 단추에 초점을 둔다.
+        focusPage('settings', target)
       }
       api.settingsChanged.connect(changed)
       api.settingsError.connect(setError)
