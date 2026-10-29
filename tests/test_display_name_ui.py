@@ -81,6 +81,8 @@ class _Application:
 def _patch_startup(monkeypatch, tmp_path):
     from PySide6 import QtWidgets
     from my_video_manager import theme
+    # 시작 경로는 개발 실행에서도 app.ico로 QIcon을 만든다. 실제 앱처럼 Qt 앱 인스턴스가 먼저 있어야 한다.
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     monkeypatch.setattr(sys, 'argv', ['my-video-manager', '--data-dir', str(tmp_path)])
     monkeypatch.setattr(QtWidgets, 'QApplication', _Application)
     monkeypatch.setattr(theme, 'apply_theme', lambda app: None)

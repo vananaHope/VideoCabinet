@@ -229,7 +229,9 @@ def frame_problems(size, image):
     silhouette = sum(pixel[3] for row in pixels for pixel in row) / 255 / size ** 2
     if silhouette < MIN_SILHOUETTE_SHARE:
         problems.append(f'{size}px: 실루엣 면적 {silhouette:.0%} < {MIN_SILHOUETTE_SHARE:.0%}(너무 작음)')
-    plate = Counter(pixels[y][x][:3] for x, y in inner).most_common(1)
+    # 판 색: 가장자리 띠 바로 안쪽 픽셀에서 가장 흔한 색. 글자가 판보다 넓어져도 판을 글자로 착각하지 않는다.
+    plate = Counter(pixels[y][x][:3] for x, y in inner
+                    if any((x + dx, y + dy) in band for dx in (-1, 0, 1) for dy in (-1, 0, 1))).most_common(1)
     mark = sum(contrast(pixels[y][x][:3], plate[0][0]) >= MIN_CONTRAST for x, y in inner) / size ** 2 if plate else 0
     low, high = MARK_SHARE_RANGE
     if not low <= mark <= high:

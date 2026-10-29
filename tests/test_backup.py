@@ -770,6 +770,8 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
     import sys
     from PySide6 import QtWidgets
     from my_video_manager import __main__, adapters, single_instance, theme, transcription, translation_cli, ui
+    # 시작 경로는 app.ico로 QIcon을 만든다. 실제 앱처럼 Qt 앱 인스턴스가 먼저 있어야 한다.
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
     archive = core.create_backup(tmp_path / "backup.zip").path
     core.request_backup_restore(archive)
@@ -810,6 +812,8 @@ def test_main_opens_current_library_after_failed_backup_restore(core, tmp_path, 
     class Application:
         def __init__(self, *args):
             self.aboutToQuit = Signal()
+        def setWindowIcon(self, icon):
+            pass
         def setQuitOnLastWindowClosed(self, value):
             pass
         def property(self, name):

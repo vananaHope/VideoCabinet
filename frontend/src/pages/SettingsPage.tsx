@@ -14,6 +14,8 @@ import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
 import { restorePageFocus } from "@/lib/page-focus"
+// 앱 아이콘: scripts/app_icon.py가 벡터 원본에서 만든 커밋 산출물. 웹 번들에 들어가 실행 중 네트워크를 쓰지 않는다.
+import appIcon from "@/assets/app-icon.png"
 
 const categories = [['general', '일반'], ['keys', '키 배치'], ['recommend', '추천'], ['translation', '번역'], ['transcription', '받아쓰기'], ['backup', '백업'], ['update', '업데이트']] as const
 
@@ -75,7 +77,7 @@ export default function SettingsPage() {
         <BackupSettings bridge={bridge} active={category === 'backup'} />
         <section hidden={category !== 'general'} className="space-y-6" aria-label="일반 설정">
           <h2 className="text-lg font-semibold">일반</h2>
-          <section className="space-y-3 rounded-xl border bg-card p-4"><h3 className="font-semibold">{appName} · {data.version}</h3><Button variant="link" title={data.releasesUrl} onClick={() => action('releases')}>GitHub Release에서 버전 보기 ↗</Button></section>
+          <section className="space-y-3 rounded-xl border bg-card p-4"><div className="flex items-center gap-3"><img src={appIcon} alt="" className="size-10 shrink-0" /><h3 className="font-semibold">{appName} · {data.version}</h3></div><Button variant="link" title={data.releasesUrl} onClick={() => action('releases')}>GitHub Release에서 버전 보기 ↗</Button></section>
           <MinimumDuration id="settings-minimum" value={data.minimum} scanning={data.scanning} onSave={async value => { await request(reply => bridge.setMinimum(value, reply)) }} />
           <AutomaticDetection enabled={data.automaticDetection} scanning={data.scanning} onChange={async enabled => { await request(reply => bridge.setAutomaticDetection(enabled, reply)) }} />
           <section className="space-y-3 rounded-xl border bg-card p-4"><div className="flex items-center gap-3"><h3 className="font-semibold">완전 종료</h3><StatusBadge variant="destructive">위험 작업</StatusBadge></div><p className="text-sm text-muted-foreground">창을 닫으면 트레이로 숨습니다. 완전 종료하면 진행 중인 자막 처리를 멈추고 앱을 끝냅니다.</p><Button variant="destructive" onClick={() => setQuit(true)}>완전 종료</Button></section>
