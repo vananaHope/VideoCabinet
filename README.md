@@ -1,6 +1,6 @@
-# My Video Manager
+# 상영실
 
-Windows용 개인 영상 라이브러리입니다. 폴더의 영상을 모아 썸네일로 보여 주고, 창 안에서 재생하며, **자막을 자동으로 만들고 번역·다듬기**까지 합니다.
+상영실은 Windows용 개인 영상 라이브러리입니다. 폴더의 영상을 모아 썸네일로 보여 주고, 창 안에서 재생하며, **자막을 자동으로 만들고 번역·다듬기**까지 합니다.
 
 - 화면: Python + PySide6, 웹 UI(React·shadcn)
 - 재생: libmpv
@@ -27,7 +27,7 @@ Windows용 개인 영상 라이브러리입니다. 폴더의 영상을 모아 �
 ## 설치해서 쓰기
 
 1. [Releases](https://github.com/vananaHope/my-video-manager-releases/releases/latest)에서 `MyVideoManager-Setup-<버전>.exe`를 받아 실행합니다. 관리자 권한은 필요 없습니다.
-2. 시작 메뉴에서 **My Video Manager**를 엽니다.
+2. 시작 메뉴에서 **상영실**을 엽니다.
 3. **폴더 관리(Ctrl+7) → 감시 폴더 추가**로 영상 폴더를 등록합니다.
 
 - **처음 자동 자막을 만들 때** CUDA 라이브러리와 Whisper large-v3-turbo 모델(합계 약 2.9 GB)을 내려받습니다. NVIDIA GPU와 드라이버가 필요합니다.
