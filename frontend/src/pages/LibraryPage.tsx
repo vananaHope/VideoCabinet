@@ -30,9 +30,13 @@ export const keyGuide: readonly KeyGuideGroup[] = [
   ] },
 ]
 
-/** 목록 데이터만 새 전체 상태로 바꾸고 보기 조건(결과·선택·검색어·칩)은 이미 반영한 더 새 보기 응답의 것을 남긴다. */
+/** 목록 데이터만 새 전체 상태로 바꾸고 보기 조건(결과·선택·검색어·칩)은 지금 화면의 것을 남긴다.
+ * 이미 반영한 더 새 보기 응답이 있거나, 마지막으로 보낸 보기 요청의 응답을 기다리는 중일 때 쓴다. */
 const keepView = (next: LibraryData) => (previous: LibraryData | null) =>
   previous && { ...next, visibleIds: previous.visibleIds, selectedId: previous.selectedId, options: previous.options, chips: previous.chips }
+
+const sameOptions = (a: LibraryViewOptions, b: LibraryViewOptions) =>
+  (Object.keys({ ...a, ...b }) as (keyof LibraryViewOptions)[]).every(key => JSON.stringify(a[key]) === JSON.stringify(b[key]))
 
 export default function LibraryPage() {
   const [bridge, setBridge] = useState<LibraryBridge | null>(null)
@@ -64,6 +68,12 @@ export default function LibraryPage() {
   const filterRevision = useRef(0)
   // 마지막으로 보낸 보기 요청의 응답을 기다리는지. 오래 기다리면 공용 기다림 표시를 보인다.
   const awaitingView = useRef(false)
+  // 응답을 기다리는 동안 도착한, 마지막 요청과 다른 조건의 전체 상태 중 가장 새것. 그동안 화면은 목록 데이터만 바꾸고 보기 조건·결과는
+  // 마지막 요청 기준으로 두며, 응답이 오면 둘 중 더 새 세대의 보기를 보인다. 앞선 조건으로 계산한 전체 상태가 방금 바꾼 정렬·필터를
+  // 되돌리거나 중간 검색어의 결과를 보이지 않게 한다. 마지막 요청과 같은 조건이면 그 결과가 곧 마지막 조건의 결과이므로 바로 보인다.
+  const deferredView = useRef<LibraryData | null>(null)
+  // 응답을 기다리는 동안 화면에 남은 이전 결과에서 고른 영상. 새 결과에 있으면 그 선택을 지키고, 없으면 코어가 보낸 선택으로 바꾸어 코어에도 알린다.
+  const pickedWhileWaiting = useRef<number | null>(null)
   const [viewPending, setViewPending] = useState(false)
   // 결과가 바뀔 때 목록을 맨 위로 올리지 않고 보던 카드의 자리를 지킬지. 폴더 패널 여닫기만 자리를 지킨다.
   const [keepPlace, setKeepPlace] = useState(false)
@@ -79,6 +89,27 @@ export default function LibraryPage() {
   // 입력란에서 검색어를 고치는 중인지(조합·응답 대기). 그동안 밀어 보낸 상태의 검색어로 입력란을 덮지 않는다.
   // 덮으면 응답을 기다리는 사이 도착한 전체 목록(검사·썸네일 갱신 등)이 그보다 앞선 검색어로 입력란을 되돌려 이어 친 글자를 잃는다.
   const editingQuery = useCallback(() => composing.current || awaitingView.current, [])
+  // 기다리는 동안 이전 결과에서 고른 영상이 새 결과에도 있으면 그 선택을 지킨다. 없으면 새 결과의 선택(코어가 정한 것)을 보이고,
+  // 코어는 그 영상을 고른 상태이므로 새 결과의 선택을 알린다.
+  const follow = useCallback(<View extends Pick<LibraryData, "visibleIds" | "selectedId">>(view: View, api: LibraryBridge): View => {
+    const picked = pickedWhileWaiting.current
+    pickedWhileWaiting.current = null
+    if (picked === null) return view
+    if (view.visibleIds.includes(picked)) return { ...view, selectedId: picked }
+    const selected = view.selectedId
+    if (selected != null) request(reply => api.select(selected, reply)).catch(showError)
+    return view
+  }, [showError])
+  // 전체 상태의 보기 조건·결과를 화면에 보인다. 자막·번역 완료나 숨어 있던 동안의 변경이 늦게 도착해도 그사이 고른 영상이
+  // 결과에 남아 있으면 유지하고, 결과가 바뀌어도 맨 위로 올리지 않고 보던 자리를 지킨다.
+  // 조건에서 빠진 영상이나 명시적인 선택 변경은 코어가 보낸 선택을 따른다.
+  const showPushedView = useCallback((next: LibraryData) => {
+    optionsRef.current = next.options
+    if (!editingQuery()) setDraftValue(next.options.query)
+    setData(previous => next.preserveSelection && previous?.selectedId != null && next.visibleIds.includes(previous.selectedId)
+      ? { ...next, selectedId: previous.selectedId } : next)
+    setKeepPlace(next.preserveSelection)
+  }, [editingQuery, setDraftValue])
 
   useEffect(() => {
     let disposed = false
@@ -87,21 +118,13 @@ export default function LibraryPage() {
       if (disposed) return
       const changed = (json: string) => {
         const next: LibraryData = JSON.parse(json)
-        const newView = freshView(next)
         if (!freshData(next)) return
-        if (!newView) {
+        const waiting = awaitingView.current
+        if (waiting && !(optionsRef.current && sameOptions(next.options, optionsRef.current))) {
+          if (!deferredView.current || next.generation > deferredView.current.generation) deferredView.current = next
           setData(keepView(next))
-          setDetailRevision(n => n + 1)
-          return
-        }
-        optionsRef.current = next.options
-        if (!editingQuery()) setDraftValue(next.options.query)
-        // 자막·번역 완료나 숨어 있던 동안의 변경이 늦게 도착해도 그사이 고른 영상이 결과에 남아 있으면 유지하고,
-        // 결과가 바뀌어도 맨 위로 올리지 않고 보던 자리를 지킨다.
-        // 조건에서 빠진 영상이나 명시적인 선택 변경은 코어가 보낸 선택을 따른다.
-        setData(previous => next.preserveSelection && previous?.selectedId != null && next.visibleIds.includes(previous.selectedId)
-          ? { ...next, selectedId: previous.selectedId } : next)
-        setKeepPlace(next.preserveSelection)
+        } else if (freshView(next)) showPushedView(waiting ? follow(next, api) : next)
+        else setData(keepView(next))
         setDetailRevision(n => n + 1)
       }
       const thumbnailsChanged = (json: string) => {
@@ -166,7 +189,7 @@ export default function LibraryPage() {
       showError(error)
     })
     return () => { disposed = true; disconnect() }
-  }, [showError, freshData, freshView, setDraftValue, editingQuery])
+  }, [showError, freshData, freshView, setDraftValue, editingQuery, showPushedView, follow])
 
   // effect는 첫 데이터의 격자가 DOM에 반영된 뒤 실행된다.
   const loaded = data !== null
@@ -211,17 +234,38 @@ export default function LibraryPage() {
     const revision = ++filterRevision.current
     awaitView(true)
     // 요청 번호는 입력 중인 보기 조건보다 먼저 보낸 요청의 응답을, 보기 세대는 그 뒤 도착한 새 전체 상태보다 오래된 응답을 버린다.
+    // 기다리는 동안 미뤄 둔 전체 상태가 이 응답보다 새것이면(코어가 이 요청을 받은 뒤 보낸 것) 그 보기가 마지막 조건의 최신 결과다.
     request<Pick<LibraryData, "visibleIds" | "selectedId" | "options" | "chips" | "generation">>(reply => bridge.view(JSON.stringify(next), reply)).then(result => {
       if (revision !== filterRevision.current) return
-      awaitView(false)
-      if (freshView(result)) { optionsRef.current = result.options; setData(data => data && { ...data, ...result }); setKeepPlace("mode" in patch) }
+      const pushed = settleView()
+      if (pushed && pushed.generation > result.generation) { if (freshView(pushed)) showPushedView(follow(pushed, bridge)) }
+      else if (freshView(result)) { optionsRef.current = result.options; const shown = follow(result, bridge); setData(data => data && { ...data, ...shown }); setKeepPlace("mode" in patch) }
+      // 응답이 이미 보인 더 새 상태보다 오래돼 버려졌으면 기다리는 동안의 선택은 화면 그대로 코어에도 있다.
+      pickedWhileWaiting.current = null
     }).catch(error => {
-      if (revision === filterRevision.current) { awaitView(false); optionsRef.current = previous; setData(data => data && { ...data, options: previous }); showError(error) }
+      if (revision !== filterRevision.current) return
+      const pushed = settleView()
+      if (pushed && freshView(pushed)) showPushedView(follow(pushed, bridge))
+      else { optionsRef.current = previous; setData(data => data && { ...data, options: previous }) }
+      pickedWhileWaiting.current = null
+      showError(error)
     })
+  }
+  // 마지막 요청의 응답(또는 실패)을 받았다. 기다림을 끝내고 그동안 미뤄 둔 전체 상태를 돌려준다.
+  function settleView() {
+    awaitView(false)
+    const pushed = deferredView.current
+    deferredView.current = null
+    return pushed
+  }
+  // 응답을 기다리는 동안에도 화면에 남은 이전 결과의 카드를 고를 수 있다(코어는 라이브러리에 있는 영상이면 받는다).
+  function pick(id: number) {
+    if (awaitingView.current) pickedWhileWaiting.current = id
+    setData(previous => previous && { ...previous, selectedId: id })
   }
   function select(id: number) {
     if (!bridge) return
-    setData(previous => previous && { ...previous, selectedId: id })
+    pick(id)
     request(reply => bridge.select(id, reply)).catch(showError)
   }
   // mpv 전환 중 숨은 웹 뷰의 폭이 바뀌어도 열 수와 스크롤을 유지한다.
@@ -262,7 +306,7 @@ export default function LibraryPage() {
       }
       setRandomNotice(null)
       randomReturn.current = true
-      setData(previous => previous && { ...previous, selectedId: videoId })
+      pick(videoId)
     }).catch(error => {
       releaseLayout()
       showError(error)

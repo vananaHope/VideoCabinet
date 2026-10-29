@@ -5,6 +5,7 @@
 """
 import json
 
+from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 
 from qt_wait import wait_for
@@ -15,6 +16,8 @@ from test_web_tab_reshow import COUNT, GRID, QUERY, SELECTED, active_element, he
 VIEW_REPLY = "(kind, object, state) => kind === 'reply' && 'visibleIds' in state && !('videos' in state)"
 LIBRARY_PUSH = "(kind, object, state) => kind === 'signal' && object === 'library' && 'videos' in state"
 CHIPS = '[...document.querySelectorAll(\'[aria-label="적용한 검색 조건"] button[title]\')].map(button => button.title)'
+NOTICES = 'document.querySelector(\'[aria-label="라이브러리 안내"]\').textContent'
+SORT_DIRECTION = 'document.querySelector(\'[aria-label="정렬 방향"]\').textContent'
 CHIP_STATUS = 'document.querySelector(\'[aria-label="적용한 검색 조건"] [data-slot=pending-status]\').textContent'
 # 웹이 받은 보기 응답 수. 붙잡기 전에 세므로 붙잡은 응답도 센다.
 COUNT_VIEW_REPLIES = """(() => {
@@ -155,3 +158,117 @@ def test_composition_requests_the_list_once_for_the_final_text(open_window, libr
     wait_for(lambda: shows(window, 1, ['제목: 한글']))
     assert js(window, 'window.mvmViewReplies') == 1
     assert js(window, f'{QUERY}.value') == '한글'
+
+
+def test_list_push_while_waiting_keeps_the_sort_just_changed(open_window):
+    window = open_window()
+    page = window.library_page
+    focus_search(window)
+    QTest.keyClicks(view(window), 'clip 0')
+    wait_for(lambda: shows(window, 60, ['제목: clip 0']))
+    # 정렬을 바꾸기 전 조건(오름차순)으로 나간 전체 목록이, 정렬 방향을 바꾼 요청의 응답을 기다리는 동안 도착한다.
+    late = hold(window, LIBRARY_PUSH)
+    window.refresh()
+    wait_for(lambda: held(window, late))
+    reply = hold(window, VIEW_REPLY)
+    click(window, '[aria-label="정렬 방향"]')
+    wait_for(lambda: page.options['descending'] and held(window, reply))
+    release(window, late)
+    # 목록 데이터는 받아도 방금 바꾼 정렬은 그대로이고, 이어 친 글자의 요청도 그 정렬을 담는다.
+    assert js(window, SORT_DIRECTION) == '내림차순 ↓'
+    focus_search(window)
+    QTest.keyClicks(view(window), '0')
+    wait_for(lambda: page.options['query'] == 'clip 00')
+    assert page.options['descending']
+    release(window, reply)
+    wait_for(lambda: shows(window, 10, ['제목: clip 00']))
+    assert js(window, SORT_DIRECTION) == '내림차순 ↓'
+    first = js(window, f'{GRID}.querySelector("[role=gridcell]").textContent')
+    assert 'clip 009' in first, first
+
+
+def test_list_push_while_waiting_never_shows_an_intermediate_query(open_window):
+    window = open_window()
+    focus_search(window)
+    QTest.keyClicks(view(window), 'clip 0')
+    wait_for(lambda: shows(window, 60, ['제목: clip 0']))
+    # 중간 검색어(clip 00)의 응답과 그 조건으로 나간 전체 목록, 마지막 검색어(clip 001)의 응답을 모두 붙잡는다.
+    middle = hold(window, VIEW_REPLY)
+    QTest.keyClicks(view(window), '0')
+    wait_for(lambda: held(window, middle))
+    late = hold(window, LIBRARY_PUSH)
+    window.refresh()
+    wait_for(lambda: held(window, late))
+    last = hold(window, VIEW_REPLY)
+    QTest.keyClicks(view(window), '1')
+    wait_for(lambda: held(window, last))
+    release(window, late)
+    # 마지막 검색어의 결과가 오기 전에는 이전 결과를 그대로 보인다. 중간 검색어의 결과는 보이지 않는다.
+    assert shows(window, 60, ['제목: clip 0']), (js(window, COUNT), chips(window))
+    assert js(window, f'{QUERY}.value') == 'clip 001'
+    release(window, middle)
+    assert shows(window, 60, ['제목: clip 0']), (js(window, COUNT), chips(window))
+    release(window, last)
+    wait_for(lambda: shows(window, 1, ['제목: clip 001']))
+
+
+def test_old_card_picked_while_waiting_is_selected_and_plays(open_window, library):
+    window = open_window()
+    page = window.library_page
+    target = next(video.id for video in library.videos() if video.title == 'clip 001')
+    focus_search(window)
+    QTest.keyClicks(view(window), 'clip 0')
+    wait_for(lambda: shows(window, 60, ['제목: clip 0']))
+    reply = hold(window, VIEW_REPLY)
+    QTest.keyClicks(view(window), '1')
+    wait_for(lambda: held(window, reply))
+    # 새 결과(clip 01)를 기다리는 동안 화면에 남은 이전 결과에서 새 결과에 없는 카드를 고른다.
+    assert target not in page.visible_ids
+    click(window, f'#video-{target}')
+    wait_for(lambda: page.selected_id == target)
+    assert js(window, SELECTED) == f'video-{target}'
+    wait_for(lambda: active_element(window) == 'library-grid')
+    # Enter는 화면에서 고른 그 영상을 재생한다. 선택 요청은 오류 없이 받아들여졌다.
+    QTest.keyClick(view(window), Qt.Key.Key_Return)
+    wait_for(lambda: window.pages.currentWidget() is window.playback_page)
+    assert window.core.playback.session.video_id == target
+    assert js(window, NOTICES) == ''
+    # 돌아와 새 결과가 반영되면 고른 영상은 결과에 없으므로 코어가 정한 첫 결과를 고르고, 화면과 코어의 선택이 같다.
+    window.back_to_list()
+    wait_for(lambda: not window.web_host.return_pending)
+    release(window, reply)
+    wait_for(lambda: shows(window, 10, ['제목: clip 01']))
+    wait_for(lambda: page.selected_id == page.visible_ids[0])
+    assert js(window, SELECTED) == f'video-{page.selected_id}'
+    assert js(window, NOTICES) == ''
+
+
+def test_card_picked_while_waiting_follows_the_new_result(open_window, library):
+    window = open_window()
+    page = window.library_page
+    ids = {video.title: video.id for video in library.videos()}
+    focus_search(window)
+    QTest.keyClicks(view(window), 'clip 0')
+    wait_for(lambda: shows(window, 60, ['제목: clip 0']))
+    # 기다리는 동안 고른 영상이 새 결과에도 있으면 결과가 바뀌어도 그 선택을 지킨다.
+    reply = hold(window, VIEW_REPLY)
+    QTest.keyClicks(view(window), '0')
+    wait_for(lambda: held(window, reply))
+    click(window, f'#video-{ids["clip 005"]}')
+    wait_for(lambda: page.selected_id == ids['clip 005'])
+    release(window, reply)
+    wait_for(lambda: shows(window, 10, ['제목: clip 00']))
+    assert js(window, SELECTED) == f'video-{ids["clip 005"]}'
+    assert page.selected_id == ids['clip 005']
+    # 새 결과에 없으면 새 결과의 선택(첫 결과)을 보이고 코어도 그 영상을 고른다.
+    reply = hold(window, VIEW_REPLY)
+    focus_search(window)
+    QTest.keyClicks(view(window), '3')
+    wait_for(lambda: held(window, reply))
+    click(window, f'#video-{ids["clip 001"]}')
+    wait_for(lambda: page.selected_id == ids['clip 001'])
+    release(window, reply)
+    wait_for(lambda: shows(window, 1, ['제목: clip 003']))
+    assert js(window, SELECTED) == f'video-{ids["clip 003"]}'
+    wait_for(lambda: page.selected_id == ids['clip 003'])
+    assert js(window, NOTICES) == ''
