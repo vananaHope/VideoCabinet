@@ -221,3 +221,17 @@ def test_application_window_icon_is_the_built_multi_size_icon(icon, monkeypatch,
     for size in (16, 32, 48, 256):
         pixmap = window_icon.pixmap(QSize(size, size))
         assert icon.pixel_digest(pixmap.toImage()) == icon.pixel_digest(built[size]), size
+
+
+def test_icon_colors_are_web_tokens(icon):
+    # 색 원본은 web_tokens.json이다. 아이콘 원본이 토큰과 다른 색을 쓰면 앱 화면과 어긋난다.
+    import re
+    from my_video_manager.web_tokens import web_tokens
+    colors = web_tokens()['colors']
+    expected = {colors['primary'], colors['background'], colors['input']}
+    svg = (ROOT / icon.VECTOR_SOURCE).read_text(encoding='utf-8')
+    assert set(re.findall(r'(?:fill|stroke)="(#[0-9a-f]{6})"', svg)) == expected
+    for size in icon.TUNED_SIZES:
+        image = icon.read_png(ROOT / icon.source_for(size))
+        used = {image.pixelColor(x, y).name() for y in range(size) for x in range(size) if image.pixelColor(x, y).alpha()}
+        assert used == expected, size
