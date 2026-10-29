@@ -38,23 +38,23 @@ function lastViewed(value: string | null) {
 }
 function VideoStatistics({ video }: { video: VideoData }) {
   const glanceOnly = video.viewingCount === 0 && video.lastViewedAt !== null
-  return <span aria-label="시청 통계" className="grid grid-cols-2 gap-1 rounded-lg border bg-background/40 p-1.5 text-xs">
-    <span className="flex min-w-0 flex-col"><span className="text-muted-foreground">횟수 · 시간</span><span className="truncate font-medium tabular-nums" title={`${video.viewingCount}회 · ${duration(video.watchedSeconds)}`}>{video.viewingCount}회 · {duration(video.watchedSeconds)}</span></span>
+  return <span aria-label="시청 통계" className="grid grid-cols-2 gap-1 rounded-lg border bg-background/40 p-1.5 text-label">
+    <span className="flex min-w-0 flex-col"><span className="text-muted-foreground">횟수 · 시간</span><span className="truncate text-label-strong tabular-nums" title={`${video.viewingCount}회 · ${duration(video.watchedSeconds)}`}>{video.viewingCount}회 · {duration(video.watchedSeconds)}</span></span>
     <span className="flex min-w-0 flex-col"><span className="truncate text-muted-foreground" title={glanceOnly ? "틀어보기는 시청 횟수·시간에 넣지 않습니다" : undefined}>{glanceOnly ? "마지막 틀어보기" : "마지막 시청"}</span><span className="truncate tabular-nums" title={lastViewed(video.lastViewedAt)}>{lastViewed(video.lastViewedAt)}</span></span>
   </span>
 }
 export function VideoCard({ video, variant, cardSize = "medium", ...props }: Props) {
   return <button {...props} className={cardVariants({ variant })} title={video.title}>
     <Thumbnail video={video} variant={cardSize === "large" ? "large" : cardSize === "small" ? "card" : "medium"} />
-    <div className="flex h-40 w-full shrink-0 flex-col gap-0.5 p-2">
-      <span className="shrink-0 truncate leading-5 font-medium">{video.title}</span>
+    <div className="flex h-card-info w-full shrink-0 flex-col gap-0.5 p-2">
+      <span className="shrink-0 truncate text-body-strong">{video.title}</span>
       <span className="flex flex-wrap items-center gap-1">
-        <span className="text-xs text-muted-foreground tabular-nums">{duration(video.duration)}</span>
+        <span className="text-label text-muted-foreground tabular-nums">{duration(video.duration)}</span>
         <StatusBadge variant={video.missing ? "destructive" : video.finished ? "success" : video.abandoned ? "info" : "muted"}>{viewing(video)}</StatusBadge>
         {video.hasSubtitles && <StatusBadge variant="outline">자막 있음</StatusBadge>}
         {video.favorite && <StatusBadge variant="highlight">즐겨 보는</StatusBadge>}
       </span>
-      {video.series && <span className="shrink-0 truncate text-xs text-muted-foreground" title={video.series}>{video.series}</span>}
+      {video.series && <span className="shrink-0 truncate text-label text-muted-foreground" title={video.series}>{video.series}</span>}
       <VideoStatistics video={video} />
       <span className="mt-auto min-w-0"><VideoTags tags={video.tags} /></span>
     </div>
@@ -65,7 +65,7 @@ export function VideoCard({ video, variant, cardSize = "medium", ...props }: Pro
 export function VideoCardPlaceholder() {
   return <div data-slot="video-card-placeholder" aria-hidden="true" className={cardVariants({ variant: "placeholder" })}>
     <Skeleton shape="media" />
-    <div className="flex h-40 w-full shrink-0 flex-col gap-0.5 p-2">
+    <div className="flex h-card-info w-full shrink-0 flex-col gap-0.5 p-2">
       <Skeleton shape="line" className="w-3/4" />
       <span className="flex gap-1"><Skeleton shape="badge" className="w-10" /><Skeleton shape="badge" className="w-14" /></span>
       <Skeleton shape="block" className="mt-1 h-12 w-full" />

@@ -4,10 +4,10 @@ import { Notice } from "@/components/ui/notice"
 
 export function ExternalSubtitleList({ files }: { files: ExternalSubtitleFileData[] }) {
   return <section aria-label="외부 자막" className="space-y-2 border-t pt-2">
-    <h3 className="font-semibold text-foreground">외부 자막{files.length > 0 && ` · ${files.length}개 파일`}</h3>
+    <h3 className="text-label-strong text-foreground">외부 자막{files.length > 0 && ` · ${files.length}개 파일`}</h3>
     {!files.length ? <p>가져온 외부 자막이 없습니다.</p> : <ul className="space-y-3">
       {files.map(file => <li key={file.id} className="min-w-0 space-y-1">
-        <p title={file.name} className="truncate font-medium text-foreground">{file.name}</p>
+        <p title={file.name} className="truncate text-label-strong text-foreground">{file.name}</p>
         {file.folderLabel && <p title={file.folderLabel} className="truncate text-muted-foreground">{file.folderLabel}</p>}
         {file.subtitles.length ? file.subtitles.map((track, index) => <div key={index} className="flex flex-wrap items-center gap-2">
           <StatusBadge>{track.languageLabel}</StatusBadge>

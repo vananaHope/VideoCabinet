@@ -58,7 +58,7 @@ function placeOf(videos: VideoData[], selectedId: number | null, { columns, rowH
 
 function GridMessage({ title, description }: { title: string; description: string }) {
   return <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
-    <h2 className="text-base font-semibold text-foreground">{title}</h2>
+    <h2 className="text-section-title text-foreground">{title}</h2>
     <p>{description}</p>
   </div>
 }
@@ -102,7 +102,9 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
       const available = element.clientWidth - 8
       const columns = Math.max(1, Math.floor((available + 12) / (cardWidth + 12)))
       const width = (available - (columns - 1) * 12) / columns
-      const rowHeight = (width - 2) * 9 / 16 + 10 * rootSize + 14
+      // 줄 = 카드 테두리 2px + 16:9 썸네일 + 정보 칸(글자 역할 줄 높이에서 정한 토큰) + 줄 간격 12px.
+      const infoHeight = parseFloat(css.getPropertyValue("--library-card-info-height")) * rootSize
+      const rowHeight = (width - 2) * 9 / 16 + infoHeight + 14
       element.style.setProperty('--grid-row-height', `${rowHeight / rootSize}rem`)
       const previous = shown.current
       // 폭이 바뀌어(폴더 패널 여닫기·창 크기·카드 크기) 열 수나 줄 높이가 바뀌면 보던 카드를 같은 세로 위치에 다시 둔다.

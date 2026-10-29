@@ -15,7 +15,7 @@ type Choice =
   | { mode: "multiple"; selected: readonly number[]; onChange: (ids: number[]) => void; chips?: boolean }
   | { mode: "immediate"; onPick: (tag: TagUsageData) => Promise<boolean>; onCreate?: (name: string) => Promise<boolean> }
 
-const option = cva("flex min-w-0 cursor-default items-center gap-2 text-sm data-active:ring-2 data-active:ring-ring data-active:ring-inset", {
+const option = cva("flex min-w-0 cursor-default items-center gap-2 text-body data-active:ring-2 data-active:ring-ring data-active:ring-inset", {
   variants: {
     layout: { chip: "max-w-full rounded-full border px-3 py-1", row: "w-full rounded-md px-3 py-1.5" },
     multiple: {
@@ -25,7 +25,7 @@ const option = cva("flex min-w-0 cursor-default items-center gap-2 text-sm data-
   },
 })
 const mark = cva("size-4 shrink-0", { variants: { chosen: { true: "", false: "invisible" } } })
-const count = cva("shrink-0 text-xs tabular-nums", { variants: { chosen: { true: "text-primary-foreground", false: "text-muted-foreground" } } })
+const count = cva("shrink-0 text-label tabular-nums", { variants: { chosen: { true: "text-primary-foreground", false: "text-muted-foreground" } } })
 
 // listAll이면 입력이 없을 때 자주 쓴 태그 대신 전체를 자체 스크롤 행 목록으로 늘 펼친다('모두 보기' 없음).
 export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 태그가 없습니다.", listAll = false, ...choice }: Choice & {
@@ -131,8 +131,8 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
         }} />
       {onCreate && <Button variant="outline" className="shrink-0" disabled={!creatable} onClick={() => create()}>새 태그로 붙이기</Button>}
     </div>
-    {available <= 0 ? <p id={statusId} className="text-xs text-muted-foreground">{emptyText}</p>
-      : !choices.length ? <p id={statusId} className="text-xs wrap-anywhere text-muted-foreground">‘{query.trim()}’이(가) 들어간 태그가 없습니다.</p>
+    {available <= 0 ? <p id={statusId} className="text-label text-muted-foreground">{emptyText}</p>
+      : !choices.length ? <p id={statusId} className="text-label wrap-anywhere text-muted-foreground">‘{query.trim()}’이(가) 들어간 태그가 없습니다.</p>
       : <div id={listId} role="listbox" aria-label={searching ? `${label} 검색 결과` : showAll || listAll ? `모든 ${label}` : `자주 쓴 ${label}`} aria-multiselectable={multiple || undefined}
         className={layout === "chip" ? "flex flex-wrap gap-1.5" : "max-h-48 space-y-0.5 overflow-y-auto rounded-md border p-1"}>
         {choices.map((tag, index) => {

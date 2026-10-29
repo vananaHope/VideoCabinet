@@ -100,9 +100,9 @@ export default function QueuePage() {
     {/* 처리 상태 구역은 필터·목록 최소 높이(머리글+행 세 개)·개수·버튼이 들어갈 높이 아래로 줄지 않는다.
         모자라면 위 안내 묶음이 줄어 스크롤한다. 자동 최소 높이는 목록 전체 높이를 따르므로 값을 정해 둔다. */}
     <section hidden={tab !== "status"} className="flex min-h-64 flex-1 flex-col gap-3">
-      <div className="flex items-center justify-between gap-4"><SelectField aria-label="대기열 상태 필터" value={filter} options={[["", "모든 상태"], ...queueStates]} onValueChange={setFilter} className="max-w-48" /><p className="text-xs text-muted-foreground">↑ / ↓ 선택 · Tab 버튼 이동 · Space 실행</p></div>
+      <div className="flex items-center justify-between gap-4"><SelectField aria-label="대기열 상태 필터" value={filter} options={[["", "모든 상태"], ...queueStates]} onValueChange={setFilter} className="max-w-48" /><p className="text-label text-muted-foreground">↑ / ↓ 선택 · Tab 버튼 이동 · Space 실행</p></div>
       <QueueList store={store} ids={ids} selected={active} onSelect={select} emptyState={<EmptyState variant="page" title={meta.order.length ? "이 상태의 항목이 없습니다" : "자막 대기열이 비어 있습니다"} description={meta.order.length ? "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다." : "라이브러리 상세 패널의 '자막 만들기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요."} />} />
-      <p aria-label="상태별 개수" className="text-xs text-muted-foreground">{meta.counts.map(item => `${item.label} ${item.count}개`).join(" · ")}</p>
+      <p aria-label="상태별 개수" className="text-label text-muted-foreground">{meta.counts.map(item => `${item.label} ${item.count}개`).join(" · ")}</p>
       <div className="flex flex-wrap gap-2"><Button ref={refineTrigger} disabled={!bridge || busy} onClick={() => action("previewRefineExisting")}>기존 한국어 자막 모두 다듬기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("promote")}>앞당기기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("remove")}>빼기</Button><Button disabled={!bridge || busy || !meta.canRetryFailed} onClick={() => action("retryFailed")}>실패 항목 모두 재시도</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("retryHeld")}>선택한 보류 재시도</Button></div>
     </section>
     <section hidden={tab !== "rules"} className="flex min-h-0 flex-1 flex-col"><QueueRules bridge={bridge} data={rules} showError={showError} /></section>

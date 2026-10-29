@@ -53,12 +53,12 @@ function reveal(videoId: number) {
   list.scrollTop += top < 0 ? top : bottom > 0 ? Math.min(bottom, top) : 0
 }
 
-// 첫 추천이 오기 전의 줄 자리. 실제 줄과 같은 머리글 높이(h-5, 실제 제목은 한 줄 말줄임)·카드 줄(다섯 장 폭)로 첫 화면을 채운다.
+// 첫 추천이 오기 전의 줄 자리. 실제 줄과 같은 머리글 높이(본문 한 줄, 실제 제목은 한 줄 말줄임)·카드 줄(다섯 장 폭)로 첫 화면을 채운다.
 function RecommendationsPlaceholder() {
   return <div data-recommend-list className="min-h-0 flex-1 overflow-hidden scroll-stable rounded-lg p-1">
     <Placeholder label="추천을 불러오는 중"><div className="space-y-3">
       {[0, 1, 2].map(row => <section key={row} className="flex flex-col gap-1">
-        <div className="flex h-5 items-center px-1"><Skeleton shape="text" className="w-28" /></div>
+        <div className="flex h-line-body items-center px-1"><Skeleton shape="text" className="w-28" /></div>
         <div className="recommendation-row rounded-lg p-1">{[0, 1, 2, 3, 4].map(card => <RecommendationCardPlaceholder key={card} />)}</div>
       </section>)}
     </div></Placeholder>
@@ -190,7 +190,7 @@ export default function RecommendPage() {
         action: <Button size="xs" variant="outline" onClick={() => restore(dismissed.id)}>되돌리기</Button> },
     ]} />
     {/* 개수·키 안내 줄은 데이터 전에도 같은 높이로 자리를 잡고, 요청을 기다리는 동안 기다림 표시를 같은 줄에 둔다. */}
-    <div data-recommend-status className="flex h-4 min-w-0 shrink-0 items-center gap-3 text-xs text-muted-foreground">
+    <div data-recommend-status className="flex h-line-label min-w-0 shrink-0 items-center gap-3 text-label text-muted-foreground">
       {count > 0 ? <p className="min-w-0 truncate">{`추천 ${rows.length}줄 · ${count}개 · ←/→ 줄 안 이동 · ↑/↓ 줄 사이 이동 · Enter 재생 · Backspace 관심 없음 · 우클릭 메뉴`}</p>
         : !loaded && !error && <Skeleton shape="text" className="w-80" />}
       <PendingStatus pending={requests > 0} label="추천을 다시 계산하는 중…" className="ml-auto shrink-0" />
@@ -201,7 +201,7 @@ export default function RecommendPage() {
       : <div id="recommendations" data-recommend-list role="grid" aria-label="추천 줄" aria-busy={requests > 0} aria-activedescendant={activeId !== null ? cardId(activeId) : undefined} tabIndex={0} onKeyDown={key}
         className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-stable rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
         {rows.map((row, rowIndex) => <section key={row.key} role="row" aria-label={`${row.title} · ${row.items.length}개`} className="flex flex-col gap-1">
-          <div role="rowheader" className="flex h-5 min-w-0 items-baseline gap-2 px-1"><h2 title={row.title} className="min-w-0 truncate text-sm font-semibold">{row.title}</h2><span className="shrink-0 text-xs text-muted-foreground">{row.items.length}개</span></div>
+          <div role="rowheader" className="flex h-line-body min-w-0 items-baseline gap-2 px-1"><h2 title={row.title} className="min-w-0 truncate text-body-strong">{row.title}</h2><span className="shrink-0 text-label text-muted-foreground">{row.items.length}개</span></div>
           <div className="recommendation-row rounded-lg p-1">
             {row.items.map((item, column) => <RecommendationMenu key={item.video.id} onPlay={() => play({ row: rowIndex, column })} onDismiss={() => dismiss({ row: rowIndex, column })}
               onClose={() => document.getElementById("recommendations")?.focus({ preventScroll: true })}>

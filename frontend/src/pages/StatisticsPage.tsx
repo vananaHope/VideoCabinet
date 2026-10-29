@@ -43,11 +43,11 @@ function Activity({ result, metric, onMetric, onPlay }: { result?: StatisticsDas
     </div>
     <section className="space-y-4 rounded-xl border bg-card p-5"><PageHeader variant="section" title="일별 시청" actions={<Tabs label="통계 지표" value={metric} items={metrics} onChange={value => onMetric(value as Metric)} />} />
       <DailyChart daily={data?.daily} metric={metric} />
-      {data?.viewing_count === 0 && <p className="text-sm text-muted-foreground">이 기간에는 시청 기록이 없습니다.</p>}
+      {data?.viewing_count === 0 && <p className="text-body text-muted-foreground">이 기간에는 시청 기록이 없습니다.</p>}
     </section>
     <div className="grid gap-5 lg:grid-cols-2"><ActivityChart title="요일별 시청 시간" values={result?.weekday_seconds} labels={weekdays} /><ActivityChart title="시간대별 시청 시간" values={result?.hourly_seconds} labels={hours} tickStep={3} /></div>
     {data && <section className="min-w-0 space-y-3 rounded-xl border bg-card p-5"><PageHeader variant="section" title="가장 많이 본 영상" description="이 기간의 시청 시간순 · 최대 5개" />
-      {data.top_videos.length === 0 ? <EmptyState title="아직 시청한 영상이 없어요" description="영상을 시청하면 여기에 표시됩니다." /> : <ol className="space-y-2">{data.top_videos.map((video, index) => <li key={video.video_id}><button type="button" data-statistics-video={video.video_id} onClick={() => onPlay(video.video_id)} disabled={video.excluded || video.missing} className={topVideo()} title={video.title}><span className="text-sm text-muted-foreground">{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium">{video.title}</span><span className="block text-xs text-muted-foreground">{duration(video.watched_seconds)} · {video.viewing_count.toLocaleString()}회{video.excluded ? " · 제외한 영상" : video.missing ? " · 파일 없음" : " · 재생"}</span></span></button></li>)}</ol>}
+      {data.top_videos.length === 0 ? <EmptyState title="아직 시청한 영상이 없어요" description="영상을 시청하면 여기에 표시됩니다." /> : <ol className="space-y-2">{data.top_videos.map((video, index) => <li key={video.video_id}><button type="button" data-statistics-video={video.video_id} onClick={() => onPlay(video.video_id)} disabled={video.excluded || video.missing} className={topVideo()} title={video.title}><span className="text-body text-muted-foreground">{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate text-body-strong">{video.title}</span><span className="block text-label text-muted-foreground">{duration(video.watched_seconds)} · {video.viewing_count.toLocaleString()}회{video.excluded ? " · 제외한 영상" : video.missing ? " · 파일 없음" : " · 재생"}</span></span></button></li>)}</ol>}
     </section>}
   </>
 }
@@ -103,7 +103,7 @@ export default function StatisticsPage() {
   return <main ref={root} aria-label="통계" className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-y-auto scroll-stable p-4">
     <PageHeader title="시청 통계" description="오늘을 포함한 로컬 날짜 기준 · 틀어보기와 모아보기 복습 제외" actions={<Tabs label="통계 기간" value={String(state.days)} items={periods} onChange={choose} />} />
     {/* 표시 중인 결과의 범위와 기다림 표시를 한 줄에 둔다. 줄 높이는 문구가 생기고 사라져도 같다. */}
-    <div data-statistics-status className="flex h-5 min-w-0 shrink-0 items-center gap-3 text-sm text-muted-foreground">
+    <div data-statistics-status className="flex h-line-body min-w-0 shrink-0 items-center gap-3 text-body text-muted-foreground">
       {description && <p className="min-w-0 truncate">{description}</p>}
       <PendingStatus pending={state.loading} label={`${state.days}일 시청 기록을 계산하고 있어요…`} className="shrink-0" />
     </div>

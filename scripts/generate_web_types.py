@@ -6,7 +6,7 @@ from typing import get_args, get_origin, get_type_hints
 
 from my_video_manager.tags import tag_name_key_tables
 from my_video_manager.web_contract import CONTRACTS
-from my_video_manager.web_tokens import web_tokens
+from my_video_manager.web_tokens import type_roles, web_tokens
 import json
 
 
@@ -72,9 +72,14 @@ def render_types(contracts=CONTRACTS):
 def render_tokens():
     tokens = web_tokens()
     variables = {**tokens['colors'], **tokens['layout'], **tokens['motion']}
+    scale = {key: value for key, value in tokens['typography'].items() if key != 'roles'}
+    # 글자 역할은 Tailwind text-<역할> 유틸리티 하나로 크기·줄 높이·굵기·자간을 함께 정한다.
+    roles = {f'text-{name}{suffix}': role[field] for name, role in type_roles(tokens).items()
+             for field, suffix in (('size', ''), ('line-height', '--line-height'),
+                                   ('weight', '--font-weight'), ('letter-spacing', '--letter-spacing'))}
     return ('/* scripts/generate_web_types.py로 생성. web_tokens.json을 수정하세요. */\n:root {\n'
             + ''.join(f'  --{key}: {value};\n' for key, value in variables.items()) + '}\n@theme {\n'
-            + ''.join(f'  --{key}: {value};\n' for key, value in tokens['typography'].items()) + '}\n')
+            + ''.join(f'  --{key}: {value};\n' for key, value in {**scale, **roles}.items()) + '}\n')
 
 
 def render_tag_name_key():

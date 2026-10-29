@@ -82,7 +82,7 @@ export default function App() {
   }
   return <div className="flex h-full flex-col">
     <header className="flex shrink-0 items-center gap-4 border-b bg-background px-4 py-3">
-      <span className="shrink-0 text-sm font-semibold">{appName}</span>
+      <span className="shrink-0 text-body-strong">{appName}</span>
       <Tabs label="페이지 이동" value={tab} items={tabs.map(([value, label], index) => ({ value, label, shortcut: `Ctrl+${index + 1}` }))} onChange={navigate} variant="navigation" />
       <KeyGuideButton onClick={() => setKeyGuide(true)} />
     </header>

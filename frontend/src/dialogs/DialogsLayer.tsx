@@ -118,14 +118,14 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       </>}
       {kind === 'tag-rename' && <Input aria-label="새 이름" value={form.name} onChange={event => update({ name: event.target.value })} />}
       {(kind === 'highlight' || kind === 'range') && <div className="grid grid-cols-2 gap-3">
-        <label className="space-y-2 text-sm">시작(초)<Input type="number" min={0} max={data.maximum} step={0.001} aria-label="시작(초)" value={form.start}
+        <label className="space-y-2 text-body">시작(초)<Input type="number" min={0} max={data.maximum} step={0.001} aria-label="시작(초)" value={form.start}
           onChange={event => update({ start: event.target.value })} onBlur={() => { if (form.start !== '') update({ start: Number(Number(form.start).toFixed(3)) }) }} /></label>
-        <label className="space-y-2 text-sm">끝(초)<Input type="number" min={0} max={data.maximum} step={0.001} aria-label="끝(초)" value={form.end} disabled={kind === 'highlight' && !form.range}
+        <label className="space-y-2 text-body">끝(초)<Input type="number" min={0} max={data.maximum} step={0.001} aria-label="끝(초)" value={form.end} disabled={kind === 'highlight' && !form.range}
           onChange={event => update({ end: event.target.value })} onBlur={() => { if (form.end !== '') update({ end: Number(Number(form.end).toFixed(3)) }) }} /></label>
-        {kind === 'highlight' && <label className="col-span-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={form.range} onChange={event => update({ range: event.target.checked })} />구간 하이라이트</label>}
+        {kind === 'highlight' && <label className="col-span-2 flex items-center gap-2 text-body"><input type="checkbox" checked={form.range} onChange={event => update({ range: event.target.checked })} />구간 하이라이트</label>}
       </div>}
-      {(kind === 'highlight' || kind === 'line') && <label className="block space-y-2 text-sm">{kind === 'highlight' ? '메모' : '자막 텍스트'}<TextArea value={form.text} onChange={text => update({ text })} /></label>}
-      {kind === 'subtitles' && <label className="block space-y-2 text-sm">원어<Input aria-label="원어" list="spoken-languages" value={form.choice} onChange={event => update({ choice: event.target.value })} /><datalist id="spoken-languages">{data.choices.map(row => <option key={row.id} value={row.title} />)}</datalist></label>}
+      {(kind === 'highlight' || kind === 'line') && <label className="block space-y-2 text-body">{kind === 'highlight' ? '메모' : '자막 텍스트'}<TextArea value={form.text} onChange={text => update({ text })} /></label>}
+      {kind === 'subtitles' && <label className="block space-y-2 text-body">원어<Input aria-label="원어" list="spoken-languages" value={form.choice} onChange={event => update({ choice: event.target.value })} /><datalist id="spoken-languages">{data.choices.map(row => <option key={row.id} value={row.title} />)}</datalist></label>}
       {kind === 'translation' && data.translation && <TranslationForm data={data.translation} form={form} update={update} act={act} busy={busy}
         request={{ pending: data.network_busy, information: data.information, warning: data.warning }} />}
       {kind === 'random-scope' && <RandomScopeForm data={data} values={form} update={update} />}

@@ -6,7 +6,7 @@ import { RandomTagFields, tagCandidateCount } from '@/components/random-tag-dial
 
 type ScopeValues = Pick<DialogValues, 'choice' | 'members'>
 
-const optionStyle = cva('flex min-w-0 items-start gap-3 rounded-md border px-3 py-2 text-sm', {
+const optionStyle = cva('flex min-w-0 items-start gap-3 rounded-md border px-3 py-2 text-body', {
   variants: {
     selected: { true: selectableItem({ selected: true, ring: true }), false: selectableItem({ selected: false }) },
     disabled: { true: 'opacity-50', false: '' },
@@ -46,9 +46,9 @@ export function RandomScopeForm({ data, values, update }: {
             tabIndex={focused && focused !== row.id ? -1 : 0}
             className="mt-1 shrink-0" onChange={() => update({ choice: row.id })} />
           <span className="min-w-0 flex-1">
-            <span className="block font-medium">{row.title}</span>
+            <span className="block text-body-strong">{row.title}</span>
             <span className="block break-words text-muted-foreground">{row.detail}</span>
-            {row.status && <span className="block text-xs text-muted-foreground">{row.status}</span>}
+            {row.status && <span className="block text-label text-muted-foreground">{row.status}</span>}
           </span>
         </label>
       })}
