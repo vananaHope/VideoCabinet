@@ -332,6 +332,8 @@ def test_rejected_push_restores_commit_tag_and_preserves_korean_notes(repository
     assert git(repo, "status", "--porcelain") == ""
     notes = repo / "dist/installer/release-notes-0.2.0.md"
     assert notes.read_text(encoding="utf-8").endswith("- 첫 구현\n- 버전 0.2.0 릴리스 준비")
+    assert '이번 버전부터 앱 이름이 **상영실**로 바뀌었습니다' in notes.read_text(encoding='utf-8')
+    assert '라이브러리·설정 데이터와 설치 위치는 그대로' in notes.read_text(encoding='utf-8')
     assert '전체 설치 파일로 한 번 설치해야' in notes.read_text(encoding='utf-8')
     assert "RESTORED_ENCODING=949" in result.stdout
     if os.name == "nt":

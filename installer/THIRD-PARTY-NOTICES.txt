@@ -1,4 +1,4 @@
-My Video Manager - Third-party notices
+상영실 - Third-party notices
 
 FFmpeg 9.0.2 essentials (Gyan): GNU GPL version 3 or later.
 Copyright (c) the FFmpeg developers and the authors of its bundled libraries.

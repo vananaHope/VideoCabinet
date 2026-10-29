@@ -142,6 +142,9 @@ try {
     }
     $Previous = Get-Metadata @('previous', '--repository', $Repository, '--version', $Version)
     $FullInstallNote = '이번 버전은 전체 설치 파일로 한 번 설치해야 합니다. 이후 런타임 지문이 같은 버전부터 패치를 사용할 수 있습니다.'
+    # 이름이 바뀐 첫 Release에만 넣는다. 이 Release를 발행한 뒤 $RenameNote와 $IncludeRenameNote를 지운다.
+    $RenameNote = '이번 버전부터 앱 이름이 **상영실**로 바뀌었습니다. 라이브러리·설정 데이터와 설치 위치는 그대로이므로 다시 설정하거나 옮길 필요가 없습니다.'
+    $IncludeRenameNote = $true
 
     if ($DryRun) {
         Write-Host "계획: pyproject.toml 버전 $CurrentVersion -> $Version, 커밋: $CommitMessage"
@@ -158,6 +161,7 @@ try {
         Show-AssetPlan $Plan
         if ($null -eq $Plan.patch_available) { Write-Host "패치 불가 판정 시 릴리스 노트 안내: $FullInstallNote" }
         elseif (-not $Plan.patch_available) { Write-Host "릴리스 노트 안내: $FullInstallNote" }
+        if ($IncludeRenameNote) { Write-Host "릴리스 노트 안내: $RenameNote" }
         if ($Build -and $Plan.patch_available) {
             & "$PSScriptRoot/build.ps1" -Version $Version -SkipPyInstaller -PatchOnly
             if ($LASTEXITCODE -ne 0) { throw 'dry-run 패치 빌드에 실패했습니다.' }
@@ -203,7 +207,10 @@ try {
         $NotesPath = Join-Path (Split-Path $Installer) "release-notes-$Version.md"
         $Subjects = Get-Git @('-c', 'i18n.logOutputEncoding=utf-8', 'log', '--reverse', '--format=%s', $Range)
         $Notes = (($Subjects -split "`n" | ForEach-Object { "- $_" }) -join "`n")
-        if (-not $Plan.patch_available) { $Notes = "$FullInstallNote`n`n$Notes" }
+        $Notices = @()
+        if ($IncludeRenameNote) { $Notices += $RenameNote }
+        if (-not $Plan.patch_available) { $Notices += $FullInstallNote }
+        if ($Notices.Count -gt 0) { $Notes = (($Notices -join "`n`n") + "`n`n" + $Notes) }
         [IO.File]::WriteAllText($NotesPath, $Notes, (New-Object Text.UTF8Encoding($false)))
         # 4. 원격 main이 바뀌면 non-fast-forward/atomic push가 전체를 거부한다. 강제 push하지 않는다.
         Get-Git @('tag', '-a', $Tag, '-m', "버전 $Version 릴리스") | Write-Host

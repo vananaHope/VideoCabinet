@@ -1,6 +1,6 @@
 # 사용 설명서
 
-My Video Manager의 기능과 사용법을 자세히 설명합니다. 요약은 [README](../README.md)를 보세요.
+상영실의 기능과 사용법을 자세히 설명합니다. 요약은 [README](../README.md)를 보세요.
 
 ## 설치해서 쓰기
 
@@ -14,7 +14,7 @@ GPLv3 원문은 FFmpeg와 독립적인 `licenses/GPL-3.0.txt`에도 있습니다
 
 설치 위치는 사용자별 `%LOCALAPPDATA%/Programs/MyVideoManager`이고 관리자 권한을 요구하지 않습니다.
 시작 메뉴 바로가기와 제거 프로그램을 등록하며 바탕화면 바로가기는 선택입니다.
-Release([배포 저장소](https://github.com/vananaHope/my-video-manager-releases/releases/latest))에서 받은 설치 파일을 실행한 뒤 시작 메뉴의 **My Video Manager**로 엽니다.
+Release([배포 저장소](https://github.com/vananaHope/my-video-manager-releases/releases/latest))에서 받은 설치 파일을 실행한 뒤 시작 메뉴의 **상영실**로 엽니다.
 코드 서명을 하지 않아 Windows SmartScreen 경고가 표시될 수 있습니다.
 Python·Node·7-Zip은 설치판 실행에 필요하지 않습니다. 번역 CLI와 NVIDIA 드라이버는 사용자가 설치합니다.
 동봉 FFmpeg·ffprobe는 실행 파일 옆 `ffmpeg/`, libmpv는 `mpv/`에서 찾습니다.
@@ -70,7 +70,7 @@ Whisper large-v3-turbo를 내려받고 검증합니다. 진행률·취소·다�
 
 ## 실행과 사용
 
-설치판은 시작 메뉴의 **My Video Manager**로 엽니다. 소스에서는 `.venv/Scripts/python -m my_video_manager`로 실행합니다([개발 문서](development.md)).
+설치판은 시작 메뉴의 **상영실**로 엽니다. 소스에서는 `.venv/Scripts/python -m my_video_manager`로 실행합니다([개발 문서](development.md)).
 
 ### 웹 셸
 
