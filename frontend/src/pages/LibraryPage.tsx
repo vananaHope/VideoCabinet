@@ -16,7 +16,7 @@ import { libraryViewDefaults, type LibraryData, type DetailsData, type Highlight
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
-import { restorePageFocus } from "@/lib/page-focus"
+import { focusPage } from "@/lib/page-focus"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -51,7 +51,6 @@ export default function LibraryPage() {
   // 후보 없음 안내는 그때의 결과에 묶어, 결과가 바뀌면 함께 사라진다.
   const [randomNotice, setRandomNotice] = useState<{ message: string; scope: string } | null>(null)
   const [tagDialogOpen, setTagDialogOpen] = useState(false)
-  const randomMenu = useRef<HTMLButtonElement>(null)
   const optionsRef = useRef<LibraryViewOptions | null>(null)
   const [error, setError] = useState("")
   // 첫 데이터 요청이 실패했는지. 오류 안내를 닫아도 실패는 그대로이고, 뒤에 데이터가 오면 ready가 된다.
@@ -144,26 +143,25 @@ export default function LibraryPage() {
           }
         }
       }
-      const focus = (target: string) => {
-        if (target === 'shell') return
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          const position = savedScroll.current
-          const grid = document.getElementById('library-grid')
-          const detail = document.getElementById('detail-scroll')
-          if (position) {
-            if (grid) grid.scrollTop = position.grid
-            if (detail) detail.scrollTop = position.detail
-            savedScroll.current = null
-          }
-          layoutPaused.current = false
-          window.dispatchEvent(new Event('resize'))
-          const destination = highlightReturn.current && detail ? detail : grid
-          highlightReturn.current = false
-          // 무작위로 고른 영상은 화면 밖일 수 있어 복원한 스크롤에서 그 카드까지 보이게 한다.
-          if (randomReturn.current) { randomReturn.current = false; setRevealRequest(n => n + 1) }
-          if (!restorePageFocus("library", target)) destination?.focus({ preventScroll: true })
-        }))
-      }
+      // 초점 자리와 시점은 공용 규칙(focusPage)이 정한다. 여기서는 렌더 뒤 떠날 때 저장한 스크롤을 되살리고,
+      // 하이라이트 재생에서 돌아오면 이번만 상세 패널을 먼저 고른다.
+      const focus = (target: string) => focusPage("library", target, () => {
+        const position = savedScroll.current
+        const grid = document.getElementById('library-grid')
+        const detail = document.getElementById('detail-scroll')
+        if (position) {
+          if (grid) grid.scrollTop = position.grid
+          if (detail) detail.scrollTop = position.detail
+          savedScroll.current = null
+        }
+        layoutPaused.current = false
+        window.dispatchEvent(new Event('resize'))
+        const highlight = highlightReturn.current
+        highlightReturn.current = false
+        // 무작위로 고른 영상은 화면 밖일 수 있어 복원한 스크롤에서 그 카드까지 보이게 한다.
+        if (randomReturn.current) { randomReturn.current = false; setRevealRequest(n => n + 1) }
+        return highlight ? detail : null
+      })
       api.thumbnailsChanged.connect(thumbnailsChanged)
       api.libraryChanged.connect(changed)
       api.libraryDetailsChanged.connect(detailsChanged)
@@ -339,13 +337,13 @@ export default function LibraryPage() {
       {/* 개수 자리는 9,999개까지 들어가는 폭을 잡아 두어 첫 데이터가 와도 옆 컨트롤이 밀리지 않는다. 그 전에는 "0개" 대신 기다림 표시를 둔다. */}
       {data ? <p aria-label="라이브러리 등록·표시 개수" className="min-w-44 shrink-0 text-label text-muted-foreground tabular-nums">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
         : <PendingStatus pending={firstLoad === "pending"} className="min-w-44 shrink-0" />}
-      <RandomPlayButton menuRef={randomMenu} disabled={!data} scopes={[
+      <RandomPlayButton disabled={!data} scopes={[
         { key: "results", label: "현재 결과에서", onSelect: () => randomPlay() },
         { key: "all", label: "영상 전체에서", onSelect: () => randomPlay("all"), shortcut: data?.keyBindings.randomPlay },
         { key: "tags", label: "태그에서…", onSelect: () => setTagDialogOpen(true), opensDialog: true },
       ]} />
       {data && <RandomTagDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} tags={data.tags} load={loadTagCandidates}
-        onPlay={randomPlay} onReturnFocus={() => randomMenu.current?.focus()} />}
+        onPlay={randomPlay} />}
     </div>
     {/* 칩 줄은 칩이 없거나 첫 데이터 전에도 같은 높이를 차지해 아래 목록이 밀리지 않는다. */}
     <LibraryFilterChips options={options} chips={data?.chips ?? []} onChange={filter} pending={viewPending} />

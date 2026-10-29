@@ -1,6 +1,7 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { AlertDialog as AlertDialogPrimitive, Dialog as DialogPrimitive } from "radix-ui"
+import { captureFocusOrigin, returnFocus, type FocusOrigin } from "@/lib/page-focus"
 
 /**
  * 앱의 모든 대화상자가 쓰는 공용 틀. 덮개·면·둥글기·안쪽 여백·그림자·여는 전환과 제목·설명·단추 줄 배치는 여기서만 정한다.
@@ -10,6 +11,8 @@ import { AlertDialog as AlertDialogPrimitive, Dialog as DialogPrimitive } from "
  * - placement=container: 대화상자 층(web_dialogs_host)의 틀. 재생 중에는 셸이 html에 data-dialog-container를 달고 웹 뷰를
  *   내용 크기의 창으로 옮긴다. 그동안 틀은 왼쪽 위에 붙어 원래 창 크기(--dialog-max-width·--dialog-max-height) 안에서
  *   내용 크기를 갖고 모서리가 각진다. 틀 안에서 여는 확인 대화상자가 위에 보이도록 한 층 아래(z-40)에 둔다.
+ * - 닫으면(Esc·닫기·바깥 누르기·F1) 공용 초점 규칙대로 연 자리 → 메뉴를 연 단추 → 탭 기본 초점으로 돌아간다(#264).
+ *   onCloseAutoFocus에서 기본 동작을 막으면 그 대화상자가 직접 초점을 정한다.
  */
 const overlayVariants = cva("fixed inset-0 flex animate-fade-enter items-center justify-center bg-background/80 p-4", {
   variants: {
@@ -38,10 +41,33 @@ function Dialog(props: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
 
-function DialogContent({ size, placement, children, ...props }: Omit<React.ComponentProps<typeof DialogPrimitive.Content>, "className"> & FrameProps) {
+/**
+ * 열리기 직전의 초점을 기억해 닫을 때 돌려준다. 기억은 내용이 붙는 렌더의 layout 단계에서 하므로
+ * Radix가 대화상자 안으로 초점을 옮기기(자식 FocusScope의 effect) 전이다.
+ */
+function useFocusReturn(onCloseAutoFocus?: (event: Event) => void) {
+  const origin = React.useRef<FocusOrigin>({ origin: null, trigger: null })
+  const capture = <FocusCapture origin={origin} />
+  const close = (event: Event) => {
+    onCloseAutoFocus?.(event)
+    if (event.defaultPrevented) return
+    event.preventDefault()
+    returnFocus(origin.current)
+  }
+  return [capture, close] as const
+}
+
+function FocusCapture({ origin }: { origin: React.RefObject<FocusOrigin> }) {
+  React.useLayoutEffect(() => { origin.current = captureFocusOrigin() }, [origin])
+  return null
+}
+
+function DialogContent({ size, placement, children, onCloseAutoFocus, ...props }: Omit<React.ComponentProps<typeof DialogPrimitive.Content>, "className"> & FrameProps) {
+  const [capture, close] = useFocusReturn(onCloseAutoFocus)
   return <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay className={overlayVariants({ placement })}>
-      <DialogPrimitive.Content data-slot="dialog-content" data-size={size ?? "default"} className={contentVariants({ size, placement })} {...props}>
+      <DialogPrimitive.Content data-slot="dialog-content" data-size={size ?? "default"} className={contentVariants({ size, placement })} onCloseAutoFocus={close} {...props}>
+        {capture}
         {children}
       </DialogPrimitive.Content>
     </DialogPrimitive.Overlay>
@@ -82,10 +108,12 @@ function AlertDialog(props: React.ComponentProps<typeof AlertDialogPrimitive.Roo
 }
 
 /** 확인 대화상자. 바깥을 눌러도 닫히지 않고, 열면 취소에 초점이 간다(Radix AlertDialog). */
-function AlertDialogContent({ size = "compact", children, ...props }: Omit<React.ComponentProps<typeof AlertDialogPrimitive.Content>, "className"> & Pick<FrameProps, "size">) {
+function AlertDialogContent({ size = "compact", children, onCloseAutoFocus, ...props }: Omit<React.ComponentProps<typeof AlertDialogPrimitive.Content>, "className"> & Pick<FrameProps, "size">) {
+  const [capture, close] = useFocusReturn(onCloseAutoFocus)
   return <AlertDialogPrimitive.Portal>
     <AlertDialogPrimitive.Overlay className={overlayVariants()}>
-      <AlertDialogPrimitive.Content data-slot="dialog-content" data-size={size} className={contentVariants({ size })} {...props}>
+      <AlertDialogPrimitive.Content data-slot="dialog-content" data-size={size} className={contentVariants({ size })} onCloseAutoFocus={close} {...props}>
+        {capture}
         {children}
       </AlertDialogPrimitive.Content>
     </AlertDialogPrimitive.Overlay>

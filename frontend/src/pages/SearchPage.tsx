@@ -4,7 +4,7 @@ import type { SearchBridge, SearchData } from "@/bridge-types"
 import { EmptyState, PageHeader, StatusBadge } from "@/components/page-parts"
 import { NoticeStack } from "@/components/ui/notice"
 import { PendingStatus } from "@/components/ui/pending-status"
-import { MatchedText, ResultRow, SearchInput, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+import { MatchedText, ResultRow, SearchInput, focusList, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
@@ -55,11 +55,11 @@ export default function SearchPage() {
           setData(next); setPending(false); setSearching(false)
           if (focusAfterSearch.current && next.state !== "preparing") {
             focusAfterSearch.current = false
-            if (next.results.length) restoreListFocus("search-results", 0)
+            if (next.results.length) focusList("search-results")
           }
         }
       }
-      const focus = (target: string) => restoreListFocus(document.querySelector('#search-results [role="option"]') ? "search-results" : "search-query", scroll.current, "search", target)
+      const focus = (target: string) => restoreListFocus("search", "search-results", scroll.current, target)
       api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError)
       disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError) }
       const initial = await request<SearchData>(reply => api.snapshot(reply))

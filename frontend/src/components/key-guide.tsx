@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { Keyboard } from "lucide-react"
 import { request } from "@/bridge"
 import { tabs, type KeyGuideData, type KeyGuideEntryData, type ShellBridge } from "@/bridge-types"
@@ -23,12 +23,6 @@ function KeyRows({ rows }: { rows: readonly (KeyGuideRow | KeyGuideEntryData)[] 
   </tr>)}</tbody></table>
 }
 
-// 닫은 뒤 돌려줄 초점. 문서에서 빠졌거나 숨거나 비활성이 된 요소에는 돌려주지 않는다.
-function focusable(element: Element | null): element is HTMLElement {
-  return element instanceof HTMLElement && element !== document.body && element.isConnected
-    && element.getClientRects().length > 0 && !element.closest("[inert]") && !element.matches(":disabled")
-}
-
 function Groups({ groups }: { groups: readonly KeyGuideGroup[] }) {
   if (!groups.length) return <p className="text-body text-muted-foreground">이 화면에만 쓰는 키는 없습니다. 앱 전체 키와 Tab으로 단추·입력 칸을 오갑니다.</p>
   return <div className="space-y-4">{groups.map(group => <section key={group.title} aria-label={group.title} className="space-y-1">
@@ -41,11 +35,6 @@ function Groups({ groups }: { groups: readonly KeyGuideGroup[] }) {
 export function KeyGuideDialog({ bridge, tab, open, onOpenChange }: { bridge: ShellBridge; tab: string; open: boolean; onOpenChange: (open: boolean) => void }) {
   const [app, setApp] = useState<KeyGuideEntryData[] | null>(null)
   const [error, setError] = useState("")
-  const origin = useRef<Element | null>(null)
-  useLayoutEffect(() => {
-    // Radix가 안내 안으로 초점을 옮기기(자식 useEffect) 전에 연 자리를 기억한다. F1이면 격자·입력 칸, ⌨이면 그 단추다.
-    if (open) origin.current = document.activeElement
-  }, [open])
   useEffect(() => {
     if (!open) return
     let current = true
@@ -72,15 +61,9 @@ export function KeyGuideDialog({ bridge, tab, open, onOpenChange }: { bridge: Sh
   const label = tabs.find(([value]) => value === tab)?.[1] ?? ""
   const groups = pageKeyGuides[tab as keyof typeof pageKeyGuides] ?? []
   return <Dialog open={open} onOpenChange={onOpenChange}>
-    {/* 초점이 뒤 페이지에 남아 있어도 닫기 키가 페이지 키(모아보기 Esc 복귀 등)로 이어지지 않게 한다. 바깥을 누르면 닫힌다. */}
-    <DialogContent size="wide" onEscapeKeyDown={event => event.stopPropagation()}
-      onCloseAutoFocus={event => {
-        // 연결된 Trigger가 없으므로 Radix 기본 복원 대신 연 자리로 돌려준다(Esc·F1·닫기·바깥 누르기 모두).
-        event.preventDefault()
-        const target = origin.current
-        origin.current = null
-        if (focusable(target)) target.focus({ preventScroll: true })
-      }}>
+    {/* 초점이 뒤 페이지에 남아 있어도 닫기 키가 페이지 키(모아보기 Esc 복귀 등)로 이어지지 않게 한다. 바깥을 누르면 닫힌다.
+        닫으면(Esc·F1·닫기·바깥 누르기) 공용 대화상자 틀이 연 자리(F1이면 격자·입력 칸, ⌨이면 그 단추)로 초점을 돌려준다. */}
+    <DialogContent size="wide" onEscapeKeyDown={event => event.stopPropagation()}>
       <DialogHeader title={`키 안내 · ${label}`} description="바꿀 수 있는 키는 설정 → 키 배치에서 바꾸며, 여기에는 지금 키 배치가 보입니다." />
       <div tabIndex={0} aria-label="키 목록" className="grid min-h-0 grid-cols-2 gap-6 overflow-y-auto rounded-md focus-visible:outline-2 focus-visible:outline-ring">
         <section aria-label="앱 전체" className="min-w-0 space-y-2">

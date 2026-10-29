@@ -194,7 +194,8 @@ def test_tray_restore_preserves_library_filter_and_selection(window_factory, mon
     window.tray.open()
     assert library.query == 'Python'
     assert library.selected_video_id() == selected
-    assert focus_requests == []
+    # 다시 보일 때는 탭 기본 위치가 아니라 숨기기 전 초점을 확인만 하는 요청(resume)을 보낸다(#264).
+    assert focus_requests == ['resume']
     assert window.web_host._pending_focus is None
 
 

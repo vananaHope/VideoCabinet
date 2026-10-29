@@ -3,7 +3,7 @@ import { selectableItem } from "@/components/ui/selectable-item"
 import type { ComponentProps, KeyboardEvent } from "react"
 import type { SearchTextData } from "@/bridge-types"
 import type { KeyGuideRow } from "@/lib/key-guide"
-import { restorePageFocus } from "@/lib/page-focus"
+import { focusAfterRender, focusPage } from "@/lib/page-focus"
 
 // stale: 새 결과를 기다리는 동안 흐리게 보이기만 하는 이전 결과. 비활성과 같은 50% 불투명도이고 포인터를 받지 않는다.
 const row = cva("flex min-w-0 gap-3 rounded-lg border p-3 text-left", {
@@ -47,11 +47,19 @@ export function listKey(event: KeyboardEvent<HTMLDivElement>, count: number, cur
   }
 }
 
-// 목록 스크롤을 되살리고 목록에 초점을 둔다. 다시 보인 탭이면(target "restore") 그 페이지에 남은 초점을 먼저 되살린다.
-export function restoreListFocus(id: string, scrollTop: number, page?: string, target = "") {
-  requestAnimationFrame(() => requestAnimationFrame(() => {
+// 셸의 초점 요청. 렌더 뒤 목록 스크롤을 되살리고, 초점 자리와 시점은 공용 규칙(focusPage)이 정한다.
+export function restoreListFocus(page: "reel" | "search", id: string, scrollTop: number, target: string) {
+  focusPage(page, target, () => {
     const element = document.getElementById(id)
     if (element) element.scrollTop = scrollTop
-    if (!(page && restorePageFocus(page, target))) element?.focus({ preventScroll: true })
-  }))
+  })
+}
+
+// 검색을 마친 뒤처럼 페이지 안 동작이 결과 목록으로 초점을 옮길 때. 렌더가 끝난 뒤 처음으로 스크롤한다.
+export function focusList(id: string) {
+  focusAfterRender(() => {
+    const element = document.getElementById(id)
+    if (element) element.scrollTop = 0
+    return element
+  })
 }
