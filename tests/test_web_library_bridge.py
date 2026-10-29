@@ -20,6 +20,7 @@ class Page(QWidget):
         self.core = core
         self.snapshot = core.library_snapshot()
         self.cards = snapshot_data(self.snapshot)
+        self.card_index = {v['id']: v for v in self.cards}
         self.video_ids = {v['id'] for v in self.cards}
         self.visible_ids = list(self.video_ids)
         self.selected_id = self.visible_ids[0]
@@ -39,6 +40,9 @@ class Page(QWidget):
 
     def payload(self):
         return {'videos': self.cards, 'visibleIds': self.visible_ids, 'selectedId': self.selected_id}
+
+    def snapshot_payload(self):
+        return self.payload()
 
     def stamp(self, data):
         return json.dumps(data)

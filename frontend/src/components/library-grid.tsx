@@ -44,14 +44,14 @@ type Dimensions = { columns: number; rowHeight: number; visibleRows: number }
  */
 type Place = { cards: { id: number; offset: number }[]; top: number }
 
-function placeOf(videos: VideoData[], selectedId: number | null, { columns, rowHeight }: Dimensions, top: number, height: number): Place | null {
-  if (!videos.length) return null
+function placeOf(ids: readonly number[], selectedId: number | null, { columns, rowHeight }: Dimensions, top: number, height: number): Place | null {
+  if (!ids.length) return null
   const rowTop = (index: number) => Math.floor(index / columns) * rowHeight
-  const card = (index: number) => ({ id: videos[index].id, offset: rowTop(index) - top })
-  const first = Math.min(videos.length - 1, Math.floor(top / rowHeight) * columns)
-  const last = Math.min(videos.length, Math.ceil((top + height) / rowHeight) * columns)
+  const card = (index: number) => ({ id: ids[index], offset: rowTop(index) - top })
+  const first = Math.min(ids.length - 1, Math.floor(top / rowHeight) * columns)
+  const last = Math.min(ids.length, Math.ceil((top + height) / rowHeight) * columns)
   const cards = Array.from({ length: last - first }, (_, index) => card(first + index))
-  const selected = videos.findIndex(video => video.id === selectedId)
+  const selected = selectedId === null ? -1 : ids.indexOf(selectedId)
   if (selected >= 0 && rowTop(selected) + rowHeight > top && rowTop(selected) < top + height) cards.unshift(card(selected))
   return { cards, top }
 }
@@ -63,9 +63,15 @@ function GridMessage({ title, description }: { title: string; description: strin
   </div>
 }
 
-export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onSelect, onAction, layoutPaused, revealRequest = 0, load = "ready", keepPlace = false }: {
-  cardSize: string; videos: VideoData[]; selectedId: number | null; scanning: boolean; total: number;
+export function LibraryGrid({ cardSize, ids, cards, selectedId, scanning, total, onSelect, onAction, onRange, layoutPaused, revealRequest = 0, load = "ready", keepPlace = false }: {
+  /** 결과의 영상 ID 순서. 줄 수와 스크롤 높이는 이것으로 정한다. */
+  ids: readonly number[];
+  /** 받은 카드. 결과에 들었지만 아직 받지 못한 영상은 같은 크기의 자리 표시로 그리고, 고르고 이동할 수 있다(#267). */
+  cards: ReadonlyMap<number, VideoData>;
+  cardSize: string; selectedId: number | null; scanning: boolean; total: number;
   onSelect: (id: number) => void; onAction: (action: Action, id: number) => void;
+  /** 그린 줄(보이는 줄과 위아래 여유 줄)의 영상 ID. 그 칸의 카드를 먼저 받는 데 쓴다. */
+  onRange?: (ids: readonly number[]) => void;
   layoutPaused: RefObject<boolean>;
   /** 값이 바뀔 때마다 선택한 카드의 행이 보이도록 스크롤한다. */
   revealRequest?: number;
@@ -78,13 +84,13 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
   const scroll = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState<Dimensions>({ columns: 2, rowHeight: 256, visibleRows: 1 })
   // 그린 결과와 마지막 스크롤 위치. 목록이 줄어 브라우저가 스크롤을 깎기 전의 위치로 보던 자리를 찾는다.
-  const shown = useRef({ ids: "", videos, selectedId, dimensions, top: 0 })
+  const shown = useRef({ key: "", ids, selectedId, dimensions, top: 0 })
   const pendingPlace = useRef<Place | null>(null)
   function restore(place: Place | null) {
     const element = scroll.current
     if (!place || !element) return
-    const { videos, dimensions: { columns, rowHeight } } = shown.current
-    const indexes = new Map(videos.map((video, index) => [video.id, index]))
+    const { ids, dimensions: { columns, rowHeight } } = shown.current
+    const indexes = new Map(ids.map((id, index) => [id, index]))
     const anchor = place.cards.find(card => indexes.has(card.id))
     // 보이던 카드가 모두 결과에서 빠지면 맨 위가 아니라 이전 스크롤 근처에 남는다.
     // 같은 세로 위치에 두려면 스크롤이 0보다 작거나 끝보다 커야 할 때(예: 열이 늘어 선택 카드가 새 첫 줄이 됨)는
@@ -109,7 +115,7 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
       const previous = shown.current
       // 폭이 바뀌어(폴더 패널 여닫기·창 크기·카드 크기) 열 수나 줄 높이가 바뀌면 보던 카드를 같은 세로 위치에 다시 둔다.
       if (previous.dimensions.columns !== columns || previous.dimensions.rowHeight !== rowHeight)
-        pendingPlace.current = placeOf(previous.videos, previous.selectedId, previous.dimensions, element.scrollTop, element.clientHeight)
+        pendingPlace.current = placeOf(previous.ids, previous.selectedId, previous.dimensions, element.scrollTop, element.clientHeight)
       const next = { columns, rowHeight, visibleRows: Math.max(1, Math.ceil(element.clientHeight / rowHeight)) }
       // 관찰자 콜백에서는 새 열 수를 같은 프레임에 그려, 늘어난 옛 열이나 어긋난 스크롤이 한 프레임도 보이지 않게 한다.
       if (sync) flushSync(() => setDimensions(next))
@@ -123,7 +129,7 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
     return () => { observer.disconnect(); window.removeEventListener('resize', changed) }
   }, [layoutPaused, cardSize])
   const { columns, rowHeight, visibleRows } = dimensions
-  const virtual = useVirtualizer({ count: Math.ceil(videos.length / columns), getScrollElement: () => scroll.current, estimateSize: () => rowHeight, overscan: 2 })
+  const virtual = useVirtualizer({ count: Math.ceil(ids.length / columns), getScrollElement: () => scroll.current, estimateSize: () => rowHeight, overscan: 2 })
   // estimateSize 변경만으로는 TanStack의 기존 행 위치 캐시가 비워지지 않는다.
   useLayoutEffect(() => { virtual.measure() }, [virtual, rowHeight, columns])
   useLayoutEffect(() => {
@@ -132,15 +138,19 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
     pendingPlace.current = null
     restore(place)
   }, [dimensions])
-  const selectedIndex = videos.findIndex(video => video.id === selectedId)
+  const selectedIndex = selectedId === null ? -1 : ids.indexOf(selectedId)
   useLayoutEffect(() => {
-    const ids = videos.map(v => v.id).join(",")
+    const key = ids.join(",")
     const before = shown.current
-    shown.current = { ...before, ids, videos, selectedId }
-    if (ids === before.ids || !before.ids || layoutPaused.current) return
-    if (keepPlace) restore(placeOf(before.videos, before.selectedId, before.dimensions, before.top, scroll.current?.clientHeight ?? 0))
+    shown.current = { ...before, key, ids, selectedId }
+    if (key === before.key || !before.key || layoutPaused.current) return
+    if (keepPlace) restore(placeOf(before.ids, before.selectedId, before.dimensions, before.top, scroll.current?.clientHeight ?? 0))
     else { scroll.current?.scrollTo({ top: 0 }); shown.current.top = 0 }
-  }, [videos, selectedId, keepPlace, layoutPaused])
+  }, [ids, selectedId, keepPlace, layoutPaused])
+  const rows = virtual.getVirtualItems()
+  const rangeStart = rows.length ? rows[0].index * columns : 0
+  const rangeEnd = rows.length ? (rows[rows.length - 1].index + 1) * columns : 0
+  useEffect(() => { if (load === "ready") onRange?.(ids.slice(rangeStart, rangeEnd)) }, [ids, rangeStart, rangeEnd, load, onRange])
 
   const revealed = useRef(revealRequest)
   useEffect(() => {
@@ -155,10 +165,10 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
     if (openKeyboardMenu(event, element)) return
     if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return
     const offsets: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -columns, ArrowDown: columns }
-    if (event.key in offsets && videos.length) {
+    if (event.key in offsets && ids.length) {
       event.preventDefault()
-      const index = Math.max(0, Math.min(videos.length - 1, Math.max(0, selectedIndex) + offsets[event.key]))
-      onSelect(videos[index].id)
+      const index = Math.max(0, Math.min(ids.length - 1, Math.max(0, selectedIndex) + offsets[event.key]))
+      onSelect(ids[index])
       virtual.scrollToIndex(Math.floor(index / columns), { align: "auto" })
     } else if (event.key === "Enter" && selectedId !== null) {
       event.preventDefault()
@@ -166,22 +176,26 @@ export function LibraryGrid({ cardSize, videos, selectedId, scanning, total, onS
     }
   }
 
-  return <div ref={scroll} id="library-grid" role="grid" aria-label="라이브러리 영상 격자" aria-rowcount={Math.ceil(videos.length / columns)} aria-colcount={columns} aria-activedescendant={selectedId === null ? undefined : `video-${selectedId}`} aria-busy={loading} tabIndex={0} onKeyDown={keyDown} onScroll={event => { shown.current.top = event.currentTarget.scrollTop }} className={gridVariants({ cardSize: cardSize as "small" | "medium" | "large", loading })}>
+  return <div ref={scroll} id="library-grid" role="grid" aria-label="라이브러리 영상 격자" aria-rowcount={Math.ceil(ids.length / columns)} aria-colcount={columns} aria-activedescendant={selectedId === null ? undefined : `video-${selectedId}`} aria-busy={loading} tabIndex={0} onKeyDown={keyDown} onScroll={event => { shown.current.top = event.currentTarget.scrollTop }} className={gridVariants({ cardSize: cardSize as "small" | "medium" | "large", loading })}>
     {loading ? <div aria-hidden="true" className="virtual-canvas" style={{ "--virtual-height": `${visibleRows * rowHeight}px` } as CSSProperties}>
       {Array.from({ length: visibleRows }, (_, row) => <div key={row} className="virtual-row gap-3 pb-3" style={{ "--virtual-top": `${row * rowHeight}px`, "--virtual-columns": columns } as CSSProperties}>
         {Array.from({ length: columns }, (_, column) => <VideoCardPlaceholder key={column} />)}
       </div>)}
     </div> : load === "failed" ? <GridMessage title="영상 목록을 읽지 못했습니다" description="앱을 다시 시작하면 목록을 다시 읽습니다." />
-    : !videos.length ? <GridMessage title={total ? "조건에 맞는 영상이 없습니다" : "라이브러리가 비어 있습니다"}
+    : !ids.length ? <GridMessage title={total ? "조건에 맞는 영상이 없습니다" : "라이브러리가 비어 있습니다"}
       description={total ? "검색 조건이나 선택한 폴더를 바꿔 보세요." : "폴더 관리(Ctrl+7)에서 감시 폴더나 영상 파일을 추가하세요."} />
     // 줄 높이가 고정이라 전체 높이는 줄 수 × 줄 높이다. 가상화 캐시는 measure 뒤에야 바뀌므로 직접 계산해, 새 열 수를 그린 커밋에서 바로 보던 자리로 스크롤할 수 있게 한다.
-    : <div className="virtual-canvas" style={{ "--virtual-height": `${Math.ceil(videos.length / columns) * rowHeight}px` } as CSSProperties}>
-      {virtual.getVirtualItems().map(row => <div key={row.key} role="row" aria-rowindex={row.index + 1} className="virtual-row gap-3 pb-3" style={{ "--virtual-top": `${row.start}px`, "--virtual-columns": columns } as CSSProperties}>
-        {videos.slice(row.index * columns, (row.index + 1) * columns).map((video, index) => <VideoMenu key={video.id} id={video.id} scanning={scanning} onAction={onAction}>
-          <VideoCard id={`video-${video.id}`} video={video} cardSize={cardSize} variant={selectedId === video.id ? "selected" : "default"} role="gridcell" aria-colindex={index + 1} aria-selected={selectedId === video.id} tabIndex={-1}
-            onClick={() => { onSelect(video.id); scroll.current?.focus({ preventScroll: true }) }}
-            onDoubleClick={() => onAction("play", video.id)} onContextMenu={() => onSelect(video.id)} />
-        </VideoMenu>)}
+    : <div className="virtual-canvas" style={{ "--virtual-height": `${Math.ceil(ids.length / columns) * rowHeight}px` } as CSSProperties}>
+      {rows.map(row => <div key={row.key} role="row" aria-rowindex={row.index + 1} className="virtual-row gap-3 pb-3" style={{ "--virtual-top": `${row.start}px`, "--virtual-columns": columns } as CSSProperties}>
+        {ids.slice(row.index * columns, (row.index + 1) * columns).map((id, index) => {
+          const video = cards.get(id)
+          const choose = () => { onSelect(id); scroll.current?.focus({ preventScroll: true }) }
+          return video ? <VideoMenu key={id} id={id} scanning={scanning} onAction={onAction}>
+            <VideoCard id={`video-${id}`} video={video} cardSize={cardSize} variant={selectedId === id ? "selected" : "default"} role="gridcell" aria-colindex={index + 1} aria-selected={selectedId === id} tabIndex={-1}
+              onClick={choose} onDoubleClick={() => onAction("play", id)} onContextMenu={() => onSelect(id)} />
+          </VideoMenu>
+            : <VideoCardPlaceholder key={id} id={`video-${id}`} selected={selectedId === id} role="gridcell" aria-colindex={index + 1} aria-selected={selectedId === id} aria-busy="true" aria-label="영상 정보를 읽는 중" onClick={choose} />
+        })}
       </div>)}
     </div>}
   </div>

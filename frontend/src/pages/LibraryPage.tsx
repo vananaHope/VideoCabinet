@@ -12,11 +12,12 @@ import { DetailPanel } from "@/components/detail-panel"
 import { RandomPlayButton } from "@/components/random-play-button"
 import { RandomTagDialog } from "@/components/random-tag-dialog"
 import { connectBridge, getSnapshot, getDetails, request, type LibraryBridge, type Action } from "@/bridge"
-import { libraryViewDefaults, type LibraryData, type DetailsData, type HighlightData, type LibraryKeyBindingsData, type LibraryViewOptions, type TagCandidatesData } from "@/bridge-types"
+import { libraryViewDefaults, type LibraryData, type LibraryEntryData, type LibraryVideosData, type DetailsData, type HighlightData, type LibraryKeyBindingsData, type LibraryViewOptions, type TagCandidatesData, type VideoData } from "@/bridge-types"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
 import { focusPage } from "@/lib/page-focus"
+import { entryData, startTabShown } from "@/lib/entry"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -37,6 +38,12 @@ const keepView = (next: LibraryData) => (previous: LibraryData | null) =>
 
 const sameOptions = (a: LibraryViewOptions, b: LibraryViewOptions) =>
   (Object.keys({ ...a, ...b }) as (keyof LibraryViewOptions)[]).every(key => JSON.stringify(a[key]) === JSON.stringify(b[key]))
+
+// 셸이 첫 렌더 전에 넣어 준 저장된 보기 조건(#267). 첫 데이터 전의 툴바·칩 줄·폴더 패널·격자 자리 표시를 이것으로 그려
+// 데이터가 와도 열 수와 첫 줄 위치가 그대로다.
+const entry = entryData<LibraryEntryData>("library")
+// 화면을 그린 뒤 나머지 카드를 한 번에 받는 수. 받는 사이사이 입력과 그리기가 끼어들 수 있게 나눈다.
+const CARD_CHUNK = 500
 
 export default function LibraryPage() {
   const [bridge, setBridge] = useState<LibraryBridge | null>(null)
@@ -76,6 +83,20 @@ export default function LibraryPage() {
   const [viewPending, setViewPending] = useState(false)
   // 결과가 바뀔 때 목록을 맨 위로 올리지 않고 보던 카드의 자리를 지킬지. 폴더 패널 여닫기만 자리를 지킨다.
   const [keepPlace, setKeepPlace] = useState(false)
+  // 받은 카드(#267). 전체 상태는 첫 화면이나 바뀐 카드만 담고, 나머지는 화면을 그린 뒤 결과 순서대로 나눠 받는다.
+  // 보기 조건·결과(data)와 따로 두므로 #266의 보기 응답·미뤄 둔 전체 상태 처리와 상관없이 쌓인다.
+  const [cards, setCards] = useState<ReadonlyMap<number, VideoData>>(() => new Map())
+  // 바뀌었다고 알려 온, 다시 받을 카드. 받을 때까지 이전 카드를 그대로 보인다.
+  const staleCards = useRef(new Set<number>())
+  // 요청했지만 라이브러리에 없어 돌아오지 않은 영상. 다음 전체 상태가 결과를 고칠 때까지 다시 요청하지 않는다.
+  const goneCards = useRef(new Set<number>())
+  const loadingCards = useRef(false)
+  // 브라우저가 쉬는 틈이 와서 다음 나머지 카드를 요청할 차례인지.
+  const idleTurn = useRef(false)
+  // 격자가 지금 그린 칸의 영상. 이 칸과 선택한 영상의 카드를 먼저 받는다.
+  const renderedIds = useRef<readonly number[]>([])
+  const [cardTurn, setCardTurn] = useState(0)
+  const nextCards = useCallback(() => setCardTurn(n => n + 1), [])
   // 격자 스크롤·썸네일 도착은 고정 조작 요소를 옮기지 않으므로 결과·선택·상세가 바뀔 때만 알린다.
   useLayoutChange(data?.options, data?.visibleIds, data?.selectedId, details, detailTab, error)
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
@@ -84,6 +105,13 @@ export default function LibraryPage() {
   const freshData = useGenerationGuard()
   const freshView = useGenerationGuard()
   const setDraftValue = useCallback((value: string) => { draftRef.current = value; setDraft(value) }, [])
+  // 카드는 한 채널로 코어가 만든 순서대로 도착하므로 세대와 상관없이 도착한 차례로 반영한다. 다시 받을 카드는 받을 때까지 이전 것을 보인다.
+  const receiveCards = useCallback((videos: readonly VideoData[], staleIds: readonly number[] = []) => {
+    for (const id of staleIds) staleCards.current.add(id)
+    for (const video of videos) staleCards.current.delete(video.id)
+    if (videos.length) setCards(previous => { const next = new Map(previous); for (const video of videos) next.set(video.id, video); return next })
+    else if (staleIds.length) nextCards()
+  }, [nextCards])
   const awaitView = (value: boolean) => { awaitingView.current = value; setViewPending(value) }
   // 입력란에서 검색어를 고치는 중인지(조합·응답 대기). 그동안 밀어 보낸 상태의 검색어로 입력란을 덮지 않는다.
   // 덮으면 응답을 기다리는 사이 도착한 전체 목록(검사·썸네일 갱신 등)이 그보다 앞선 검색어로 입력란을 되돌려 이어 친 글자를 잃는다.
@@ -119,6 +147,8 @@ export default function LibraryPage() {
       if (disposed) return
       const changed = (json: string) => {
         const next: LibraryData = JSON.parse(json)
+        goneCards.current.clear()
+        receiveCards(next.videos, next.staleIds)
         if (!freshData(next)) return
         const waiting = awaitingView.current
         if (waiting && !(optionsRef.current && sameOptions(next.options, optionsRef.current))) {
@@ -129,8 +159,12 @@ export default function LibraryPage() {
         setDetailRevision(n => n + 1)
       }
       const thumbnailsChanged = (json: string) => {
-        const ids = new Set<number>(JSON.parse(json))
-        setData(previous => previous && { ...previous, videos: previous.videos.map(video => ids.has(video.id) ? { ...video, thumbnail: `mvm-thumb://video/${video.id}?v=640` } : video) })
+        const ids: number[] = JSON.parse(json)
+        setCards(previous => {
+          const next = new Map(previous)
+          for (const id of ids) { const video = next.get(id); if (video) next.set(id, { ...video, thumbnail: `mvm-thumb://video/${id}?v=640` }) }
+          return next
+        })
       }
       const detailsChanged = () => setDetailRevision(n => n + 1)
       const keyBindingsChanged = (json: string) => { const keyBindings: LibraryKeyBindingsData = JSON.parse(json); setData(previous => previous && { ...previous, keyBindings }) }
@@ -174,6 +208,7 @@ export default function LibraryPage() {
       setBridge(api)
       const initial = await getSnapshot(api)
       if (disposed) return
+      receiveCards(initial.videos)
       const newView = freshView(initial)
       if (!freshData(initial)) return
       if (!newView) {
@@ -186,17 +221,60 @@ export default function LibraryPage() {
     }).catch(error => {
       if (disposed) return
       setFirstLoadFailed(true)
+      startTabShown("library")
       showError(error)
     })
     return () => { disposed = true; disconnect() }
-  }, [showError, freshData, freshView, setDraftValue, editingQuery, showPushedView, follow])
+  }, [showError, freshData, freshView, setDraftValue, editingQuery, showPushedView, follow, receiveCards])
 
   // effect는 첫 데이터의 격자가 DOM에 반영된 뒤 실행된다.
   const loaded = data !== null
   const firstLoad: FirstLoad = loaded ? "ready" : firstLoadFailed ? "failed" : "pending"
+  // 첫 화면의 카드로 그리면 바로 준비를 알리고(시작 검사 예약은 그 뒤다), 그다음 숨은 탭이 첫 데이터를 요청하게 놓아 준다(#267).
   useEffect(() => {
-    if (bridge && loaded) request(reply => bridge.ready(reply)).catch(showError)
+    if (!bridge || !loaded) return
+    request(reply => bridge.ready(reply)).catch(showError)
+    startTabShown("library")
   }, [bridge, loaded, showError])
+
+  // 나머지 카드를 받는다. 그린 칸과 선택한 영상 중 없는 카드는 바로 받는다. 그 밖의 결과는 결과 순서대로 나눠
+  // 브라우저가 쉬는 틈마다 하나씩 받아, 첫 화면 직후나 입력 중의 그리기를 막지 않는다. 한 번에 요청 하나만 보낸다.
+  const visibleIds = data?.visibleIds
+  const selectedId = data?.selectedId
+  useEffect(() => {
+    if (!bridge || !visibleIds || loadingCards.current) return
+    const wanted = (id: number) => (!cards.has(id) || staleCards.current.has(id)) && !goneCards.current.has(id)
+    const ids = new Set([...renderedIds.current, ...(selectedId != null ? [selectedId] : [])].filter(wanted))
+    if (!ids.size) {
+      for (const id of visibleIds) { if (ids.size >= CARD_CHUNK) break; if (wanted(id)) ids.add(id) }
+      if (!ids.size) return
+      if (!idleTurn.current) {
+        const handle = requestIdleCallback(() => { idleTurn.current = true; nextCards() })
+        return () => cancelIdleCallback(handle)
+      }
+    }
+    idleTurn.current = false
+    const requested = [...ids]
+    loadingCards.current = true
+    request<LibraryVideosData>(reply => bridge.videos(JSON.stringify(requested), reply)).then(result => {
+      const returned = new Set(result.videos.map(video => video.id))
+      for (const id of requested) if (!returned.has(id)) goneCards.current.add(id)
+      receiveCards(result.videos)
+    }).catch(error => {
+      for (const id of requested) goneCards.current.add(id)
+      showError(error)
+    }).finally(() => {
+      loadingCards.current = false
+      nextCards()
+    })
+  }, [bridge, visibleIds, selectedId, cards, cardTurn, receiveCards, nextCards, showError])
+  // 그린 칸이 바뀔 때(스크롤 등) 그 칸에 받을 카드가 있을 때만 요청을 깨운다. 다 받은 뒤의 스크롤은 페이지를 다시 그리지 않는다.
+  const shownCards = useRef(cards)
+  useEffect(() => { shownCards.current = cards }, [cards])
+  const rangeChanged = useCallback((ids: readonly number[]) => {
+    renderedIds.current = ids
+    if (ids.some(id => (!shownCards.current.has(id) || staleCards.current.has(id)) && !goneCards.current.has(id))) nextCards()
+  }, [nextCards])
 
   useEffect(() => {
     let current = true
@@ -216,11 +294,9 @@ export default function LibraryPage() {
     return () => { current = false }
   }, [bridge, data?.selectedId, detailRevision, detailTab, showError])
 
-  const byId = useMemo(() => new Map(data?.videos.map(video => [video.id, video]) ?? []), [data?.videos])
-  const visible = useMemo(() => data?.visibleIds.flatMap(id => byId.get(id) ?? []) ?? [], [data?.visibleIds, byId])
-  // 첫 데이터 전에는 기본 보기 조건으로 툴바를 같은 자리·같은 크기에 그린다. 저장된 조건을 먼저 받는 일은 #267이 맡는다.
-  const options = data?.options ?? libraryViewDefaults
-  const foldersOpen = data?.options.mode === 'folders'
+  // 첫 데이터 전에는 셸이 넣어 준 저장된 보기 조건으로, 그마저 없으면 기본 보기 조건으로 툴바를 같은 자리·같은 크기에 그린다.
+  const options = data?.options ?? entry?.options ?? libraryViewDefaults
+  const foldersOpen = options.mode === 'folders'
   const resultScope = useMemo(() => data?.visibleIds.join(",") ?? "", [data?.visibleIds])
 
   // 요청에는 늘 입력란 초안을 담는다. 칩의 X나 모두 지우기처럼 검색어를 바꾸는 조건은 입력란 초안도 함께 바꾼다.
@@ -335,7 +411,7 @@ export default function LibraryPage() {
       <Button size="sm" variant="outline" aria-label="정렬 방향" disabled={!data} onClick={() => filter({ descending: !options.descending })}>{options.descending ? "내림차순 ↓" : "오름차순 ↑"}</Button>
       <LibraryFilters options={options} tags={data?.tags ?? []} disabled={!data} onChange={filter} />
       {/* 개수 자리는 9,999개까지 들어가는 폭을 잡아 두어 첫 데이터가 와도 옆 컨트롤이 밀리지 않는다. 그 전에는 "0개" 대신 기다림 표시를 둔다. */}
-      {data ? <p aria-label="라이브러리 등록·표시 개수" className="min-w-44 shrink-0 text-label text-muted-foreground tabular-nums">등록 영상 {data.videos.length}개 · 표시 {data.visibleIds.length}개</p>
+      {data ? <p aria-label="라이브러리 등록·표시 개수" className="min-w-44 shrink-0 text-label text-muted-foreground tabular-nums">등록 영상 {data.videoCount}개 · 표시 {data.visibleIds.length}개</p>
         : <PendingStatus pending={firstLoad === "pending"} className="min-w-44 shrink-0" />}
       <RandomPlayButton disabled={!data} scopes={[
         { key: "results", label: "현재 결과에서", onSelect: () => randomPlay() },
@@ -346,21 +422,22 @@ export default function LibraryPage() {
         onPlay={randomPlay} />}
     </div>
     {/* 칩 줄은 칩이 없거나 첫 데이터 전에도 같은 높이를 차지해 아래 목록이 밀리지 않는다. */}
-    <LibraryFilterChips options={options} chips={data?.chips ?? []} onChange={filter} pending={viewPending} />
+    <LibraryFilterChips options={options} chips={data?.chips ?? entry?.chips ?? []} onChange={filter} pending={viewPending} />
     <div className="flex min-h-40 flex-1 gap-2">
       {/* 패널을 닫아도 고른 폴더(folder)는 옵션에 남아 다시 열 때 복원된다. */}
       <Button size="icon-sm" variant={foldersOpen ? "secondary" : "outline"} aria-label="폴더 패널" aria-expanded={foldersOpen} aria-controls={foldersOpen ? "library-folder-panel" : undefined} disabled={!data}
         title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>
-      {foldersOpen && <LibraryFolders collapsedIds={data.options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data.folders} selected={data.options.folder} onSelect={folder => filter({ folder })} />}
+      {foldersOpen && <LibraryFolders collapsedIds={options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data?.folders ?? []} selected={options.folder} onSelect={folder => filter({ folder })} />}
       {/* 페이지 안내는 격자 위쪽에 떠 있는 띠라 생기고 사라져도 격자의 자리·열 수·스크롤이 그대로다. 툴바·칩 줄·상세 패널은 덮지 않는다. */}
       <div className="relative flex min-w-0 flex-1">
-        <LibraryGrid cardSize={options.card_size} load={firstLoad} videos={visible} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videos.length ?? 0} onSelect={select} onAction={action} layoutPaused={layoutPaused} revealRequest={revealRequest} keepPlace={keepPlace} />
+        <LibraryGrid cardSize={options.card_size} load={firstLoad} ids={data?.visibleIds ?? []} cards={cards} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videoCount ?? 0} onSelect={select} onAction={action} onRange={rangeChanged} layoutPaused={layoutPaused} revealRequest={revealRequest} keepPlace={keepPlace} />
         <NoticeStack layout="band" aria-label="라이브러리 안내" items={[
           error && { tone: "error", message: error, onDismiss: () => setError("") },
           randomNotice?.scope === resultScope && { tone: "info", message: randomNotice.message, onDismiss: () => setRandomNotice(null) },
         ]} />
       </div>
-      <DetailPanel variant={!data ? (firstLoad === "failed" ? "failed" : "loading") : data.selectedId == null ? "empty" : "selected"} video={byId.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} highlightGuidance={data?.keyBindings.highlightGuidance ?? ""} onRandomTag={tagId => randomPlay([tagId])} />
+      {/* 고른 영상의 카드를 아직 받지 못했으면 받을 때까지 상세 자리 표시를 둔다. */}
+      <DetailPanel variant={!data ? (firstLoad === "failed" ? "failed" : "loading") : data.selectedId == null ? "empty" : cards.has(data.selectedId) ? "selected" : "loading"} video={cards.get(data?.selectedId ?? -1)} details={details} highlights={highlights} revision={detailRevision} tab={detailTab} onTabChange={setDetailTab} scanning={data?.scanning ?? false} onAction={action} onHighlight={highlightAction} highlightGuidance={data?.keyBindings.highlightGuidance ?? ""} onRandomTag={tagId => randomPlay([tagId])} />
     </div>
   </main>
 }

@@ -16,6 +16,7 @@ import { useGenerationGuard } from "@/lib/generation"
 import { focusPage } from "@/lib/page-focus"
 // 앱 아이콘: scripts/app_icon.py가 벡터 원본에서 만든 커밋 산출물. 웹 번들에 들어가 실행 중 네트워크를 쓰지 않는다.
 import appIcon from "@/assets/app-icon.png"
+import { firstData } from "@/lib/entry"
 
 const categories = [['general', '일반'], ['keys', '키 배치'], ['recommend', '추천'], ['translation', '번역'], ['transcription', '받아쓰기'], ['backup', '백업'], ['update', '업데이트']] as const
 
@@ -53,7 +54,7 @@ export default function SettingsPage() {
       api.settingsError.connect(setError)
       api.settingsFocusRequested.connect(focus)
       disconnect = () => { api.settingsChanged.disconnect(changed); api.settingsError.disconnect(setError); api.settingsFocusRequested.disconnect(focus) }
-      const initial = await request<SettingsData>(reply => api.snapshot(reply))
+      const initial = await firstData("settings", () => request<SettingsData>(reply => api.snapshot(reply)))
       if (disposed) return
       if (fresh(initial)) setData(initial)
       setBridge(api); setShell(shell)

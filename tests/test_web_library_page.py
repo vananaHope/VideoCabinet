@@ -55,19 +55,20 @@ def test_real_web_snapshot_filter_tag_deletion_and_count(window_factory, core):
     state = json.loads(page.bridge.snapshot())
     assert {v['id'] for v in state['videos']} == {v.id for v in core.videos()}
     assert json.loads(page.bridge.filter('', tag.id))['visibleIds'] == [video.id]
-    assert len(page.payload()['videos']) == 3 and len(page.payload()['visibleIds']) == 1
+    # 카드는 결과의 첫 화면만 담고 등록 개수는 따로 보낸다(#267).
+    assert [v['id'] for v in page.payload()['videos']] == [video.id] and page.payload()['videoCount'] == 3
 
     core.delete_tag(tag.id)
     window.refresh()
     state = json.loads(page.bridge.snapshot())
     assert state['tags'] == []
     assert set(state['visibleIds']) == {v.id for v in core.videos()}
-    assert len(state['videos']) == 3 and len(state['visibleIds']) == 3
+    assert len(state['videos']) == 3 and len(state['visibleIds']) == 3 and state['videoCount'] == 3
 
     core.exclude_video(video.id)
     window.refresh()
     state = json.loads(page.bridge.snapshot())
-    assert len(state['videos']) == 2 and len(state['visibleIds']) == 2
+    assert len(state['videos']) == 2 and len(state['visibleIds']) == 2 and state['videoCount'] == 2
 
 
 def test_focus_request_survives_until_frontend_ready(window_factory):

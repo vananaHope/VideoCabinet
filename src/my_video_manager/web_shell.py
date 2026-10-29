@@ -9,7 +9,8 @@ from PySide6.QtCore import QLocale, QPoint, QUrl, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QStackedLayout
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineUrlRequestInterceptor
+from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineSettings,
+                                      QWebEngineUrlRequestInterceptor)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtQuickWidgets import QQuickWidget
 
@@ -183,7 +184,29 @@ class WebShellHost(QWidget):
             raise ValueError('브리지 계약과 채널 등록부가 일치하지 않습니다.')
         self._pending_focus = self.controllers[self.active_tab].default_focus
         self._shown_tabs = {self.active_tab}
+        self.update_entry()
         self.view.load(self.entry)
+
+    def update_entry(self):
+        """웹이 처음 그리기 전에 읽을 시작 상태(ShellEntryData)를 문서를 만들 때 넣는다(#267).
+
+        시작 탭과 페이지가 내는 진입 데이터(라이브러리의 저장된 보기 조건 등)다. 웹은 첫 데이터가 오기 전에 이것으로
+        자리 표시를 그리고, 숨은 탭의 첫 데이터 요청을 시작 탭 뒤로 미룬다. 다음에 읽는 문서부터 적용된다.
+        """
+        pages = {tab: data for tab, controller in self.controllers.items() if (data := controller.entry_data()) is not None}
+        source = f"window.mvmEntry = {encode({'tab': self.active_tab, 'pages': pages})}"
+        scripts = self.engine_page.scripts()
+        if any(script.sourceCode() == source for script in scripts.find('mvm-entry')):
+            return
+        for script in scripts.find('mvm-entry'):
+            scripts.remove(script)
+        script = QWebEngineScript()
+        script.setName('mvm-entry')
+        script.setSourceCode(source)
+        script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+        script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+        script.setRunsOnSubFrames(False)
+        scripts.insert(script)
 
     def set_tab(self, tab):
         if tab not in self.routes:
@@ -417,6 +440,8 @@ class WebShellHost(QWidget):
             page.synced_change = None
         controller = self.controllers.get(self.active_tab)
         self._pending_focus = self._pending_focus or (controller.default_focus if controller else 'shell')
+        # 다시 읽는 웹(렌더러 재시작 등)은 지금 탭과 보기 조건으로 처음 그린다.
+        self.update_entry()
 
     def load_finished(self, ok):
         self.load_error.setVisible(not ok)

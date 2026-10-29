@@ -61,9 +61,12 @@ export function VideoCard({ video, variant, cardSize = "medium", ...props }: Pro
   </button>
 }
 
-/** 영상 정보가 오기 전의 카드 자리. VideoCard와 같은 테두리·16:9 썸네일·정보 칸 높이를 써서 바뀔 때 크기가 같다. */
-export function VideoCardPlaceholder() {
-  return <div data-slot="video-card-placeholder" aria-hidden="true" className={cardVariants({ variant: "placeholder" })}>
+/**
+ * 영상 정보가 오기 전의 카드 자리. VideoCard와 같은 테두리·16:9 썸네일·정보 칸 높이를 써서 바뀔 때 크기가 같다.
+ * 결과에 든 영상의 카드를 아직 받지 못했으면(#267) 격자 칸 역할과 선택 표시를 받아 그 자리에서 고르고 이동할 수 있다.
+ */
+export function VideoCardPlaceholder({ selected = false, ...props }: Omit<ComponentProps<"div">, "className" | "children"> & { selected?: boolean }) {
+  return <div data-slot="video-card-placeholder" aria-hidden={props.role ? undefined : true} {...props} className={cardVariants({ variant: selected ? "selected" : "placeholder" })}>
     <Skeleton shape="media" />
     <div className="flex h-card-info w-full shrink-0 flex-col gap-0.5 p-2">
       <Skeleton shape="line" className="w-3/4" />

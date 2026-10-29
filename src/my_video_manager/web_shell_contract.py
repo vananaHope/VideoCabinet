@@ -21,7 +21,7 @@ SHELL = BridgeContract(
              TypeAlias('UpdateAction', ('cancel', 'install', 'later', 'retry', 'dismiss'))),
     constants=(Constant('tabs', TABS), Constant('appName', DISPLAY_NAME)),
     # 페이지 상태 메시지의 공용 세대는 셸 계약에 한 번만 내보낸다(#265).
-    data_types=(GenerationData, web_shell_data.ShellData, web_shell_data.KeyGuideEntryData, web_shell_data.KeyGuideData,
+    data_types=(GenerationData, web_shell_data.ShellData, web_shell_data.ShellEntryData, web_shell_data.KeyGuideEntryData, web_shell_data.KeyGuideData,
                 web_update_data.UpdateNoticeData, web_update_data.UpdateInstallResultData,
                 web_update_data.UpdateInstallData, web_update_data.ShellUpdateData),
 )

@@ -10,6 +10,7 @@ import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
 import { focusPage } from "@/lib/page-focus"
+import { firstData } from "@/lib/entry"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = []
@@ -41,7 +42,7 @@ export default function FoldersPage() {
       api.foldersError.connect(setError)
       api.foldersFocusRequested.connect(focus)
       disconnect = () => { api.foldersChanged.disconnect(changed); api.foldersError.disconnect(setError); api.foldersFocusRequested.disconnect(focus) }
-      const initial = await request<FoldersData>(reply => api.snapshot(reply))
+      const initial = await firstData("folders", () => request<FoldersData>(reply => api.snapshot(reply)))
       if (disposed) return
       if (fresh(initial)) setData(initial)
       setBridge(api)

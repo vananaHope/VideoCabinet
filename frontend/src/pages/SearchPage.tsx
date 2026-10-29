@@ -8,6 +8,7 @@ import { MatchedText, ResultRow, SearchInput, focusList, listKey, listKeyRows, r
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
+import { firstData } from "@/lib/entry"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -62,7 +63,7 @@ export default function SearchPage() {
       const focus = (target: string) => restoreListFocus("search", "search-results", scroll.current, target)
       api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError)
       disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError) }
-      const initial = await request<SearchData>(reply => api.snapshot(reply))
+      const initial = await firstData("search", () => request<SearchData>(reply => api.snapshot(reply)))
       if (disposed) return
       if (fresh(initial)) start(initial)
       setBridge(api)

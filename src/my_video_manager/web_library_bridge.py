@@ -24,7 +24,19 @@ class LibraryBridge(QObject):
 
     @LIBRARY.slot('snapshot')
     def snapshot(self):
-        return self.page.stamp(self.page.payload())
+        return self.page.stamp(self.page.snapshot_payload())
+
+    @LIBRARY.slot('videos')
+    def videos(self, ids):
+        # 화면을 그린 뒤 나머지 카드를 나눠 받는다(#267). 라이브러리에 없는 영상은 빼고 돌려준다.
+        try:
+            requested = json.loads(ids)
+            if not isinstance(requested, list) or not all(type(video_id) is int for video_id in requested):
+                raise ValueError('영상 목록이 올바르지 않습니다.')
+        except ValueError as error:
+            return encode({'error': str(error)})
+        cards = self.page.card_index
+        return encode({'videos': [cards[video_id] for video_id in requested if video_id in cards]})
 
     @LIBRARY.slot('ready')
     def ready(self):
