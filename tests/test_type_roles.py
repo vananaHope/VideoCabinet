@@ -67,9 +67,11 @@ def add_viewing(core):
 
 
 def page_ready(window, tab):
+    # 숨은 탭은 첫 화면 뒤에 첫 데이터를 받으므로(#267) 바로 열면 '…불러오는 중' 안내가 먼저 보일 수 있다. 그것도 기다린다.
     return window.web_host.active_tab == tab and js(window, f"""(() => {{
       const page = document.querySelector('[data-page={tab}]')
-      return !!page && page.getClientRects().length > 0 && !page.querySelector('[aria-busy=true], [data-slot=skeleton]') }})()""")
+      return !!page && page.getClientRects().length > 0 && !page.querySelector('[aria-busy=true], [data-slot=skeleton]')
+        && ![...page.querySelectorAll('[role=status]')].some(e => e.textContent.includes('불러오는 중')) }})()""")
 
 
 def test_every_tab_and_key_guide_draw_each_role_with_its_token_values(window):

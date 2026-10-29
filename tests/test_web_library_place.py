@@ -59,6 +59,8 @@ def open_window(library, qapp):
         host = window.web_host
         wait_for(lambda: host._frontend_ready and 'library' in host._ready_pages)
         wait_for(lambda: js(window, CELLS) > 0)
+        # 첫 진입의 기본 초점이 자리 잡은 뒤에 조작한다. 첫 화면 준비가 빨라져(#267) 늦게 온 첫 초점이 시험의 초점을 가로챌 수 있다.
+        wait_for(lambda: js(window, "document.activeElement?.id ?? ''") == 'library-grid')
         return window
 
     yield create
@@ -467,6 +469,9 @@ def test_shell_notices_move_off_controls_after_page_notice_expands(open_window):
 def test_shell_layer_does_not_measure_page_while_grid_scrolls(open_window):
     # 가상 격자는 스크롤 프레임마다 카드 DOM을 바꾸지만 고정 조작 요소는 그대로다. 셸 묶음은 그때 페이지를 다시 재지 않는다.
     window = open_window()
+    # 숨은 탭은 첫 화면 뒤에 데이터를 받고 그때 배치 변경을 알린다(#267). 그 알림이 스크롤 구간에 섞이지 않게 모두 받은 뒤 잰다.
+    host = window.web_host
+    wait_for(lambda: host._ready_pages >= set(host.controllers))
     show_long_shell_notices(window)
     wait_for(lambda: js(window, f"document.querySelector('{SHELL}').checkVisibility()") is True)
     # 시험 쪽 탐침: 고정 조작 요소를 잴 때 부르는 checkVisibility 호출 수와 그린 프레임 수를 센다.

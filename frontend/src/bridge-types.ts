@@ -11,6 +11,10 @@ export interface ShellData {
   status: string
 }
 
+export interface ShellEntryData {
+  tab: string
+}
+
 export interface KeyGuideEntryData {
   keys: Array<string>
   label: string
@@ -229,6 +233,8 @@ export interface LibraryKeyBindingsData {
 export interface LibraryData {
   generation: number
   videos: Array<VideoData>
+  staleIds: Array<number>
+  videoCount: number
   tags: Array<TagUsageData>
   visibleIds: Array<number>
   selectedId: number | null
@@ -240,6 +246,16 @@ export interface LibraryData {
   keyBindings: LibraryKeyBindingsData
 }
 
+export interface LibraryVideosData {
+  generation: number
+  videos: Array<VideoData>
+}
+
+export interface LibraryEntryData {
+  options: LibraryViewOptions
+  chips: Array<LibraryChip>
+}
+
 export type Action = "play" | "tags" | "subtitles" | "review" | "series" | "rename" | "reconnect" | "exclude"
 export const actions = [["play", "재생"], ["tags", "태그 편집"], ["subtitles", "자막 만들기 / 원어 지정"], ["review", "자막 검수 / SRT 내보내기"], ["series", "시리즈 편집"], ["rename", "제목 변경"], ["reconnect", "파일 다시 연결"], ["exclude", "제외"]] as const
 export const scanLockedActions: readonly Action[] = ["rename", "reconnect", "exclude"]
@@ -249,6 +265,7 @@ export const libraryViewDefaults: LibraryViewOptions = {"query": "", "mode": "al
 export interface LibraryBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void
+  videos: (ids: string, reply: Reply) => void
   filter: (query: string, tag: number, reply: Reply) => void
   view: (options: string, reply: Reply) => void
   select: (id: number, reply: Reply) => void
@@ -273,6 +290,7 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
   return Object.freeze({
     ready: raw.ready.bind(raw),
     snapshot: raw.snapshot.bind(raw),
+    videos: raw.videos.bind(raw),
     filter: raw.filter.bind(raw),
     view: raw.view.bind(raw),
     select: raw.select.bind(raw),

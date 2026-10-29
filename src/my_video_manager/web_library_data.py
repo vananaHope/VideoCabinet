@@ -98,7 +98,11 @@ class LibraryKeyBindingsData(TypedDict):
 
 
 class LibraryData(GenerationData):
+    # 카드 데이터는 일부만 담는다(#267). 스냅숏은 첫 화면의 카드, 밀어 보내는 갱신은 웹에 아직 알리지 않은 바뀐 카드다.
+    # 나머지는 웹이 화면을 그린 뒤 videos 슬롯으로 나눠 받는다. staleIds는 바뀌었지만 담지 못한 카드로, 웹이 다시 받는다.
     videos: list[VideoData]
+    staleIds: list[int]
+    videoCount: int
     tags: list[TagUsageData]
     visibleIds: list[int]
     selectedId: int | None
@@ -108,6 +112,18 @@ class LibraryData(GenerationData):
     folders: list[LibraryFolder]
     chips: list[LibraryChip]
     keyBindings: LibraryKeyBindingsData
+
+
+class LibraryVideosData(GenerationData):
+    """videos 슬롯의 응답. 요청한 ID 중 라이브러리에 있는 영상의 카드만 담는다.
+    세대는 스냅숏·밀어 보내는 갱신과 같은 차례다. 웹은 카드마다 더 새 세대의 내용만 반영한다."""
+    videos: list[VideoData]
+
+
+class LibraryEntryData(TypedDict):
+    """웹이 처음 그리기 전에 받는 라이브러리 보기 조건(#267). 자리 표시를 저장된 카드 크기·칩·폴더 패널로 그린다."""
+    options: LibraryViewOptions
+    chips: list[LibraryChip]
 
 
 def snapshot_data(snapshot, subtitled_ids=frozenset()) -> list[VideoData]:

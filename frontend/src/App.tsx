@@ -14,6 +14,7 @@ import { NoticeLayer, NoticeStack } from "@/components/ui/notice"
 import { shellStatusTone } from "@/lib/shell-status"
 import { focusPage, markPageShown, rememberPageFocus } from "@/lib/page-focus"
 import { restorePageScroll, savePageScroll } from "@/lib/page-scroll"
+import { shellShown, startTab, tabOpened } from "@/lib/entry"
 
 // 탭을 바꿀 때만 새 탭 내용이 투명도로 짧게 들어온다. 첫 진입·재생 복귀·같은 탭 다시 열기에는 전환이 없다.
 // 숨은 탭은 그대로 남아 있으므로 이전 탭의 선택·스크롤·초점이 유지된다. 페이지 안에서 마지막으로 초점을 받은 요소를
@@ -22,11 +23,12 @@ const pageArea = cva("min-h-0 flex-1 overflow-y-auto", { variants: { entering: {
 
 export default function App() {
   const [bridge, setBridge] = useState<ShellBridge | null>(null)
-  const [view, setView] = useState({ tab: "library", entering: false })
+  // 첫 렌더부터 셸이 넣어 준 시작 탭을 보인다(#267). 다시 읽은 웹이 잠깐 라이브러리를 보였다가 바뀌지 않는다.
+  const [view, setView] = useState<{ tab: string; entering: boolean }>({ tab: startTab, entering: false })
   const tab = view.tab
   // 지금 보이는 탭. 탭 변경 신호에서 떠나는 페이지의 스크롤을 저장할 때 쓴다.
-  const shown = useRef("library")
-  const setTab = (next: string) => { shown.current = next; setView(previous => previous.tab === next ? previous : { tab: next, entering: false }) }
+  const shown = useRef<string>(startTab)
+  const setTab = (next: string) => { tabOpened(next); shown.current = next; setView(previous => previous.tab === next ? previous : { tab: next, entering: false }) }
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [keyGuide, setKeyGuide] = useState(false)
@@ -37,6 +39,7 @@ export default function App() {
       if (disposed) return
       const changed = (json: string) => {
         const next = JSON.parse(json).tab
+        tabOpened(next)
         const leaving = shown.current
         // 탭 전환·재생 복귀(같은 탭)마다 셸이 보낸다. 이 뒤의 사용자 입력만 늦게 온 초점 요청을 건너뛰게 한다.
         markPageShown(next)
@@ -72,14 +75,16 @@ export default function App() {
       const state = await request<ShellData>(reply => api.shellSnapshot(reply))
       if (disposed) return
       // 스냅숏 응답은 탭이 보이게 된 순간이 아니다. 이미 보이는 탭이면 그 뒤의 사용자 입력 이력을 그대로 두고,
-      // 다른 탭으로 바뀔 때만 새로 보인 것으로 친다(첫 화면은 처음부터 보이는 라이브러리, 스냅숏·데이터 도착 순서와 무관).
+      // 다른 탭으로 바뀔 때만 새로 보인 것으로 친다(첫 화면은 첫 렌더부터 보이는 시작 탭, 스냅숏·데이터 도착 순서와 무관).
       if (state.tab !== shown.current) markPageShown(state.tab)
       setBridge(api); setTab(state.tab); setStatus(state.status)
-    }).catch(error => setError(String(error)))
+    }).catch(error => { shellShown(); setError(String(error)) })
     return () => { disposed = true; disconnect() }
   }, [])
   useEffect(() => {
-    if (bridge) request(reply => bridge.ready(reply)).catch(error => setError(String(error)))
+    if (!bridge) return
+    request(reply => bridge.ready(reply)).catch(error => setError(String(error)))
+    shellShown()
   }, [bridge])
   function navigate(value: string) {
     if (bridge) request(reply => bridge.navigate(value as Tab, reply)).catch(error => setError(String(error)))

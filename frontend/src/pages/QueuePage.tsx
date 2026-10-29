@@ -12,6 +12,7 @@ import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
 import { focusPage } from "@/lib/page-focus"
+import { firstData } from "@/lib/entry"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = [
@@ -59,7 +60,7 @@ export default function QueuePage() {
       api.rulesChanged.connect(rulesChanged)
       api.queueFocusRequested.connect(focus)
       disconnect = () => { api.bulkFinished.disconnect(bulkFinished); api.queueChanged.disconnect(changed); api.rulesChanged.disconnect(rulesChanged); api.queueFocusRequested.disconnect(focus) }
-      const data = await request<QueueData>(reply => api.snapshot(reply))
+      const data = await firstData("queue", () => request<QueueData>(reply => api.snapshot(reply)))
       if (disposed) return
       if (fresh(data)) store.apply(data)
       const ruleData = await request<QueueRulesData>(reply => api.rulesSnapshot(reply))

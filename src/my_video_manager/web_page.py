@@ -68,6 +68,10 @@ class WebPageController(QWidget):
     def frontend_ready(self):
         self.host.page_ready(self.tab)
 
+    def entry_data(self):
+        """웹이 처음 그리기 전에 받을 이 페이지의 상태(#267). 없으면 None이다."""
+        return None
+
     def refresh(self):
         pass
 

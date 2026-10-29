@@ -615,6 +615,9 @@ class AppCore:
 
     def dismissed_videos(self) -> tuple[Video, ...]:
         ids = self._recommendations.dismissed_ids()
+        if not ids:
+            # 폴더 탭은 앱을 켤 때마다 읽는다. 관심 없음 영상이 없으면 라이브러리 전체를 읽지 않는다(#267).
+            return ()
         return tuple(v for v in self.videos() + self.excluded_videos() if v.id in ids)
 
     def request_subtitles(self, video_id: int, spoken_language: str | None = None) -> SubtitleQueueEntry:

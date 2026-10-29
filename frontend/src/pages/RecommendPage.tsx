@@ -12,6 +12,7 @@ import { menuKeyRow, type KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
 import { focusPage, setDefaultFocus } from "@/lib/page-focus"
+import { firstData } from "@/lib/entry"
 
 type Cursor = { key: string; row: number; column: number; videoId: number }
 type Position = { row: number; column: number }
@@ -107,7 +108,7 @@ export default function RecommendPage() {
       const focus = (target: string) => focusPage("recommend", target)
       api.changed.connect(changed); api.focusRequested.connect(focus); api.error.connect(showError); shell.shellChanged.connect(shellChanged)
       disconnect = () => { api.changed.disconnect(changed); api.focusRequested.disconnect(focus); api.error.disconnect(showError); shell.shellChanged.disconnect(shellChanged) }
-      const initial = await request<RecommendData>(reply => api.snapshot(reply))
+      const initial = await firstData("recommend", () => request<RecommendData>(reply => api.snapshot(reply)))
       if (disposed) return
       if (fresh(initial)) setData(initial)
       setBridge(api)

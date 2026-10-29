@@ -14,7 +14,7 @@ MENU_ACTIONS = MappingProxyType({
 SCAN_LOCKED_ACTIONS = ('rename', 'reconnect', 'exclude')
 
 LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
-    'ready': (), 'snapshot': (),
+    'ready': (), 'snapshot': (), 'videos': (Argument('ids', str, 'string'),),
     'filter': (Argument('query', str, 'string'), Argument('tag', int, 'number')),
     'view': (Argument('options', str, 'string'),),
     'select': (Argument('id', int, 'number'),), 'clearSelection': (), 'details': (Argument('id', int, 'number'),),
@@ -37,4 +37,4 @@ LIBRARY = BridgeContract(name='library', interface='LibraryBridge', slots={
                LibraryViewOptions, LibraryFolder, LibraryChipRange, LibraryChip,
                web_library_data.ExternalSubtitleTrackData, web_library_data.ExternalSubtitleFileData,
                web_library_data.DetailsData, web_library_data.HighlightData, web_library_data.LibraryKeyBindingsData,
-               web_library_data.LibraryData))
+               web_library_data.LibraryData, web_library_data.LibraryVideosData, web_library_data.LibraryEntryData))

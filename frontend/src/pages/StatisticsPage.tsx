@@ -17,6 +17,7 @@ import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
 import { focusPage } from "@/lib/page-focus"
+import { firstData } from "@/lib/entry"
 
 const periods = [7, 30, 90, 365].map(days => ({ value: String(days), label: `${days}일` }))
 const metrics = [{ value: "watched_seconds", label: "시청 시간" }, { value: "viewing_count", label: "시청 횟수" }]
@@ -74,7 +75,7 @@ export default function StatisticsPage() {
       statistics.statisticsChanged.connect(update)
       statistics.statisticsFocusRequested.connect(focus)
       cleanup = () => { statistics.statisticsChanged.disconnect(update); statistics.statisticsFocusRequested.disconnect(focus) }
-      const snapshot = await request<StatisticsData>(reply => statistics.snapshot(reply))
+      const snapshot = await firstData("statistics", () => request<StatisticsData>(reply => statistics.snapshot(reply)))
       if (disposed) return
       if (fresh(snapshot)) setState(snapshot)
       await request(reply => statistics.ready(reply))

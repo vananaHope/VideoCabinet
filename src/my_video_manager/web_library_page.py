@@ -3,11 +3,15 @@
 from PySide6.QtCore import Signal
 from .library_operations import LibraryOperations
 from .library_controls import LibraryControls
-from .web_library_data import key_bindings_data, snapshot_data, tag_usage_data
+from .web_library_data import LibraryEntryData, key_bindings_data, snapshot_data, tag_usage_data
 from .library_views import filter_chips
 from .web_library_bridge import LibraryBridge
 from .web_json import encode
 from .web_page import WebPageController
+
+# 한 번에 담는 카드 수(#267). 큰 창의 작은 카드로 보이는 줄과 위아래 여유 줄까지 덮는다.
+# 스냅숏은 결과의 첫 화면을, 밀어 보내는 갱신은 바뀐 카드를 결과 앞쪽부터 이만큼만 담는다. 나머지는 웹이 화면을 그린 뒤 나눠 받는다.
+SCREEN_VIDEOS = 60
 
 
 class WebLibraryPage(LibraryOperations, WebPageController):
@@ -23,7 +27,10 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         self.worker = None
         self.snapshot = None
         self.cards = []
+        self.card_index = {}
         self.video_ids = set()
+        # 웹에 아직 알리지 않은 바뀐 카드. 다음 전체 상태가 담거나 다시 받으라고 알린다.
+        self.unsent = set()
         self.visible_ids = []
         self.selected_id = None
         # 코어가 바꾼 선택을 웹이 아직 받지 않았다. 다음 전체 상태는 웹의 이전 선택을 보존하지 않는다.
@@ -41,9 +48,34 @@ class WebLibraryPage(LibraryOperations, WebPageController):
         window.subtitles.video_changed.connect(self.refresh_subtitle_details)
         window.translations.video_changed.connect(self.refresh_subtitle_details)
 
-    def payload(self, *, preserve_selection=False):
-        return dict(videos=self.cards, tags=self.tags, scanning=self.worker is not None, folders=self.index.folders if self.index else [],
-                    keyBindings=key_bindings_data(self.core.key_bindings()), preserveSelection=preserve_selection, **self.view_payload())
+    def payload(self, *, preserve_selection=False, changed=None):
+        """changed가 없으면 결과 첫 화면의 카드를, 있으면 그중 바뀐 카드를 담는다. 담지 못한 바뀐 카드는 staleIds로 알린다."""
+        if changed is None:
+            ids = dict.fromkeys([*self.visible_ids[:SCREEN_VIDEOS], self.selected_id])
+            videos, stale = [self.card_index[vid] for vid in ids if vid in self.card_index], []
+        else:
+            videos, stale = self.changed_videos(changed)
+        return dict(videos=videos, staleIds=stale, videoCount=len(self.cards), tags=self.tags, scanning=self.worker is not None,
+                    folders=self.index.folders if self.index else [], keyBindings=key_bindings_data(self.core.key_bindings()),
+                    preserveSelection=preserve_selection, **self.view_payload())
+
+    def changed_videos(self, changed):
+        # 선택한 카드와 결과 앞쪽의 카드가 먼저다. 결과 밖의 카드는 뒤로 간다.
+        order = {vid: index for index, vid in enumerate(self.visible_ids)}
+        ids = sorted((vid for vid in changed if vid in self.card_index),
+                     key=lambda vid: (vid != self.selected_id, order.get(vid, len(order)), vid))
+        return [self.card_index[vid] for vid in ids[:SCREEN_VIDEOS]], ids[SCREEN_VIDEOS:]
+
+    def snapshot_payload(self):
+        """새로 읽은 웹이 처음 받는 전체 상태. 그 뒤의 카드는 웹이 지금 상태로 받으므로 알리지 않은 변경을 비운다."""
+        self.unsent.clear()
+        return self.payload()
+
+    def entry_data(self):
+        """웹이 처음 그릴 때 쓰는 저장된 보기 조건(#267). 첫 데이터 전의 자리 표시가 같은 카드 크기·칩·폴더 패널로 그려진다."""
+        names = ({t['id']: t['name'] for t in self.tags} if self.index
+                 else {usage.tag.id: usage.tag.name for usage in self.core.tag_usage()})
+        return LibraryEntryData(options=self.options, chips=filter_chips(self.options, names))
 
     def view_payload(self):
         return dict(visibleIds=self.visible_ids, selectedId=self.selected_id, options=self.options,
@@ -90,8 +122,11 @@ class WebLibraryPage(LibraryOperations, WebPageController):
     def rebuild(self):
         self.snapshot = self.core.library_snapshot()
         self.index = self.core.library_view_index(self.snapshot)
+        previous = self.card_index
         self.cards = snapshot_data(self.snapshot, self.index.original)
-        self.video_ids = {v['id'] for v in self.cards}
+        self.card_index = {card['id']: card for card in self.cards}
+        self.video_ids = set(self.card_index)
+        self.unsent.update(vid for vid, card in self.card_index.items() if previous.get(vid) != card)
         self.tags = tag_usage_data(self.core.tag_usage())
         self.options['tags'] = [tid for tid in self.options['tags'] if tid in {t['id'] for t in self.tags}]
         if self.options['folder'] not in self.index.members:
@@ -101,8 +136,9 @@ class WebLibraryPage(LibraryOperations, WebPageController):
 
     def publish_library(self, *, preserve_selection=False):
         preserve = preserve_selection and not self.selection_moved
-        if self.publish(self.bridge.libraryChanged, self.payload(preserve_selection=preserve)):
+        if self.publish(self.bridge.libraryChanged, self.payload(preserve_selection=preserve, changed=self.unsent)):
             self.selection_moved = False
+            self.unsent.clear()
 
     def move_selection(self, video_id):
         """코어가 웹 모르게 바꾼 선택(무작위 연속 재생의 마지막 영상 등). 보이면 지금, 숨었으면 다시 보일 때 알린다."""
@@ -130,7 +166,10 @@ class WebLibraryPage(LibraryOperations, WebPageController):
             self.index = self.core.library_view_index(self.snapshot)
             self.apply_filters()
             for card in self.cards:
-                card['hasSubtitles'] = card['id'] in self.index.original
+                subtitled = card['id'] in self.index.original
+                if card['hasSubtitles'] != subtitled:
+                    card['hasSubtitles'] = subtitled
+                    self.unsent.add(card['id'])
             self.publish_library(preserve_selection=preserve_selection)
         if self.selected_id is not None and (changed_video_id is None or changed_video_id == self.selected_id):
             self.bridge.libraryDetailsChanged.emit(self.selected_id)

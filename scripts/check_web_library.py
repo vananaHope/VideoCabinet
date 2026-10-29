@@ -5,6 +5,7 @@ python scripts/check_web_library.py --count 24 --verify --stay
 python scripts/check_web_library.py --verify-contrast --offscreen
 python scripts/check_web_library.py --prepare --count 5000
 python scripts/check_web_library.py --count 5000 --profile-search --no-screenshots
+python scripts/check_web_library.py --count 5000 --profile-search --search-push details --no-screenshots
 """
 import time
 STARTED = time.perf_counter()
@@ -30,6 +31,8 @@ parser.add_argument('--verify-shell', action='store_true')
 parser.add_argument('--verify-library', action='store_true', help='카드 통계·태그와 하이라이트 재생·편집·복귀 확인')
 parser.add_argument('--profile-refresh', action='store_true', help='갱신의 Python·JSON 파싱·후속 웹 프레임 비용 측정')
 parser.add_argument('--profile-search', action='store_true', help='빠른 검색 연속 입력의 입력란 반영·결과 반영 시간 측정')
+parser.add_argument('--search-push', choices=('details', 'refresh'),
+                    help='--profile-search 입력 중간(3번째 글자 뒤)에 갱신 push를 겹친다. details: 자막 완료, refresh: 검사 완료 같은 전체 갱신')
 parser.add_argument('--long-content', action='store_true')
 parser.add_argument('--output', type=Path, default=ROOT / '.local/screens-46')
 parser.add_argument('--verify-contrast', action='store_true', help='제외 버튼·메뉴 글자 대비 검증')
@@ -168,6 +171,17 @@ def run_web_frames(script):
     assert completed, '웹 프레임 완료 알림 시간 초과'
 
 
+# 첫 목록 표시: 문서를 만들 때부터 프레임마다 실제 카드(받은 영상 카드)가 격자에 있는지 보고, 처음 그린 프레임의 시각을 남긴다(#267).
+# startup_ms는 준비 알림 뒤 두 프레임과 고정 대기까지 재므로 첫 화면 뒤의 일(숨은 탭·나머지 카드)도 들어간다.
+from PySide6.QtWebEngineCore import QWebEngineScript
+first_list_probe = QWebEngineScript()
+first_list_probe.setName('first-list-probe')
+first_list_probe.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+first_list_probe.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+first_list_probe.setSourceCode("""window.__firstList = null; (function watch() { requestAnimationFrame(() => {
+  if (document.querySelector('#library-grid button[role=gridcell]')) window.__firstList = performance.timeOrigin + performance.now(); else watch() }) })()""")
+host.engine_page.scripts().insert(first_list_probe)
+WALL_STARTED = time.time() * 1000 - (time.perf_counter() - STARTED) * 1000
 startup_loop = QEventLoop()
 host.frontend_loaded.connect(startup_loop.quit)
 startup_timeout = QTimer()
@@ -200,7 +214,9 @@ def capture_window(name):
 
 
 capture_window(f'web-{args.count}.png')
-metrics = {'mode': 'web', 'count': args.count, 'startup_ms': round(startup, 2), 'checks': []}
+first_list = js('window.__firstList')
+metrics = {'mode': 'web', 'count': args.count, 'startup_ms': round(startup, 2),
+           'first_list_ms': round(first_list - WALL_STARTED, 2) if first_list else None, 'checks': []}
 
 
 if args.verify_shell:
@@ -711,6 +727,11 @@ if args.profile_search:
         for index, char in enumerate(text):
             planned.append(base + index * interval)
             QTimer.singleShot(150 + index * interval, lambda char=char: QTest.keyClick(host.view.focusProxy(), char))
+        if args.search_push:
+            # 사용자가 하지 않은 갱신이 입력 중간에 도착한다. 선택하지 않은 영상의 자막 완료이거나 검사 완료의 전체 갱신이다.
+            pushed = next(vid for vid in page.video_ids if vid != page.selected_id)
+            QTimer.singleShot(150 + 2 * interval + interval // 2, (lambda: window.subtitles.video_changed.emit(pushed))
+                              if args.search_push == 'details' else window.refresh)
         run_web_frames(f"""
           const input = {SEARCH_INPUT}, target = {json.dumps(text)}, chip = '제목: ' + target;
           const profile = window.__searchProfile = {{input: [], result: null}};
@@ -801,7 +822,7 @@ metrics['private_commit_mib'] = round(sum(p['PrivateMemorySize64'] for p in proc
 out = screens / f'web-{args.count}{"-verify" if args.verify else ""}.json'
 out.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps({
-    'mode': 'web', 'count': args.count, 'startup_ms': metrics['startup_ms'],
+    'mode': 'web', 'count': args.count, 'startup_ms': metrics['startup_ms'], 'first_list_ms': metrics['first_list_ms'],
     'refresh_median_ms': median(metrics['refresh_ms']),
     'scroll_frame_median_ms': median(metrics['scroll_frame_ms']),
     'working_set_mib': metrics['working_set_mib'], 'checks': metrics['checks'],
