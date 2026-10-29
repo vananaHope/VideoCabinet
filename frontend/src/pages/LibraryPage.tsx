@@ -89,16 +89,18 @@ export default function LibraryPage() {
   // 입력란에서 검색어를 고치는 중인지(조합·응답 대기). 그동안 밀어 보낸 상태의 검색어로 입력란을 덮지 않는다.
   // 덮으면 응답을 기다리는 사이 도착한 전체 목록(검사·썸네일 갱신 등)이 그보다 앞선 검색어로 입력란을 되돌려 이어 친 글자를 잃는다.
   const editingQuery = useCallback(() => composing.current || awaitingView.current, [])
-  // 기다리는 동안 이전 결과에서 고른 영상이 새 결과에도 있으면 그 선택을 지킨다. 없으면 새 결과의 선택(코어가 정한 것)을 보이고,
-  // 코어는 그 영상을 고른 상태이므로 새 결과의 선택을 알린다.
+  // 기다리는 동안 이전 결과에서 고른 영상이 새 결과에도 있으면 그 선택을 지킨다. 없으면 새 결과의 선택(코어가 정한 것)을 보인다.
+  // 어느 쪽이든 화면과 코어가 같은 선택으로 끝나게 코어에 알린다. 고른 뒤 보낸 다른 요청(좁혔다 넓히기 등)이 코어의 선택을
+  // 바꿨을 수 있고, 고른 영상은 코어가 들고 있을 수 있으며, 결과가 0개면 코어도 선택을 비워야 한다.
   const follow = useCallback(<View extends Pick<LibraryData, "visibleIds" | "selectedId">>(view: View, api: LibraryBridge): View => {
     const picked = pickedWhileWaiting.current
     pickedWhileWaiting.current = null
     if (picked === null) return view
-    if (view.visibleIds.includes(picked)) return { ...view, selectedId: picked }
-    const selected = view.selectedId
-    if (selected != null) request(reply => api.select(selected, reply)).catch(showError)
-    return view
+    const shown = view.visibleIds.includes(picked) ? { ...view, selectedId: picked } : view
+    const selected = shown.selectedId
+    if (view.selectedId !== picked)
+      request(reply => selected != null ? api.select(selected, reply) : api.clearSelection(reply)).catch(showError)
+    return shown
   }, [showError])
   // 전체 상태의 보기 조건·결과를 화면에 보인다. 자막·번역 완료나 숨어 있던 동안의 변경이 늦게 도착해도 그사이 고른 영상이
   // 결과에 남아 있으면 유지하고, 결과가 바뀌어도 맨 위로 올리지 않고 보던 자리를 지킨다.

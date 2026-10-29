@@ -272,3 +272,66 @@ def test_card_picked_while_waiting_follows_the_new_result(open_window, library):
     assert js(window, SELECTED) == f'video-{ids["clip 003"]}'
     wait_for(lambda: page.selected_id == ids['clip 003'])
     assert js(window, NOTICES) == ''
+
+
+def selects(window, video_id):
+    """화면 선택과 코어 선택(selected_video_id)이 모두 video_id다. None이면 둘 다 선택이 없다."""
+    screen = None if video_id is None else f'video-{video_id}'
+    return json.loads(js(window, f'JSON.stringify({SELECTED})')) == screen and window.library_page.selected_video_id() == video_id
+
+
+def test_card_picked_while_waiting_stays_selected_after_narrowing_and_broadening(open_window, library):
+    window = open_window()
+    page = window.library_page
+    ids = {video.title: video.id for video in library.videos()}
+    focus_search(window)
+    QTest.keyClicks(view(window), 'clip 0')
+    wait_for(lambda: shows(window, 60, ['제목: clip 0']))
+    first = hold(window, VIEW_REPLY)
+    QTest.keyClicks(view(window), '0')
+    wait_for(lambda: held(window, first))
+    click(window, f'#video-{ids["clip 005"]}')
+    wait_for(lambda: selects(window, ids['clip 005']))
+    # 응답을 붙잡은 채 좁혔다(clip 003) 넓힌다(clip 00). 코어는 좁힐 때 선택을 clip 003으로 바꾸고 넓혀도 그대로 둔다.
+    focus_search(window)
+    narrow = hold(window, VIEW_REPLY)
+    QTest.keyClicks(view(window), '3')
+    wait_for(lambda: held(window, narrow))
+    assert js(window, SELECTED) == f'video-{ids["clip 005"]}'
+    broad = hold(window, VIEW_REPLY)
+    QTest.keyClick(view(window), Qt.Key.Key_Backspace)
+    wait_for(lambda: held(window, broad))
+    assert js(window, SELECTED) == f'video-{ids["clip 005"]}'
+    for reply in (first, narrow):
+        release(window, reply)
+        assert shows(window, 60, ['제목: clip 0'])
+        assert js(window, SELECTED) == f'video-{ids["clip 005"]}'
+    # 마지막 결과에 고른 영상이 있으므로 화면과 코어 모두 그 영상을 고른다.
+    release(window, broad)
+    wait_for(lambda: shows(window, 10, ['제목: clip 00']))
+    wait_for(lambda: selects(window, ids['clip 005']))
+    # 정렬만 바꿔도 두 영상 모두 결과에 남으므로 선택은 그대로다.
+    click(window, '[aria-label="정렬 방향"]')
+    wait_for(lambda: page.options['descending'] and js(window, SORT_DIRECTION) == '내림차순 ↓')
+    wait_for(lambda: js(window, f'{GRID}.querySelector("[role=gridcell]")?.id') == f'video-{ids["clip 009"]}')
+    assert selects(window, ids['clip 005'])
+    assert js(window, NOTICES) == ''
+
+
+def test_card_picked_while_waiting_for_an_empty_result_clears_both_selections(open_window, library):
+    window = open_window()
+    target = next(video.id for video in library.videos() if video.title == 'clip 001')
+    focus_search(window)
+    QTest.keyClicks(view(window), 'clip 0')
+    wait_for(lambda: shows(window, 60, ['제목: clip 0']))
+    reply = hold(window, VIEW_REPLY)
+    QTest.keyClicks(view(window), 'x')
+    wait_for(lambda: held(window, reply))
+    click(window, f'#video-{target}')
+    wait_for(lambda: selects(window, target))
+    # 마지막 결과가 0개면 화면도 코어도 선택이 없다.
+    release(window, reply)
+    wait_for(lambda: shows(window, 0, ['제목: clip 0x']))
+    wait_for(lambda: selects(window, None))
+    assert window.library_page.visible_ids == []
+    assert js(window, NOTICES) == ''

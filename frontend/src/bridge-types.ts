@@ -252,6 +252,7 @@ export interface LibraryBridge {
   filter: (query: string, tag: number, reply: Reply) => void
   view: (options: string, reply: Reply) => void
   select: (id: number, reply: Reply) => void
+  clearSelection: (reply: Reply) => void
   details: (id: number, reply: Reply) => void
   action: (name: Action, id: number, reply: Reply) => void
   highlights: (videoId: number, reply: Reply) => void
@@ -275,6 +276,7 @@ export function publicLibraryBridge(raw: LibraryBridge): LibraryBridge {
     filter: raw.filter.bind(raw),
     view: raw.view.bind(raw),
     select: raw.select.bind(raw),
+    clearSelection: raw.clearSelection.bind(raw),
     details: raw.details.bind(raw),
     action: raw.action.bind(raw),
     highlights: raw.highlights.bind(raw),
