@@ -59,6 +59,8 @@ def open_window(library, qapp):
         host = window.web_host
         wait_for(lambda: host._frontend_ready and 'library' in host._ready_pages)
         wait_for(lambda: js(window, CELLS) > 0)
+        # 첫 진입의 기본 초점이 자리 잡은 뒤에 조작한다. 첫 화면 준비가 빨라져(#267) 늦게 온 첫 초점이 시험의 초점을 가로챌 수 있다.
+        wait_for(lambda: js(window, "document.activeElement?.id ?? ''") == 'library-grid')
         return window
 
     yield create
