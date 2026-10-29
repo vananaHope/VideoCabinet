@@ -4,7 +4,7 @@
 """
 import json
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QFont, QFontInfo
 from PySide6.QtTest import QTest
 
@@ -122,6 +122,56 @@ def test_every_tab_and_key_guide_draw_each_role_with_its_token_values(window):
     assert any(e['tag'] == 'h1' for e in elements)
     assert any(e['dialogTitle'] for e in guide) and any(e['kbd'] for e in guide)
     assert any(e['badge'] for e in elements)
+
+
+# 보이고 글자를 직접 가진 요소 중 글자가 정확히 title인 것의 계산된 글자 값. 클래스가 없어 상속으로 정해지는 제목도 잡는다.
+TITLE_STYLE = """(() => {
+  const title = %s
+  const own = e => [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())
+  const e = [...document.querySelectorAll(%s)].find(e => e.getClientRects().length > 0 && own(e) && e.textContent.trim() === title)
+  if (!e) return null
+  const s = getComputedStyle(e)
+  return JSON.stringify({ size: parseFloat(s.fontSize), line: parseFloat(s.lineHeight), weight: s.fontWeight,
+    spacing: s.letterSpacing === 'normal' ? 0 : Math.round(parseFloat(s.letterSpacing) * 100) / 100 })
+})()"""
+
+
+def title_style(window, selector, title):
+    found = js(window, TITLE_STYLE % (json.dumps(title), json.dumps(selector)))
+    return json.loads(found) if found else None
+
+
+def click(window, selector):
+    """보이는 selector 요소의 가운데를 실제 마우스로 누른다."""
+    center = json.loads(js(window, f"""(() => {{ const e = [...document.querySelectorAll({json.dumps(selector)})]
+      .find(e => e.getClientRects().length > 0), r = e.getBoundingClientRect()
+      return JSON.stringify([r.x + r.width / 2, r.y + r.height / 2]) }})()"""))
+    QTest.mouseClick(view(window), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(*map(round, center)))
+
+
+def test_excluded_and_dismissed_video_titles_use_the_same_role_as_library_cards(window):
+    core = window.core
+    excluded, dismissed = core.videos()[:2]
+    core.exclude_video(excluded.id)
+    core.dismiss_video(dismissed.id)
+    wait_for(lambda: window.loaded)
+    window.activateWindow()
+    # 라이브러리 카드의 영상 제목(관심 없음으로 뺀 영상은 라이브러리에 그대로 보인다).
+    wait_for(lambda: title_style(window, '#library-grid [role=gridcell] *', dismissed.title) is not None)
+    card = title_style(window, '#library-grid [role=gridcell] *', dismissed.title)
+    assert card == expected('body-strong'), card
+
+    # 사용자가 Ctrl+순번으로 폴더 관리에 들어가 제외 목록·관심 없음 되돌리기 구역을 차례로 연다.
+    index = [tab for tab, _ in TABS].index('folders')
+    QTest.keyClick(window.focusWidget() or window, Qt.Key.Key_1 + index, Qt.KeyboardModifier.ControlModifier)
+    wait_for(lambda: page_ready(window, 'folders'))
+    for section, video in (('excluded', excluded), ('dismissed', dismissed)):
+        click(window, f'[data-page=folders] button[data-tab={section}]')
+        wait_for(lambda: js(window, f"!!document.querySelector('[data-page=folders] button[data-tab={section}][aria-current=page]')"))
+        wait_for(lambda: title_style(window, '#folders-section li *', video.title) is not None)
+        settle(window)
+        # 되돌리기 목록의 영상 제목도 카드·목록의 항목 제목과 같은 역할 값이다.
+        assert title_style(window, '#folders-section li *', video.title) == card, section
 
 
 CARD_ROWS = """JSON.stringify((() => {
