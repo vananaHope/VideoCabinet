@@ -13,12 +13,16 @@ import sys
 
 import pytest
 
+from my_video_manager.app_version import DISPLAY_NAME
 from my_video_manager.runtime_fingerprint import APP_OWNED_PATHS, FILENAME, make_runtime_fingerprint
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('patch_payload', ROOT / 'scripts/patch_payload.py')
 payload = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(payload)
+metadata_spec = importlib.util.spec_from_file_location('installer_metadata', ROOT / 'scripts/installer_metadata.py')
+metadata = importlib.util.module_from_spec(metadata_spec)
+metadata_spec.loader.exec_module(metadata)
 
 
 def test_version_command_does_not_initialize_gui_or_data(tmp_path):
@@ -97,25 +101,70 @@ def snapshot(directory):
             for p in directory.rglob('*') if p.is_file()}
 
 
-@pytest.fixture
-def patch_exe(bundle, tmp_path):
+def write_test_icon(bundle):
+    """Inno가 SetupIconFile·바로 가기 아이콘으로 읽을 최소 ICO."""
+    import struct
+    bitmap = struct.pack('<IiiHHIIiiII', 40, 1, 2, 1, 32, 0, 4, 0, 0, 0, 0) + b'\xff\x80\x00\xff' + b'\0' * 4
+    icon = struct.pack('<HHH', 0, 1, 1) + struct.pack('<BBBBHHII', 1, 1, 0, 0, 1, 32, len(bitmap), 22) + bitmap
+    (bundle / 'my_video_manager/app.ico').write_bytes(icon)
+
+
+def inno_compiler():
     if sys.platform != 'win32':
         pytest.skip('Inno Setup requires Windows')
     compiler = shutil.which('ISCC.exe') or str(Path(os.environ['LOCALAPPDATA']) / 'Programs/Inno Setup 6/ISCC.exe')
     if not Path(compiler).is_file():
         pytest.skip('Inno Setup 6 compiler not installed')
-    # A valid tiny ICO: BITMAPINFOHEADER + one BGRA pixel + padded AND mask.
-    import struct
-    bitmap = struct.pack('<IiiHHIIiiII', 40, 1, 2, 1, 32, 0, 4, 0, 0, 0, 0) + b'\xff\x80\x00\xff' + b'\0' * 4
-    icon = struct.pack('<HHH', 0, 1, 1) + struct.pack('<BBBBHHII', 1, 1, 0, 0, 1, 32, len(bitmap), 22) + bitmap
-    (bundle / 'my_video_manager/app.ico').write_bytes(icon)
+    return compiler
+
+
+def compile_isolated_installer(bundle, tmp_path, shortcut_root, patch_include=None, version='0.4.2'):
+    """실제 제품 .iss를 격리 define으로 컴파일한다. 바로 가기 폴더는 임시 폴더로 돌린다."""
+    compiler = inno_compiler()
+    display_name = tmp_path / 'display-name.iss'
+    metadata.write_display_name_include(display_name)
+    arguments = [compiler, '/Q', '/DIsolatedTest', f'/DAppVersion={version}',
+                 f'/DAppDirectory={bundle}', f'/DInstallerOutput={tmp_path}',
+                 f'/DDisplayNameInclude={display_name}', f'/DShortcutRoot={shortcut_root}']
+    if patch_include:
+        arguments.append(f'/DPatchInclude={patch_include}')
+    arguments.append(str(ROOT / 'installer/my-video-manager.iss'))
+    result = subprocess.run(arguments, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def run_installer(executable, directory, log, *extra):
+    return subprocess.run([str(executable), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART',
+                           f'/DIR={directory}', f'/LOG={log}', *extra], timeout=60)
+
+
+def shortcut_properties(path):
+    """WScript.Shell로 .lnk의 대상·아이콘을 읽는다. 임시 폴더의 바로 가기만 읽는다."""
+    shell = shutil.which('powershell') or shutil.which('pwsh')
+    assert shell, 'PowerShell is required to inspect shortcuts'
+    script = ('$link = (New-Object -ComObject WScript.Shell).CreateShortcut($env:TEST_SHORTCUT); '
+              '[Console]::OutputEncoding = [Text.Encoding]::UTF8; '
+              'ConvertTo-Json @{ target = $link.TargetPath; icon = $link.IconLocation }')
+    result = subprocess.run([shell, '-NoProfile', '-Command', script], capture_output=True,
+                            text=True, encoding='utf-8-sig', timeout=60,
+                            env={**os.environ, 'TEST_SHORTCUT': str(path)})
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def make_old_shortcuts(shortcut_root, desktop=True):
+    for folder in ('Programs', 'Desktop') if desktop else ('Programs',):
+        directory = shortcut_root / folder
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / 'My Video Manager.lnk').write_bytes(b'old shortcut')
+
+
+@pytest.fixture
+def patch_exe(bundle, tmp_path):
+    write_test_icon(bundle)
     include = tmp_path / 'payload.iss'
     payload.write_patch_include(bundle, include, '0.4.2')
-    result = subprocess.run([compiler, '/Q', '/DIsolatedTest', '/DAppVersion=0.4.2',
-                             f'/DAppDirectory={bundle}', f'/DInstallerOutput={tmp_path}',
-                             f'/DPatchInclude={include}', str(ROOT / 'installer/my-video-manager.iss')],
-                            capture_output=True, text=True, timeout=120)
-    assert result.returncode == 0, result.stdout + result.stderr
+    compile_isolated_installer(bundle, tmp_path, tmp_path / 'shortcuts', patch_include=include)
     return tmp_path / 'MyVideoManager-Patch-0.4.2.exe'
 
 
@@ -165,9 +214,10 @@ def test_silent_installer_accepts_only_matching_identity(bundle, patch_exe, tmp_
     before = snapshot(installed)
     existed_before = installed.exists()
     directories_before = {p.relative_to(installed).as_posix() for p in installed.rglob('*') if p.is_dir()}
+    shortcuts = tmp_path / 'shortcuts'
+    make_old_shortcuts(shortcuts)
     log = tmp_path / 'install.log'
-    result = subprocess.run([str(patch_exe), '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART',
-                             f'/DIR={installed}', f'/LOG={log}'], timeout=60)
+    result = run_installer(patch_exe, installed, log)
     if scenario in ('match', 'reordered'):
         assert result.returncode == 0, log.read_text(encoding='utf-8-sig')
         for name in payload.app_files(bundle):
@@ -177,9 +227,52 @@ def test_silent_installer_accepts_only_matching_identity(bundle, patch_exe, tmp_
         assert not (installed / 'licenses/old.txt').exists()
         assert (installed / 'python310.dll').read_bytes() == b'runtime unchanged'
         assert snapshot(installed)['library.sqlite3'] == before['library.sqlite3']
+        # 패치 설치도 옛 이름 바로 가기를 지우고 표시 이름 바로 가기 하나만 남긴다.
+        assert sorted(p.name for p in (shortcuts / 'Programs').iterdir()) == [f'{DISPLAY_NAME}.lnk']
+        assert sorted(p.name for p in (shortcuts / 'Desktop').iterdir()) == [f'{DISPLAY_NAME}.lnk']
+        link = shortcut_properties(shortcuts / 'Desktop' / f'{DISPLAY_NAME}.lnk')
+        assert Path(link['target']).name == 'my-video-manager.exe'
+        assert Path(link['icon'].split(',', 1)[0]).name == 'app.ico'
     else:
         assert result.returncode != 0
         assert snapshot(installed) == before
         assert installed.exists() == existed_before
         assert {p.relative_to(installed).as_posix() for p in installed.rglob('*') if p.is_dir()} == directories_before
         assert '전체 설치 파일을 사용하세요' in log.read_text(encoding='utf-8-sig')
+        # 설치를 거부하면 바로 가기도 그대로다.
+        assert (shortcuts / 'Programs' / 'My Video Manager.lnk').exists()
+        assert (shortcuts / 'Desktop' / 'My Video Manager.lnk').exists()
+
+
+@pytest.mark.parametrize('desktop_before, select_desktop_task', [
+    (True, False), (False, False), (False, True), (True, True),
+])
+def test_overwrite_install_replaces_old_shortcuts_with_one_display_name(
+        bundle, tmp_path, desktop_before, select_desktop_task):
+    """덮어 설치도 옛 바로 가기를 지우고 표시 이름 하나만 남긴다(바탕 화면은 있던 사용자만)."""
+    write_test_icon(bundle)
+    shortcuts = tmp_path / 'shortcuts'
+    compile_isolated_installer(bundle, tmp_path, shortcuts)
+    installer = tmp_path / 'MyVideoManager-Setup-0.4.2.exe'
+    installed = tmp_path / 'installed'
+    shutil.copytree(bundle, installed)
+    (installed / 'my-video-manager.exe').write_bytes(b'old exe')
+    with closing(sqlite3.connect(installed / 'library.sqlite3')) as database, database:
+        database.execute('create table user_data (value text)')
+        database.execute("insert into user_data values ('keep me')")
+    make_old_shortcuts(shortcuts, desktop=desktop_before)
+    log = tmp_path / 'install.log'
+    result = run_installer(installer, installed, log,
+                           *(['/MERGETASKS=desktopicon'] if select_desktop_task else []))
+    assert result.returncode == 0, log.read_text(encoding='utf-8-sig')
+    assert (installed / 'my-video-manager.exe').read_bytes() == (bundle / 'my-video-manager.exe').read_bytes()
+    with closing(sqlite3.connect(installed / 'library.sqlite3')) as database:
+        assert database.execute('select value from user_data').fetchone() == ('keep me',)
+    assert sorted(p.name for p in (shortcuts / 'Programs').iterdir()) == [f'{DISPLAY_NAME}.lnk']
+    desktop = sorted(p.name for p in (shortcuts / 'Desktop').iterdir()) if (shortcuts / 'Desktop').is_dir() else []
+    assert desktop == ([f'{DISPLAY_NAME}.lnk'] if desktop_before or select_desktop_task else [])
+    assert not list(shortcuts.rglob('My Video Manager.lnk'))
+    if desktop:
+        link = shortcut_properties(shortcuts / 'Desktop' / f'{DISPLAY_NAME}.lnk')
+        assert Path(link['target']).name == 'my-video-manager.exe'
+        assert Path(link['icon'].split(',', 1)[0]).name == 'app.ico'
