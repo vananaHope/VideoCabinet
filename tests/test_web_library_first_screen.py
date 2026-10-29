@@ -29,15 +29,22 @@ from my_video_manager.web_shell import WebShellHost
 
 VIDEOS = 200
 # 문서를 만들 때 넣는다. 첫 스냅숏·나머지 카드 응답·밀어 보내는 갱신을 붙잡고, 그린 프레임마다 사용자가 보는 배치를 기록한다.
-# 붙잡은 갱신은 __releasePushes(true)로 도착 순서를 뒤집어 넘길 수 있다.
+# 붙잡은 갱신은 __releasePushes(true)로 도착 순서를 뒤집어 넘길 수 있다. 나머지 카드 요청은 코어에 보내기 전에 붙잡아
+# (__deferVideos) 코어가 나중의 라이브러리 상태로 응답하게 할 수 있다.
 RECORDER = """(() => {
   let channelClass, holdSnapshot = %(hold_snapshot)s, releaseSnapshot = null
-  const heldVideos = [], heldPushes = []
+  const heldVideos = [], heldPushes = [], deferredVideos = []
   window.__holdVideos = %(hold_videos)s
+  window.__deferVideos = %(defer_videos)s
   window.__holdPushes = false
   window.__videoRequests = 0
+  window.__requestedIds = []
+  window.__videoReplies = []
   window.__releaseLibrary = () => { holdSnapshot = false; releaseSnapshot?.() }
   window.__releaseVideos = () => { window.__holdVideos = false; for (const deliver of heldVideos.splice(0)) deliver() }
+  window.__heldVideos = () => heldVideos.length
+  window.__deferredVideos = () => deferredVideos.length
+  window.__sendVideos = () => { window.__deferVideos = false; for (const send of deferredVideos.splice(0)) send() }
   window.__heldPushes = () => heldPushes.length
   window.__releasePushes = reversed => {
     window.__holdPushes = false
@@ -53,7 +60,12 @@ RECORDER = """(() => {
         })
         library.videos = (ids, reply) => {
           window.__videoRequests++
-          videos.call(library, ids, json => { if (window.__holdVideos) heldVideos.push(() => reply(json)); else reply(json) })
+          window.__requestedIds.push(JSON.parse(ids))
+          const send = () => videos.call(library, ids, json => {
+            window.__videoReplies.push(JSON.parse(json))
+            if (window.__holdVideos) heldVideos.push(() => reply(json)); else reply(json)
+          })
+          if (window.__deferVideos) deferredVideos.push(send); else send()
         }
         const changed = library.libraryChanged, connect = changed.connect.bind(changed), disconnect = changed.disconnect.bind(changed)
         const wrapped = new Map()
@@ -126,9 +138,9 @@ def open_window(library, qapp, monkeypatch):
 
     monkeypatch.setattr(WebShellHost, 'start', start_recorded)
 
-    def create(*, hold_snapshot=False, hold_videos=False, **options):
+    def create(*, hold_snapshot=False, hold_videos=False, defer_videos=False, **options):
         library.save_library_view_options({**default_options(), **options})
-        recorder.update(hold_snapshot=hold_snapshot, hold_videos=hold_videos)
+        recorder.update(hold_snapshot=hold_snapshot, hold_videos=hold_videos, defer_videos=defer_videos)
         window = MainWindow(library, player_factory=Player)
         monkeypatch.setattr(window.tray.icon, 'showMessage', lambda *args: None)
         windows.append(window)
@@ -361,6 +373,83 @@ def test_late_card_reply_after_many_stale_ids_shows_newest_cards(open_window, li
     js(window, f'{GRID}.scrollTop = {GRID}.scrollHeight; true')
     wait_for(lambda: '정리' in card_text(window, stale[-1]))
     assert js(window, PLACEHOLDER_CELLS) == 0
+
+
+def value(window, expression):
+    """배열·객체는 Python 값으로 오지 않으므로 JSON으로 받는다."""
+    return json.loads(js(window, f'JSON.stringify({expression})'))
+
+
+def settle(window):
+    """브라우저가 쉬는 틈과 그 뒤 두 프레임까지 기다린다. 그사이 나머지 카드를 요청할 차례가 돈다."""
+    js(window, 'window.__settled = false; requestIdleCallback(() => requestAnimationFrame(() => '
+               'requestAnimationFrame(() => window.__settled = true))); true')
+    wait_for(lambda: js(window, 'window.__settled === true'))
+
+
+def exclude_with_held_push(window, library, video_ids):
+    """영상을 빼고, 웹이 아직 모르게 그 갱신을 붙잡는다. 웹의 결과에는 뺀 영상이 남는다."""
+    js(window, 'window.__holdPushes = true')
+    for video_id in video_ids:
+        library.exclude_video(video_id)
+    window.refresh()
+    wait_for(lambda: js(window, 'window.__heldPushes()') == 1)
+
+
+def test_late_missing_reply_does_not_block_restored_cards(open_window, library):
+    # 뺀 영상을 빠뜨린 나머지 카드 응답이, 그 영상을 되살린 더 새 갱신보다 늦게 와도 되살린 카드를 다시 받는다.
+    # 오래된 응답의 누락으로 "라이브러리에 없음"을 기록하면 스크롤·선택으로도 다시 요청하지 않아 자리 표시에 갇힌다.
+    window = open_window(hold_videos=True, defer_videos=True, card_size='small')
+    ready(window)
+    wait_for(lambda: js(window, 'window.__deferredVideos()') > 0)
+    order = list(window.library_page.visible_ids)
+    changed = order[-100:]
+    target = changed[-1]
+    exclude_with_held_push(window, library, changed)
+    js(window, 'window.__sendVideos(); true')
+    wait_for(lambda: js(window, 'window.__heldVideos()') == 1)
+    old = value(window, 'window.__videoReplies[0]')
+    assert target in value(window, 'window.__requestedIds[0]')
+    assert target not in [card['id'] for card in old['videos']]
+    pushes = []
+    window.library_page.bridge.libraryChanged.connect(lambda value: pushes.append(json.loads(value)))
+    for video_id in changed:
+        library.restore_video(video_id)
+        library.add_video_tag(video_id, 'RESTORED267')
+    window.refresh()
+    wait_for(lambda: js(window, 'window.__heldPushes()') == 2)
+    assert target in pushes[-1]['staleIds'] and pushes[-1]['generation'] > old['generation']
+    # 빼고 되살린 갱신이 먼저, 그보다 오래된 누락 응답이 나중에 도착한다.
+    deliver(window, 'window.__releasePushes()')
+    deliver(window, 'window.__releaseVideos()')
+    js(window, f'{GRID}.scrollTop = {GRID}.scrollHeight; true')
+    wait_for(lambda: js(window, f'!!document.getElementById("video-{target}")'))
+    click(window, f'#video-{target}')
+    wait_for(lambda: selects(window, target))
+    wait_for(lambda: 'RESTORED267' in card_text(window, target))
+    assert js(window, PLACEHOLDER_CELLS) == 0
+
+
+def test_missing_cards_are_not_requested_again(open_window, library):
+    # 최신 상태에도 없는 영상(응답이 갱신보다 새것)은 다음 전체 상태가 결과를 고칠 때까지 스크롤해도 다시 요청하지 않는다.
+    window = open_window(defer_videos=True, card_size='small')
+    ready(window)
+    wait_for(lambda: js(window, 'window.__deferredVideos()') > 0)
+    order = list(window.library_page.visible_ids)
+    gone = order[-100:]
+    exclude_with_held_push(window, library, gone)
+    deliver(window, 'window.__sendVideos()')
+    wait_for(lambda: js(window, 'window.__videoReplies.length') == js(window, 'window.__videoRequests'))
+    assert not {card['id'] for card in value(window, 'window.__videoReplies[0]')['videos']} & set(gone)
+    js(window, f'{GRID}.scrollTop = {GRID}.scrollHeight; true')
+    wait_for(lambda: js(window, f'document.getElementById("video-{gone[-1]}")?.dataset.slot ?? ""') == 'video-card-placeholder')
+    settle(window)
+    settle(window)
+    requested = value(window, 'window.__requestedIds')
+    assert sum(gone[-1] in ids for ids in requested) == 1, requested
+    # 갱신이 결과를 고치면 뺀 영상의 자리 표시도 사라진다.
+    deliver(window, 'window.__releasePushes()')
+    wait_for(lambda: window.library_page.visible_ids == order[:-100] and js(window, PLACEHOLDER_CELLS) == 0)
 
 
 def test_first_screen_then_ready_then_hidden_tabs_then_startup_scan(open_window, monkeypatch):
