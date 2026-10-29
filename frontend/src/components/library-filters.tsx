@@ -3,6 +3,7 @@ import { SlidersHorizontal, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
+import { PendingStatus } from "@/components/ui/pending-status"
 import { TagPicker } from "@/components/tag-picker"
 import { tagPickerKeepsEscape } from "@/lib/tag-search"
 import { libraryChoices, libraryFilterDefaults, type LibraryViewOptions, type TagUsageData, type LibraryChip } from "@/bridge-types"
@@ -54,11 +55,12 @@ function chipText({ label, range }: LibraryChip) {
 
 /**
  * 적용한 조건 칩 줄. 칩이 없어도 한 줄 높이(칩 높이 + 초점 링 + 가로 스크롤바 자리)를 늘 차지해, 칩이 생기고 사라져도 아래 목록이 밀리지 않는다.
- * 칩이 많으면 이 한 줄 안에서 가로로 넘긴다.
+ * 칩이 많으면 이 한 줄 안에서 가로로 넘긴다. 바꾼 조건의 결과를 오래 기다리면 줄 끝에 공용 기다림 표시를 둔다(칩은 그대로 둔다).
  */
-export function LibraryFilterChips({ chips, options, onChange }: { chips: LibraryChip[]; options: LibraryViewOptions; onChange: Change }) {
+export function LibraryFilterChips({ chips, options, onChange, pending = false }: { chips: LibraryChip[]; options: LibraryViewOptions; onChange: Change; pending?: boolean }) {
   return <div aria-label="적용한 검색 조건" className="flex h-9 shrink-0 items-start gap-2 overflow-x-auto overflow-y-hidden px-0.5 pt-0.5">
     {chips.map(chip => { const text = chipText(chip); return <Button key={chip.key} variant="secondary" size="xs" title={text} aria-label={`${text} 지우기`} onClick={() => onChange(chip.reset)}><span className="max-w-60 truncate">{text}</span><X /></Button> })}
     {chips.length > 0 && <Button variant="ghost" size="xs" onClick={() => onChange(clearLibraryFilters(options))}>모두 지우기</Button>}
+    <PendingStatus pending={pending} className="ml-auto shrink-0 self-center" />
   </div>
 }
