@@ -1,7 +1,7 @@
-; Compare parsed identity inputs with the build-validated reference document.
-; No installed executable, shell, external JSON library or runtime is executed.
-; The canonical form is internal to this parser, not the fingerprint hash format.
-[Code]
+// Compare parsed identity inputs with the build-validated reference document.
+// No installed executable, shell, external JSON library or runtime is executed.
+// The canonical form is internal to this parser, not the fingerprint hash format.
+// my-video-manager.iss의 [Code] 섹션 안에서 #include되므로 여기서 [Code] 헤더를 다시 열지 않는다.
 function GetFileAttributes(Filename: String): Cardinal;
   external 'GetFileAttributesW@kernel32.dll stdcall';
 

@@ -176,8 +176,16 @@ libmpv·FFmpeg·ffprobe를 포함합니다. CUDA·Whisper 모델은 넣지 않�
 트레이가 이 파일을 읽고 설치본에도 실립니다. 빌드의 생성 검사는 `scripts/app_icon.py --check`로
 앱·트레이 아이콘의 원본 내용 해시와 픽셀 규칙(DESIGN.md "App Icon")을 확인하고 어긋나면 멈춥니다.
 
-앱 부분만 담은 패치도 만들려면 `scripts/build.ps1 -Patch`를 사용합니다.
-전체 설치 파일과 함께 `dist/installer/MyVideoManager-Patch-<version>.exe`를 만듭니다.
+설치 프로그램 제목·시작 메뉴·바탕 화면 바로 가기·"설치된 앱" 목록 이름은 `app_version.DISPLAY_NAME`을 따릅니다.
+`build.ps1`은 Inno 컴파일 직전에 `scripts/installer_metadata.py`로 UTF-8(BOM) `build/bundle-assets/display-name.iss`를 만들고
+`/DDisplayNameInclude=<ASCII 절대 경로>`로 넘겨 `.iss`가 `#include`로 읽습니다(한글을 `/D` 값으로 넘기지 않습니다).
+덮어 설치와 패치 설치 모두 `[InstallDelete]`로 옛 이름 `My Video Manager.lnk`를 지우고, 설치 전에 바탕 화면 바로 가기가
+있던 사용자는 작업 선택과 무관하게 새 이름 바탕 화면 바로 가기 하나를 더 만듭니다. 이전 작업 선택은 기억하지 않아
+(`UsePreviousTasks=no`) 지운 바로 가기를 설치가 되살리지 않습니다. 바로 가기 아이콘은 설치 폴더의
+`my_video_manager\app.ico`를 가리켜 패치로 아이콘 파일만 바뀌어도 따라갑니다. 실행 파일 버전 정보(제품 이름·파일 설명)도
+같은 이름과 앱 버전으로 `prepare_bundle.py`가 만든 `build/bundle-assets/version-info.txt`에서 들어갑니다.
+
+앱 부분만 담은 패치도 만들려면 `scripts/build.ps1 -Patch`를 사용합니다. 전체 설치 파일과 함께 `dist/installer/MyVideoManager-Patch-<version>.exe`를 만듭니다.
 기본 빌드는 패치를 추가 압축하지 않습니다. 기존 번들에서는 `-SkipPyInstaller -Patch`를 함께 쓰며,
 `-Version`은 번들의 `my_video_manager/build-version.txt`와 같아야 합니다.
 `release.ps1`은 전체 빌드 후 이전 Release와 지문을 비교하고, 같을 때만
@@ -204,9 +212,9 @@ schema·입력·해시를 빌드 시 검증한 지문과 대조합니다. 공백
 이 검사는 호환성 검사이며, 실제 런타임 파일 내용의 무결성 검사나 서명 검증은 아닙니다.
 
 비GUI 실행 확인은 `my-video-manager.exe --version`으로 합니다. 배포 exe는 `console=False`라 콘솔이 없으므로(`--help`도 같음) stdout을 연결하지 않고 실행하면 argparse가 출력을 쓰지 못해 오류 창이 뜹니다. 파이프나 리다이렉션으로 출력을 받아야 합니다.
-설치 테스트 전용 `/DIsolatedTest` ISCC define은 제거 프로그램·등록·바로가기 생성을 끄고
-이전 설치 경로 재사용도 끕니다. `build.ps1`은 이 define을 전달하지 않습니다.
-`tests/test_patch_installer.py`는 이 구성과 임시 `/DIR=`로 실제 조용한 설치·거부 경로를 검사합니다.
+설치 테스트 전용 `/DIsolatedTest` ISCC define은 제거 프로그램·등록·이전 설치 경로 재사용을 끕니다. `build.ps1`은 이 define을 전달하지 않습니다.
+바로 가기는 실제 사용자 시작 메뉴·바탕 화면을 건드리지 않도록 `/DShortcutRoot=<임시 폴더>` 아래 `Programs`·`Desktop`으로 돌려
+`tests/test_patch_installer.py`가 이 구성과 임시 `/DIR=`로 실제 조용한 덮어 설치·패치 설치·거부 경로와 바로 가기 교체를 검사합니다.
 사람이 확인할 때는 별도 시험 PC에서 실제 마법사·앱 닫기·설치 등록·제거 프로그램 동작을 확인하세요.
 
 실행 폴더 루트의 `runtime-fingerprint.json`은 실제 동봉 Python 배포판의 고정 버전 목록(앱 자체 제외), Python·PyInstaller·hooks 버전, ffmpeg·ffprobe·mpv와 커스텀 hook의 SHA-256, 필터링 후 동봉 바이너리·데이터의 대상 경로 목록(`bundle_files`)을 기록합니다. 대상 경로는 Windows 기준 소문자·`/` 구분자로 정규화하고 정렬·중복 제거하며 앱 소유 경로는 제외합니다. hook은 CRLF를 LF로 바꾼 뒤 해시합니다. schema 2는 파일 집합을 기록하지 않던 schema 1을 허용하지 않으므로 기존 번들은 다시 빌드해야 합니다. 입력 정책과 이유는 `runtime_fingerprint.py` 한 곳에 있으며 앱 코드·앱 버전·웹 자산·`.spec` 전체는 입력에서 제외합니다.

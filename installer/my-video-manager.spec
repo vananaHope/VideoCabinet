@@ -59,8 +59,10 @@ fingerprint = write_bundle_fingerprint(stage, root / '.runtime' / 'mpv', root / 
 a.datas.append((fingerprint.name, str(fingerprint), 'DATA'))
 pyz = PYZ(a.pure)
 # windowed도 부모가 연결한 stdout/stderr 파이프는 유지한다. 설치판 자식 JSON으로 검증한다.
+# 버전 정보(제품 이름·파일 설명)는 prepare_bundle.py가 표시 이름 원본에서 만든 파일을 쓴다.
+version_info = stage / 'version-info.txt'
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='my-video-manager',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
           console=False, contents_directory='.',
-          icon=str(app_icon))
+          icon=str(app_icon), version=str(version_info))
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='my-video-manager')

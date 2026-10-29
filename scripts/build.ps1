@@ -98,9 +98,14 @@ Confirm-Exit 'Bundle contents'
 # 기존 실행 폴더는 빌드 당시 지문을 보존하며 현재 환경으로 다시 계산하지 않는다.
 & $Python scripts/bundle_fingerprint.py --check $AppDirectory
 Confirm-Exit 'Runtime fingerprint'
-# 4. Inno Setup. 버전 원본은 pyproject.toml 하나다.
+# 4. 설치 프로그램 표시 이름: 앱 원본(app_version.DISPLAY_NAME)에서 UTF-8(BOM) include를 만든다.
+#    /D로 한글 값을 넘기지 않고 이 파일을 #include로 읽는다. 경로는 ASCII인 스테이지 절대 경로다.
+$DisplayNameInclude = Join-Path (Join-Path (Get-Location) 'build/bundle-assets') 'display-name.iss'
+& $Python scripts/installer_metadata.py --display-name-include $DisplayNameInclude
+Confirm-Exit 'Installer display name'
+# 5. Inno Setup. 버전·표시 이름 원본은 pyproject.toml과 app_version.DISPLAY_NAME 하나다.
 if (-not $PatchOnly) {
-    & $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" installer/my-video-manager.iss
+    & $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" "/DDisplayNameInclude=$DisplayNameInclude" installer/my-video-manager.iss
     Confirm-Exit 'Inno Setup'
     Write-Host "Created: $OutputDirectory/MyVideoManager-Setup-$Version.exe"
 }
@@ -108,7 +113,7 @@ if ($Patch -or $PatchOnly) {
     $PatchInclude = Join-Path (Get-Location) 'build/patch-payload.iss'
     & $Python scripts/patch_payload.py $AppDirectory --output $PatchInclude --version $Version
     Confirm-Exit 'Patch payload'
-    & $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" "/DPatchInclude=$PatchInclude" installer/my-video-manager.iss
+    & $InnoCompiler "/DAppVersion=$Version" "/DAppDirectory=$AppDirectory" "/DInstallerOutput=$OutputDirectory" "/DPatchInclude=$PatchInclude" "/DDisplayNameInclude=$DisplayNameInclude" installer/my-video-manager.iss
     Confirm-Exit 'Inno Setup patch'
     Write-Host "Created: $OutputDirectory/MyVideoManager-Patch-$Version.exe"
 }

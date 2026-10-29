@@ -14,7 +14,7 @@ from wait_helpers import CHILD_READY_TIMEOUT
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from my_video_manager.app_version import RELEASE_REPOSITORY
+from my_video_manager.app_version import DISPLAY_NAME, RELEASE_REPOSITORY
 from my_video_manager.runtime_fingerprint import NATIVE_FILES, make_runtime_fingerprint
 from my_video_manager.update_manifest import verify_manifest
 
@@ -526,7 +526,7 @@ def test_encrypted_key_password_is_scoped_and_cleared(repository, monkeypatch, o
 @pytest.mark.parametrize('damaged', [False, True])
 def test_patch_only_build_validates_bundle_and_never_rebuilds_full_installer(repository, damaged):
     repo, _ = repository
-    for name in ('build.ps1', 'bundle_fingerprint.py', 'patch_payload.py'):
+    for name in ('build.ps1', 'bundle_fingerprint.py', 'patch_payload.py', 'installer_metadata.py'):
         shutil.copyfile(ROOT / 'scripts' / name, repo / 'scripts' / name)
     # Large production bundle/license checks are replaced; fingerprint and payload checks are real.
     (repo / 'scripts/check_bundle.py').write_text('print("synthetic bundle")')
@@ -558,5 +558,11 @@ $global:LASTEXITCODE = 0
     compiled = repo / 'dist/compiler-arguments.json'
     assert compiled.exists() != damaged
     if not damaged:
-        assert any(arg.startswith('/DPatchInclude=') for arg in json.loads(compiled.read_text(encoding='utf-8-sig')))
+        arguments = json.loads(compiled.read_text(encoding='utf-8-sig'))
+        assert any(arg.startswith('/DPatchInclude=') for arg in arguments)
+        # 표시 이름 include는 패치 전용 빌드에서도 Inno 컴파일 직전에 만든다.
+        display_name = next(arg.split('=', 1)[1] for arg in arguments
+                            if arg.startswith('/DDisplayNameInclude='))
+        assert Path(display_name).read_bytes().startswith(b'\xef\xbb\xbf')
+        assert DISPLAY_NAME in Path(display_name).read_text(encoding='utf-8-sig')
         assert (repo / 'build/patch-payload.iss').exists()

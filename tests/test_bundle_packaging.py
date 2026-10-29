@@ -270,6 +270,90 @@ def test_executable_installer_and_uninstall_entry_use_built_icon():
     assert setup['DefaultDirName'] == r'{localappdata}\Programs\MyVideoManager'
 
 
+def _installer_metadata(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / 'scripts'))
+    return importlib.import_module('installer_metadata')
+
+
+def _setup_source():
+    return (Path(__file__).resolve().parents[1] / 'installer/my-video-manager.iss').read_text(encoding='utf-8')
+
+
+def test_installer_names_setup_and_shortcuts_from_display_name(monkeypatch, tmp_path):
+    """설치 프로그램·바로 가기·설치된 앱 목록 이름이 표시 이름 원본에서 오고 옛 바로 가기를 지운다(#306)."""
+    from my_video_manager.app_version import DISPLAY_NAME
+    module = _installer_metadata(monkeypatch)
+    source = _setup_source()
+    lines = [line.strip() for line in source.splitlines()]
+    assert '#ifndef DisplayNameInclude' in lines
+    assert '#error DisplayNameInclude is required. Run scripts/build.ps1.' in lines
+    assert '#include DisplayNameInclude' in lines
+    assert '#error AppDisplayName is required in DisplayNameInclude. Run scripts/build.ps1.' in lines
+    assert 'AppName={#AppDisplayName}' in lines
+    assert 'DefaultGroupName={#AppDisplayName}' in lines
+    assert 'UninstallDisplayName={#AppDisplayName}' in lines
+    icons = [line for line in lines if line.startswith('Name: "{#Shortcut')]
+    assert sum(line.startswith('Name: "{#ShortcutPrograms}\\{#AppDisplayName}"') for line in icons) == 1
+    assert sum(line.startswith('Name: "{#ShortcutDesktop}\\{#AppDisplayName}"') for line in icons) == 2
+    assert all('Filename: "{app}\\my-video-manager.exe"' in line for line in icons)
+    # 바로 가기 아이콘은 설치 폴더의 ICO를 가리켜 패치로 아이콘만 바뀌어도 따라간다.
+    assert all('IconFilename: "{app}\\my_video_manager\\app.ico"' in line for line in icons)
+    assert [line for line in lines if line.startswith('Type: files')] == [
+        'Type: files; Name: "{#ShortcutPrograms}\\My Video Manager.lnk"',
+        'Type: files; Name: "{#ShortcutDesktop}\\My Video Manager.lnk"']
+    # 바탕 화면 바로 가기는 작업 선택과 별도로, 설치 전에 있었는지로도 다시 만든다.
+    assert 'function HadDesktopShortcut: Boolean;' in lines
+    assert 'Check: HadDesktopShortcut' in source
+    assert "FileExists(ExpandConstant('{#ShortcutDesktop}\\My Video Manager.lnk'))" in source
+    assert "FileExists(ExpandConstant('{#ShortcutDesktop}\\{#AppDisplayName}.lnk'))" in source
+    # 격리 설치 테스트는 임시 폴더를 쓰고 제품 빌드는 사용자 시작 메뉴·바탕 화면을 쓴다.
+    assert '#define ShortcutPrograms ShortcutRoot + "\\Programs"' in lines
+    assert '#define ShortcutDesktop ShortcutRoot + "\\Desktop"' in lines
+    assert '#define ShortcutPrograms "{userprograms}"' in lines
+    assert '#define ShortcutDesktop "{userdesktop}"' in lines
+    include = module.write_display_name_include(tmp_path / 'display-name.iss')
+    raw = include.read_bytes()
+    assert raw.startswith(b'\xef\xbb\xbf')
+    assert f'#define AppDisplayName "{DISPLAY_NAME}"' in raw.decode('utf-8-sig')
+
+
+def test_executable_version_info_uses_display_name_and_app_version(monkeypatch, tmp_path):
+    """실행 파일 버전 정보(제품 이름·파일 설명)가 표시 이름이고 버전은 앱 버전이다(#306)."""
+    from my_video_manager.app_version import DISPLAY_NAME
+    module = _installer_metadata(monkeypatch)
+    text = module.write_version_info(tmp_path / 'version-info.txt', '1.2.3').read_text(encoding='utf-8')
+    assert f"StringStruct('FileDescription', {DISPLAY_NAME!r})" in text
+    assert f"StringStruct('ProductName', {DISPLAY_NAME!r})" in text
+    assert "StringStruct('FileVersion', '1.2.3')" in text
+    assert "StringStruct('ProductVersion', '1.2.3')" in text
+    assert "StringStruct('OriginalFilename', 'my-video-manager.exe')" in text
+    assert 'filevers=(1, 2, 3, 0)' in text and 'prodvers=(1, 2, 3, 0)' in text
+    specs = (Path(__file__).resolve().parents[1] / 'installer/my-video-manager.spec').read_text(encoding='utf-8')
+    assert "version_info = stage / 'version-info.txt'" in specs
+    assert 'version=str(version_info)' in specs
+    prepare = (Path(__file__).resolve().parents[1] / 'scripts/prepare_bundle.py').read_text(encoding='utf-8')
+    assert "write_version_info(target / 'version-info.txt', args.version)" in prepare
+
+
+def test_product_identifiers_stay_fixed_after_rename():
+    """이름을 바꿔도 실행 파일·데이터 폴더·단일 실행 키·배포 저장소·출력 파일 이름은 그대로다.
+
+    AppId와 설치 폴더는 위의 test_executable_installer_and_uninstall_entry_use_built_icon이 이미 고정한다.
+    """
+    from my_video_manager import app_version, core, single_instance
+    root = Path(__file__).resolve().parents[1]
+    specs = (root / 'installer/my-video-manager.spec').read_text(encoding='utf-8')
+    iss = _setup_source()
+    assert app_version.RELEASE_REPOSITORY == 'vananaHope/my-video-manager-releases'
+    assert core.default_data_directory() == Path.home() / '.my-video-manager'
+    assert single_instance.instance_name(core.default_data_directory()).startswith('my-video-manager-')
+    assert specs.count("name='my-video-manager'") == 2
+    assert "name='my-video-manager'," in specs and "name='my-video-manager')" in specs
+    assert 'my-video-manager.exe' in iss
+    assert 'OutputBaseFilename=MyVideoManager-Setup-{#AppVersion}' in iss
+    assert 'OutputBaseFilename=MyVideoManager-Patch-{#AppVersion}' in iss
+
+
 def test_bundle_rejects_size_regression(bundle, monkeypatch):
     checker, directory = bundle
     size = sum(p.stat().st_size for p in directory.rglob('*') if p.is_file())
