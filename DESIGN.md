@@ -35,29 +35,46 @@ colors:
 typography:
   display:
     fontFamily: "Pretendard, Malgun Gothic, sans-serif"
-    fontSize: "1.875rem"
+    fontSize: "1.25rem"
     fontWeight: 600
-    lineHeight: 1.2
-  headline:
+    lineHeight: "1.75rem"
+    letterSpacing: "-0.01em"
+  page-title:
     fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "1.5rem"
     fontWeight: 600
-    lineHeight: 1.333
-  title:
+    lineHeight: "2rem"
+    letterSpacing: "-0.02em"
+  section-title:
     fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "1.125rem"
     fontWeight: 600
-    lineHeight: 1.556
+    lineHeight: "1.75rem"
+    letterSpacing: "-0.01em"
   body:
     fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "0.875rem"
     fontWeight: 400
-    lineHeight: 1.429
+    lineHeight: "1.25rem"
+    letterSpacing: "0em"
+  body-strong:
+    fontFamily: "Pretendard, Malgun Gothic, sans-serif"
+    fontSize: "0.875rem"
+    fontWeight: 600
+    lineHeight: "1.25rem"
+    letterSpacing: "0em"
   label:
     fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "0.75rem"
+    fontWeight: 400
+    lineHeight: "1rem"
+    letterSpacing: "0em"
+  label-strong:
+    fontFamily: "Pretendard, Malgun Gothic, sans-serif"
+    fontSize: "0.75rem"
     fontWeight: 500
-    lineHeight: 1.333
+    lineHeight: "1rem"
+    letterSpacing: "0em"
 rounded:
   sm: "0.5rem"
   md: "0.625rem"
@@ -122,13 +139,13 @@ components:
   status-badge-success:
     backgroundColor: "{colors.status-success}"
     textColor: "{colors.status-success-foreground}"
-    typography: "{typography.label}"
+    typography: "{typography.label-strong}"
     rounded: "{rounded.md}"
     padding: "0.125rem 0.5rem"
   status-badge-highlight:
     backgroundColor: "{colors.highlight}"
     textColor: "{colors.highlight-foreground}"
-    typography: "{typography.label}"
+    typography: "{typography.label-strong}"
     rounded: "{rounded.md}"
     padding: "0.125rem 0.5rem"
   number-card:
@@ -203,14 +220,28 @@ components:
 
 **Body Font:** Pretendard (with Malgun Gothic, sans-serif)
 
-**Character:** 앱에 번들한 한국어 글꼴 Pretendard(SIL OFL 1.1) 하나로 모든 위계를 만든다. 글꼴을 섞지 않고 크기와 굵기(400·500·600)로만 위계를 나눈다. 글꼴 파일은 npm 프로덕션 의존성 `pretendard`의 정적 woff2를 웹 번들에 넣는다. 굵기마다 첫 렌더용 부분 집합(라틴·기호·자주 쓰는 한글 2,780자, `font-display: block`)을 미리 읽고 첫 렌더 전에 기다려(상한 1초) 대체 글꼴이 보였다가 바뀌지 않게 한다. 부분 집합에 없는 원본의 나머지 모든 글자(한글 음절·확장 라틴·기호 등)는 같은 글꼴의 전체 파일이 `unicode-range`(`swap`)로 맡아 그 글자가 화면에 나올 때만 읽고, 두 face의 `unicode-range`는 `npm run fonts`가 woff2 cmap에서 생성한 `fonts.css`에 둔다. 줄 높이와 카드 칸이 고정이라 바뀌어도 배치가 밀리지 않는다. 실행 중 네트워크에서 받지 않는다. 대체 글꼴은 맑은 고딕이다. 고정폭 표시(`font-mono`)도 같은 글꼴에 고정폭 숫자(`tnum`)를 켠다. Qt 화면(재생·트레이 메뉴·공용 경고)도 같은 글꼴을 쓴다. Qt는 woff2를 읽지 못해 웹 빌드가 같은 패키지의 정적 TrueType(토큰 굵기마다, otf는 Qt 힌팅에서 작은 글자 가로획이 사라져 쓰지 않는다)을 `web/qt-fonts/`에 두고, 앱이 창을 만들 때 Qt 글꼴 데이터베이스에 등록한다. 파일이 없거나 읽지 못하면 맑은 고딕으로 뜨고 앱 로그에 남긴다. 재생 기호(⏮ ⏸ ⏭ 등)만 컬러 이모지가 되지 않게 단색 기호 글꼴(Segoe UI Symbol)로 그린다. 글꼴을 바꾸려면 `web_tokens.json`의 `font-sans`·`bundled-font`를 고치고 `npm run fonts`로 `fonts.css`를 다시 만든다(`index.css`는 생성된 `fonts.css`를 import한다).
+**Character:** 앱에 번들한 한국어 글꼴 Pretendard(SIL OFL 1.1) 하나로 모든 위계를 만든다. 글꼴을 섞지 않고 역할 토큰의 크기·굵기(400·500·600)·자간으로만 위계를 나눈다. 글꼴 파일은 npm 프로덕션 의존성 `pretendard`의 정적 woff2를 웹 번들에 넣는다. 굵기마다 첫 렌더용 부분 집합(라틴·기호·자주 쓰는 한글 2,780자, `font-display: block`)을 미리 읽고 첫 렌더 전에 기다려(상한 1초) 대체 글꼴이 보였다가 바뀌지 않게 한다. 부분 집합에 없는 원본의 나머지 모든 글자(한글 음절·확장 라틴·기호 등)는 같은 글꼴의 전체 파일이 `unicode-range`(`swap`)로 맡아 그 글자가 화면에 나올 때만 읽고, 두 face의 `unicode-range`는 `npm run fonts`가 woff2 cmap에서 생성한 `fonts.css`에 둔다. 줄 높이와 카드 칸이 고정이라 바뀌어도 배치가 밀리지 않는다. 실행 중 네트워크에서 받지 않는다. 대체 글꼴은 맑은 고딕이다. 고정폭 표시(`font-mono`)도 같은 글꼴에 고정폭 숫자(`tnum`)를 켠다. Qt 화면(재생·트레이 메뉴·공용 경고)도 같은 글꼴을 쓴다. Qt는 woff2를 읽지 못해 웹 빌드가 같은 패키지의 정적 TrueType(토큰 굵기마다, otf는 Qt 힌팅에서 작은 글자 가로획이 사라져 쓰지 않는다)을 `web/qt-fonts/`에 두고, 앱이 창을 만들 때 Qt 글꼴 데이터베이스에 등록한다. 파일이 없거나 읽지 못하면 맑은 고딕으로 뜨고 앱 로그에 남긴다. 재생 기호(⏮ ⏸ ⏭ 등)만 컬러 이모지가 되지 않게 단색 기호 글꼴(Segoe UI Symbol)로 그린다. 글꼴을 바꾸려면 `web_tokens.json`의 `font-sans`·`bundled-font`를 고치고 `npm run fonts`로 `fonts.css`를 다시 만든다(`index.css`는 생성된 `fonts.css`를 import한다).
 
 ### Hierarchy
-- **Display** (600, 1.875rem): 통계의 큰 숫자(`NumberCard`). 페이지당 몇 개뿐이다.
-- **Headline** (600, 1.5rem): 페이지 제목(`PageHeader`의 `h1`).
-- **Title** (600, 1.125rem): 구역 제목, 대화상자 제목, 빈 상태 제목. 가장 자주 쓰는 제목 크기다.
-- **Body** (400, 0.875rem): 앱 기본 글자 크기. 본문, 단추, 탭, 설명이 모두 이 크기다. 강조는 500(`font-medium`)으로 한다.
-- **Label** (500, 0.75rem): 배지, 키 표시, 카드 안의 길이·통계, 작은 안내.
+글자 위계는 역할 토큰으로 정한다. 원본은 `web_tokens.json`의 `typography.roles` 한곳이고, 역할마다 크기·줄 높이·굵기·자간을 함께 둔다. `scripts/generate_web_types.py`가 이를 Tailwind `text-<역할>` 유틸리티(크기·줄 높이·굵기·자간을 한 번에 정함)로 `tokens.css`에 만들고(`--check`가 드리프트를 막는다), 굵기는 번들 글꼴에 파일이 있는 400·500·600만 받는다. 화면에서는 `text-<역할>` 하나만 쓰고 `font-*`·`leading-*`·`tracking-*`를 덧붙이지 않는다. 같은 역할·같은 변형이면 어느 화면이든 같은 값이다.
+
+| 역할 | 크기 / 줄 높이 | 굵기 | 자간 | 쓰는 곳 |
+|---|---|---|---|---|
+| `display` 큰 숫자 | 1.25rem / 1.75rem | 600 | -0.01em | 통계 숫자 카드(`StatisticsCard`, `NumberCard`). `tabular-nums`와 함께 쓴다. |
+| `page-title` 페이지 제목 | 1.5rem / 2rem | 600 | -0.02em | `PageHeader`의 `h1`. |
+| `section-title` 구역 제목 | 1.125rem / 1.75rem | 600 | -0.01em | 구역 제목(`SectionTitle`), 빈 상태 제목, 대화상자 제목, 통계 차트 제목, 설정 분류 제목. Qt 재생 머리글 제목·하이라이트 패널 제목. |
+| `body` 본문 | 0.875rem / 1.25rem | 400 | 0 | 앱 기본 글자(`body`). 설명·목록 글자·검색 결과 대사. Qt 재생 화면의 보조 글자. |
+| `body-strong` 본문 강조 | 0.875rem / 1.25rem | 600 | 0 | 카드·목록·검색 결과의 항목 제목, 카드 안 소제목(설정·백업의 `h3`), 입력 라벨, 표 머리글, 안내 제목, 메뉴 묶음 라벨, 앱 이름. |
+| `label` 라벨 | 0.75rem / 1rem | 400 | 0 | 길이·날짜·개수 같은 작은 메타 글자, 키 안내 설명, 컴팩트 안내, 차트 축·도움말. |
+| `label-strong` 라벨 강조 | 0.75rem / 1rem | 500 | 0 | 상태 배지(`StatusBadge`·`Badge`), 키 표시(`Kbd`), 하이라이트 시각, 카드 통계 값, 작은 묶음 제목. |
+
+자간은 큰 글자에만 조금 줄인다. Pretendard는 큰 크기에서 글자 사이가 벌어져 보여 제목·큰 숫자만 -0.01~-0.02em으로 조이고, 본문·라벨은 글꼴 기본 자간 그대로 둔다. 단추·탭·입력란·선택 목록·메뉴 항목 같은 조작 글자는 역할이 아니라 shadcn 부품의 크기(`text-sm font-medium`, 입력란 `text-base`)를 그대로 쓴다.
+
+**줄 높이에 묶인 높이.** 한 줄짜리 칸과 자리 표시는 역할 줄 높이를 따른다(`index.css`의 `h-line-body`·`h-line-label`·`h-line-display`, 라벨 두 줄 `lines-label-2`, 상태 배지 `h-badge` = 라벨 한 줄 + 위아래 0.125rem). 라이브러리 카드 정보 칸 높이는 `web_tokens.json` `layout.library-card-info-height`(10rem: 여백 0.5rem×2 + 제목 한 줄 1.25 + 배지 줄 1.25 + 시리즈 한 줄 1 + 통계 묶음 2.875 + 태그 줄 1.25 + 간격, 남는 자리는 태그 줄이 아래에 붙는다)이고, 카드와 가상 격자 줄 높이 계산(`library-grid.tsx`)이 같은 토큰을 읽는다. 줄 높이를 바꾸면 이 토큰도 함께 다시 잰다(`tests/test_type_roles.py`가 작게·보통·크게에서 잘림을 확인한다).
+
+**Qt 재생 화면.** `theme.set_type_role`이 같은 역할 토큰을 읽는다. 크기·굵기는 스타일시트의 `typeRole` 규칙, 자간은 Qt 스타일시트에 속성이 없어 위젯 글꼴(1/64px 단위)에 둔다. 한 줄 라벨이라 줄 높이는 글꼴 기본값을 쓴다.
+
+**`cn()`과 역할 클래스.** tailwind-merge는 모르는 `text-*`를 글자 색으로 보므로, `lib/utils.ts`가 생성된 역할 이름 목록(`lib/type-roles.ts`)을 글자 크기 묶음으로 알려 준다. 역할을 더하면 생성기가 이 목록도 함께 만든다.
 
 ### Named Rules
 **The Tabular Numbers Rule.** 길이·횟수·시간·날짜·통계 숫자는 `tabular-nums`로 쓴다. 목록에서 숫자 폭이 흔들리지 않게 한다.
