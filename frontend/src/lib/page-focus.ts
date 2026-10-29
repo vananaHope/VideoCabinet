@@ -67,6 +67,12 @@ function pageOf(element: EventTarget | null | undefined) {
   return element instanceof Element ? element.closest<HTMLElement>("[data-page]")?.dataset.page : undefined
 }
 
+/** 보이는 대화상자(키 안내·확인·셸 대화상자)가 열려 있는지. */
+function modalOpen() {
+  return Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]'))
+    .some(element => element.getAttribute("data-state") !== "closed" && element.getClientRects().length > 0)
+}
+
 /** 지금 보이는 탭. */
 function shownPage() {
   return document.querySelector<HTMLElement>("[data-page]:not([hidden])")?.dataset.page
@@ -136,9 +142,10 @@ export function focusPage(page: string, target: string, prepare?: () => Target |
     pending.delete(page)
     const first = prepare?.() ?? undefined
     if (movedByUser(page)) return
-    // 숨기기 전 초점이 아직 보이면(페이지·머리글·열린 대화상자 어디든) 그대로 둔다. 숨은 탭에 남은 초점은 아니다.
+    // 숨기기 전 초점이 아직 보이면(페이지·머리글 어디든) 그대로 둔다. 숨은 탭에 남은 초점은 아니다.
+    // 대화상자가 열려 있으면 초점은 그 대화상자의 것이므로 건드리지 않는다(닫을 때 연 자리로 돌아간다).
     const active = document.activeElement
-    if (target === "resume" && focusable(active) && (pageOf(active) ?? page) === page) return
+    if (target === "resume" && (modalOpen() || (focusable(active) && (pageOf(active) ?? page) === page))) return
     const kept = remembered.get(page)
     focusFirst([
       first,
