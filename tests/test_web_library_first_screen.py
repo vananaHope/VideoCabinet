@@ -28,23 +28,41 @@ from my_video_manager.web_library_page import SCREEN_VIDEOS
 from my_video_manager.web_shell import WebShellHost
 
 VIDEOS = 200
-# 문서를 만들 때 넣는다. 첫 스냅숏이나 나머지 카드 응답을 붙잡고, 그린 프레임마다 사용자가 보는 배치를 기록한다.
+# 문서를 만들 때 넣는다. 첫 스냅숏·나머지 카드 응답·밀어 보내는 갱신을 붙잡고, 그린 프레임마다 사용자가 보는 배치를 기록한다.
+# 붙잡은 갱신은 __releasePushes(true)로 도착 순서를 뒤집어 넘길 수 있다.
 RECORDER = """(() => {
   let channelClass, holdSnapshot = %(hold_snapshot)s, releaseSnapshot = null
-  const heldVideos = []
+  const heldVideos = [], heldPushes = []
   window.__holdVideos = %(hold_videos)s
+  window.__holdPushes = false
   window.__videoRequests = 0
   window.__releaseLibrary = () => { holdSnapshot = false; releaseSnapshot?.() }
   window.__releaseVideos = () => { window.__holdVideos = false; for (const deliver of heldVideos.splice(0)) deliver() }
+  window.__heldPushes = () => heldPushes.length
+  window.__releasePushes = reversed => {
+    window.__holdPushes = false
+    const pushes = heldPushes.splice(0)
+    for (const deliver of reversed ? pushes.reverse() : pushes) deliver()
+  }
   Object.defineProperty(window, 'QWebChannel', { configurable: true, get: () => channelClass, set(Original) {
     channelClass = function (transport, ready) {
       return new Original(transport, channel => {
         const library = channel.objects.library, snapshot = library.snapshot, videos = library.videos
-        library.snapshot = reply => snapshot.call(library, json => { if (holdSnapshot) releaseSnapshot = () => reply(json); else reply(json) })
+        library.snapshot = reply => snapshot.call(library, json => {
+          if (holdSnapshot) { releaseSnapshot = () => reply(json); window.__heldSnapshot = true } else reply(json)
+        })
         library.videos = (ids, reply) => {
           window.__videoRequests++
           videos.call(library, ids, json => { if (window.__holdVideos) heldVideos.push(() => reply(json)); else reply(json) })
         }
+        const changed = library.libraryChanged, connect = changed.connect.bind(changed), disconnect = changed.disconnect.bind(changed)
+        const wrapped = new Map()
+        changed.connect = callback => {
+          const hold = json => { if (window.__holdPushes) heldPushes.push(() => callback(json)); else callback(json) }
+          wrapped.set(callback, hold)
+          connect(hold)
+        }
+        changed.disconnect = callback => disconnect(wrapped.get(callback) ?? callback)
         ready(channel)
       })
     }
@@ -264,6 +282,87 @@ def test_change_push_carries_changed_cards_and_names_the_rest(open_window, libra
     assert js(window, PLACEHOLDER_CELLS) == 0
 
 
+def card_text(window, video_id):
+    return js(window, f'document.getElementById("video-{video_id}")?.textContent ?? ""')
+
+
+def deliver(window, release):
+    """붙잡은 응답을 넘기고 그 처리가 그려진 두 프레임 뒤까지 기다린다."""
+    js(window, f'window.__deliveredPaint = false; {release}; '
+               'requestAnimationFrame(() => requestAnimationFrame(() => window.__deliveredPaint = true)); true')
+    wait_for(lambda: js(window, 'window.__deliveredPaint === true'))
+
+
+def test_late_first_snapshot_keeps_newer_card(open_window, library):
+    # 첫 스냅숏 응답이 그 뒤의 갱신보다 늦게 와도, 갱신이 담은 더 새 카드(방금 붙인 태그)를 옛 카드로 되돌리지 않는다.
+    window = open_window(hold_snapshot=True)
+    wait_for(lambda: js(window, 'window.__heldSnapshot === true'))
+    target = window.library_page.visible_ids[0]
+    library.add_video_tag(target, 'LATEST267')
+    window.refresh()
+    wait_for(lambda: 'LATEST267' in card_text(window, target))
+    deliver(window, 'window.__releaseLibrary()')
+    assert 'LATEST267' in card_text(window, target), card_text(window, target)
+
+
+def test_late_card_reply_keeps_newer_card(open_window, library):
+    # 화면을 그린 뒤 요청한 나머지 카드 응답이 바뀐 카드를 담은 갱신보다 늦게 와도 더 새 카드를 덮지 않는다.
+    window = open_window(hold_videos=True, card_size='small')
+    ready(window)
+    wait_for(lambda: js(window, 'window.__videoRequests') > 0)
+    target = window.library_page.visible_ids[-1]
+    library.add_video_tag(target, 'LATEST267')
+    window.refresh()
+    js(window, f'{GRID}.scrollTop = {GRID}.scrollHeight; true')
+    wait_for(lambda: 'LATEST267' in card_text(window, target))
+    deliver(window, 'window.__releaseVideos()')
+    assert 'LATEST267' in card_text(window, target), card_text(window, target)
+
+
+def test_out_of_order_pushes_keep_each_newest_card(open_window, library):
+    # 연속한 갱신이 뒤바뀐 순서로 도착해도 카드마다 가장 새 내용이 남는다. 늦게 온 앞 갱신에만 든 다른 카드의 변경도 잃지 않는다.
+    window = open_window(card_size='small')
+    ready(window)
+    first, second = window.library_page.visible_ids[:2]
+    pushes = []
+    window.library_page.bridge.libraryChanged.connect(pushes.append)
+    js(window, 'window.__holdPushes = true')
+    library.add_video_tag(first, '앞변경')
+    library.add_video_tag(second, '앞변경')
+    window.refresh()
+    library.add_video_tag(first, '뒤변경')
+    window.refresh()
+    wait_for(lambda: len(pushes) == 2 and js(window, 'window.__heldPushes()') == 2)
+    deliver(window, 'window.__releasePushes(true)')
+    assert '뒤변경' in card_text(window, first), card_text(window, first)
+    assert '앞변경' in card_text(window, second), card_text(window, second)
+
+
+def test_late_card_reply_after_many_stale_ids_shows_newest_cards(open_window, library):
+    # 첫 화면보다 많이 바뀌어 일부만 담고 나머지를 staleIds로 알린 갱신 뒤에, 그 전에 요청한 옛 카드 응답이 와도
+    # 갱신이 담은 카드는 그대로이고 알린 카드는 다시 받아 최신이 된다.
+    window = open_window(hold_videos=True, card_size='small')
+    ready(window)
+    wait_for(lambda: js(window, 'window.__videoRequests') > 0)
+    order = list(window.library_page.visible_ids)
+    pushes = []
+    window.library_page.bridge.libraryChanged.connect(lambda value: pushes.append(json.loads(value)))
+    changed = order[-100:]
+    for video_id in changed:
+        library.add_video_tag(video_id, '정리')
+    window.refresh()
+    wait_for(lambda: len(pushes) == 1)
+    sent, stale = changed[:SCREEN_VIDEOS], changed[SCREEN_VIDEOS:]
+    assert pushes[0]['staleIds'] == stale
+    deliver(window, 'window.__releaseVideos()')
+    js(window, f'{GRID}.scrollTop = {GRID}.scrollHeight * {order.index(sent[0])} / {len(order)}; true')
+    wait_for(lambda: card_text(window, sent[0]) != '')
+    assert '정리' in card_text(window, sent[0]), card_text(window, sent[0])
+    js(window, f'{GRID}.scrollTop = {GRID}.scrollHeight; true')
+    wait_for(lambda: '정리' in card_text(window, stale[-1]))
+    assert js(window, PLACEHOLDER_CELLS) == 0
+
+
 def test_first_screen_then_ready_then_hidden_tabs_then_startup_scan(open_window, monkeypatch):
     events = []
     scan = MainWindow.scan_on_startup
@@ -293,8 +392,11 @@ def test_videos_slot_returns_known_cards_and_rejects_bad_input(open_window):
     ready(window)
     page = window.library_page
     known = page.visible_ids[-2:]
+    generation = page.generation
     reply = json.loads(page.bridge.videos(json.dumps([*known, 999999])))
     assert [card['id'] for card in reply['videos']] == known
+    # 응답은 스냅숏·갱신과 같은 세대 차례를 쓴다. 웹이 카드마다 더 새 내용만 반영하는 기준이다.
+    assert reply['generation'] == generation + 1
     assert reply['videos'] == [page.card_index[video_id] for video_id in known]
     assert 'error' in json.loads(page.bridge.videos('{broken'))
     assert 'error' in json.loads(page.bridge.videos(json.dumps(['1'])))

@@ -87,8 +87,10 @@ export default function LibraryPage() {
   // 받은 카드(#267). 전체 상태는 첫 화면이나 바뀐 카드만 담고, 나머지는 화면을 그린 뒤 결과 순서대로 나눠 받는다.
   // 보기 조건·결과(data)와 따로 두므로 #266의 보기 응답·미뤄 둔 전체 상태 처리와 상관없이 쌓인다.
   const [cards, setCards] = useState<ReadonlyMap<number, VideoData>>(() => new Map())
-  // 바뀌었다고 알려 온, 다시 받을 카드. 받을 때까지 이전 카드를 그대로 보인다.
-  const staleCards = useRef(new Set<number>())
+  // 카드마다 반영한 내용을 담은 메시지의 세대. 스냅숏·갱신·나머지 카드 응답은 한 세대 차례를 쓴다.
+  const cardGenerations = useRef(new Map<number, number>())
+  // 바뀌었다고 알려 온, 다시 받을 카드와 그 알림의 세대. 받을 때까지 이전 카드를 그대로 보인다.
+  const staleCards = useRef(new Map<number, number>())
   // 요청했지만 라이브러리에 없어 돌아오지 않은 영상. 다음 전체 상태가 결과를 고칠 때까지 다시 요청하지 않는다.
   const goneCards = useRef(new Set<number>())
   const loadingCards = useRef(false)
@@ -106,11 +108,18 @@ export default function LibraryPage() {
   const freshData = useGenerationGuard()
   const freshView = useGenerationGuard()
   const setDraftValue = useCallback((value: string) => { draftRef.current = value; setDraft(value) }, [])
-  // 카드는 한 채널로 코어가 만든 순서대로 도착하므로 세대와 상관없이 도착한 차례로 반영한다. 다시 받을 카드는 받을 때까지 이전 것을 보인다.
-  const receiveCards = useCallback((videos: readonly VideoData[], staleIds: readonly number[] = []) => {
-    for (const id of staleIds) staleCards.current.add(id)
-    for (const video of videos) staleCards.current.delete(video.id)
-    if (videos.length) setCards(previous => { const next = new Map(previous); for (const video of videos) next.set(video.id, video); return next })
+  // 카드와 다시 받으라는 알림은 카드마다 이미 반영한 것보다 새 세대일 때만 반영한다. 늦게 도착한 스냅숏·나머지 카드 응답이나
+  // 앞선 갱신이 더 새 카드(방금 붙인 태그 등)를 덮지 않는다. 메시지 전체가 아니라 카드마다 비교하므로, 늦게 온 갱신에만 든
+  // 다른 카드의 변경은 반영한다. 알림보다 오래된 카드는 보이되 다시 받는다.
+  const receiveCards = useCallback((generation: number, videos: readonly VideoData[], staleIds: readonly number[] = []) => {
+    const older = (id: number) => (cardGenerations.current.get(id) ?? -Infinity) < generation
+    for (const id of staleIds) if (older(id) && (staleCards.current.get(id) ?? -Infinity) < generation) staleCards.current.set(id, generation)
+    const fresh = videos.filter(video => older(video.id))
+    for (const video of fresh) {
+      cardGenerations.current.set(video.id, generation)
+      if ((staleCards.current.get(video.id) ?? -Infinity) < generation) staleCards.current.delete(video.id)
+    }
+    if (fresh.length) setCards(previous => { const next = new Map(previous); for (const video of fresh) next.set(video.id, video); return next })
     else if (staleIds.length) nextCards()
   }, [nextCards])
   const awaitView = (value: boolean) => { awaitingView.current = value; setViewPending(value) }
@@ -149,7 +158,7 @@ export default function LibraryPage() {
       const changed = (json: string) => {
         const next: LibraryData = JSON.parse(json)
         goneCards.current.clear()
-        receiveCards(next.videos, next.staleIds)
+        receiveCards(next.generation, next.videos, next.staleIds)
         if (!freshData(next)) return
         const waiting = awaitingView.current
         if (waiting && !(optionsRef.current && sameOptions(next.options, optionsRef.current))) {
@@ -209,7 +218,7 @@ export default function LibraryPage() {
       setBridge(api)
       const initial = await getSnapshot(api)
       if (disposed) return
-      receiveCards(initial.videos)
+      receiveCards(initial.generation, initial.videos)
       const newView = freshView(initial)
       if (!freshData(initial)) return
       if (!newView) {
@@ -260,7 +269,7 @@ export default function LibraryPage() {
     request<LibraryVideosData>(reply => bridge.videos(JSON.stringify(requested), reply)).then(result => {
       const returned = new Set(result.videos.map(video => video.id))
       for (const id of requested) if (!returned.has(id)) goneCards.current.add(id)
-      receiveCards(result.videos)
+      receiveCards(result.generation, result.videos)
     }).catch(error => {
       for (const id of requested) goneCards.current.add(id)
       showError(error)

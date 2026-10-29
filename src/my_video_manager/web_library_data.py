@@ -114,8 +114,9 @@ class LibraryData(GenerationData):
     keyBindings: LibraryKeyBindingsData
 
 
-class LibraryVideosData(TypedDict):
-    """videos 슬롯의 응답. 요청한 ID 중 라이브러리에 있는 영상의 카드만 담는다."""
+class LibraryVideosData(GenerationData):
+    """videos 슬롯의 응답. 요청한 ID 중 라이브러리에 있는 영상의 카드만 담는다.
+    세대는 스냅숏·밀어 보내는 갱신과 같은 차례다. 웹은 카드마다 더 새 세대의 내용만 반영한다."""
     videos: list[VideoData]
 
 

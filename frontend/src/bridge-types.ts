@@ -247,6 +247,7 @@ export interface LibraryData {
 }
 
 export interface LibraryVideosData {
+  generation: number
   videos: Array<VideoData>
 }
 
