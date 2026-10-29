@@ -1,10 +1,10 @@
-"""앱 아이콘 원본(assets/icon)에서 ICO·웹 이미지·출처 매니페스트를 만들고, 산출물만 읽어 검사한다.
+"""앱·트레이 아이콘 원본(assets/icon)에서 ICO·웹 이미지·출처 매니페스트를 만들고, 산출물만 읽어 검사한다.
 
     python scripts/app_icon.py           원본에서 산출물을 다시 만든다.
     python scripts/app_icon.py --check   산출물이 최신이고 픽셀 규칙을 지키는지 확인한다.
 
 산출물은 저장소에 커밋한다. 벡터 렌더링 결과가 PySide6 버전에 묶여 PC마다 다시 만들면 흔들릴 수 있고,
-개발 실행(src/my_video_manager/app.ico)과 웹 빌드(frontend/src/assets/app-icon.png)가 같은 파일을 바로 읽어야 해서다.
+개발 실행(src/my_video_manager/app.ico·tray.ico)과 웹 빌드(frontend/src/assets/app-icon.png)가 같은 파일을 바로 읽어야 해서다.
 낡음은 파일 수정 시각이 아니라 매니페스트에 적은 원본 내용 해시로 판정한다(git checkout이 시각을 바꾼다).
 """
 import argparse
@@ -29,6 +29,9 @@ WEB_IMAGE_SIZE = 128  # 설정의 버전 정보 구역 40px을 화면 배율 300
 ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 256)
 # 작업 표시줄·트레이·창 모서리 크기. 벡터를 그대로 줄이지 않고 픽셀에 맞춰 손본 PNG를 원본으로 쓴다.
 TUNED_SIZES = (16, 20, 24, 32)
+# 알림 영역(트레이) 아이콘. 화면 배율 100·125·150·200%의 크기를 각각 손본 PNG에서 그대로 담는다. 벡터 원본은 없다.
+TRAY_ICO = 'src/my_video_manager/tray.ico'
+TRAY_SIZES = (16, 20, 24, 32)
 
 # Windows 11 기본 작업 표시줄 색.
 TASKBAR_BACKGROUNDS = {'밝은': '#f3f3f3', '어두운': '#202020'}
@@ -43,6 +46,9 @@ MAX_SEMITRANSPARENT_SHARE = 0.02
 MARK_SHARE_RANGE = (0.12, 0.45)
 # 실루엣(alpha 합)이 캔버스에서 차지하는 비율의 하한.
 MIN_SILHOUETTE_SHARE = 0.5
+# 트레이는 판 없이 윤곽 두른 글자만이라 캔버스를 다 채우지 않는다(손본 원본 53~66%). 너무 작으면 알림 영역에서
+# 안 보이고, 크면 글자가 아니라 판(덩어리)이다. 앱 아이콘의 하한 하나 대신 이 범위를 쓴다.
+TRAY_SILHOUETTE_SHARE_RANGE = (0.35, 0.8)
 # 다른 프레임을 Qt로 늘이거나 줄인 결과와 채널 차이가 이 값 이하인 픽셀이 전부면 그 프레임을 복사본으로 본다.
 SCALED_COPY_TOLERANCE = 2
 
@@ -51,6 +57,10 @@ _PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
 
 def source_for(size):
     return f'{SOURCE_DIRECTORY}/app-icon-{size}.png' if size in TUNED_SIZES else VECTOR_SOURCE
+
+
+def tray_source_for(size):
+    return f'{SOURCE_DIRECTORY}/tray-icon-{size}.png'
 
 
 def content_digest(path):
@@ -162,17 +172,24 @@ def build_frames(root=ROOT):
                    render_vector(root / VECTOR_SOURCE, size)) for size in ICON_SIZES}
 
 
+def _frame_records(root, frames, source_of):
+    return {str(size): {'source': source_of(size), 'source_sha256': content_digest(root / source_of(size)),
+                        'pixels_sha256': pixel_digest(image)} for size, image in frames.items()}
+
+
 def build(root=ROOT):
     frames = build_frames(root)
+    tray = {size: read_png(root / tray_source_for(size)) for size in TRAY_SIZES}
     web = render_vector(root / VECTOR_SOURCE, WEB_IMAGE_SIZE)
     (root / ICO).write_bytes(encode_ico(frames))
+    (root / TRAY_ICO).write_bytes(encode_ico(tray))
     (root / WEB_IMAGE).parent.mkdir(parents=True, exist_ok=True)
     (root / WEB_IMAGE).write_bytes(_png_bytes(web))
     manifest = {
-        'frames': {str(size): {'source': source_for(size), 'source_sha256': content_digest(root / source_for(size)),
-                               'pixels_sha256': pixel_digest(image)} for size, image in frames.items()},
+        'frames': _frame_records(root, frames, source_for),
         'web': {'path': WEB_IMAGE, 'size': WEB_IMAGE_SIZE, 'source': VECTOR_SOURCE,
                 'source_sha256': content_digest(root / VECTOR_SOURCE), 'pixels_sha256': pixel_digest(web)},
+        'tray': {'path': TRAY_ICO, 'frames': _frame_records(root, tray, tray_source_for)},
     }
     (root / MANIFEST).write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     return manifest
@@ -209,35 +226,67 @@ def edge_band(size, pixels, width):
     return band, remaining
 
 
-def frame_problems(size, image):
-    """작업 표시줄 크기 프레임 하나의 픽셀 규칙 위반을 사람이 읽는 문장으로 돌려준다."""
-    size, pixels = _grid(image)
+def _visibility_problems(label, pixels, band):
+    """두 작업 표시줄 위 가장자리 대비와 반투명(흐림) 규칙. 앱 아이콘과 트레이가 같은 기준을 쓴다."""
     problems = []
-    band, inner = edge_band(size, pixels, max(1, size // 16))
-    if not band:
-        return [f'{size}px: 불투명한 실루엣이 없습니다']
     for name, background in TASKBAR_BACKGROUNDS.items():
         rgb = QColor(background).getRgb()[:3]
         share = sum(contrast(pixels[y][x][:3], rgb) >= MIN_CONTRAST for x, y in band) / len(band)
         if share < MIN_EDGE_CONTRAST_SHARE:
-            problems.append(f'{size}px: 가장자리가 {name} 작업 표시줄({background})과 {MIN_CONTRAST}:1 이상인 비율 '
+            problems.append(f'{label}: 가장자리가 {name} 작업 표시줄({background})과 {MIN_CONTRAST}:1 이상인 비율 '
                             f'{share:.0%} < {MIN_EDGE_CONTRAST_SHARE:.0%}')
     visible = [pixel for row in pixels for pixel in row if pixel[3]]
     semitransparent = sum(pixel[3] < 255 for pixel in visible) / max(1, len(visible))
     if semitransparent > MAX_SEMITRANSPARENT_SHARE:
-        problems.append(f'{size}px: 반투명 가장자리 픽셀 비율 {semitransparent:.1%} > {MAX_SEMITRANSPARENT_SHARE:.0%}(흐림)')
-    silhouette = sum(pixel[3] for row in pixels for pixel in row) / 255 / size ** 2
+        problems.append(f'{label}: 반투명 가장자리 픽셀 비율 {semitransparent:.1%} > {MAX_SEMITRANSPARENT_SHARE:.0%}(흐림)')
+    return problems
+
+
+def _silhouette_share(size, pixels):
+    return sum(pixel[3] for row in pixels for pixel in row) / 255 / size ** 2
+
+
+def _mark_share_problems(label, mark, what):
+    low, high = MARK_SHARE_RANGE
+    if low <= mark <= high:
+        return []
+    return [f'{label}: {what} 면적 {mark:.0%}가 {low:.0%}~{high:.0%} 밖입니다({"너무 작음" if mark < low else "꽉 참"})']
+
+
+def frame_problems(size, image):
+    """작업 표시줄 크기 프레임 하나의 픽셀 규칙 위반을 사람이 읽는 문장으로 돌려준다."""
+    size, pixels = _grid(image)
+    band, inner = edge_band(size, pixels, max(1, size // 16))
+    if not band:
+        return [f'{size}px: 불투명한 실루엣이 없습니다']
+    problems = _visibility_problems(f'{size}px', pixels, band)
+    silhouette = _silhouette_share(size, pixels)
     if silhouette < MIN_SILHOUETTE_SHARE:
         problems.append(f'{size}px: 실루엣 면적 {silhouette:.0%} < {MIN_SILHOUETTE_SHARE:.0%}(너무 작음)')
     # 판 색: 가장자리 띠 바로 안쪽 픽셀에서 가장 흔한 색. 글자가 판보다 넓어져도 판을 글자로 착각하지 않는다.
     plate = Counter(pixels[y][x][:3] for x, y in inner
                     if any((x + dx, y + dy) in band for dx in (-1, 0, 1) for dy in (-1, 0, 1))).most_common(1)
     mark = sum(contrast(pixels[y][x][:3], plate[0][0]) >= MIN_CONTRAST for x, y in inner) / size ** 2 if plate else 0
-    low, high = MARK_SHARE_RANGE
-    if not low <= mark <= high:
-        problems.append(f'{size}px: 판과 {MIN_CONTRAST}:1 이상 구별되는 글자 마크 면적 {mark:.0%}가 '
-                        f'{low:.0%}~{high:.0%} 밖입니다({"너무 작음" if mark < low else "꽉 참"})')
-    return problems
+    return problems + _mark_share_problems(f'{size}px', mark, f'판과 {MIN_CONTRAST}:1 이상 구별되는 글자 마크')
+
+
+def tray_frame_problems(size, image):
+    """트레이 프레임 하나의 픽셀 규칙 위반. 대비·흐림은 앱 아이콘과 같고, 판이 없어 면적은 윤곽과 글자로 본다."""
+    size, pixels = _grid(image)
+    label = f'트레이 {size}px'
+    band, inner = edge_band(size, pixels, max(1, size // 16))
+    if not band:
+        return [f'{label}: 불투명한 실루엣이 없습니다']
+    problems = _visibility_problems(label, pixels, band)
+    silhouette = _silhouette_share(size, pixels)
+    low, high = TRAY_SILHOUETTE_SHARE_RANGE
+    if not low <= silhouette <= high:
+        problems.append(f'{label}: 실루엣 면적 {silhouette:.0%}가 {low:.0%}~{high:.0%} 밖입니다'
+                        f'({"너무 작음" if silhouette < low else "판처럼 꽉 참"})')
+    # 윤곽 색: 가장자리 띠에서 가장 흔한 색. 글자 마크는 윤곽 안쪽에서 윤곽 색과 다른 픽셀이다.
+    outline = Counter(pixels[y][x][:3] for x, y in band).most_common(1)[0][0]
+    mark = sum(pixels[y][x][:3] != outline for x, y in inner) / size ** 2
+    return problems + _mark_share_problems(label, mark, '윤곽 안쪽 글자 마크')
 
 
 def _scaled_copy(image, other):
@@ -250,34 +299,54 @@ def _scaled_copy(image, other):
     return False
 
 
-def icon_problems(root=ROOT, ico=ICO, manifest=MANIFEST):
-    """산출물(ICO·웹 이미지·매니페스트)과 지금 원본을 대조하고 픽셀 규칙을 검사한다. 문제가 없으면 빈 목록."""
+def _frames_problems(root, frames, entries, sizes, source_of, tuned_sizes, label=''):
+    """ICO 프레임마다 크기 누락·출처·매니페스트 픽셀·원본 낡음·늘인 복사본을 본다. label은 메시지 앞에 붙인다."""
+    problems = [f'{label}{size}px 프레임이 없습니다(크기 누락)' for size in sizes if size not in frames]
+    for size in (size for size in sizes if size in frames):
+        entry = entries.get(str(size), {})
+        if entry.get('source') != source_of(size):
+            problems.append(f'{label}{size}px 프레임의 원본이 {entry.get("source")}입니다. {source_of(size)}여야 합니다')
+            continue
+        if entry.get('pixels_sha256') != pixel_digest(frames[size]):
+            problems.append(f'{label}{size}px 프레임이 매니페스트의 픽셀과 다릅니다')
+        source = root / source_of(size)
+        if not source.is_file() or entry.get('source_sha256') != content_digest(source):
+            problems.append(f'낡은 산출물: {source_of(size)}가 {label}{size}px 프레임을 만든 뒤 바뀌었습니다. '
+                            'python scripts/app_icon.py로 다시 만드세요')
+        elif size in tuned_sizes and pixel_digest(read_png(source)) != pixel_digest(frames[size]):
+            problems.append(f'{label}{size}px 프레임이 손본 원본 {source_of(size)}와 다릅니다')
+    for size, image in frames.items():
+        for other_size, other in frames.items():
+            if other_size != size and _scaled_copy(image, other):
+                problems.append(f'{label}{size}px 프레임이 {other_size}px 프레임을 늘이거나 줄인 것입니다')
+                break
+    return problems
+
+
+def tray_problems(root, record, tray_ico=TRAY_ICO):
+    """트레이 ICO를 매니페스트의 tray 항목·손본 원본과 대조하고 트레이 픽셀 규칙을 검사한다."""
+    try:
+        frames = decode_ico((root / tray_ico).read_bytes())
+    except (OSError, ValueError, struct.error) as error:
+        return [f'트레이 산출물을 읽지 못했습니다: {error}']
+    tray = record.get('tray', {})
+    problems = [] if tray.get('path') == TRAY_ICO else [f'매니페스트에 트레이 산출물 {TRAY_ICO} 기록이 없습니다']
+    problems += _frames_problems(root, frames, tray.get('frames', {}), TRAY_SIZES, tray_source_for, TRAY_SIZES, '트레이 ')
+    problems += [f'트레이 {size}px 프레임은 쓰지 않는 크기입니다' for size in frames if size not in TRAY_SIZES]
+    for size in (size for size in TRAY_SIZES if size in frames):
+        problems += tray_frame_problems(size, frames[size])
+    return problems
+
+
+def icon_problems(root=ROOT, ico=ICO, manifest=MANIFEST, tray_ico=TRAY_ICO):
+    """산출물(앱·트레이 ICO, 웹 이미지, 매니페스트)과 지금 원본을 대조하고 픽셀 규칙을 검사한다. 문제가 없으면 빈 목록."""
     root = Path(root)
     try:
         frames = decode_ico((root / ico).read_bytes())
         record = json.loads((root / manifest).read_text(encoding='utf-8'))
     except (OSError, ValueError, struct.error) as error:
         return [f'산출물을 읽지 못했습니다: {error}']
-    problems = [f'{size}px 프레임이 없습니다(크기 누락)' for size in ICON_SIZES if size not in frames]
-    entries = record.get('frames', {})
-    for size in (size for size in ICON_SIZES if size in frames):
-        entry = entries.get(str(size), {})
-        if entry.get('source') != source_for(size):
-            problems.append(f'{size}px 프레임의 원본이 {entry.get("source")}입니다. {source_for(size)}여야 합니다')
-            continue
-        if entry.get('pixels_sha256') != pixel_digest(frames[size]):
-            problems.append(f'{size}px 프레임이 매니페스트의 픽셀과 다릅니다')
-        source = root / source_for(size)
-        if not source.is_file() or entry.get('source_sha256') != content_digest(source):
-            problems.append(f'낡은 산출물: {source_for(size)}가 {size}px 프레임을 만든 뒤 바뀌었습니다. '
-                            'python scripts/app_icon.py로 다시 만드세요')
-        elif size in TUNED_SIZES and pixel_digest(read_png(source)) != pixel_digest(frames[size]):
-            problems.append(f'{size}px 프레임이 손본 원본 {source_for(size)}와 다릅니다')
-    for size, image in frames.items():
-        for other_size, other in frames.items():
-            if other_size != size and _scaled_copy(image, other):
-                problems.append(f'{size}px 프레임이 {other_size}px 프레임을 늘이거나 줄인 것입니다')
-                break
+    problems = _frames_problems(root, frames, record.get('frames', {}), ICON_SIZES, source_for, TUNED_SIZES)
     for size in (size for size in TUNED_SIZES if size in frames):
         problems += frame_problems(size, frames[size])
     web = record.get('web', {})
@@ -286,7 +355,7 @@ def icon_problems(root=ROOT, ico=ICO, manifest=MANIFEST):
         problems.append(f'웹 이미지 {WEB_IMAGE}가 매니페스트와 다릅니다')
     if web.get('source') != VECTOR_SOURCE or web.get('source_sha256') != content_digest(root / VECTOR_SOURCE):
         problems.append(f'낡은 산출물: {VECTOR_SOURCE}가 웹 이미지를 만든 뒤 바뀌었습니다')
-    return problems
+    return problems + tray_problems(root, record, tray_ico)
 
 
 def main(argv=None):
@@ -301,7 +370,8 @@ def main(argv=None):
     for problem in problems:
         print(problem, file=sys.stderr)
     if not problems:
-        print(f'앱 아이콘 산출물 최신·픽셀 규칙 통과: {ICO} ({", ".join(map(str, ICON_SIZES))}px)')
+        print(f'앱 아이콘 산출물 최신·픽셀 규칙 통과: {ICO} ({", ".join(map(str, ICON_SIZES))}px), '
+              f'{TRAY_ICO} ({", ".join(map(str, TRAY_SIZES))}px)')
     del app
     return 1 if problems else 0
 

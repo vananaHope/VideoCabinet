@@ -1,11 +1,18 @@
 """트레이 어댑터와 창 숨기기·완전 종료 연결."""
 
+from pathlib import Path
+
 from PySide6.QtCore import QObject, QTimer
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QStyle, QSystemTrayIcon
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from .app_version import DISPLAY_NAME
 from .core import CommandType
 from .key_display import display_keys
+
+# scripts/app_icon.py가 손본 원본에서 만든 16·20·24·32px 커밋 산출물. 화면 배율에 맞는 크기를 Windows가 고른다.
+# 테마나 작업 상태에 따라 바꾸지 않는다(긴급 탈출로 숨겼을 때도 같다).
+TRAY_ICON = Path(__file__).with_name('tray.ico')
 
 
 class TrayControls(QObject):
@@ -16,7 +23,7 @@ class TrayControls(QObject):
         self._confirmed = False
         self._emergency_hidden = False
         self._emergency_focus = None
-        self.icon = QSystemTrayIcon(window.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay), self)
+        self.icon = QSystemTrayIcon(QIcon(str(TRAY_ICON)), self)
         self.icon.setToolTip(f"{DISPLAY_NAME} · 자막 대기열")
         menu = QMenu(window)
         menu.addAction("열기", self.open)

@@ -15,6 +15,9 @@ MAX_BUNDLE_BYTES = 950_000_000  # MB (decimal), not MiB
 # 창·실행 파일·설치 프로그램·설치된 앱 목록이 쓰는 다중 크기 ICO. 저장소의 커밋 산출물과 같아야 한다(scripts/app_icon.py).
 APP_ICON = 'my_video_manager/app.ico'
 SOURCE_APP_ICON = Path(__file__).resolve().parents[1] / 'src' / APP_ICON
+# 알림 영역(트레이) 아이콘. 같은 스크립트의 커밋 산출물과 같아야 한다. 빠지면 숨긴 창을 다시 열 곳이 안 보인다.
+TRAY_ICON = 'my_video_manager/tray.ico'
+SOURCE_TRAY_ICON = SOURCE_APP_ICON.with_name('tray.ico')
 UNUSED_QT_PREFIXES = ("qt6quick3d", "qt63d", "qt6charts", "qt6graphs",
                       "qt6multimedia", "qt6virtualkeyboard", "qt6pdf", "qt6location")
 REQUIRED_LICENSES = (
@@ -84,7 +87,7 @@ def check_pyav(directory):
 def check_bundle(directory: Path):
     required = (
         'my-video-manager.exe', 'my_video_manager/web/index.html',
-        'my_video_manager/web_tokens.json', APP_ICON,
+        'my_video_manager/web_tokens.json', APP_ICON, TRAY_ICON,
         'my_video_manager/build-version.txt', 'ffmpeg/ffmpeg.exe', 'ffmpeg/ffprobe.exe',
         'mpv/libmpv-2.dll', 'PySide6/QtWebEngineProcess.exe',
         'PySide6/resources/icudtl.dat', 'PySide6/resources/qtwebengine_resources.pak',
@@ -110,6 +113,8 @@ def check_bundle(directory: Path):
         raise RuntimeError(f'설치판 자산 검사 실패: missing={missing}, CUDA={cuda}, unnecessary={unnecessary}')
     if digest(directory / APP_ICON) != digest(SOURCE_APP_ICON):
         raise RuntimeError(f'설치판 앱 아이콘이 {SOURCE_APP_ICON.relative_to(SOURCE_APP_ICON.parents[2])}와 다릅니다')
+    if digest(directory / TRAY_ICON) != digest(SOURCE_TRAY_ICON):
+        raise RuntimeError(f'설치판 트레이 아이콘이 {SOURCE_TRAY_ICON.relative_to(SOURCE_TRAY_ICON.parents[2])}와 다릅니다')
     check_licenses(directory)
     check_pyav(directory)
     total_bytes = sum(path.stat().st_size for path in directory.rglob('*') if path.is_file())

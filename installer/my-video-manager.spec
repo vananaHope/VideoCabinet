@@ -7,7 +7,8 @@ root = Path(SPECPATH).parent
 stage = root / 'build' / 'bundle-assets'
 # app.ico는 scripts/app_icon.py가 원본에서 만든 커밋 산출물이다. 개발 실행과 설치본이 같은 파일을 창 아이콘으로 읽는다.
 app_icon = root / 'src' / 'my_video_manager' / 'app.ico'
-datas = collect_data_files('my_video_manager', includes=['web/**', 'web_tokens.json', 'app.ico'])
+# tray.ico도 같은 스크립트의 커밋 산출물이다. 트레이가 실행 중 읽는다.
+datas = collect_data_files('my_video_manager', includes=['web/**', 'web_tokens.json', 'tray.ico', 'app.ico'])
 datas += collect_data_files('faster_whisper') + copy_metadata('my-video-manager')
 datas += [(str(root / 'installer' / 'THIRD-PARTY-NOTICES.txt'), '.'),
           (str(root / 'installer' / 'licenses'), 'licenses')]
