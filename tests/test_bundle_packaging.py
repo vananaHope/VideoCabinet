@@ -127,7 +127,7 @@ def bundle(packaging, tmp_path, monkeypatch):
     ffmpeg, checker = packaging
     files = [
         'my-video-manager.exe', 'my_video_manager/web/index.html', 'my_video_manager/web_tokens.json',
-        'my_video_manager/app.ico', 'my_video_manager/build-version.txt', 'mpv/libmpv-2.dll',
+        'my_video_manager/app.ico', 'my_video_manager/tray.ico', 'my_video_manager/build-version.txt', 'mpv/libmpv-2.dll',
         'PySide6/QtWebEngineProcess.exe', 'PySide6/plugins/platforms/qwindows.dll', 'PySide6/opengl32sw.dll',
         *('PySide6/resources/' + name for name in ['icudtl.dat', 'qtwebengine_resources.pak',
           'qtwebengine_resources_100p.pak', 'qtwebengine_resources_200p.pak', 'v8_context_snapshot.bin']),
@@ -141,6 +141,7 @@ def bundle(packaging, tmp_path, monkeypatch):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b'asset')
     (tmp_path / checker.APP_ICON).write_bytes(checker.SOURCE_APP_ICON.read_bytes())
+    (tmp_path / checker.TRAY_ICON).write_bytes(checker.SOURCE_TRAY_ICON.read_bytes())
     for kind, file in [('python', 'faster-whisper/metadata/LICENSE'), ('web', 'node_modules/react/LICENSE')]:
         (tmp_path / 'licenses' / kind / 'manifest.json').write_text(json.dumps([
             {'name': 'example', 'files': [{'path': file, 'sha256': hashlib.sha256(b'asset').hexdigest()}]}
@@ -171,7 +172,7 @@ def test_bundle_logs_pinned_ffmpeg_version(bundle, capsys):
     'licenses/web/node_modules/pretendard/dist/LICENSE.txt',
     'my_video_manager/web/qt-fonts/Pretendard-Regular.ttf', 'my_video_manager/web/qt-fonts/Pretendard-SemiBold.ttf',
     'PySide6/translations/qtwebengine_locales/ko.pak', 'PySide6/translations/qtwebengine_locales/en-US.pak',
-    'my_video_manager/app.ico'])
+    'my_video_manager/app.ico', 'my_video_manager/tray.ico'])
 def test_bundle_missing_required_runtime_fails(bundle, name):
     checker, directory = bundle
     (directory / name).unlink()
@@ -235,6 +236,24 @@ def test_bundle_rejects_icon_other_than_built_artifact(bundle):
     (directory / checker.APP_ICON).write_bytes(b'old icon')
     with pytest.raises(RuntimeError, match='앱 아이콘'):
         checker.check_bundle(directory)
+
+
+def test_bundle_rejects_tray_icon_other_than_built_artifact(bundle):
+    # 앱 아이콘을 트레이 자리에 잘못 넣거나 낡은 트레이 이미지가 섞이면 Inno에 넘기기 전에 멈춘다.
+    checker, directory = bundle
+    (directory / checker.TRAY_ICON).write_bytes(checker.SOURCE_APP_ICON.read_bytes())
+    with pytest.raises(RuntimeError, match='트레이 아이콘'):
+        checker.check_bundle(directory)
+
+
+def test_installed_package_data_and_bundle_spec_carry_tray_icon():
+    # 개발 설치(pip)와 PyInstaller 설치물 모두 트레이가 실행 중 읽는 tray.ico를 싣는다.
+    root = Path(__file__).resolve().parents[1]
+    pyproject = (root / 'pyproject.toml').read_text(encoding='utf-8')
+    package_data = pyproject.split('[tool.setuptools.package-data]', 1)[1].split('\n[', 1)[0]
+    assert '"tray.ico"' in package_data
+    spec = (root / 'installer/my-video-manager.spec').read_text(encoding='utf-8')
+    assert "'tray.ico'" in next(line for line in spec.splitlines() if line.startswith('datas = collect_data_files('))
 
 
 def test_executable_installer_and_uninstall_entry_use_built_icon():

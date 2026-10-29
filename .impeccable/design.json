@@ -53,7 +53,16 @@
       "shape": "둥근 사각 판(캔버스를 여백 없이 채움, 256px 기준 반지름 36) + 바깥 테두리(256px 기준 10) + 균일한 획(256px 기준 26)의 한글 '상'.",
       "colors": { "mark": "primary", "plate": "background", "outline": "input" },
       "smallSizes": "16~32px은 반투명 없이 세 색만 쓴 손본 PNG. 테두리 24px 이하 1px·32px 2px, 테두리와 글자 사이 판 1px 이상, 획 2px(32px 3px). 40px 이상은 벡터 렌더링.",
-      "checks": { "test": "tests/test_app_icon.py", "taskbarBackgrounds": { "light": "#f3f3f3", "dark": "#202020" }, "minContrast": 3.0, "minEdgeContrastShare": 0.9, "maxSemitransparentShare": 0.02, "markShareRange": [0.12, 0.45] }
+      "checks": { "test": "tests/test_app_icon.py", "taskbarBackgrounds": { "light": "#f3f3f3", "dark": "#202020" }, "minContrast": 3.0, "minEdgeContrastShare": 0.9, "maxSemitransparentShare": 0.02, "markShareRange": [0.12, 0.45] },
+      "tray": {
+        "tunedSources": ["assets/icon/tray-icon-16.png", "assets/icon/tray-icon-20.png", "assets/icon/tray-icon-24.png", "assets/icon/tray-icon-32.png"],
+        "artifacts": ["src/my_video_manager/tray.ico", "assets/icon/build-manifest.json"],
+        "sizes": [16, 20, 24, 32],
+        "shape": "앱 아이콘에서 판을 뺀 '상' 글자 마크 하나에 바깥 윤곽(24px 이하 1px·32px 2px)을 두른다. 글자는 캔버스를 거의 다 쓰고 획은 16·20px 2px, 24px 3px, 32px 4px.",
+        "colors": { "mark": "primary", "outline": "input" },
+        "variants": "없음. Windows 테마·작업 상태(배지)·긴급 탈출에 따라 바꾸지 않는다.",
+        "checks": { "test": "tests/test_app_icon.py", "sameAsAppIcon": ["taskbarBackgrounds", "minContrast", "minEdgeContrastShare", "maxSemitransparentShare", "markShareRange"], "silhouetteShareRange": [0.35, 0.8] }
+      }
     }
   },
   "components": [

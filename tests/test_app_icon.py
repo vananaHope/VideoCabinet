@@ -1,4 +1,4 @@
-"""앱 아이콘 픽셀 검사: 빌드 산출물(ICO·웹 이미지·매니페스트)만 읽어 크기·출처·대비·흐림·면적·낡음을 본다."""
+"""앱·트레이 아이콘 픽셀 검사: 빌드 산출물(ICO·웹 이미지·매니페스트)만 읽어 크기·출처·대비·흐림·면적·낡음을 본다."""
 import importlib
 import json
 from pathlib import Path
@@ -28,7 +28,7 @@ def built(icon, tmp_path):
     """저장소의 원본과 산출물을 복사한 작업 폴더. 산출물을 일부러 망가뜨려도 저장소는 그대로다."""
     for relative in (icon.SOURCE_DIRECTORY, ):
         shutil.copytree(ROOT / relative, tmp_path / relative)
-    for relative in (icon.ICO, icon.WEB_IMAGE):
+    for relative in (icon.ICO, icon.WEB_IMAGE, icon.TRAY_ICO):
         (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, tmp_path / relative)
     return tmp_path
@@ -45,6 +45,20 @@ def replace_frames(icon, root, frames):
     manifest = json.loads(path.read_text(encoding='utf-8'))
     for size, image in frames.items():
         manifest['frames'][str(size)]['pixels_sha256'] = icon.pixel_digest(image)
+    path.write_text(json.dumps(manifest), encoding='utf-8')
+
+
+def tray_frames_of(icon, root):
+    return icon.decode_ico((root / icon.TRAY_ICO).read_bytes())
+
+
+def replace_tray_frames(icon, root, frames):
+    """트레이 ICO를 다시 쓰고 매니페스트의 트레이 픽셀 해시만 맞춘다."""
+    (root / icon.TRAY_ICO).write_bytes(icon.encode_ico(frames))
+    path = root / icon.MANIFEST
+    manifest = json.loads(path.read_text(encoding='utf-8'))
+    for size, image in frames.items():
+        manifest['tray']['frames'][str(size)]['pixels_sha256'] = icon.pixel_digest(image)
     path.write_text(json.dumps(manifest), encoding='utf-8')
 
 
@@ -185,9 +199,100 @@ def test_touching_sources_without_changing_content_keeps_artifacts_fresh(icon, b
 
 def test_rebuild_from_sources_reproduces_committed_frames(icon, built):
     before = {size: icon.pixel_digest(image) for size, image in frames_of(icon, built).items()}
+    tray_before = {size: icon.pixel_digest(image) for size, image in tray_frames_of(icon, built).items()}
     icon.build(built)
     assert {size: icon.pixel_digest(image) for size, image in frames_of(icon, built).items()} == before
+    assert {size: icon.pixel_digest(image) for size, image in tray_frames_of(icon, built).items()} == tray_before
     assert icon.icon_problems(built) == []
+
+
+def test_tray_frames_come_from_their_own_hand_tuned_sources(icon):
+    manifest = json.loads((ROOT / icon.MANIFEST).read_text(encoding='utf-8'))
+    frames = tray_frames_of(icon, ROOT)
+    assert manifest['tray']['path'] == 'src/my_video_manager/tray.ico'
+    assert sorted(frames) == [16, 20, 24, 32]
+    for size, image in frames.items():
+        source = f'assets/icon/tray-icon-{size}.png'
+        assert manifest['tray']['frames'][str(size)]['source'] == source
+        assert icon.pixel_digest(image) == icon.pixel_digest(icon.read_png(ROOT / source))
+        # 앱 아이콘 같은 크기 프레임을 그대로 쓰지 않는다(판 없는 단순화 모양).
+        assert icon.pixel_digest(image) != icon.pixel_digest(frames_of(icon, ROOT)[size])
+
+
+def test_committed_tray_frames_pass_pixel_rules_on_both_taskbars(icon):
+    for size, image in tray_frames_of(icon, ROOT).items():
+        assert icon.tray_frame_problems(size, image) == [], size
+
+
+def test_blurred_tray_frame_fails(icon, built):
+    frames = tray_frames_of(icon, built)
+    frames[16] = blur(frames[16])
+    replace_tray_frames(icon, built, frames)
+    assert any(problem.startswith('트레이 16px: 반투명 가장자리') for problem in icon.icon_problems(built))
+
+
+@pytest.mark.parametrize('background', ['밝은', '어두운'])
+def test_low_contrast_tray_outline_fails_on_each_taskbar(icon, built, background):
+    frames = tray_frames_of(icon, built)
+    frames[20] = recolor(frames[20], '#7c7c85', '#202020' if background == '어두운' else '#f3f3f3')
+    replace_tray_frames(icon, built, frames)
+    problems = icon.icon_problems(built)
+    assert any(problem.startswith(f'트레이 20px: 가장자리가 {background} 작업 표시줄') for problem in problems)
+
+
+def test_tray_mark_without_outline_disappears_on_dark_taskbar(icon, built):
+    # 판도 윤곽도 없는 인디고 글자만이면 어두운 작업 표시줄(#202020)과 2.6:1이라 묻힌다. 윤곽을 두는 이유다.
+    frames = tray_frames_of(icon, built)
+    frames[24] = recolor(frames[24], '#7c7c85', 'transparent')
+    replace_tray_frames(icon, built, frames)
+    problems = icon.icon_problems(built)
+    assert any(problem.startswith('트레이 24px: 가장자리가 어두운 작업 표시줄') for problem in problems)
+    assert not any(problem.startswith('트레이 24px: 가장자리가 밝은 작업 표시줄') for problem in problems)
+
+
+def test_tray_filled_like_a_plate_fails(icon, built):
+    frames = tray_frames_of(icon, built)
+    frames[32] = recolor(frames[32], 'transparent', '#7c7c85')
+    replace_tray_frames(icon, built, frames)
+    assert any(problem.startswith('트레이 32px: 실루엣 면적') and '판처럼 꽉 참' in problem
+               for problem in icon.icon_problems(built))
+
+
+def test_tray_mark_reduced_to_outline_fails_as_too_small(icon, built):
+    frames = tray_frames_of(icon, built)
+    frames[16] = recolor(frames[16], '#4f46e5', '#7c7c85')
+    replace_tray_frames(icon, built, frames)
+    assert any(problem.startswith('트레이 16px: 윤곽 안쪽 글자 마크') and '너무 작음' in problem
+               for problem in icon.icon_problems(built))
+
+
+@pytest.mark.parametrize('size', [16, 32])
+def test_missing_tray_size_fails(icon, built, size):
+    frames = tray_frames_of(icon, built)
+    del frames[size]
+    replace_tray_frames(icon, built, frames)
+    assert f'트레이 {size}px 프레임이 없습니다(크기 누락)' in icon.icon_problems(built)
+
+
+def test_tray_frame_scaled_from_another_size_fails(icon, built):
+    frames = tray_frames_of(icon, built)
+    frames[16] = frames[32].scaled(16, 16, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.FastTransformation)
+    replace_tray_frames(icon, built, frames)
+    assert '트레이 16px 프레임이 32px 프레임을 늘이거나 줄인 것입니다' in icon.icon_problems(built)
+
+
+def test_missing_tray_artifact_fails(icon, built):
+    (built / icon.TRAY_ICO).unlink()
+    assert any(problem.startswith('트레이 산출물을 읽지 못했습니다') for problem in icon.icon_problems(built))
+
+
+def test_stale_tray_artifact_fails_when_tray_source_changes(icon, built):
+    path = built / 'assets/icon/tray-icon-24.png'
+    image = icon.read_png(path)
+    image.setPixelColor(0, 0, QColor('#7c7c85'))
+    image.save(str(path))
+    assert any(problem.startswith('낡은 산출물: assets/icon/tray-icon-24.png가 트레이 24px')
+               for problem in icon.icon_problems(built))
 
 
 class _Application:
@@ -235,3 +340,8 @@ def test_icon_colors_are_web_tokens(icon):
         image = icon.read_png(ROOT / icon.source_for(size))
         used = {image.pixelColor(x, y).name() for y in range(size) for x in range(size) if image.pixelColor(x, y).alpha()}
         assert used == expected, size
+    # 트레이는 판을 빼고 글자(primary)와 윤곽(input) 두 색만 쓴다.
+    for size in icon.TRAY_SIZES:
+        image = icon.read_png(ROOT / icon.tray_source_for(size))
+        used = {image.pixelColor(x, y).name() for y in range(size) for x in range(size) if image.pixelColor(x, y).alpha()}
+        assert used == {colors['primary'], colors['input']}, size

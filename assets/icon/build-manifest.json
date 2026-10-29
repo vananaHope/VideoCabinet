@@ -47,5 +47,30 @@
     "source": "assets/icon/app-icon.svg",
     "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
     "pixels_sha256": "2dc20ba6016d1002d287447ad56fa6d1a2e3a586e6e59d793c0e92ff7dc2b47d"
+  },
+  "tray": {
+    "path": "src/my_video_manager/tray.ico",
+    "frames": {
+      "16": {
+        "source": "assets/icon/tray-icon-16.png",
+        "source_sha256": "85204368bd44c9ca4b74c449d55dae1fb26109e605778a847ffe13b580136056",
+        "pixels_sha256": "7bbd1d8dab0d9871511069bc3f2556746e2165964f984639f06bf12f1c748ac2"
+      },
+      "20": {
+        "source": "assets/icon/tray-icon-20.png",
+        "source_sha256": "991dfeca827ee7020cd90d30b365ccd99b56ebf37919712971a9e8455463b463",
+        "pixels_sha256": "069343b29d52c78d43f5fba9a34c17d8af866706ebc1fc161bd4a7701255268e"
+      },
+      "24": {
+        "source": "assets/icon/tray-icon-24.png",
+        "source_sha256": "9d70633f29681fc7a2a61e73dea14f3dd70bccf12cab4012ef26a974d33f94c7",
+        "pixels_sha256": "5b8c6ac1d984b1b660876f48ed217b15c3765168fe6e0fb492a7ddeac7ce8e70"
+      },
+      "32": {
+        "source": "assets/icon/tray-icon-32.png",
+        "source_sha256": "1e39aaa45945425bee407e0c14108471185a256337499fa5256c2f21dcc2c25b",
+        "pixels_sha256": "dbe435b2bc5712475cb21e18e7cd0e79695b3ebd95ac092a6fe270cf0e26a575"
+      }
+    }
   }
 }
