@@ -171,8 +171,10 @@ libmpv·FFmpeg·ffprobe를 포함합니다. CUDA·Whisper 모델은 넣지 않�
 앱 아이콘은 `assets/icon/`의 벡터 원본(`app-icon.svg`)과 16·20·24·32px 손본 PNG가 원본입니다.
 원본을 바꾸면 `python scripts/app_icon.py`로 산출물(`src/my_video_manager/app.ico`, `frontend/src/assets/app-icon.png`,
 `assets/icon/build-manifest.json`)을 다시 만들어 함께 커밋합니다. 개발 실행과 설치본이 같은 `app.ico`를 창 아이콘으로 읽고,
-실행 파일·설치 프로그램·설치된 앱 목록도 이 파일을 씁니다. 빌드의 생성 검사는 `scripts/app_icon.py --check`로
-원본 내용 해시와 픽셀 규칙(DESIGN.md "App Icon")을 확인하고 어긋나면 멈춥니다.
+실행 파일·설치 프로그램·설치된 앱 목록도 이 파일을 씁니다. 트레이 아이콘은 같은 폴더의 16·20·24·32px 손본 PNG
+(`tray-icon-<크기>.png`)가 원본이고(벡터 원본 없음), 같은 명령이 `src/my_video_manager/tray.ico`를 만들어 매니페스트에 함께 적습니다.
+트레이가 이 파일을 읽고 설치본에도 실립니다. 빌드의 생성 검사는 `scripts/app_icon.py --check`로
+앱·트레이 아이콘의 원본 내용 해시와 픽셀 규칙(DESIGN.md "App Icon")을 확인하고 어긋나면 멈춥니다.
 
 앱 부분만 담은 패치도 만들려면 `scripts/build.ps1 -Patch`를 사용합니다.
 전체 설치 파일과 함께 `dist/installer/MyVideoManager-Patch-<version>.exe`를 만듭니다.
