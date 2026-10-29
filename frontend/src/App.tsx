@@ -70,7 +70,11 @@ export default function App() {
       api.shellPrepareReturn.connect(prepareReturn)
       disconnect = () => { api.shellChanged.disconnect(changed); api.shellFocusRequested.disconnect(focus); api.shellStatusChanged.disconnect(setStatus); api.shellKeyGuideRequested.disconnect(openKeyGuide); api.shellPrepareReturn.disconnect(prepareReturn) }
       const state = await request<ShellData>(reply => api.shellSnapshot(reply))
-      if (!disposed) { markPageShown(state.tab); setBridge(api); setTab(state.tab); setStatus(state.status) }
+      if (disposed) return
+      // 스냅숏 응답은 탭이 보이게 된 순간이 아니다. 이미 보이는 탭이면 그 뒤의 사용자 입력 이력을 그대로 두고,
+      // 다른 탭으로 바뀔 때만 새로 보인 것으로 친다(첫 화면은 처음부터 보이는 라이브러리, 스냅숏·데이터 도착 순서와 무관).
+      if (state.tab !== shown.current) markPageShown(state.tab)
+      setBridge(api); setTab(state.tab); setStatus(state.status)
     }).catch(error => setError(String(error)))
     return () => { disposed = true; disconnect() }
   }, [])

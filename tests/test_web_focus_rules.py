@@ -53,6 +53,36 @@ HOLD_FIRST_LIBRARY_FOCUS = """(() => {
 })()"""
 
 
+# 웹 셸을 다시 불러온 문서에서 첫 셸 스냅숏 응답을 붙잡고, 라이브러리 초점 요청이 몇 번 왔는지 센다.
+HOLD_FIRST_SHELL_SNAPSHOT = """(() => {
+  let channelClass;
+  window.mvmLibraryFocusCount = 0;
+  Object.defineProperty(window, 'QWebChannel', { configurable: true, get: () => channelClass, set(Original) {
+    channelClass = function(transport, ready) {
+      return new Original(transport, channel => {
+        const shell = channel.objects.shell, snapshot = shell.shellSnapshot;
+        shell.shellSnapshot = callback => snapshot.call(shell, state => { window.mvmReleaseSnapshot = () => callback(state) });
+        const signal = channel.objects.library.libraryFocusRequested, connect = signal.connect;
+        signal.connect = callback => connect.call(signal, target => { window.mvmLibraryFocusCount++; callback(target) });
+        ready(channel);
+      });
+    };
+  }});
+})()"""
+
+
+def reload_with(window, name, source):
+    """문서가 생길 때 넣을 스크립트를 붙이고 웹 셸을 다시 불러온다. 첫 신호보다 먼저 준비된다."""
+    from PySide6.QtWebEngineCore import QWebEngineScript
+    script = QWebEngineScript()
+    script.setName(name)
+    script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+    script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+    script.setSourceCode(source)
+    window.web_host.engine_page.scripts().insert(script)
+    window.web_host.view.reload()
+
+
 def hold_focus(window, page, *targets):
     js(window, HOLD_FOCUS)
     return js(window, f'window.mvmFocusHolds.push({{ object: "{page}", targets: {list(targets)}, release: null }}) - 1')
@@ -141,9 +171,11 @@ def test_late_default_focus_on_first_visit_keeps_focus_the_user_moved(open_windo
     wait_for(lambda: active_text(window).startswith('제외 목록'))
     release_focus(window, held)
     assert active_text(window).startswith('제외 목록')
-    # 사용자 입력이 없으면 늦게 와도 기본 초점에 둔다.
-    switch(window, 1, 'library', 'library-grid')
-    window.web_host._shown_tabs.discard('folders')  # 다음 표시도 처음 여는 것처럼 기본 초점을 요청한다.
+
+
+def test_late_default_focus_on_first_visit_without_input_focuses_default(open_window):
+    window = open_window()
+    # 사용자 입력이 없으면 처음 여는 폴더 관리의 기본 초점 요청이 늦게 와도 기본 초점에 둔다.
     held = hold_focus(window, 'folders', 'folders-add')
     switch(window, 7, 'folders', None)
     wait_for(lambda: focus_held(window, held))
@@ -152,15 +184,8 @@ def test_late_default_focus_on_first_visit_keeps_focus_the_user_moved(open_windo
 
 
 def test_late_first_entry_focus_after_reload_keeps_focus_the_user_moved(open_window):
-    from PySide6.QtWebEngineCore import QWebEngineScript
     window = open_window()
-    script = QWebEngineScript()
-    script.setName('hold-first-library-focus')
-    script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
-    script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-    script.setSourceCode(HOLD_FIRST_LIBRARY_FOCUS)
-    window.web_host.engine_page.scripts().insert(script)
-    window.web_host.view.reload()
+    reload_with(window, 'hold-first-library-focus', HOLD_FIRST_LIBRARY_FOCUS)
     # 첫 진입의 격자 초점 요청이 늦는 동안 목록이 보이고, 사용자가 빠른 검색 칸을 눌러 친다(#257 점검).
     wait_for(lambda: js(window, 'typeof window.mvmFirstFocus === "function"'))
     wait_for(lambda: js(window, f'{GRID}.querySelectorAll("[role=gridcell]").length') > 0
@@ -169,6 +194,24 @@ def test_late_first_entry_focus_after_reload_keeps_focus_the_user_moved(open_win
     wait_for(lambda: active_element(window) == '영상 제목 빠른 검색')
     QTest.keyClicks(view(window), 'cl')
     js(window, 'window.mvmFirstFocus(); true')
+    frames(window)
+    assert active_element(window) == '영상 제목 빠른 검색'
+    QTest.keyClicks(view(window), 'ip')
+    wait_for(lambda: window.library_page.options['query'] == 'clip')
+
+
+def test_late_first_shell_snapshot_keeps_focus_the_user_moved(open_window):
+    window = open_window()
+    reload_with(window, 'hold-first-shell-snapshot', HOLD_FIRST_SHELL_SNAPSHOT)
+    # 첫 셸 스냅숏 응답이 늦는 동안 이미 보인 라이브러리에서 사용자가 빠른 검색 칸을 눌러 친다.
+    wait_for(lambda: js(window, 'typeof window.mvmReleaseSnapshot === "function"'))
+    wait_for(lambda: js(window, f'!!{QUERY} && !{QUERY}.disabled'))
+    click(window, QUICK_SEARCH)
+    wait_for(lambda: active_element(window) == '영상 제목 빠른 검색')
+    QTest.keyClicks(view(window), 'cl')
+    # 늦은 스냅숏은 같은 탭을 새로 보인 것으로 치지 않으므로 그 뒤 첫 진입의 격자 초점 요청이 입력을 덮지 않는다.
+    js(window, 'window.mvmReleaseSnapshot(); true')
+    wait_for(lambda: js(window, 'window.mvmLibraryFocusCount') >= 1)
     frames(window)
     assert active_element(window) == '영상 제목 빠른 검색'
     QTest.keyClicks(view(window), 'ip')
