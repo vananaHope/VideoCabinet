@@ -19,13 +19,14 @@ export default function ShellModals() {
       observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state', 'hidden', 'style'] })
       // 숨긴 뒤 도착한 모달 알림은 Qt가 무시한다. 복귀 때 DOM이 그대로여도 다시 알려야 한다.
       const resync = () => { previous = undefined; requestAnimationFrame(update) }
+      const reshown = () => { if (document.visibilityState === 'visible') resync() }
       shell.shellChanged.connect(resync)
-      document.addEventListener('visibilitychange', resync)
+      document.addEventListener('visibilitychange', reshown)
       update()
       disconnect = () => {
         observer.disconnect()
         shell.shellChanged.disconnect(resync)
-        document.removeEventListener('visibilitychange', resync)
+        document.removeEventListener('visibilitychange', reshown)
         void request(reply => dialogs.modalState(0, reply))
       }
     })

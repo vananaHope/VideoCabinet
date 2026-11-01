@@ -127,6 +127,28 @@ def test_reduced_motion_draws_every_layer_instantly(window):
     assert json.loads(js(window, 'JSON.stringify(window.motionHeld)')) == []
 
 
+def test_hidden_key_guide_keeps_shell_actions_blocked_during_status_updates(window):
+    ready(window)
+    QTest.keyClick(view(window), Qt.Key.Key_F1)
+    wait_for(lambda: present(window, GUIDE) and window.web_host.dialogs.blocks_shell_actions)
+    press_emergency(view(window))
+    wait_for(lambda: js(window, "document.visibilityState") == "hidden")
+    assert not window.isVisible()
+
+    window.show_status("숨긴 동안 폴더 검사 완료")
+    wait_for(lambda: js(window, f"document.querySelector('{NOTICE}')?.textContent.includes('숨긴 동안 폴더 검사 완료')"))
+    assert window.web_host.dialogs.blocks_shell_actions
+    window.show_status("")
+    wait_for(lambda: not present(window, NOTICE))
+    assert window.web_host.dialogs.blocks_shell_actions
+    assert not window.isVisible()
+
+    restore(window)
+    activated(window)
+    QTest.keyClick(view(window), Qt.Key.Key_Escape)
+    wait_for(lambda: not present(window, GUIDE) and not window.web_host.dialogs.blocks_shell_actions)
+
+
 def run_motion_child(request):
     """움직임 줄이기를 끈 Chromium에서 지정한 시험 하나를 실행한다."""
     flags = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '--disable-gpu')
