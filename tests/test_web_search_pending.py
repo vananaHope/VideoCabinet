@@ -35,6 +35,12 @@ SEARCH_RECORDER = """(() => {
       return new Original(transport, channel => {
         const search = window.__search = channel.objects.search
         const connect = search.changed.connect, find = search.find
+        const snapshot = search.snapshot
+        search.snapshot = reply => snapshot.call(search, json => {
+          const deliver = () => { reply(json); requestAnimationFrame(() => requestAnimationFrame(() => { window.__searchInitialRendered = true })) }
+          if (window.__holdSearchSnapshot) window.__releaseSearchSnapshot = deliver
+          else deliver()
+        })
         search.changed.connect = callback => connect.call(search.changed, json => {
           const query = JSON.parse(json).query
           const deliver = () => { log.delivered.push([performance.now(), query]); callback(json) }
@@ -113,29 +119,33 @@ def open_window(core, monkeypatch, qapp):
     """검색 기록을 켠 MainWindow를 검색 탭에 연다. 첫 검색어로 결과를 받아 둔 채 돌려준다."""
     windows = []
     start = WebShellHost.start
+    hold_initial = False
 
     def record(host):
         script = QWebEngineScript()
         script.setName('search-recorder')
         script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
-        script.setSourceCode(SEARCH_RECORDER)
+        script.setSourceCode(f'window.__holdSearchSnapshot = {json.dumps(hold_initial)};\n' + SEARCH_RECORDER)
         host.engine_page.scripts().insert(script)
         start(host)
 
     monkeypatch.setattr(WebShellHost, 'start', record)
     core.prepare_search()
 
-    def create(first='Python'):
+    def create(first='Python', *, hold_snapshot=False):
+        nonlocal hold_initial
+        hold_initial = hold_snapshot
         window = MainWindow(core, player_factory=Player)
         windows.append(window)
         window.show()
         wait_for(lambda: window.web_host._frontend_ready)
         window.show_search()
         wait_for(lambda: read(window, "!!window.__search && !document.querySelector('main[aria-label=\"검색\"]').parentElement.hidden"))
-        type_query(window, first)
-        expected = len(core.search(first).results)
-        wait_for(lambda: js(window, OPTIONS) == expected and js(window, BUSY) == 'false')
+        if first is not None:
+            type_query(window, first)
+            expected = len(core.search(first).results)
+            wait_for(lambda: js(window, OPTIONS) == expected and js(window, BUSY) == 'false')
         return window
 
     yield create
@@ -199,6 +209,20 @@ def no_pending_text(statuses):
 
 def count(core, query):
     return len(core.search(query).results)
+
+
+def test_typing_before_initial_search_snapshot_keeps_query_and_finds_results(open_window, core):
+    window = open_window(None, hold_snapshot=True)
+    wait_for(lambda: js(window, 'typeof window.__releaseSearchSnapshot === "function"'))
+    click(window, '#search-query')
+    wait_for(lambda: js(window, 'document.activeElement?.id') == 'search-query')
+    QTest.keyClicks(view(window), 'Python')
+    wait_for(lambda: js(window, 'document.getElementById("search-query").value') == 'Python')
+    js(window, 'window.__releaseSearchSnapshot()')
+    wait_for(lambda: js(window, 'window.__searchInitialRendered') is True)
+    assert js(window, 'document.getElementById("search-query").value') == 'Python'
+    wait_for(lambda: js(window, OPTIONS) == count(core, 'Python') and js(window, BUSY) == 'false')
+    assert 'Python' in js(window, PAGE_TEXT)
 
 
 def test_previous_results_stay_dimmed_and_inert_until_new_results(open_window, core):

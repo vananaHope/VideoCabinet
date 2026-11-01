@@ -348,8 +348,10 @@ def test_confirm_dialog_returns_focus_to_its_opener(open_window, how):
 def test_dialog_opened_from_menu_returns_focus_to_menu_button(open_window, how):
     window = open_window()
     # 실제 마우스로 카드를 눌러 페이지가 키 입력을 받게 한 뒤 ▾에 초점을 둔다.
-    click(window, f'#video-{window.core.videos()[1].id}')
-    wait_for(lambda: active_element(window) == 'library-grid')
+    target = window.library_page.visible_ids[1]
+    click(window, f'#video-{target}')
+    # 격자는 클릭 전부터 초점이 있다. 실제 클릭으로 선택이 바뀐 뒤에만 ▾로 초점을 옮긴다.
+    wait_for(lambda: js(window, SELECTED) == f'video-{target}' and active_element(window) == 'library-grid')
     js(window, f'document.querySelector(\'{RANDOM_MENU}\').focus()')
     wait_for(lambda: active_label(window) == '무작위 재생 범위')
     QTest.keyClick(view(window), Qt.Key.Key_Down)

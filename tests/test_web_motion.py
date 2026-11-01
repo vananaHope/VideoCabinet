@@ -23,16 +23,19 @@ MOTION_CHILD = os.environ.get('MVM_MOTION_CHILD') == '1'
 MOTION = web_tokens()['motion']
 CTRL = Qt.KeyboardModifier.ControlModifier
 
-# 전환이 시작되는 순간 그 애니메이션을 멈춰 붙잡는다. 멈춘 동안(=전환 중) 넣은 입력이 바로 적용되는지 본다.
+# 시험에서만 전환을 시작부터 멈춘다. 부하로 animationstart 전달이 늦어도 이미 끝난 전환을 놓치지 않는다.
+# 실제 animationstart와 제품의 이름·길이·불투명도를 확인하고, 멈춘 전환 중 입력이 바로 적용되는지 본다.
 HOLD = """(() => {
   window.motionHeld = []
+  const pause = document.createElement('style')
+  pause.textContent = '* { animation-play-state: paused !important; }'
+  document.head.append(pause)
   document.addEventListener('animationstart', event => {
     const target = event.target
     const slot = target.dataset.slot ?? target.dataset.page
       ?? (target.matches('[role=dialog],[role=alertdialog]') || target.querySelector('[role=dialog],[role=alertdialog]') ? 'dialog' : target.tagName)
     for (const animation of target.getAnimations()) {
-      if (animation.animationName !== event.animationName || animation.playState !== 'running') continue
-      animation.pause()
+      if (animation.animationName !== event.animationName || animation.playState !== 'paused') continue
       window.motionHeld.push({ name: event.animationName, slot, time: animation.currentTime,
         duration: animation.effect.getComputedTiming().duration, opacity: Number(getComputedStyle(target).opacity) })
     }
@@ -233,11 +236,15 @@ def test_transitions_run_without_reduced_motion_and_never_block_input(request):
     wait_for(lambda: active_page(window) == 'library')
 
     # 긴급 탈출은 열리는 중인 대화상자를 그대로 숨기고 되돌린다.
+    js(window, 'window.motionHeld = []')
     QTest.keyClick(view(window), Qt.Key.Key_F1)
+    # DOM 부착만이 아니라 실제 여는 전환이 시작됐음을 확인한다. 붙잡힌 전환은 끝내지 않는다.
+    wait_held(window, 'dialog', 'fade-enter', MOTION['motion-duration-enter'])
     wait_for(lambda: present(window, GUIDE) and window.web_host.dialogs.blocks_shell_actions)
     press_emergency(view(window))
     assert not window.isVisible()
     restore(window)
-    assert present(window, GUIDE)
+    # visibilityState와 Qt 창 표시가 React 대화상자의 재표시까지 보증하지는 않는다.
+    wait_for(lambda: present(window, GUIDE) and window.web_host.dialogs.blocks_shell_actions)
     QTest.keyClick(view(window), Qt.Key.Key_Escape)
     wait_for(lambda: not present(window, GUIDE) and not window.web_host.dialogs.blocks_shell_actions)

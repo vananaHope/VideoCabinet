@@ -86,6 +86,12 @@ winget install --id 7zip.7zip --version 26.04 --exact --source winget --accept-p
 자식 프로세스 성공 경로의 대기 한도는 `tests/wait_helpers.py`의 `CHILD_READY_TIMEOUT`(기본 90초)이며 `MVM_TEST_CHILD_TIMEOUT` 환경 변수로 조정합니다. 조건이 충족되면 즉시 진행하고, 짧은 timeout 동작 검사는 별도 한도를 유지합니다. 실패를 빨리 보려면 단독 실행에서 `MVM_TEST_CHILD_TIMEOUT` 값을 낮춥니다.
 건너뛴 테스트와 이유까지 비교하려면 직렬·병렬 명령에 각각 `-rs`를 붙입니다.
 
+웹 입력 시험은 Qt 이벤트 전송이나 창 표시만으로 완료를 판단하지 않습니다. 카드 클릭은 **선택 변경**까지,
+긴급 탈출 복귀는 **웹 입력란 초점·대화상자 재표시**까지 조건 대기합니다. 이미 초점이 있는 격자를 다시
+클릭할 때 초점만 기다리면 아직 전달 중인 클릭을 놓칩니다. 고정 시간 대기나 시간 제한 증가로 대신하지 않습니다.
+전환 중 입력 시험은 시험용 CSS로 전환을 시작부터 멈추고 실제 `animationstart`와 제품의 이름·길이·불투명도를 확인한 뒤 입력하며,
+DOM 부착만 확인하거나 전환이 끝날 때까지 기다리는 검사로 바꾸지 않습니다.
+
 ## 웹 빌드와 개발 서버
 
 배포용 빌드는 `src/my_video_manager/web/`에 생성되며 package-data로 포함됩니다.
@@ -601,6 +607,8 @@ python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-204 -- .venv
 모아보기는 기존 `ReelControls`의 재생·반복·복습 흐름을 쓰며, 검색은 장면 재생 후
 `Esc`로 돌아왔을 때 검색어·결과·선택을 보존합니다. 검색 입력의 `↓`/`Enter`는
 결과로 이동하고, 목록의 `Enter`는 선택한 장면을 재생합니다.
+검색 탭의 첫 응답 전에 입력한 초안도 유지합니다. 초기 상태는 입력란을 덮지 않고, 브리지가 준비되면
+최신 초안을 검색합니다. IME 조합 중이면 조합이 끝날 때까지 검색을 보내지 않습니다.
 
 ```powershell
 .venv/Scripts/python.exe scripts/check_web_reel_search.py --offscreen
