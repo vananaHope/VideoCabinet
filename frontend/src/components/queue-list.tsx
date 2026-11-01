@@ -14,15 +14,15 @@ const rowClass = cva(`${columns} items-center border-b py-1 text-body`, { varian
 // 고정 머리글 높이 토큰을 scroll-padding에도 써서, 키보드로 위쪽 행을 골라도 머리글에 가리지 않게 한다.
 const listClass = cva("min-h-32 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border scroll-pt-queue-header" } } })
 const trackClass = cva("h-2 w-full rounded-full", { variants: { selected: { true: "bg-muted-foreground", false: "bg-muted" } } })
-const badges = { completed: "success", failed: "destructive", transcribing: "info", translating: "info", held: "highlight", queued: "muted" } as const
+const badges = { completed: "success", failed: "destructive", transcribing: "info", reading: "info", translating: "info", held: "highlight", queued: "muted" } as const
 // 행 안내의 위계: 실패 사유는 오류, 보류 사유는 경고, 그 밖의 안내(말소리 없음·이어받기 등)는 정보다.
 const tones = { failed: "error", held: "warning" } as const
 
-const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { store: QueueStore; id: number; selected: boolean; onSelect: (id: number) => void }) {
+const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { store: QueueStore; id: string; selected: boolean; onSelect: (id: string) => void }) {
   const subscribe = useCallback((listener: () => void) => store.subscribeRow(id, listener), [store, id])
   const row = useSyncExternalStore(subscribe, () => store.rows.get(id))
   if (!row) return null
-  return <div id={`queue-row-${id}`} role="row" aria-selected={selected} data-queue-row={id} className={rowClass({ selected })} onClick={() => onSelect(id)}>
+  return <div id={`queue-row-${id}`} role="row" aria-selected={selected} data-queue-row={id} data-queue-kind={row.queueKind} className={rowClass({ selected })} onClick={() => onSelect(id)}>
     <div role="gridcell" title={row.title} className={`${wide} truncate text-body-strong`}>{row.title}</div>
     <div role="gridcell"><StatusBadge variant={selected && row.state === "queued" ? "selectedMuted" : badges[row.state as keyof typeof badges]}>{row.stateLabel}</StatusBadge></div>
     <div role="gridcell" className="flex min-w-0 items-center gap-2"><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="progressbar" aria-label={`${row.title} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(row.progress * 100)} className={trackClass({ selected })}><rect width={Math.max(0, Math.min(100, row.progress * 100))} height={8} className="fill-primary" /></svg><span className="text-label tabular-nums">{Math.round(row.progress * 100)}%</span></div>
@@ -37,10 +37,10 @@ export const queueKeyRows: readonly KeyGuideRow[] = [
   { keys: ["Home", "End"], label: "처음 / 끝 항목" },
 ]
 
-export function QueueList({ store, ids, selected, onSelect, emptyState }: { store: QueueStore; ids: number[]; selected: number | null; onSelect: (id: number) => void; emptyState: ReactNode }) {
+export function QueueList({ store, ids, selected, onSelect, emptyState }: { store: QueueStore; ids: string[]; selected: string | null; onSelect: (id: string) => void; emptyState: ReactNode }) {
   function keyDown(event: KeyboardEvent) {
     if (event.nativeEvent.isComposing || event.ctrlKey || event.altKey || event.metaKey || !ids.length) return
-    const index = Math.max(0, ids.indexOf(selected ?? -1))
+    const index = Math.max(0, ids.indexOf(selected ?? ""))
     let next = event.key === "ArrowDown" ? Math.min(index + 1, ids.length - 1) : event.key === "ArrowUp" ? Math.max(index - 1, 0) : event.key === "Home" ? 0 : event.key === "End" ? ids.length - 1 : -1
     if (event.key === "PageDown" || event.key === "PageUp") {
       const list = event.currentTarget

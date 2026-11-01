@@ -10,6 +10,7 @@ from .adapters import MpvPlayer
 from .app_version import DISPLAY_NAME
 from .core import AppCore, Command, CommandType
 from .random_continuous_play import RandomPlayScope
+from .onscreen_controls import OnScreenSubtitleControls
 from .subtitle_controls import SubtitleControls
 from .translation_controls import TranslationControls
 from .web_dialogs_entries import HighlightList
@@ -62,6 +63,7 @@ class MainWindow(QMainWindow):
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self.poll_position)
         self.subtitles = SubtitleControls(self)
+        self.onscreen_subtitles = OnScreenSubtitleControls(self)
         self.translations = TranslationControls(self)
         self.tray = TrayControls(self)
         from .update_controls import UpdateControls
@@ -399,6 +401,8 @@ class MainWindow(QMainWindow):
 
     def stop_player(self, *, report=True):
         self.position_timer.stop()
+        # 영역을 정하던 장면이 사라지므로 덮개도 닫는다.
+        self.playback_page.close_region_selector()
         # 닫는 엔진의 일시정지 상태는 읽지 않는다. 남은 보고는 기존처럼 처리한다.
         self._hold = None
         self._pending_random_eof = None

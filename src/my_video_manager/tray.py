@@ -125,13 +125,16 @@ class TrayControls(QObject):
         counts = self.core.take_subtitle_queue_completion()
         if counts is not None:
             no_speech = f" · 말소리 없음 {counts.no_speech}개" if counts.no_speech else ""
+            no_text = f" · 읽은 글자 없음 {counts.no_text}개" if counts.no_text else ""
             self.icon.showMessage(DISPLAY_NAME, "자막 대기열 처리를 마쳤습니다. "
-                                  f"이번 처리: 완료 {counts.completed}개{no_speech} · 실패 {counts.failed}개")
+                                  f"이번 처리: 완료 {counts.completed}개{no_speech}{no_text} · 실패 {counts.failed}개")
 
     def resume(self):
         self.window.subtitles.stopping = False
+        self.window.onscreen_subtitles.stopping = False
         self.core.resume_subtitle_processing()
         self.window.subtitles.timer.start(500)
+        self.window.onscreen_subtitles.timer.start(500)
         self.window.translations.timer.start(500)
         # 종료를 취소하면 종료 확인 중 미뤄 둔 감시 묶음을 이어서 검사한다.
         self.window.folder_watch.flush()
@@ -172,6 +175,7 @@ class TrayControls(QObject):
                     self.quitting = False
                     self.resume()
                     return
+                window.onscreen_subtitles.shutdown()
                 window.translations.shutdown()
             elif not QSystemTrayIcon.isSystemTrayAvailable():
                 raise RuntimeError("시스템 트레이를 사용할 수 없습니다. 설정(Ctrl+8)의 완전 종료를 이용하세요.")

@@ -37,6 +37,7 @@ from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.subtitle_queue import SubtitleQueueItem
+from my_video_manager.subtitle_queue_kind import ONSCREEN_SUBTITLE, QUEUE_KIND_LABELS, TRANSCRIPTION
 from my_video_manager.ui import MainWindow
 
 app = QApplication([])
@@ -170,7 +171,7 @@ try:
         page.refresh()
         settle()
         keys(Qt.Key.Key_Down)
-        assert js("document.querySelector('#queue-list [aria-selected=true]').dataset.queueRow") == str(videos[1].id)
+        assert js("document.querySelector('#queue-list [aria-selected=true]').dataset.queueRow") == f'{videos[1].id}:{TRANSCRIPTION}'
         keys(Qt.Key.Key_Tab)
         assert js('document.activeElement.textContent') == '기존 한국어 자막 모두 다듬기'
         keys(Qt.Key.Key_Tab)
@@ -265,20 +266,35 @@ try:
     for video in videos:
         core.request_subtitles(video.id)
     original_items = core.subtitle_queue_items
-    visual_count = 6
+    states = ('queued', 'transcribing', 'reading', 'translating', 'held', 'completed', 'failed')
+    visual_count = len(states)
     tick = 0
     visual_states = True
-    states = ('queued', 'transcribing', 'translating', 'held', 'completed', 'failed')
+
+    def row_id(index):
+        """index번째 영상 행의 웹 id. 화면 자막 상태(읽는 중·완료)로 보인 행은 화면 자막 작업이다."""
+        kind = ONSCREEN_SUBTITLE if states[index % len(states)] in ('reading', 'completed') else TRANSCRIPTION
+        return f'queue-row-{videos[index].id}:{kind}'
 
     def display_items():
         items = list(original_items())[:visual_count]
         if visual_states:
-            items = [SubtitleQueueItem(item.video_id, item.title, states[i % 6], (i % 6) / 5,
-                     '로그인을 확인한 뒤 선택한 번역 보류 재시도를 눌러 주세요. ' * 8 if i == 3 else None)
-                     for i, item in enumerate(items)]
+            # 화면 자막 작업은 읽는 중과 완료(줄 수)로, 나머지는 받아쓰기 작업으로 보인다.
+            def item(i, source):
+                state = states[i % len(states)]
+                kind = ONSCREEN_SUBTITLE if state in ('reading', 'completed') else TRANSCRIPTION
+                message = ('로그인을 확인한 뒤 선택한 번역 보류 재시도를 눌러 주세요. ' * 8 if state == 'held'
+                           else '화면 자막 12줄' if kind == ONSCREEN_SUBTITLE and state == 'completed' else None)
+                return SubtitleQueueItem(source.video_id, source.title, state, (i % len(states)) / (len(states) - 1),
+                                         message, QUEUE_KIND_LABELS[kind], queue_kind=kind)
+            items = [item(i, source) for i, source in enumerate(items)]
         if items:
             items[0] = replace(items[0], progress=(tick % 90) / 100,
                                title='아주 긴 한글 영상 제목 ' + 'LongVideoTitle' * 12)
+        if visual_states and visual_count <= len(states):
+            # 같은 영상의 받아쓰기·화면 자막 작업이 따로 줄을 선다.
+            items.insert(1, replace(items[0], state='queued', progress=0, error=None,
+                                    task_label=QUEUE_KIND_LABELS[ONSCREEN_SUBTITLE], queue_kind=ONSCREEN_SUBTITLE))
         return tuple(items)
 
     core.subtitle_queue_items = display_items
@@ -299,7 +315,7 @@ try:
     visual_count = 300
     page.refresh()
     wait(lambda: js('document.querySelectorAll("[data-queue-row]").length') == 300)
-    assert js("document.querySelector('[aria-label=\"상태별 개수\"]').textContent.includes('대기 50개')")
+    assert js("document.querySelector('[aria-label=\"상태별 개수\"]').textContent.includes('대기 43개')")
     capture('300')
     assert js('document.querySelectorAll("[data-queue-row]").length') == 300
     js("document.getElementById('queue-list').focus()")
@@ -312,16 +328,16 @@ try:
         return js("document.getElementById('queue-list').getAttribute('aria-activedescendant')")
     keys(Qt.Key.Key_Home)
     keys(Qt.Key.Key_PageDown)
-    assert selected_row() == f'queue-row-{videos[page_size].id}'
+    assert selected_row() == row_id(page_size)
     keys(Qt.Key.Key_PageUp)
-    assert selected_row() == f'queue-row-{videos[0].id}'
+    assert selected_row() == row_id(0)
     keys(Qt.Key.Key_PageUp)
-    assert selected_row() == f'queue-row-{videos[0].id}'
+    assert selected_row() == row_id(0)
     keys(Qt.Key.Key_End)
     keys(Qt.Key.Key_PageDown)
-    assert selected_row() == f'queue-row-{videos[-1].id}'
+    assert selected_row() == row_id(len(videos) - 1)
     keys(Qt.Key.Key_PageUp)
-    assert selected_row() == f'queue-row-{videos[-1 - page_size].id}'
+    assert selected_row() == row_id(len(videos) - 1 - page_size)
     metrics['checks'].append(f'PageUp/PageDown 표시 행 {page_size}개만큼 이동 및 양 끝 경계')
     click_text('자동 자막 규칙')
     capture('rules-empty')
@@ -386,7 +402,7 @@ try:
     keys(Qt.Key.Key_End)
     scroll = js("document.getElementById('queue-list').scrollTop")
     selection = js("document.getElementById('queue-list').getAttribute('aria-activedescendant')")
-    first_progress = f"document.getElementById('queue-row-{videos[0].id}').querySelector('[role=progressbar]').getAttribute('aria-valuenow')"
+    first_progress = f"document.getElementById('queue-row-{videos[0].id}:{TRANSCRIPTION}').querySelector('[role=progressbar]').getAttribute('aria-valuenow')"
     tick += 1
     progress = str(round((tick % 90) / 100 * 100))
     assert js(first_progress) != progress
@@ -455,7 +471,7 @@ try:
     host.engine_page.titleChanged.disconnect(complete)
     assert finished, '웹 갱신 측정 시간 초과'
     web = js_json('window.queueProfile')
-    assert web['changedRows'] == [str(videos[0].id)], web
+    assert web['changedRows'] == [f'{videos[0].id}:{TRANSCRIPTION}'], web
     metrics['web_commit_ms'] = {'median': median(web['commitMs']), 'max': max(web['commitMs'])}
     metrics['web_next_frame_ms'] = {'median': median(web['nextFrameMs']), 'max': max(web['nextFrameMs'])}
     metrics['web_changed_rows'] = web['changedRows']

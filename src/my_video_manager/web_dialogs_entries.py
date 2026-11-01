@@ -42,6 +42,13 @@ class RandomScopeChooser(_Entry):
         super().__init__(parent, 'random-scope')
 
 
+class OnScreenRegionDialog(_Entry):
+    """화면 자막 영역을 끈 뒤 읽을 언어를 확인한다. 재생 화면에서 연다."""
+
+    def __init__(self, core, video_id, region, parent):
+        super().__init__(parent, 'onscreen-region', video_id=video_id, region=region)
+
+
 class ReviewDialog(_Entry):
     def __init__(self, core, video_id, jump, changed, parent=None):
         super().__init__(parent, 'review', video_id=video_id, jump=jump, changed=changed)

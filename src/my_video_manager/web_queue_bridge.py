@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
-from .subtitle_queue_kind import TRANSCRIPTION
+from .subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION
 from .web_queue_contract import QUEUE
 from .web_json import encode
 
@@ -86,7 +86,7 @@ class QueueBridge(QObject):
             return encode({'error': str(error)})
 
     @QUEUE.slot('action')
-    def action(self, name, video_id):
+    def action(self, name, video_id, queue_kind):
         def execute():
             core = self.page.core
             if name == 'previewRefineExisting':
@@ -100,24 +100,27 @@ class QueueBridge(QObject):
                 QThreadPool.globalInstance().start(_BulkRefinement(core, self._bulk_signals))
                 return {'pending': True}
             if name == 'retryFailed':
-                result = core.retry_failed_subtitles(kind=TRANSCRIPTION)
+                # 받아쓰기와 화면 자막의 실패 항목을 함께 다시 시도한다.
+                results = [core.retry_failed_subtitles(kind=kind) for kind in (TRANSCRIPTION, ONSCREEN_SUBTITLE)]
                 details = []
-                for item in result.skipped:
+                for item in (skipped for result in results for skipped in result.skipped):
                     try:
                         title = core.video(item.video_id).title or str(item.video_id)
                     except (ValueError, OSError, sqlite3.Error):
                         title = str(item.video_id)
                     details.append(f'영상 {title}: {item.reason}')
-                return {'message': f'재시도 {result.retried}개 · 건너뜀 {result.skipped_count}개' +
+                return {'message': f'재시도 {sum(r.retried for r in results)}개 · '
+                                   f'건너뜀 {sum(r.skipped_count for r in results)}개' +
                         ('\n' + '\n'.join(details) if details else '')}
-            if video_id not in {entry.video_id for entry in core.subtitle_queue_items() if entry.queue_kind == TRANSCRIPTION}:
-                raise ValueError('현재 대기열에 없는 영상입니다.')
+            if (video_id, queue_kind) not in {(entry.video_id, entry.queue_kind) for entry in core.subtitle_queue_items()}:
+                raise ValueError('현재 대기열에 없는 항목입니다.')
             if name == 'promote':
-                core.promote_subtitle(video_id, kind=TRANSCRIPTION)
+                core.promote_subtitle(video_id, kind=queue_kind)
             elif name == 'remove':
-                core.remove_from_subtitle_queue(video_id, kind=TRANSCRIPTION)
+                core.remove_from_subtitle_queue(video_id, kind=queue_kind)
             elif name == 'retryHeld':
-                if any(e.video_id == video_id and e.state == 'held' for e in core.translation_queue()):
+                if queue_kind == TRANSCRIPTION and any(e.video_id == video_id and e.state == 'held'
+                                                       for e in core.translation_queue()):
                     core.request_translation(video_id)
             else:
                 raise ValueError('지원하지 않는 작업입니다.')
