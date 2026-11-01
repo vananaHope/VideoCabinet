@@ -430,6 +430,8 @@ class PlaybackPage(QWidget):
     def seek(self, position=None, *, command=None):
         """마우스와 키보드 탐색은 같은 위치 보고·모아보기 동기화를 거친다."""
         window = self.shell
+        if self.region_selector is not None:
+            return  # 영역을 정하는 동안 진행 막대로도 장면을 바꾸지 않는다.
         try:
             window.sync_position()
             window.reel.sync()
@@ -504,6 +506,8 @@ class PlaybackPage(QWidget):
 
     def jump_highlight(self, highlight):
         window = self.shell
+        if self.region_selector is not None:
+            return  # 영역을 정하는 동안 하이라이트 목록으로도 장면을 바꾸지 않는다.
         try:
             window.sync_position()
             session = self.core.playback.session
@@ -865,6 +869,9 @@ class PlaybackPage(QWidget):
             return True
         if not window.player:
             return False
+        if self.region_selector is not None:
+            # 화면 자막 영역을 정하는 동안은 멈춘 장면을 바꾸지 않는다. 덮개 밖 단추로 눌러도 같다.
+            return True
         changed = False
         try:
             if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):

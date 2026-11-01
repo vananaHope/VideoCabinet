@@ -118,13 +118,12 @@ class FFmpegMediaReader:
         self, path: Path, region: RegionRect, *, fps: float, cancellation: Event
     ) -> Iterator[tuple[float, RegionImage]]:
         """표시 방향의 영역을 디스크에 쓰지 않고 회색조 프레임으로 읽는다."""
+        # 크기 조사도 취소를 받는다. 취소되면 아무 장도 내보내지 않고 끝나 실패가 아닌 대기로 돌아간다.
+        info = self.read_resolution(path, cancellation=cancellation)
         if cancellation.is_set():
             return
-        info = self.read(path)
         if info is None or not info.width or not info.height:
             raise RuntimeError("영상의 표시 크기를 읽을 수 없습니다.")
-        if cancellation.is_set():
-            return
         x = min(info.width - 1, max(0, int(region.x * info.width)))
         y = min(info.height - 1, max(0, int(region.y * info.height)))
         width = min(info.width - x, max(1, int(region.width * info.width)))

@@ -26,9 +26,11 @@ SAMPLES_PER_SECOND = 4
 NOISE_SAMPLES = 2
 # 이 장 수보다 짧게 보인 줄(0.75초 미만)은 전환 중 잘못 읽힌 것으로 보고 버린다.
 MIN_LINE_SAMPLES = 3
-# 이웃한 두 줄의 글자가 이 비율 이상 같으면(예: "Goodby for now"와 "Goodbye for now") OCR이 같은 자막을
-# 다르게 읽은 것으로 보고 한 줄로 잇는다. "Round 1"·"Round 2"처럼 짧은 글자의 한 자 차이는 다른 줄로 둔다.
+# 이웃한 두 줄의 글자가 이 비율 이상 같고(예: "Goodby for now"와 "Goodbye for now") 한쪽이 JITTER_SAMPLES장
+# (1초) 이하로만 보였으면 OCR이 같은 자막을 잠깐 다르게 읽은 것으로 보고 한 줄로 잇는다. 둘 다 그보다 오래
+# 보였으면("Player 1 wins"·"Player 2 wins") 서로 다른 자막이다. "Round 1"·"Round 2"처럼 짧은 글자의 한 자 차이도 다른 줄이다.
 SIMILAR_TEXT_RATIO = 0.9
+JITTER_SAMPLES = 4
 # 같은 그림 판정: 밝기가 이 값보다 크게 바뀐 화소가 영역 화소의 1/5000 이하이면 앞 그림과 같다고 본다.
 # 압축 잡음은 넘기고, 글자 하나가 바뀌는 정도의 변화는 놓치지 않는 값이다.
 CHANGED_PIXEL_DELTA = 24
@@ -201,8 +203,9 @@ def merge_samples(samples: Sequence[tuple[float, str]],
 
     1. 같은 글자가 이어지는 장을 한 덩어리로 묶는다.
     2. 앞뒤 덩어리가 같은 글자이고 그 사이 NOISE_SAMPLES장 이하만 다르게 읽혔으면 잇는다.
-    3. 이웃한 덩어리의 글자가 거의 같으면(SIMILAR_TEXT_RATIO 이상) 잇는다. OCR이 같은 자막의 글자 한둘을
-       장마다 다르게 읽는 경우다. 줄의 글자는 가장 많은 장에서 읽힌 글자다.
+    3. 이웃한 덩어리의 글자가 거의 같고(SIMILAR_TEXT_RATIO 이상) 한쪽이 JITTER_SAMPLES장 이하이면 잇는다.
+       OCR이 같은 자막의 글자 한둘을 잠깐 다르게 읽는 경우다. 줄의 글자는 가장 많은 장에서 읽힌 글자다.
+       둘 다 오래 보인 덩어리는 글자가 비슷해도 서로 다른 자막으로 둔다.
     4. 빈 글자와 MIN_LINE_SAMPLES장보다 짧은 줄은 버린다.
     시작은 처음 보인 장의 시각, 끝은 마지막으로 보인 장의 다음 장 시각이다.
     """
@@ -226,7 +229,9 @@ def merge_samples(samples: Sequence[tuple[float, str]],
     index = 1
     while index < len(runs):
         before, run = _run_text(runs[index - 1]), _run_text(runs[index])
-        if before and run and SequenceMatcher(None, before, run).ratio() >= SIMILAR_TEXT_RATIO:
+        shorter = min(runs[index - 1][2] - runs[index - 1][1], runs[index][2] - runs[index][1]) + 1
+        if (before and run and shorter <= JITTER_SAMPLES
+                and SequenceMatcher(None, before, run).ratio() >= SIMILAR_TEXT_RATIO):
             runs[index - 1][0].update(runs[index][0])
             runs[index - 1][2] = runs[index][2]
             del runs[index]

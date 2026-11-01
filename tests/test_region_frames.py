@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import subprocess
+import sys
 from threading import Event
 
 import pytest
@@ -133,6 +134,37 @@ def test_closing_generator_reaps_process(reader, tmp_path, monkeypatch):
     assert all(process.stdout.closed and process.stderr.closed for process in processes)
 
 
+def test_cancellation_during_probe_stops_without_frames_or_error(reader, tmp_path, monkeypatch):
+    """크기를 읽는 ffprobe 단계에서도 취소를 받는다(대기열 빼기·앱 종료가 기다리지 않는다)."""
+    path = encode(reader, tmp_path / "probe.mkv", duration=1, box=False)
+    popen = subprocess.Popen
+    probes, started = [], Event()
+
+    def launch(command, *args, **kwargs):
+        if command[0] == reader.ffprobe:
+            # 응답하지 않는 ffprobe 대신 오래 자는 프로세스를 띄운다.
+            process = popen([sys.executable, "-c", "import time; time.sleep(60)"], *args, **kwargs)
+            probes.append(process)
+            started.set()
+            return process
+        return popen(command, *args, **kwargs)
+
+    monkeypatch.setattr(adapters.subprocess, "Popen", launch)
+    cancellation = Event()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = executor.submit(lambda: list(reader.region_frames(
+            path, RegionRect(0, 0, 1, 1), fps=4, cancellation=cancellation)))
+        try:
+            assert started.wait(5)
+            cancellation.set()
+            assert result.result(timeout=3) == []
+        finally:
+            cancellation.set()
+            for process in probes:
+                process.kill()
+    assert probes and all(process.poll() is not None for process in probes)
+
+
 def test_missing_file_raises_runtime_error(reader, tmp_path):
     with pytest.raises(RuntimeError):
         frames(reader, tmp_path / "missing.mkv", RegionRect(0, 0, 1, 1))
@@ -140,13 +172,13 @@ def test_missing_file_raises_runtime_error(reader, tmp_path):
 
 def test_decoder_failure_raises_runtime_error(reader, tmp_path, monkeypatch):
     path = encode(reader, tmp_path / "removed.mkv", duration=1, box=False)
-    read = reader.read
+    read = reader.read_resolution
 
-    def read_then_remove(path):
-        info = read(path)
+    def read_then_remove(path, *, cancellation):
+        info = read(path, cancellation=cancellation)
         path.unlink()
         return info
 
-    monkeypatch.setattr(reader, "read", read_then_remove)
+    monkeypatch.setattr(reader, "read_resolution", read_then_remove)
     with pytest.raises(RuntimeError):
         frames(reader, path, RegionRect(0, 0, 1, 1))

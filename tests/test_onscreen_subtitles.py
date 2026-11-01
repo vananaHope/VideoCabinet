@@ -170,6 +170,15 @@ def test_neighbouring_readings_of_almost_the_same_text_are_one_line(setup):
     assert lines(core, a.id) == [(2, 4, "Round 1"), (4, 6, "Round 2"), (17, 21, "Goodbye for now")]
 
 
+def test_long_lasting_similar_captions_stay_separate_lines(setup):
+    core, media, _, (a, _) = setup
+    # 거의 같은 글자라도 각각 충분히 오래 보였으면 OCR 흔들림이 아니라 다른 자막이다.
+    media.captions = ((1, 4, "Player 1 wins"), (4, 7, "Player 2 wins"))
+    core.set_onscreen_subtitle_regions(a.id, [(BAND, "en")])
+    core.process_next_onscreen_subtitle()
+    assert lines(core, a.id) == [(1, 4, "Player 1 wins"), (4, 7, "Player 2 wins")]
+
+
 @pytest.mark.parametrize("frames,kept", [(2, False), (3, True)])
 def test_very_short_lines_are_dropped(setup, frames, kept):
     core, media, _, (a, _) = setup

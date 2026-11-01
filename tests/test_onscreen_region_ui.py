@@ -209,6 +209,34 @@ def test_escape_and_tiny_drag_do_not_open_dialog_and_playback_keys_wait(window):
     assert window.core.onscreen_subtitle_regions(video.id) == ()
 
 
+def test_mouse_playback_controls_wait_while_selecting_and_work_after(window):
+    from my_video_manager.core import Command, CommandType
+    core, page = window.core, window.playback_page
+    video, selector = start(window)
+    core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))  # 20초 지점
+    highlight, = core.highlights(video.id)
+    player = window.player
+    player.seek_to(60)
+    window.sync_position()
+    position = player.position
+    # 덮개 밖의 재생 단추·진행 막대·하이라이트 목록은 정하는 동안 장면을 바꾸지 않는다.
+    QTest.mouseClick(page.pause_button, Qt.MouseButton.LeftButton)
+    page.progress.seek_requested.emit(90.0)
+    page.highlights_panel.activated.emit(highlight)
+    QApplication.processEvents()
+    assert player.paused and player.position == position
+    assert page.region_selector is selector
+    key(window, Qt.Key.Key_Escape)
+    assert page.region_selector is None
+    page.progress.seek_requested.emit(90.0)
+    assert player.position == 90
+    page.highlights_panel.activated.emit(highlight)
+    # 하이라이트 이동은 그 장면부터 다시 재생한다(기존 동작).
+    assert player.position == highlight.start and not player.paused
+    QTest.mouseClick(page.pause_button, Qt.MouseButton.LeftButton)
+    assert player.paused
+
+
 def test_leaving_playback_closes_the_selector(window):
     start(window)
     window.back_to_list()

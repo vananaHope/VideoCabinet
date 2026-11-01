@@ -912,7 +912,7 @@ v8은 화면 자막 영역·세대·줄 테이블(`onscreen_subtitle_regions`, `
 이를 모르는 이전 버전이 열지 않도록 버전을 올립니다. 영역은 영상 ID에 속해 위치 이동·복사에도 유지됩니다.
 `onscreen_subtitles.py`의 `OnScreenSubtitles`가 영역 저장, 대기열 등록·처리·취소·재시도, 훑기·줄 합치기·저장을 맡고,
 영역 이미지는 `RegionFrameReader`(ffmpeg `FFmpegMediaReader.region_frames`), 글자 읽기는 `OcrEngine`
-(`WindowsOcrEngine`) 어댑터로 주입합니다. 줄 합치기 기준값(초당 4장, 잡음 2장, 최소 3장, 비슷한 글자 0.9, 같은 그림 판정)은
+(`WindowsOcrEngine`) 어댑터로 주입합니다. 줄 합치기 기준값(초당 4장, 잡음 2장, 최소 3장, 비슷한 글자 0.9·흔들림 4장 이하, 같은 그림 판정)은
 `tests/test_onscreen_subtitles.py`가 고정합니다. 화면 자막 작업자(`onscreen_controls.py`)는 받아쓰기 작업자와 따로 돌아갑니다.
 새 등록과 파일 변경 검사 때 ffprobe의 첫 일반 영상 스트림 크기를 저장하며 display matrix와
 구형 rotate 태그의 90/270도 회전을 반영합니다. 해상도 미확인 기존 영상은 유휴 시간에
