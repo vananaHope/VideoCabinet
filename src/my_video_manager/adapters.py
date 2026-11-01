@@ -1,5 +1,8 @@
 """ffmpeg와 libmpv에 대한 외부 어댑터."""
 
+from collections import deque
+from dataclasses import dataclass
+from collections.abc import Iterator
 from functools import lru_cache
 import os
 from pathlib import Path
@@ -8,10 +11,29 @@ import shutil
 import subprocess
 import sys
 import time
-from threading import Lock
+from threading import Event, Lock, Thread
 
 from .core import Command, CommandType, MediaInfo, playback_speed
 from .media import parse_ffprobe_result
+from .onscreen_subtitles import RegionImage, RegionRect
+
+
+# 화면 자막 영역 읽기 전 영상 크기 조사(ffprobe)의 제한 시간. 일반 읽기(read)와 같은 120초로,
+# 받아쓰기 등으로 바쁜 PC에서도 실패하지 않으면서 응답 없는 파일에서 끝없이 기다리지는 않는다.
+REGION_PROBE_TIMEOUT_SECONDS = 120
+
+
+class ProbeTimeout(RuntimeError):
+    """영상 크기 조사가 제한 시간 안에 끝나지 않았다."""
+
+
+@dataclass(frozen=True)
+class VideoFrame:
+    """재생 중인 영상의 한 장면. 화소는 bgr0(한 화소 4바이트), 한 행은 stride 바이트다."""
+    width: int
+    height: int
+    stride: int
+    data: bytes
 
 
 def executable(name: str) -> str:
@@ -48,17 +70,17 @@ class FFmpegMediaReader:
         return parse_ffprobe_result(result.stdout, suffix=path.suffix,
                                     returncode=result.returncode, error=result.stderr)
 
-    def read_resolution(self, path: Path, *, cancellation) -> MediaInfo | None:
-        """채우기 전용: 낮은 우선순위로 읽고 종료/전경 작업 요청에 즉시 양보한다."""
+    def read_resolution(self, path: Path, *, cancellation, timeout: float = 15) -> MediaInfo | None:
+        """낮은 우선순위로 읽고 취소(종료·전경 작업·대기열 빼기)에 즉시 양보한다. 해상도 채우기와 화면 자막이 쓴다."""
         flags = (subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS) if sys.platform == 'win32' else 0
         process = subprocess.Popen([self.ffprobe, '-v', 'error', '-show_format', '-show_streams', '-of', 'json', str(path)],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    encoding='utf-8', errors='replace', creationflags=flags)
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + timeout
         try:
             while not cancellation.is_set():
                 if time.monotonic() >= deadline:
-                    raise RuntimeError('해상도 읽기 제한 시간(15초)을 초과했습니다. 다시 검사해 주세요.')
+                    raise ProbeTimeout(f'해상도 읽기 제한 시간({timeout:g}초)을 초과했습니다. 다시 검사해 주세요.')
                 try:
                     output, error = process.communicate(timeout=0.05)
                     return parse_ffprobe_result(output, suffix=path.suffix, returncode=process.returncode, error=error)
@@ -100,6 +122,92 @@ class FFmpegMediaReader:
             if process.poll() is None:
                 process.kill()
             process.communicate()
+
+    def region_frames(
+        self, path: Path, region: RegionRect, *, fps: float, cancellation: Event
+    ) -> Iterator[tuple[float, RegionImage]]:
+        """표시 방향의 영역을 디스크에 쓰지 않고 회색조 프레임으로 읽는다."""
+        # 크기 조사도 취소를 받는다. 취소되면 아무 장도 내보내지 않고 끝나 실패가 아닌 대기로 돌아간다.
+        try:
+            info = self.read_resolution(path, cancellation=cancellation, timeout=REGION_PROBE_TIMEOUT_SECONDS)
+        except ProbeTimeout as error:
+            # 해상도 채우기의 '다시 검사' 안내는 화면 자막 작업을 되살리지 않는다. 실제 복구 방법을 안내한다.
+            raise RuntimeError(f"화면 자막을 만들 영상 크기를 {REGION_PROBE_TIMEOUT_SECONDS:g}초 안에 읽지 못했습니다. "
+                               "자막 대기열의 '실패 항목 모두 재시도'로 다시 시도하세요.") from error
+        if cancellation.is_set():
+            return
+        if info is None or not info.width or not info.height:
+            raise RuntimeError("영상의 표시 크기를 읽을 수 없습니다.")
+        x = min(info.width - 1, max(0, int(region.x * info.width)))
+        y = min(info.height - 1, max(0, int(region.y * info.height)))
+        width = min(info.width - x, max(1, int(region.width * info.width)))
+        height = min(info.height - y, max(1, int(region.height * info.height)))
+        # 색차 서브샘플링 영상에서도 홀수 크기와 위치를 그대로 잘라야 한다.
+        filters = f"crop={width}:{height}:{x}:{y}:exact=1,fps={fps}"
+        if max(width, height) > 2560:
+            ratio = 2560 / max(width, height)
+            width, height = max(1, round(width * ratio)), max(1, round(height * ratio))
+            filters += f",scale={width}:{height}"
+        filters += ",format=gray"
+        flags = (subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS) if sys.platform == "win32" else 0
+        try:
+            process = subprocess.Popen(
+                [self.ffmpeg, "-v", "error", "-nostdin", "-i", str(path),
+                 "-map", "0:V:0", "-an", "-sn", "-vf", filters,
+                 "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags,
+            )
+        except OSError as error:
+            raise RuntimeError(f"영역 프레임을 읽을 수 없습니다: {error}") from error
+        finished = Event()
+        errors: deque[bytes] = deque(maxlen=16)
+
+        def watch_cancellation():
+            # 종료 신호도 기다려 생성기를 닫을 때 감시 스레드가 남지 않게 한다.
+            while not finished.wait(0.02):
+                if cancellation.is_set():
+                    if process.poll() is None:
+                        process.kill()
+                    return
+
+        def drain_errors():
+            while chunk := process.stderr.read(4096):
+                errors.append(chunk)
+
+        watcher = Thread(target=watch_cancellation, name="region-frame-cancellation")
+        error_reader = Thread(target=drain_errors, name="region-frame-stderr")
+        try:
+            watcher.start()
+            error_reader.start()
+            frame_size = width * height
+            index = 0
+            while not cancellation.is_set():
+                pixels = process.stdout.read(frame_size)
+                if cancellation.is_set():
+                    return
+                if len(pixels) != frame_size:
+                    break
+                yield index / fps, RegionImage(width, height, pixels)
+                index += 1
+            code = process.wait()
+            error_reader.join()
+            if not cancellation.is_set():
+                if code:
+                    detail = b"".join(errors).decode("utf-8", errors="replace").strip()
+                    raise RuntimeError(detail or "영역 프레임을 읽을 수 없습니다.")
+                if pixels and len(pixels) != frame_size:
+                    raise RuntimeError("영역 프레임의 픽셀 데이터가 잘렸습니다.")
+        finally:
+            finished.set()
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            if watcher.ident is not None:
+                watcher.join()
+            if error_reader.ident is not None:
+                error_reader.join()
+            process.stdout.close()
+            process.stderr.close()
 
 
 @lru_cache(maxsize=1)
@@ -246,6 +354,19 @@ class MpvPlayer:
     @property
     def paused(self) -> bool:
         return bool(self._player.pause)
+
+    def video_frame(self) -> VideoFrame | None:
+        """지금 보이는 영상 프레임(자막·재생 상태 표시 제외). 영상이 아직 없거나 종료 중이면 None.
+
+        mpv screenshot-raw의 bgr0 화소(한 화소 4바이트)를 그대로 돌려준다. 회전·화면비를 반영한 표시 모양이다.
+        """
+        with self._callback_lock:
+            if self._closing:
+                return None
+            frame = self._player.command("screenshot-raw", "video")
+        if not frame or frame.get("format") != "bgr0":
+            return None
+        return VideoFrame(frame["w"], frame["h"], frame["stride"], bytes(frame["data"]))
 
     def take_eof(self) -> bool:
         reached = False

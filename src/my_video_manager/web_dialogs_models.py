@@ -3,6 +3,7 @@ from uuid import uuid4
 from math import isfinite
 
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
+from .onscreen_subtitles import ONSCREEN_LANGUAGES, OcrLanguageUnavailable, default_onscreen_language
 from .review import ReviewConfirmationRequired
 from .web_dialogs_data import row, values
 from .web_library_data import tag_candidates_data, tag_usage_data
@@ -15,7 +16,7 @@ TITLES = {
     'review': '자막 검수 · SRT 내보내기', 'line': '자막 줄 수정',
     'range': '구간 원어 자막 다시 생성', 'translation': '번역 방식 / 재시도',
     'video-rename': '제목 변경', 'video-exclude': '영상 제외',
-    'random-scope': '무작위 이어 재생 범위',
+    'random-scope': '무작위 이어 재생 범위', 'onscreen-region': '화면 자막 영역 · 읽을 언어',
 }
 RANDOM_SCOPE_CHOICES = (('all', '영상 전체'), ('list', '재생을 시작한 목록'), ('tags', '태그 고르기'))
 
@@ -69,6 +70,11 @@ class DialogModel:
             scope = self.core.random_continuous_scope
             if scope is not None:
                 self.values.update(choice=scope.kind, members=[str(tag_id) for tag_id in scope.tag_ids])
+        elif kind == 'onscreen-region':
+            transcript = self.core.transcript(context['video_id'])
+            self.spoken_language = transcript.spoken_language if transcript else None
+            self.values['choice'] = default_onscreen_language(self.spoken_language) or ''
+            self.replaces = bool(self.core.onscreen_subtitle_regions(context['video_id']))
         elif kind == 'video-exclude':
             video = self.core.video(context['video_id'])
             def exclude():
@@ -79,7 +85,11 @@ class DialogModel:
 
     @property
     def expired(self):
-        """대화상자가 기대는 상태가 사라졌는지. 범위 고르기는 무작위 이어 재생이 끝나면(목록 복귀 등) 쓸모가 없다."""
+        """대화상자가 기대는 상태가 사라졌는지. 범위 고르기는 무작위 이어 재생이 끝나면(목록 복귀 등),
+        화면 자막 영역은 그 영상의 재생이 끝나면 쓸모가 없다."""
+        if self.kind == 'onscreen-region':
+            session = self.core.playback.session
+            return session is None or session.video_id != self.context['video_id']
         return self.kind == 'random-scope' and not self.core.random_continuous_enabled
 
     def usage(self):
@@ -149,6 +159,20 @@ class DialogModel:
             if transcript:
                 data['description'] += f" 현재 원어: {transcript.spoken_language or '알 수 없음'} ({'직접 지정' if transcript.language_specified else '자동 감지'})"
             data['information'] = c.subtitle_preparation_notice()
+        elif kind == 'onscreen-region':
+            region = ctx['region']
+            spoken = self.spoken_language
+            default = ('기본값은 영상의 원어입니다.' if default_onscreen_language(spoken)
+                       else '영상의 원어를 아직 몰라 직접 고르세요.' if spoken is None
+                       else '영상의 원어가 한국어라 직접 고르세요.' if spoken == 'ko'
+                       else f'영상의 원어({spoken})는 읽을 언어 목록에 없어 직접 고르세요.')
+            data.update(description=f'영역(가로 {region.x:.0%}–{region.x + region.width:.0%}, 세로 {region.y:.0%}–'
+                                    f'{region.y + region.height:.0%}) 안 글자를 읽을 언어를 고르세요. {default} '
+                                    '한국어 글자는 번역할 필요가 없어 고를 수 없습니다.',
+                        choices=[*([row('', '읽을 언어 고르기')] if not self.values['choice'] else []),
+                                 *[row(code, f'{name} ({code})') for code, name in ONSCREEN_LANGUAGES]])
+            if self.replaces:
+                data['information'] = '이미 정한 영역과 그 화면 자막은 새 영역으로 바뀝니다.'
         elif kind == 'review':
             from .translation_models import TRANSLATION_CHOICES
             names = dict(TRANSLATION_CHOICES)
@@ -305,6 +329,17 @@ class DialogModel:
             start = resolve_time_input(h.start, self.values['start'], self.time_value(data['start']))
             end = resolve_time_input(h.end, self.values['end'], self.time_value(data['end'])) if data['range'] else None
             c.update_highlight(h.id, start=start, end=end, note=data['text'])
+            self.owner.pop(accepted=True)
+        elif kind == 'onscreen-region' and action == 'save':
+            if not data.get('choice'):
+                raise ValueError('읽을 언어를 고르세요.')
+            try:
+                c.set_onscreen_subtitle_regions(ctx['video_id'], [(ctx['region'], data['choice'])])
+            except OcrLanguageUnavailable as missing:
+                # 경고 안내로 설치 방법을 보이고 대기열에는 넣지 않는다. 다른 언어를 고르거나 취소할 수 있다.
+                self.message = str(missing)
+                return
+            self.owner.window.statusBar().showMessage('자막 대기열에 화면 자막 만들기를 추가했습니다. 재생 중에도 계속 처리합니다.')
             self.owner.pop(accepted=True)
         elif kind == 'subtitles' and action == 'save':
             def request():

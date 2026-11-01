@@ -102,6 +102,8 @@ class PlaybackPage(QWidget):
         self._error = ""
         self._details = None
         self._reel = False
+        # 화면 자막 영역을 끄는 덮개. 정하는 동안만 있다.
+        self.region_selector = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
@@ -248,6 +250,7 @@ class PlaybackPage(QWidget):
         for label, callback in (
             ("하이라이트 목록 · 시각·메모 편집", window.show_highlights),
             ("자막 만들기 / 원어 지정", window.subtitles.request),
+            ("화면 자막 영역 정하기", self.choose_onscreen_region),
             ("번역 CLI / 재시도", window.translations.settings),
             ("자막 검수 / SRT 내보내기", window.show_review),
         ):
@@ -324,6 +327,53 @@ class PlaybackPage(QWidget):
         if self.core.random_continuous_enabled:
             self.run_action(lambda: RandomScopeChooser(self.core, self.shell).exec())
 
+    def choose_onscreen_region(self):
+        """재생 작업 메뉴의 '화면 자막 영역 정하기'. 지금 장면에서 멈추고 그 위에서 사각형을 끈다."""
+        from .onscreen_region_ui import RegionSelector, frame_image
+        player, session = self.shell.player, self.core.playback.session
+        if player is None or session is None or self.region_selector is not None:
+            return
+        try:
+            player.pause()
+            self.shell.sync_position()
+        except Exception as error:
+            self.show_error(f"일시정지 실패: {error}")
+            return
+        self.update_controls()
+        try:
+            image = frame_image(player.video_frame())
+        except Exception:
+            image = None  # 장면을 못 받아도 영상 화면비 위에서 영역을 정할 수 있다.
+        video = self.core.video(session.video_id)
+        aspect = (video.width / video.height if video.width and video.height
+                  else self.surface.width() / max(1, self.surface.height()))
+        selector = self.region_selector = RegionSelector(self.surface, image, aspect)
+        video_id = session.video_id
+        # 대화상자는 끌기 입력 처리가 끝난 뒤에 연다.
+        selector.selected.connect(lambda rect: QTimer.singleShot(0, lambda: self.confirm_onscreen_region(video_id, rect)))
+        selector.cancelled.connect(self.close_region_selector)
+        selector.show()
+        selector.raise_()
+        selector.setFocus()
+
+    def confirm_onscreen_region(self, video_id, rect):
+        """읽을 언어를 웹 업무 대화상자로 확인한다. 확인하면 자막 대기열에 화면 자막 만들기가 들어간다."""
+        from .web_dialogs_entries import OnScreenRegionDialog
+        if self.region_selector is None:
+            return
+        try:
+            OnScreenRegionDialog(self.core, video_id, rect, self.shell).exec()
+        finally:
+            self.close_region_selector()
+
+    def close_region_selector(self):
+        selector, self.region_selector = self.region_selector, None
+        if selector is not None:
+            self.surface.removeEventFilter(selector)
+            selector.hide()
+            selector.deleteLater()
+            self.focus_content()
+
     def current_speed(self):
         options = getattr(self.shell.player, "playback_options", None)
         return options()[0] if options else 1
@@ -375,11 +425,13 @@ class PlaybackPage(QWidget):
 
     def focus_content(self):
         if self.isVisible() and QApplication.activeModalWidget() is None:
-            self.surface.setFocus()
+            (self.region_selector or self.surface).setFocus()
 
     def seek(self, position=None, *, command=None):
         """마우스와 키보드 탐색은 같은 위치 보고·모아보기 동기화를 거친다."""
         window = self.shell
+        if self.region_selector is not None:
+            return  # 영역을 정하는 동안 진행 막대로도 장면을 바꾸지 않는다.
         try:
             window.sync_position()
             window.reel.sync()
@@ -454,6 +506,8 @@ class PlaybackPage(QWidget):
 
     def jump_highlight(self, highlight):
         window = self.shell
+        if self.region_selector is not None:
+            return  # 영역을 정하는 동안 하이라이트 목록으로도 장면을 바꾸지 않는다.
         try:
             window.sync_position()
             session = self.core.playback.session
@@ -759,6 +813,8 @@ class PlaybackPage(QWidget):
     def handle_key(self, event) -> bool:
         window = self.shell
         self.reveal_bar()
+        if self.region_selector is not None:
+            return self.region_selector.handle_key(event)
         if event.key() == Qt.Key.Key_F1 and event.modifiers() == Qt.KeyboardModifier.NoModifier:
             if not event.isAutoRepeat():
                 self.toggle_help()
@@ -813,6 +869,9 @@ class PlaybackPage(QWidget):
             return True
         if not window.player:
             return False
+        if self.region_selector is not None:
+            # 화면 자막 영역을 정하는 동안은 멈춘 장면을 바꾸지 않는다. 덮개 밖 단추로 눌러도 같다.
+            return True
         changed = False
         try:
             if command.kind in (CommandType.PREVIOUS_VIDEO, CommandType.NEXT_VIDEO):

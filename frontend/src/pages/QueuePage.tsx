@@ -29,14 +29,14 @@ export default function QueuePage() {
   const currentTab = useRef(tab)
   currentTab.current = tab
   const [filter, setFilter] = useState("")
-  const [selected, setSelected] = useState<number | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
   const [confirmation, setConfirmation] = useState("")
   const [busy, setBusy] = useState(false)
   useLayoutChange(tab, rules, error, message)
   const showError = useCallback((error: unknown) => setError(error instanceof Error ? error.message : String(error)), [])
-  const select = useCallback((id: number) => setSelected(id), [])
+  const select = useCallback((key: string) => setSelected(key), [])
   // 브리지는 매번 전체 상태를 보내므로 늦게 도착한 앞 세대는 버려도 잃는 것이 없다.
   const fresh = useGenerationGuard()
 
@@ -70,14 +70,15 @@ export default function QueuePage() {
   }, [showError, store, fresh])
   useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
 
-  const ids = meta.order.filter(id => !filter || store.rows.get(id)?.state === filter)
+  const ids = meta.order.filter(key => !filter || store.rows.get(key)?.state === filter)
   const active = selected !== null && ids.includes(selected) ? selected : ids[0] ?? null
+  const activeRow = active === null ? undefined : store.rows.get(active)
   async function action(name: QueueAction) {
     if (!bridge || busy) return
     setBusy(true); setError(""); setMessage("")
     let pending = false
     try {
-      const result = await request<{ message?: string; confirmation?: string; pending?: boolean }>(reply => bridge.action(name, active ?? -1, reply))
+      const result = await request<{ message?: string; confirmation?: string; pending?: boolean }>(reply => bridge.action(name, activeRow?.videoId ?? -1, activeRow?.queueKind ?? "", reply))
       pending = !!result.pending
       if (result.confirmation) setConfirmation(result.confirmation)
       if (result.message) setMessage(result.message)
@@ -101,7 +102,7 @@ export default function QueuePage() {
         모자라면 위 안내 묶음이 줄어 스크롤한다. 자동 최소 높이는 목록 전체 높이를 따르므로 값을 정해 둔다. */}
     <section hidden={tab !== "status"} className="flex min-h-64 flex-1 flex-col gap-3">
       <div className="flex items-center justify-between gap-4"><SelectField aria-label="대기열 상태 필터" value={filter} options={[["", "모든 상태"], ...queueStates]} onValueChange={setFilter} className="max-w-48" /><p className="text-label text-muted-foreground">↑ / ↓ 선택 · Tab 버튼 이동 · Space 실행</p></div>
-      <QueueList store={store} ids={ids} selected={active} onSelect={select} emptyState={<EmptyState variant="page" title={meta.order.length ? "이 상태의 항목이 없습니다" : "자막 대기열이 비어 있습니다"} description={meta.order.length ? "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다." : "라이브러리 상세 패널의 '자막 만들기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요."} />} />
+      <QueueList store={store} ids={ids} selected={active} onSelect={select} emptyState={<EmptyState variant="page" title={meta.order.length ? "이 상태의 항목이 없습니다" : "자막 대기열이 비어 있습니다"} description={meta.order.length ? "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다." : "라이브러리 상세 패널의 '자막 만들기'나 재생 작업 메뉴의 '화면 자막 영역 정하기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요."} />} />
       <p aria-label="상태별 개수" className="text-label text-muted-foreground">{meta.counts.map(item => `${item.label} ${item.count}개`).join(" · ")}</p>
       <div className="flex flex-wrap gap-2"><Button disabled={!bridge || busy} onClick={() => action("previewRefineExisting")}>기존 한국어 자막 모두 다듬기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("promote")}>앞당기기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("remove")}>빼기</Button><Button disabled={!bridge || busy || !meta.canRetryFailed} onClick={() => action("retryFailed")}>실패 항목 모두 재시도</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("retryHeld")}>선택한 보류 재시도</Button></div>
     </section>

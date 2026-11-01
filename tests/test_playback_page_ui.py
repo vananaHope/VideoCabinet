@@ -189,7 +189,7 @@ def test_help_reflects_saved_keys_and_menu_keyboard_restores_surface_focus(windo
                        page.menu_button]
     key(window, Qt.Key.Key_Space)
     assert page.menu.isVisible()
-    assert len(page.menu.actions()) == 5
+    assert len(page.menu.actions()) == 6
     assert window.player.commands == []
     QTest.keyClick(page.menu, Qt.Key.Key_Escape)
     QApplication.processEvents()

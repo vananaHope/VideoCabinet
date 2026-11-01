@@ -18,6 +18,7 @@ def main():
     from .adapters import FFmpegMediaReader
     from .core import AppCore, default_data_directory
     from .transcription import FasterWhisperTranscriber
+    from .windows_ocr import WindowsOcrEngine
     from .translation_cli import SubscriptionCLITranslator
     from .ui import MainWindow
     from .single_instance import SingleInstance
@@ -45,6 +46,7 @@ def main():
             lambda: AppCore(media=FFmpegMediaReader(), clock=lambda: datetime.now(timezone.utc),
                        transcriber=FasterWhisperTranscriber(data_directory / "models"),
                        translator=SubscriptionCLITranslator(data_directory),
+                       ocr_engine=WindowsOcrEngine(),
                        database=args.data_dir / "library.sqlite3" if args.data_dir else None))
         if core is None:
             instance.close()

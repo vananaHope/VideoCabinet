@@ -373,6 +373,7 @@ export interface PreparationData {
 }
 
 export interface QueueRowData {
+  key: string
   videoId: number
   queueKind: string
   title: string
@@ -414,14 +415,14 @@ export interface QueueRulesData {
 }
 
 export type QueueAction = "promote" | "remove" | "retryFailed" | "retryHeld" | "refineExisting" | "previewRefineExisting"
-export const queueStates = [["queued", "대기"], ["transcribing", "받아쓰는 중"], ["translating", "자막 처리 중"], ["held", "보류"], ["completed", "완료"], ["failed", "실패"]] as const
+export const queueStates = [["queued", "대기"], ["transcribing", "받아쓰는 중"], ["reading", "읽는 중"], ["translating", "자막 처리 중"], ["held", "보류"], ["completed", "완료"], ["failed", "실패"]] as const
 export interface QueueBridge {
   ready: (reply: Reply) => void
   snapshot: (reply: Reply) => void
   rulesSnapshot: (reply: Reply) => void
   preparationSnapshot: (reply: Reply) => void
   preparationAction: (action: string, reply: Reply) => void
-  action: (name: QueueAction, videoId: number, reply: Reply) => void
+  action: (name: QueueAction, videoId: number, queueKind: string, reply: Reply) => void
   candidates: (target: string, reply: Reply) => void
   saveRule: (target: string, language: string, includeExisting: boolean, reply: Reply) => void
   removeRule: (ruleId: number, reply: Reply) => void

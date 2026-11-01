@@ -144,7 +144,7 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 7
+LIBRARY_DB_VERSION = 8
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
@@ -234,6 +234,12 @@ def migrate_library(db, *, before_upgrade=None) -> None:
             from .translation_schema import migrate_translation_sources
             migrate_translation_sources(db)
             db.execute("PRAGMA user_version = 7")
+        if version < 8:
+            # 화면 자막 영역·세대·줄. 이 버전부터 자막 대기열에 화면 자막 작업(읽는 중 상태)이 들어오므로
+            # 이를 모르는 이전 버전이 이 라이브러리를 열지 않게 버전을 올린다.
+            from .onscreen_subtitles import create_onscreen_tables
+            create_onscreen_tables(db)
+            db.execute("PRAGMA user_version = 8")
         db.commit()
     except BaseException:
         db.rollback()

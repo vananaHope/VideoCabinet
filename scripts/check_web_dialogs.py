@@ -42,6 +42,8 @@ from my_video_manager.web_dialogs_entries import TagEditor, TagManager
 from my_video_manager.web_dialogs_entries import SeriesEditor
 from my_video_manager.web_dialogs_entries import HighlightList, HighlightEditor
 from my_video_manager.web_dialogs_entries import ReviewDialog
+from my_video_manager.onscreen_subtitles import RegionRect
+from my_video_manager.windows_ocr import WindowsOcrEngine
 
 app = QApplication([])
 if args.offscreen:
@@ -74,9 +76,16 @@ class Translator:
         return tuple(TranslatedLine(line.id, '번역 자막 ' + line.text) for line in lines)
 
 
+class Ocr(WindowsOcrEngine):
+    """영어만 언어 팩이 있는 PC. 설치 안내 문구는 실제 Windows OCR 어댑터의 것이다."""
+
+    def language_available(self, language):
+        return language == 'en'
+
+
 core = AppCore(media=Media(), database=directory / 'data/library.sqlite3',
                clock=lambda: datetime.now(timezone.utc),
-               transcriber=Transcriber(), translator=Translator())
+               transcriber=Transcriber(), translator=Translator(), ocr_engine=Ocr())
 for i in range(40):
     path = directory / f'검사 영상 {i:03d}.mkv'
     path.write_bytes(f'dialog sample {i}'.encode())
@@ -476,6 +485,29 @@ try:
         web_modal('random-scope', {}, random_scope_check)
         core.set_random_continuous_enabled(False)
         core.playback.end()
+        # #274 화면 자막 영역의 읽을 언어(재생 중 컨테이너): 원어를 몰라 직접 고르기 / 원어 기본값 + 영역 바꿈 안내
+        # / 언어 팩 없음 경고까지 겹친 가장 긴 상태.
+        band = RegionRect(0.08, 0.78, 0.84, 0.17)
+        for name, target in (('choose', empty), ('replace', video)):
+            if name == 'replace':
+                core.set_onscreen_subtitle_regions(video.id, [(band, 'en')])
+            core.playback.start(target.id, 0)
+            def onscreen_region_check(name=name):
+                wait(lambda: dialogs.container is not None)
+                settle(300)
+                container = dialogs.container
+                assert container.width() <= window.width() and container.height() <= window.height()
+                assert current()['values']['choice'] == ('' if name == 'choose' else 'en')
+                footer_layout(f'onscreen-region-{name}')
+                capture(f'container-onscreen-region-{name}', container)
+                if name == 'replace':
+                    result = json.loads(dialogs.bridge.act(current()['id'], 'save', json.dumps({'choice': 'ja'})))
+                    assert '언어 팩이 없어' in result['dialog']['warning'], result
+                    settle(300)
+                    capture('container-onscreen-region-missing-pack', dialogs.container)
+            web_modal('onscreen-region', {'video_id': target.id, 'region': band}, onscreen_region_check)
+            core.playback.end()
+        metrics['checks'].append('화면 자막 읽을 언어(직접 고르기·원어 기본값·영역 바꿈 안내·언어 팩 없음 경고) 컨테이너 촬영')
         metrics['checks'].append('무작위 이어 재생 범위(재생 중 컨테이너)·태그 이름 변경 촬영과 끝 단추 배치 기록')
         window.pages.setCurrentWidget(host)
         settle(300)

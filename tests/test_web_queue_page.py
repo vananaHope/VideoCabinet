@@ -69,9 +69,9 @@ def test_queue_initial_add_promote_remove_and_counts(queue_page, setup):
     assert order(snapshot) == [a.id, b.id]
     assert snapshot['counts'][0]['count'] == 2
     assert {row['queueKind'] for row in snapshot['rows']} == {'transcription'}
-    reply(page.bridge.action('promote', b.id))
+    reply(page.bridge.action('promote', b.id, 'transcription'))
     assert order(reply(page.bridge.snapshot())) == [b.id, a.id]
-    reply(page.bridge.action('remove', b.id))
+    reply(page.bridge.action('remove', b.id, 'transcription'))
     assert order(reply(page.bridge.snapshot())) == [a.id]
     assert [row.video_id for row in core.subtitle_queue_items()] == [a.id]
 
@@ -93,8 +93,8 @@ def test_progress_change_sends_whole_queue_and_nothing_when_unchanged(queue_page
     # 늦은 앞 메시지를 버려도 잃는 것이 없게 바뀌지 않은 행까지 전체를 보낸다(#265).
     assert len(changes) == 1
     assert changes[0]['rows'] == [
-        dict(videoId=a.id, queueKind='transcription', title=a.title, state='queued', progress=.5, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기'),
-        dict(videoId=b.id, queueKind='transcription', title=b.title, state='queued', progress=0.0, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기')]
+        dict(key=f'{a.id}:transcription', videoId=a.id, queueKind='transcription', title=a.title, state='queued', progress=.5, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기'),
+        dict(key=f'{b.id}:transcription', videoId=b.id, queueKind='transcription', title=b.title, state='queued', progress=0.0, message='', taskLabel='받아쓰기', stateLabel='받아쓰기 · 대기')]
     assert changes[0]['canRetryFailed'] is False
     assert {entry['state']: entry['count'] for entry in changes[0]['counts']}['queued'] == 2
 
@@ -108,15 +108,15 @@ def test_queue_change_reports_promoted_order_and_removed_rows(queue_page, setup)
     changes = []
     page.bridge.queueChanged.connect(lambda value: changes.append(sent(value)))
 
-    reply(page.bridge.action('promote', b.id))
+    reply(page.bridge.action('promote', b.id, 'transcription'))
     assert order(changes.pop()) == [b.id, a.id]
 
     for removed_id, remaining in ((b.id, [a.id]), (a.id, [])):
-        reply(page.bridge.action('remove', removed_id))
+        reply(page.bridge.action('remove', removed_id, 'transcription'))
         data = changes.pop()
         assert order(data) == remaining
         assert {entry['state']: entry['count'] for entry in data['counts']} == {
-            'queued': len(remaining), 'transcribing': 0, 'translating': 0,
+            'queued': len(remaining), 'transcribing': 0, 'reading': 0, 'translating': 0,
             'held': 0, 'completed': 0, 'failed': 0,
         }
     page.refresh()
@@ -137,7 +137,7 @@ def test_inactive_page_does_not_read_or_send(queue_page, setup, monkeypatch):
     monkeypatch.setattr(setup[0], 'subtitle_queue_items', unexpected)
     page.refresh()
     assert not page.timer.isActive()
-    assert 'error' in json.loads(page.bridge.action('retryFailed', -1))
+    assert 'error' in json.loads(page.bridge.action('retryFailed', -1, ''))
 
 
 def test_rules_folder_and_tag_save_include_existing_and_remove(queue_page, setup):
@@ -173,7 +173,7 @@ def test_retry_failed_reports_missing_video_title(queue_page, setup):
     core.rename_video(a.id, '다시 찾을 영상')
     a.locations[0].path.unlink()
     core.scan()
-    result = reply(queue_page.bridge.action('retryFailed', -1))
+    result = reply(queue_page.bridge.action('retryFailed', -1, ''))
     assert '재시도 1개 · 건너뜀 1개' in result['message']
     assert '영상 다시 찾을 영상:' in result['message']
 
@@ -191,8 +191,46 @@ def test_retry_held_translation_uses_existing_public_request(queue_page, setup):
     translator.error = TranslationError('usage_limit', '한도')
     core.process_next_translation()
     assert core.translation_queue()[0].state == 'held'
-    reply(queue_page.bridge.action('retryHeld', video.id))
+    reply(queue_page.bridge.action('retryHeld', video.id, 'transcription'))
     assert core.translation_queue()[0].state == 'queued'
+
+
+def test_onscreen_and_transcription_rows_of_one_video_are_separate(queue_page, setup):
+    from test_onscreen_subtitles import BAND, FakeMedia, FakeOcr, NOW
+    from my_video_manager.core import AppCore
+    core, transcriber, (a, b) = setup
+    media = FakeMedia()
+    core = queue_page.core = AppCore(media=media, clock=lambda: NOW, transcriber=transcriber, ocr_engine=FakeOcr(),
+                                     database=core.database)
+    page = queue_page
+    core.request_subtitles(a.id)
+    core.set_onscreen_subtitle_regions(a.id, [(BAND, 'en')])
+    core.set_onscreen_subtitle_regions(b.id, [(BAND, 'en')])
+    page.refresh()
+    rows = reply(page.bridge.snapshot())['rows']
+    assert [(row['key'], row['taskLabel'], row['stateLabel']) for row in rows] == [
+        (f'{a.id}:transcription', '받아쓰기', '받아쓰기 · 대기'),
+        (f'{a.id}:onscreen_subtitle', '화면 자막', '화면 자막 · 대기'),
+        (f'{b.id}:onscreen_subtitle', '화면 자막', '화면 자막 · 대기')]
+    reply(page.bridge.action('promote', b.id, 'onscreen_subtitle'))
+    assert [row['key'] for row in reply(page.bridge.snapshot())['rows']][0] == f'{b.id}:onscreen_subtitle'
+    reply(page.bridge.action('remove', a.id, 'onscreen_subtitle'))
+    assert [row['key'] for row in reply(page.bridge.snapshot())['rows']] == [
+        f'{b.id}:onscreen_subtitle', f'{a.id}:transcription']
+    assert 'error' in json.loads(page.bridge.action('remove', a.id, 'onscreen_subtitle'))
+    media.error_at = 0
+    core.process_next_onscreen_subtitle()
+    page.refresh()
+    failed = reply(page.bridge.snapshot())
+    assert failed['canRetryFailed'] and failed['rows'][0]['state'] == 'failed'
+    assert failed['rows'][0]['message'] == 'Invalid data found when processing input'
+    media.error_at = None
+    assert reply(page.bridge.action('retryFailed', -1, ''))['message'].startswith('재시도 1개')
+    media.captions = ((1, 3, 'Hello'),)
+    core.process_next_onscreen_subtitle()
+    page.refresh()
+    done = {row['key']: row for row in reply(page.bridge.snapshot())['rows']}[f'{b.id}:onscreen_subtitle']
+    assert (done['state'], done['stateLabel'], done['message']) == ('completed', '화면 자막 · 완료', '화면 자막 1줄')
 
 
 def test_tray_opens_web_queue(window_factory):
@@ -220,19 +258,19 @@ def test_bulk_confirmation_then_background_result_keeps_ui_responsive(queue_page
         assert release.wait(10)
         return 3, 2
     monkeypatch.setattr(core, 'request_existing_refinements', request_bulk)
-    preview = reply(page.bridge.action('previewRefineExisting', -1))
+    preview = reply(page.bridge.action('previewRefineExisting', -1, ''))
     assert '3개' in preview['confirmation'] and '2개' in preview['confirmation']
     assert not entered.is_set()
     results = []
     page.bridge.bulkFinished.connect(lambda value: results.append(json.loads(value)))
     try:
-        assert reply(page.bridge.action('refineExisting', -1))['pending']
+        assert reply(page.bridge.action('refineExisting', -1, ''))['pending']
         assert entered.wait(5)
         ticks = []
         QTimer.singleShot(0, lambda: ticks.append(True))
         wait(lambda: bool(ticks))
         assert page.bridge.bulk_running
-        assert 'error' in json.loads(page.bridge.action('refineExisting', -1))
+        assert 'error' in json.loads(page.bridge.action('refineExisting', -1, ''))
     finally:
         release.set()
         wait(lambda: not page.bridge.bulk_running)
@@ -246,7 +284,7 @@ def test_bulk_failure_releases_busy_state(queue_page, monkeypatch):
     monkeypatch.setattr(queue_page.core, 'request_existing_refinements', fail)
     results = []
     queue_page.bridge.bulkFinished.connect(lambda value: results.append(json.loads(value)))
-    assert reply(queue_page.bridge.action('refineExisting', -1))['pending']
+    assert reply(queue_page.bridge.action('refineExisting', -1, ''))['pending']
     wait(lambda: bool(results))
     assert results == [{'error': '등록 실패'}]
     assert not queue_page.bridge.bulk_running
@@ -266,9 +304,9 @@ def test_retry_failed_availability_tracks_failure_retry_and_empty(queue_page, se
     page.refresh()
     assert changes[-1]['canRetryFailed'] is True
     assert reply(page.bridge.snapshot())['canRetryFailed'] is True
-    reply(page.bridge.action('retryFailed', -1))
+    reply(page.bridge.action('retryFailed', -1, ''))
     assert changes[-1]['canRetryFailed'] is False
-    reply(page.bridge.action('remove', video.id))
+    reply(page.bridge.action('remove', video.id, 'transcription'))
     assert reply(page.bridge.snapshot())['canRetryFailed'] is False
 
 
@@ -474,7 +512,7 @@ QUEUE_SELECTION = """JSON.stringify((() => {
     const view = list.getBoundingClientRect()
     const header = list.querySelector(':scope > [role=row]:not([data-queue-row])').getBoundingClientRect()
     const row = document.getElementById(list.getAttribute('aria-activedescendant')).getBoundingClientRect()
-    return { id: Number(list.getAttribute('aria-activedescendant').slice(10)), top: row.top, bottom: row.bottom,
+    return { id: list.getAttribute('aria-activedescendant').slice(10), top: row.top, bottom: row.bottom,
              header: header.bottom, viewBottom: view.top + list.clientTop + list.clientHeight, scrollTop: list.scrollTop }
 })())"""
 
@@ -491,7 +529,7 @@ def test_keyboard_selection_stays_below_sticky_queue_header(window_factory, core
         path.write_bytes(str(index).encode())
         core.add_file(path)
     window, js, rendered = open_queue(window_factory, core, width, height, long_notices=long_notices)
-    ids = json.loads(js("JSON.stringify([...document.querySelectorAll('#queue-list [data-queue-row]')].map(row => Number(row.dataset.queueRow)))"))
+    ids = json.loads(js("JSON.stringify([...document.querySelectorAll('#queue-list [data-queue-row]')].map(row => row.dataset.queueRow))"))
     assert len(ids) == count
     view = window.web_host.view.focusProxy() or window.web_host.view
     js("document.getElementById('queue-list').scrollIntoView({ block: 'nearest' })")

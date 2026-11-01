@@ -6,7 +6,8 @@ from .web_contract_types import Argument, BridgeContract, Constant, TypeAlias
 QUEUE = BridgeContract(name='queue', interface='QueueBridge', slots={
     'ready': (), 'snapshot': (), 'rulesSnapshot': (),
     'preparationSnapshot': (), 'preparationAction': (Argument('action', str, 'string'),),
-    'action': (Argument('name', str, 'QueueAction'), Argument('videoId', int, 'number')),
+    'action': (Argument('name', str, 'QueueAction'), Argument('videoId', int, 'number'),
+               Argument('queueKind', str, 'string')),
     'candidates': (Argument('target', str, 'string'),),
     'saveRule': (Argument('target', str, 'string'), Argument('language', str, 'string'),
                  Argument('includeExisting', bool, 'boolean')),

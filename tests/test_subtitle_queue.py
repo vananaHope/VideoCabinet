@@ -177,7 +177,7 @@ def test_unified_translation_progress_held_failure_retry_and_notification(setup)
     translator.error = TranslationError("authentication", "로그인")
     core.process_next_translation()
     assert {i.video_id: i.state for i in core.subtitle_queue_items()} == {a.id: "failed", b.id: "completed"}
-    assert core.take_subtitle_queue_completion() == (1, 1, 0)
+    assert core.take_subtitle_queue_completion() == (1, 1, 0, 0)
     assert core.take_subtitle_queue_completion() is None
     assert core.retry_failed_subtitles().retried == 1
     translator.error = None
@@ -186,7 +186,7 @@ def test_unified_translation_progress_held_failure_retry_and_notification(setup)
     assert (item.state, item.progress) == ("queued", .5)
     assert core.take_subtitle_queue_completion() is None
     core.process_next_translation()
-    assert core.take_subtitle_queue_completion() == (1, 0, 0)
+    assert core.take_subtitle_queue_completion() == (1, 0, 0, 0)
 
 
 def test_retry_all_transcription_failures_and_remove_translation_survives_restart(setup):
@@ -295,7 +295,7 @@ def test_remove_active_cancels_only_that_video_and_next_can_run(setup):
     core = translation_core(core, adapter, Translator())
     while core.translation_ready():
         core.process_next_translation()
-    assert core.take_subtitle_queue_completion() == (1, 0, 0)
+    assert core.take_subtitle_queue_completion() == (1, 0, 0, 0)
     assert not core.translation_queue()
 
 
@@ -427,4 +427,4 @@ def test_no_speech_completion_stays_with_notice_and_is_counted_separately(setup,
     assert (items[a.id].state, items[a.id].task_label, items[a.id].error) == ("completed", "받아쓰기", "말소리를 찾지 못했습니다.")
     assert items[b.id].state == "completed" and not items[b.id].error
     completion = core.take_subtitle_queue_completion()
-    assert completion == (1, 0, 1) and completion.no_speech == 1
+    assert completion == (1, 0, 1, 0) and completion.no_speech == 1

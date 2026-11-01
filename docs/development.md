@@ -28,6 +28,16 @@ winget 설치 후 기존 bash에서 `uv: command not found`가 나오면 IDE와 
 사용자 PATH를 반영하세요. PowerShell의 `Get-Command uv`로 위치를 확인할 수 있습니다.
 마지막으로 libmpv를 준비하고 FFmpeg·CUDA를 확인한 뒤 `pytest -n auto`로 테스트를 병렬 실행합니다.
 
+화면 자막은 Windows 내장 OCR을 사용합니다. Windows에만 설치되는 pywinrt 3.2.1의
+`winrt-runtime` 및 `Windows.Media.Ocr`, `Windows.Graphics.Imaging`,
+`Windows.Storage.Streams`, `Windows.Globalization`, `Windows.Foundation`,
+`Windows.Foundation.Collections` 투영 패키지는 `pyproject.toml`에 고정돼 있습니다.
+읽을 언어의 Windows 언어 팩(광학 문자 인식 포함)은 별도로 설치해야 합니다:
+설정 > 시간 및 언어 > 언어 및 지역 > 언어 추가. 앱이나 설치 프로그램은 언어 팩을 내려받지 않습니다.
+`onscreen_subtitles.OcrEngine` 경계는 영역 이미지·언어를 글자로 바꾸는 계약이며,
+`windows_ocr.WindowsOcrEngine`이 구현합니다. UI의 언어 확인과 작업자 QThread의 읽기를
+분리하고, 읽기 스레드마다 이벤트 루프·언어별 인식기를 재사용합니다.
+
 이미 도구가 설치된 PC의 새 worktree에서는 빠른 모드를 사용합니다.
 
 ```powershell
@@ -168,6 +178,12 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 버전은 `pyproject.toml`에서 읽고 `dist/installer/MyVideoManager-Setup-<version>.exe`로 만듭니다.
 실행 폴더는 `dist/my-video-manager/`이며 웹·디자인 토큰·아이콘·Qt WebEngine 리소스와 로캘,
 libmpv·FFmpeg·ffprobe를 포함합니다. CUDA·Whisper 모델은 넣지 않습니다.
+Windows OCR의 함수 내부 지연 import도 PyInstaller가 분석합니다. 별도 OCR 어댑터만
+불러오는 Analysis에서 pywinrt 7개 배포판의 pyd와 `winrt/MSVCP140.dll` 수집을 확인했으므로
+추가 hiddenimports는 필요하지 않습니다. Windows OCR 자체와 언어 팩은 OS 구성 요소로
+동봉하지 않습니다. wheel에서 빠진 MIT 원문은 공식 `v3.2.1` 태그의 LICENSE를
+`installer/license-sources/`에 보관하고, `bundle_licenses.py`가 배포판별 버전·해시를
+검사해 포함합니다. VC 런타임의 별도 이용 조건은 `THIRD-PARTY-NOTICES.txt`에 고지합니다.
 `-Version 0.2.0`은 소스를 바꾸지 않고 설치 파일과 앱 표시 버전을 함께 지정합니다(Release DryRun용).
 이미 만든 실행 폴더로 설치 파일만 다시 만들 때는 `-SkipPyInstaller -AppDirectory <실행 폴더>`를 사용합니다.
 
@@ -880,7 +896,7 @@ GIF·정지 이미지 형식과 단일 프레임, 첨부 그림은 새 영상으
 전체 검사 때 정리합니다. `reconnected` 안내는 검사 시작 때 이미 파일 없음이던 영상에만 적용됩니다.
 인자 없는 `scan()`은 감시 폴더 전체와 직접 추가한 위치를 지금처럼 검사합니다.
 전체/지정 폴더 검사는 자동 자막 규칙 조회부터 후처리까지 앱 코어의 잠금으로 직렬 실행합니다.
-기존 DB는 최초 실행 때 라이브러리 테이블을 v6으로 이전합니다(`PRAGMA user_version = 6`).
+기존 DB는 최초 실행 때 라이브러리 테이블을 v8로 이전합니다(`PRAGMA user_version = 8`).
 영상 ID와 다른 기능 테이블은 그대로 유지하며, 이전 위치는 첫 검사에서 캐시 정보를 채웁니다.
 이전 직전에는 원래 버전 DB의 자동 백업을 남깁니다. v3은 가로·세로 및 해상도 확인 상태 열을,
 v4는 번역 작업의 용어집과 최근 사용 순서를 저장하는 테이블을 추가합니다.
@@ -890,7 +906,14 @@ v5는 원어 자막에 전체 받아쓰기에 쓴 모델 이름을 저장하고 
 v6은 대기열 항목·순서·숨기기의 키를 `(영상, 작업 종류)`로 바꾸며 기존 항목은 `transcription`으로 옮깁니다.
 검수 구간 요청의 항목 ID·순번·앞당기기와 실패 기록을 보존합니다. 번역·다듬기는 받아쓰기 작업의 후속 단계입니다.
 `queue_kind`는 대기열 작업 종류이고 `TranslationQueueEntry.kind`(번역·다듬기 단계)와 구별합니다.
-웹 행의 `queueKind`도 이 값을 전달하지만 영상 ID 기반 동작은 계속 받아쓰기 작업에 적용됩니다.
+웹 행의 `queueKind`와 행 키(`key` = `영상ID:작업 종류`)로 앞당기기·빼기 같은 행 동작이 그 작업 종류에만 적용됩니다.
+v8은 화면 자막 영역·세대·줄 테이블(`onscreen_subtitle_regions`, `onscreen_subtitles`, `onscreen_subtitle_lines`)을
+만듭니다. 이 버전부터 자막 대기열에 화면 자막 작업(`onscreen_subtitle`, 진행 상태 `reading`)이 들어오므로
+이를 모르는 이전 버전이 열지 않도록 버전을 올립니다. 영역은 영상 ID에 속해 위치 이동·복사에도 유지됩니다.
+`onscreen_subtitles.py`의 `OnScreenSubtitles`가 영역 저장, 대기열 등록·처리·취소·재시도, 훑기·줄 합치기·저장을 맡고,
+영역 이미지는 `RegionFrameReader`(ffmpeg `FFmpegMediaReader.region_frames`), 글자 읽기는 `OcrEngine`
+(`WindowsOcrEngine`) 어댑터로 주입합니다. 줄 합치기 기준값(초당 4장, 잡음 2장, 최소 3장, 비슷한 글자 0.9·흔들림 4장 이하, 같은 그림 판정)은
+`tests/test_onscreen_subtitles.py`가 고정합니다. 화면 자막 작업자(`onscreen_controls.py`)는 받아쓰기 작업자와 따로 돌아갑니다.
 새 등록과 파일 변경 검사 때 ffprobe의 첫 일반 영상 스트림 크기를 저장하며 display matrix와
 구형 rotate 태그의 90/270도 회전을 반영합니다. 해상도 미확인 기존 영상은 유휴 시간에
 한 번에 한 개씩 약 1초 간격으로 읽습니다. 재생·받아쓰기·검사가 시작되면 채우기를 취소하고,

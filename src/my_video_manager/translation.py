@@ -524,7 +524,7 @@ class Translations:
 
     def ready(self, *, cli=None):
         cli = self.cli if cli is None else cli
-        blocked = {(e.video_id, e.queue_kind) for e in self._subtitles.queue(kind=None)
+        blocked = {(e.video_id, e.queue_kind) for e in self._subtitles.queue()
                    if e.state in ("queued", "transcribing")}
         entries = sorted(self.queue(), key=lambda e: e.state == "held")
         with self._connect() as db:

@@ -1,7 +1,6 @@
 """활성 대기열만 조회하고 바뀌었을 때 전체 항목 목록을 웹에 보낸다."""
 from PySide6.QtCore import QTimer, Slot
 
-from .subtitle_queue_kind import TRANSCRIPTION
 from .web_page import WebPageController
 from .web_queue_bridge import QueueBridge
 from .web_queue_data import counts_data, row_data, rules_data
@@ -50,8 +49,7 @@ class WebQueuePage(WebPageController):
     def refresh(self):
         if not self.is_active() or self.bridge.bulk_running:
             return
-        items = tuple(item for item in self.core.subtitle_queue_items() if item.queue_kind == TRANSCRIPTION)
-        entries = {item.video_id: item for item in items}
+        entries = {(item.video_id, item.queue_kind): item for item in self.core.subtitle_queue_items()}
         order = list(entries)
         if entries == self.entries and order == self.order:
             return

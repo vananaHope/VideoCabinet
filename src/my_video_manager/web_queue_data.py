@@ -4,11 +4,13 @@ from typing import TypedDict
 from .web_contract_types import GenerationData
 
 
-STATES = {'queued': '대기', 'transcribing': '받아쓰는 중', 'translating': '자막 처리 중',
+STATES = {'queued': '대기', 'transcribing': '받아쓰는 중', 'reading': '읽는 중', 'translating': '자막 처리 중',
           'held': '보류', 'completed': '완료', 'failed': '실패'}
 
 
 class QueueRowData(TypedDict):
+    # 행 식별자. 같은 영상도 작업 종류가 다르면 다른 행이다.
+    key: str
     videoId: int
     queueKind: str
     title: str
@@ -63,8 +65,13 @@ class QueueRulesData(TypedDict):
     rules: list[QueueRuleData]
 
 
+def row_key(video_id, queue_kind) -> str:
+    return f'{video_id}:{queue_kind}'
+
+
 def row_data(entry) -> QueueRowData:
-    return dict(videoId=entry.video_id, queueKind=entry.queue_kind, title=entry.title, state=entry.state,
+    return dict(key=row_key(entry.video_id, entry.queue_kind), videoId=entry.video_id, queueKind=entry.queue_kind,
+                title=entry.title, state=entry.state,
                 progress=entry.progress, message=entry.error or '', taskLabel=entry.task_label,
                 stateLabel='받아쓰는 중' if entry.state == 'transcribing'
                 else f'{entry.task_label} · 처리 중' if entry.state == 'translating'

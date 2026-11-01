@@ -228,9 +228,11 @@ class Subtitles:
                 "대기열 화면의 실패 항목 모두 재시도로 같은 구간을 다시 시도할 수도 있습니다"
                 if self.review and self.review.range_for(queue_id) else "다시 요청하면 재시도합니다")
 
-    def queue(self, *, kind=TRANSCRIPTION) -> tuple[SubtitleQueueEntry, ...]:
+    def queue(self) -> tuple[SubtitleQueueEntry, ...]:
+        """받아쓰기 작업만 읽는다. 다른 작업 종류의 행은 그 종류의 모듈이 읽는다."""
         with self._connect() as db:
-            entries = tuple(self._entry(row) for row in db.execute("SELECT * FROM subtitle_queue WHERE (? IS NULL OR kind = ?) ORDER BY id", (kind, kind)))
+            entries = tuple(self._entry(row) for row in db.execute("SELECT * FROM subtitle_queue WHERE kind = ? ORDER BY id",
+                                                                   (TRANSCRIPTION,)))
         return self._order.sort(entries)
 
     def remove(self, video_id, *, kind=TRANSCRIPTION):

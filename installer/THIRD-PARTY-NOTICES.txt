@@ -36,6 +36,11 @@ python-mpv: GPLv2+ / LGPLv2.1+ as applicable to libmpv;
   https://github.com/jaseg/python-mpv
 faster-whisper: MIT; https://github.com/SYSTRAN/faster-whisper
 CTranslate2: MIT; https://github.com/OpenNMT/CTranslate2
+pywinrt 3.2.1 (winrt-runtime and Windows OCR projections): MIT;
+  Copyright (c) Microsoft Corporation. All rights reserved.
+  Copyright (c) 2021-2025 David Lechner <david@pybricks.com>
+  https://github.com/pywinrt/pywinrt/tree/v3.2.1
+  Original text: licenses/python/winrt-*/LICENSE.
 Hugging Face Hub and tokenizers: Apache-2.0;
   https://github.com/huggingface/huggingface_hub
   https://github.com/huggingface/tokenizers
@@ -76,6 +81,12 @@ Related upstream project (not the exact Intel binary build source):
 https://github.com/llvm/llvm-project/tree/main/openmp
 CTranslate2 and tokenizers originals: licenses/python/ctranslate2/LICENSE and
 licenses/python/tokenizers/LICENSE.
+
+Microsoft Visual C++ Runtime (including winrt/MSVCP140.dll):
+Copyright (c) Microsoft Corporation. All rights reserved.
+This runtime is separately licensed, not covered by pywinrt's MIT license.
+Microsoft Visual C++ Runtime 2015-2022 license and redistribution terms:
+https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/
 
 PyAV 17.1.0 bundled FFmpeg 8.1.1 (LGPLv3+), avcodec 62.28.101.
 Copyright (c) the FFmpeg developers and the respective dependency authors.

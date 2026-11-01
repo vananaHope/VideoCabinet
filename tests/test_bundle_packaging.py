@@ -608,7 +608,13 @@ def test_pyav_notice_matches_actual_dll_versions(bundle, monkeypatch, change):
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows Python 설치 구조(LICENSE.txt)')
-@pytest.mark.parametrize('name,version', [('ctranslate2', '4.8.3'), ('tokenizers', '0.23.3')])
+@pytest.mark.parametrize('name,version', [
+    ('ctranslate2', '4.8.3'), ('tokenizers', '0.23.3'),
+    ('winrt-runtime', '3.2.1'), ('winrt-windows-media-ocr', '3.2.1'),
+    ('winrt-windows-graphics-imaging', '3.2.1'), ('winrt-windows-storage-streams', '3.2.1'),
+    ('winrt-windows-globalization', '3.2.1'), ('winrt-windows-foundation', '3.2.1'),
+    ('winrt-windows-foundation-collections', '3.2.1'),
+])
 @pytest.mark.parametrize('change', ['valid', 'hash', 'version'])
 def test_python_supplement_is_exact_and_verified(licenses, tmp_path, monkeypatch, name, version, change):
     from importlib.metadata import PathDistribution

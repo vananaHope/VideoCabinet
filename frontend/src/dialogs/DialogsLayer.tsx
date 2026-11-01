@@ -80,7 +80,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   }
   const button = (label: string, action: string, disabled = false, variant: 'default' | 'outline' | 'destructive' = 'outline') =>
     <Button key={action} variant={variant} disabled={busy || disabled} onClick={() => void act(action, action === 'close' ? { accepted: !editable } : {})}>{label}</Button>
-  const editable = ['series', 'tag-rename', 'highlight', 'subtitles', 'line', 'range', 'translation', 'video-rename', 'random-scope'].includes(kind)
+  const editable = ['series', 'tag-rename', 'highlight', 'subtitles', 'line', 'range', 'translation', 'video-rename', 'random-scope', 'onscreen-region'].includes(kind)
   const disabledEdit = data.locked || !currentSelected
   const members = form.members.map(id => data.available.find(row => row.id === id)).filter(row => row !== undefined)
   const others = data.available.filter(row => !form.members.includes(row.id))
@@ -126,6 +126,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       </div>}
       {(kind === 'highlight' || kind === 'line') && <label className="block space-y-2 text-body">{kind === 'highlight' ? '메모' : '자막 텍스트'}<TextArea value={form.text} onChange={text => update({ text })} /></label>}
       {kind === 'subtitles' && <label className="block space-y-2 text-body">원어<Input aria-label="원어" list="spoken-languages" value={form.choice} onChange={event => update({ choice: event.target.value })} /><datalist id="spoken-languages">{data.choices.map(row => <option key={row.id} value={row.title} />)}</datalist></label>}
+      {kind === 'onscreen-region' && <Choice label="읽을 언어" rows={data.choices} value={form.choice} onChange={choice => update({ choice })} />}
       {kind === 'translation' && data.translation && <TranslationForm data={data.translation} form={form} update={update} act={act} busy={busy}
         request={{ pending: data.network_busy, information: data.information, warning: data.warning }} />}
       {kind === 'random-scope' && <RandomScopeForm data={data} values={form} update={update} />}
@@ -145,8 +146,8 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       : kind === 'review' ? <>{data.task_kind === 'refinement' && button(data.task_label, 'refine', data.locked)}{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button(`${data.short_label} SRT 저장`, 'export-translation', !data.rows.length)}</>
       : undefined}>
       {button(editable ? '취소' : '닫기', 'close')}
-      {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'translation' || kind === 'random-scope' ? '확인' : '저장', 'save',
-        data.locked || data.network_busy || kind === 'range' && !!data.warning || kind === 'random-scope' && !randomScopeReady(data, form), kind === 'range' ? 'destructive' : 'default')}
+      {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'onscreen-region' ? '화면 자막 만들기' : kind === 'translation' || kind === 'random-scope' ? '확인' : '저장', 'save',
+        data.locked || data.network_busy || kind === 'range' && !!data.warning || kind === 'random-scope' && !randomScopeReady(data, form) || kind === 'onscreen-region' && !form.choice, kind === 'range' ? 'destructive' : 'default')}
     </DialogFooter>
     {data.keep_reviewed && <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.confirm_title} description={data.confirmation}
       confirmLabel={`새 원어로 다시 ${data.task_label}`} cancelLabel="사용자 수정본 유지" onCancel={() => void act('keep-reviewed')}
