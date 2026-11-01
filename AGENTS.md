@@ -34,7 +34,5 @@ Settings for the `orchestrate-issues` skill (agent-orchestra plugin). See `docs/
 
 - `orchestration.md`의 지휘 전용 절(등급별 배치, 작업자 실패 알림, Codex fast)은 무시한다.
 - 나머지 절(병합, 구현 제약, 테스트, 추가 완료 조건, 실창 검사)과 `common-findings.md`는 환경과 관계없이 따른다.
-- 메인 폴더에서는 브랜치를 바꾸지 않는다. 이슈마다 worktree를 만들고, 그 폴더에서 `scripts/setup.ps1 -Worktree`로 준비한 뒤 작업한다. 브랜치는 `vananaHope/issue-<번호>-<요약>`, 기준은 `origin/main`이다.
-  - herdr 안(`HERDR_ENV=1`): `herdr worktree create --cwd <메인 폴더> --branch <브랜치> --base origin/main --label issue-<번호> --no-focus`로 만들어 사이드바에 workspace로 띄운다. 결과 JSON의 `checkout_path`에서 작업한다. PR이 병합되면 `herdr worktree remove --workspace <id>`와 `git branch -D <브랜치>`로 지운다.
-  - 그 밖: `git worktree add ~/.omp/wt/my-video-manager/issue-<번호> -b <브랜치> origin/main`으로 만들고, PR이 병합되면 `git worktree remove <경로>`로 지운다.
+- worktree 정리·생성은 `~/.omp/agent/AGENTS.md`의 "이슈 worktree" 절을 따른다. 이 저장소의 worktree 준비 명령은 `scripts/setup.ps1 -Worktree`다.
 - 문서의 `~/.agent-orchestra/bin/desktop_lock.py run ... -- <명령>`은 이 스크립트가 없으면 `<명령>`만 실행하고, 실창 검사는 한 번에 하나만 돌린다.
