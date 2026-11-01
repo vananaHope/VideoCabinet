@@ -24,6 +24,17 @@ PYTHON_SUPPLEMENTS = {
         "url": "https://raw.githubusercontent.com/huggingface/tokenizers/v0.23.3/LICENSE",
         "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
     },
+    **{
+        (name, "3.2.1"): {
+            "url": "https://raw.githubusercontent.com/pywinrt/pywinrt/v3.2.1/LICENSE",
+            "sha256": "6e898069e8b3c6d8d23dc70ac7067cc2b7c9db14c36df873026758db82c0891d",
+        }
+        for name in (
+            "winrt-runtime", "winrt-windows-media-ocr", "winrt-windows-graphics-imaging",
+            "winrt-windows-storage-streams", "winrt-windows-globalization",
+            "winrt-windows-foundation", "winrt-windows-foundation-collections",
+        )
+    },
 }
 
 

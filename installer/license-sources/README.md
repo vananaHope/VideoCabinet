@@ -27,6 +27,13 @@ SHA-256을 검증한다. 원문 없는 새 배포물은 빈 기본 허용 목록
   - SHA-256: `54aa79d9fe3c09e67a16dcd95b9e88676405a6ec174efda31036983cf7672ecb`
 - tokenizers: https://raw.githubusercontent.com/huggingface/tokenizers/v0.23.3/LICENSE
   - SHA-256: `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4`
+- pywinrt 3.2.1: https://raw.githubusercontent.com/pywinrt/pywinrt/v3.2.1/LICENSE
+  - SHA-256: `6e898069e8b3c6d8d23dc70ac7067cc2b7c9db14c36df873026758db82c0891d`
+  - `winrt-runtime`, `winrt-Windows.Media.Ocr`, `winrt-Windows.Graphics.Imaging`,
+    `winrt-Windows.Storage.Streams`, `winrt-Windows.Globalization`,
+    `winrt-Windows.Foundation`, `winrt-Windows.Foundation.Collections`의 wheel에는
+    MIT 메타데이터만 있어 같은 공식 원문을 각각 보완한다. 폴더·수집 키는
+    배포판 이름을 소문자로 바꾸고 점·밑줄·하이픈을 하이픈으로 정규화한 이름이다.
 - GPLv2: https://raw.githubusercontent.com/qt/qtbase/v6.10.2/LICENSES/GPL-2.0-only.txt
   - SHA-256: `8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643`
 - shadcn/ui MIT: https://raw.githubusercontent.com/shadcn-ui/ui/6ea6856f5a1082d4d9c231559b6bc3ee73827493/LICENSE.md
