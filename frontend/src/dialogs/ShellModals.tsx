@@ -17,10 +17,17 @@ export default function ShellModals() {
       }
       const observer = new MutationObserver(update)
       observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state', 'hidden', 'style'] })
-      const navigation = () => { previous = undefined; requestAnimationFrame(update) }
-      shell.shellChanged.connect(navigation)
+      // 숨긴 뒤 도착한 모달 알림은 Qt가 무시한다. 복귀 때 DOM이 그대로여도 다시 알려야 한다.
+      const resync = () => { previous = undefined; requestAnimationFrame(update) }
+      shell.shellChanged.connect(resync)
+      document.addEventListener('visibilitychange', resync)
       update()
-      disconnect = () => { observer.disconnect(); shell.shellChanged.disconnect(navigation); void request(reply => dialogs.modalState(0, reply)) }
+      disconnect = () => {
+        observer.disconnect()
+        shell.shellChanged.disconnect(resync)
+        document.removeEventListener('visibilitychange', resync)
+        void request(reply => dialogs.modalState(0, reply))
+      }
     })
     return () => { disposed = true; disconnect() }
   }, [])

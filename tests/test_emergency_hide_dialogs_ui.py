@@ -244,6 +244,8 @@ def test_playback_dialog_hides_pauses_and_returns_as_it_was(window):
         assert window.balloons == []
         assert dialogs.active and state(dialogs)["id"] == identifier
         wait_for(lambda: js(window, "document.visibilityState") == "hidden")
+        # 준비 완료 대기가 아니라, 지연된 콜백이 숨긴 창을 다시 띄우지 않는지 보는 관찰 구간이다.
+        QTest.qWait(300)
         assert not window.isVisible() and not container.isVisible()
 
         restore(window)
