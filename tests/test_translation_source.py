@@ -101,7 +101,7 @@ def test_fake_source_without_transcript_and_failed_retry_are_independent(setup):
 
 
 @pytest.mark.parametrize('language', ['en', 'ko'])
-@pytest.mark.parametrize('archive_version', [6, 7])
+@pytest.mark.parametrize('archive_version', [6, LIBRARY_DB_VERSION])
 def test_migration_and_backup_keep_results_reviews_progress_providers_glossary(setup, tmp_path, language, archive_version):
     _, transcriber, _, _, reopen = setup
     adapter = RecordingTranslator()
@@ -131,7 +131,7 @@ def test_migration_and_backup_keep_results_reviews_progress_providers_glossary(s
     restored = reopen(adapter)
     assert (restored.translation(a.id), restored.review_lines(a.id), restored.translation_line_providers(a.id),
             restored.translation_queue(), restored.translation_line_providers(b.id)) == expected
-    assert restored.create_backup(tmp_path / 'restored.zip').metadata.db_version == 7
+    assert restored.create_backup(tmp_path / 'restored.zip').metadata.db_version == LIBRARY_DB_VERSION
     assert restored.process_next_translation().completed_lines == 4
     assert [(entry.source, entry.target) for entry in adapter.calls[-1][1]['glossary']] == [('Jon', '존')]
     assert len(adapter.calls[-1][0]) == 2

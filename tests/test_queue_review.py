@@ -93,7 +93,7 @@ def test_completed_items_are_current_run_only_and_do_not_read_transcript_lines(s
     # 반환값만으로 전체 자막 읽기 비용을 알 수 없어 공개 조회 경계에만 감시 함수를 둔다.
     monkeypatch.setattr(core, "transcript", no_lines)
     assert [(i.video_id, i.state) for i in core.subtitle_queue_items()] == [(a.id, "completed")]
-    assert core.take_subtitle_queue_completion() == (1, 0, 0)
+    assert core.take_subtitle_queue_completion() == (1, 0, 0, 0)
     assert core.take_subtitle_queue_completion() is None
     assert core.subtitle_queue_items()[0].state == "completed"
     core = reopen(core, adapter)

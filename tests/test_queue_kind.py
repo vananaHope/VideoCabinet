@@ -32,7 +32,7 @@ def test_order_priority_and_promotion_are_per_video_and_kind(setup):
     core, _, (a, b) = setup
     connect = connection_factory(core.database)
     order = QueueOrder(connect)
-    direct = SubtitleQueueItem(a.id, a.title, "queued", 0)
+    direct = SubtitleQueueItem(a.id, a.title, "queued", 0, None, "받아쓰기")
     other = replace(direct, queue_kind="test-kind")
     automatic = replace(direct, video_id=b.id)
     with connect() as db:
@@ -81,19 +81,19 @@ def test_completion_and_hidden_records_are_per_video_and_kind(setup):
     queue.record(completed)
     queue.record(other)
     assert {e.queue_kind for e in queue.items()} == {TRANSCRIPTION, other.queue_kind}
-    assert queue.take_completion() == (1, 0, 1)
+    assert queue.take_completion() == (1, 0, 1, 0)
     assert queue.take_completion() is None
     queue.record(completed)
     queue.record(other)
     queue.hide(a.id, kind=other.queue_kind)
     assert [e.queue_kind for e in queue.items()] == [TRANSCRIPTION]
-    assert queue.take_completion() == (0, 0, 1)
+    assert queue.take_completion() == (0, 0, 1, 0)
     queue.record(other)  # 숨긴 종류의 늦은 완료는 다시 나타나지 않는다.
     assert queue.take_completion() is None
     with connect() as db:
         order.request(db, a.id, kind=other.queue_kind, renew=True)
     queue.record(other)
-    assert queue.take_completion() == (1, 0, 0)
+    assert queue.take_completion() == (1, 0, 0, 0)
 
 
 def test_v5_hidden_completion_remains_hidden_after_migration(setup):

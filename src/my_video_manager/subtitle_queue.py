@@ -7,9 +7,10 @@ import re
 from threading import RLock
 from typing import NamedTuple
 
+from .onscreen_subtitles import NO_TEXT_NOTICE
 from .subtitles import normalize_spoken_language
 from .translation_kind import translation_task
-from .subtitle_queue_kind import TRANSCRIPTION, queue_task_key
+from .subtitle_queue_kind import QUEUE_KIND_LABELS, TRANSCRIPTION, queue_task_key
 from .translation_source import TRANSCRIPT, TranslationSources
 
 
@@ -27,8 +28,8 @@ class SubtitleQueueItem:
     title: str
     state: str
     progress: float
-    error: str | None = None
-    task_label: str = "받아쓰기"
+    error: str | None
+    task_label: str
     queue_kind: str = TRANSCRIPTION
 
 
@@ -36,10 +37,11 @@ NO_SPEECH_NOTICE = "말소리를 찾지 못했습니다."
 
 
 class SubtitleQueueCompletion(NamedTuple):
-    """이번 처리의 결과 수. 말소리 없음은 완료와 따로 센다."""
+    """이번 처리의 결과 수. 말소리 없음과 읽은 글자 없음은 완료와 따로 센다."""
     completed: int
     failed: int
     no_speech: int
+    no_text: int = 0
 
 
 @dataclass(frozen=True)
@@ -270,7 +272,7 @@ class SubtitleQueue:
             s, t = subtitles.get(key), translations.get(key)
             if s:
                 result.append(SubtitleQueueItem(video_id, title, s.state, s.progress,
-                                               s.error_detail or s.error, queue_kind=kind))
+                                               s.error_detail or s.error, QUEUE_KIND_LABELS.get(kind, kind), queue_kind=kind))
             elif t:
                 detail = _display_error_detail(t.error_detail)
                 summary = t.error
@@ -284,7 +286,7 @@ class SubtitleQueue:
                 result.append(SubtitleQueueItem(video_id, title, "completed", 1, notices.get(key),
                                                 translation_task(video["language"]).label
                                                 if kind == TRANSCRIPTION and video["has_result"]
-                                                and video["language"] not in (None, "und") else "받아쓰기",
+                                                and video["language"] not in (None, "und") else QUEUE_KIND_LABELS.get(kind, kind),
                                                 queue_kind=kind))
         return self.order.sort(result)
 
@@ -296,25 +298,27 @@ class SubtitleQueue:
             with self.order.connect() as db:
                 if db.execute("SELECT 1 FROM subtitle_queue_hidden WHERE video_id = ? AND kind = ?", key).fetchone():
                     return
-            no_speech = getattr(result, "no_speech", False)
-            self._notices[key] = NO_SPEECH_NOTICE if no_speech else getattr(result, "notice", "")
-            self._outcomes[key] = "no_speech" if no_speech else result.state
+            no_speech, no_text = getattr(result, "no_speech", False), getattr(result, "no_text", False)
+            self._notices[key] = (NO_SPEECH_NOTICE if no_speech else NO_TEXT_NOTICE if no_text
+                                  else getattr(result, "notice", ""))
+            self._outcomes[key] = "no_speech" if no_speech else "no_text" if no_text else result.state
             if result.state == "completed":
                 self._completed.add(key)
             else:
                 self._completed.discard(key)
 
     def take_completion(self):
+        """대기열 전체가 끝났을 때 한 번만 결과를 센다. 받아쓰기·화면 자막을 종류별로 나누지 않고 한 처리 묶음으로 알린다."""
         with self._lock:
             if self._active or not self._outcomes:
                 return None
             # 보류도 남은 작업이다. 한도 대기 중에는 완료 알림을 내지 않는다.
             with self.order.connect() as db:
-                pending = db.execute("SELECT EXISTS(SELECT 1 FROM subtitle_queue WHERE state IN ('queued', 'transcribing')) "
+                pending = db.execute("SELECT EXISTS(SELECT 1 FROM subtitle_queue WHERE state IN ('queued', 'transcribing', 'reading')) "
                                      "OR EXISTS(SELECT 1 FROM translation_queue WHERE state IN ('queued', 'translating', 'held'))").fetchone()[0]
                 if pending:
                     return None
             counts = SubtitleQueueCompletion(*(sum(s == state for s in self._outcomes.values())
-                                               for state in ("completed", "failed", "no_speech")))
+                                               for state in ("completed", "failed", "no_speech", "no_text")))
             self._outcomes.clear()
             return counts

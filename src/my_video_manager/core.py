@@ -27,7 +27,9 @@ from .viewing import Viewing, ViewingRecord, ViewingRecorder, ViewingSettings, V
 from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, transcript_srt
 from .translation import (Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection,
                           translation_skip_reason)
-from .subtitle_queue_kind import TRANSCRIPTION, queue_task_key
+from .subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION, queue_task_key
+from .onscreen_subtitles import (OcrEngine, OnScreenSubtitle, OnScreenSubtitleQueueEntry, OnScreenSubtitleRegion,
+                                 OnScreenSubtitles, RegionRect)
 from .translation_source import TRANSCRIPT, TranslationSources
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewPlayback, SubtitleExport
@@ -137,6 +139,7 @@ class AppCore:
         reel_settings: ReelSettings | None = None,
         update_installation=None,
         random_choice: Callable[[tuple[int, ...]], int] | None = None,
+        ocr_engine: OcrEngine | None = None,
     ):
         self.database = (Path(database) if database is not None else default_data_directory() / "library.sqlite3").resolve()
         self.database.parent.mkdir(parents=True, exist_ok=True)
@@ -179,6 +182,9 @@ class AppCore:
         self._subtitles = Subtitles(self._connect, clock, transcriber, self.playback_location, self._queue_order)
         self._review = Review(self._connect, clock, self._subtitles, self.playback_location, self._queue_order)
         self._subtitles.review = self._review
+        # 영역 이미지는 같은 미디어 어댑터(ffmpeg)가, 글자 읽기는 주입한 OCR 엔진이 맡는다.
+        self._onscreen = OnScreenSubtitles(self._connect, clock, media, ocr_engine, self.playback_location,
+                                           self._queue_order)
         from .translation_options import TranslationOptions
         self._translation_options = TranslationOptions(self.settings, self._connect, self.database.parent, clock,
                                                        secret_store=translation_secret_store, transport=translation_transport)
@@ -644,7 +650,10 @@ class AppCore:
         return self._subtitle_queue.items()
 
     def remove_from_subtitle_queue(self, video_id, *, kind=TRANSCRIPTION):
-        self._subtitles.remove(video_id, kind=kind)
+        if kind == ONSCREEN_SUBTITLE:
+            self._onscreen.remove(video_id)
+        else:
+            self._subtitles.remove(video_id, kind=kind)
         source = self._translation_sources.for_queue_kind(kind)
         if source is not None:
             self._translations.remove(video_id, source=source)
@@ -660,7 +669,8 @@ class AppCore:
         failed = [e for e in self.subtitle_queue(kind=kind) if e.state == "failed"]
         translated = [e for e in self.translation_queue() if e.state == "failed" and e.queue_kind == kind]
         retried, skipped = set(), []
-        for entries, request in ((failed, lambda e: self._subtitles.retry_failed(e.id, kind=e.queue_kind)),
+        retry = self._onscreen.retry_failed if kind == ONSCREEN_SUBTITLE else self._subtitles.retry_failed
+        for entries, request in ((failed, lambda e: retry(e.id)),
                                  (translated, lambda e: self.request_translation(e.video_id, source=e.source))):
             for entry in entries:
                 try:
@@ -672,6 +682,7 @@ class AppCore:
 
     def resume_subtitle_processing(self):
         self._subtitles.resume_processing()
+        self._onscreen.resume_processing()
         self._translations.resume_processing()
 
     def take_subtitle_queue_completion(self):
@@ -683,8 +694,15 @@ class AppCore:
         self.settings.set("subtitle_queue.tray_notice_shown", True)
         return True
 
-    def subtitle_queue(self, *, kind=TRANSCRIPTION) -> tuple[SubtitleQueueEntry, ...]:
-        return self._subtitles.queue(kind=kind)
+    def subtitle_queue(self, *, kind=TRANSCRIPTION) -> tuple[SubtitleQueueEntry | OnScreenSubtitleQueueEntry, ...]:
+        """작업 종류 하나의 대기열. kind=None이면 모든 종류를 처리 순서대로 돌려준다."""
+        if kind == TRANSCRIPTION:
+            return self._subtitles.queue()
+        if kind == ONSCREEN_SUBTITLE:
+            return self._onscreen.queue()
+        if kind is None:
+            return self._queue_order.sort((*self._subtitles.queue(), *self._onscreen.queue()))
+        return ()  # 처리 모듈이 없는 종류는 대기열 행도 없다.
 
     def process_next_subtitle(self) -> SubtitleQueueEntry | None:
         with self._subtitle_queue.processing():
@@ -699,6 +717,38 @@ class AppCore:
 
     def stop_subtitle_processing(self) -> None:
         self._subtitles.stop_processing()
+
+    def onscreen_subtitle_regions(self, video_id: int) -> tuple[OnScreenSubtitleRegion, ...]:
+        return self._onscreen.regions(video_id)
+
+    def onscreen_language_available(self, language: str) -> bool:
+        """읽을 언어의 언어 팩을 OCR 엔진이 쓸 수 있는지. 영역을 정하기 전에 확인한다."""
+        return self._onscreen.language_available(language)
+
+    def set_onscreen_subtitle_regions(self, video_id: int,
+                                      regions: Iterable[tuple[RegionRect, str]]) -> OnScreenSubtitleQueueEntry:
+        """영상의 화면 자막 영역을 바꾸고 화면 자막 만들기를 직접 요청한다.
+
+        읽을 언어의 언어 팩이 없으면 OcrLanguageUnavailable을 던지고 아무것도 바꾸지 않는다.
+        """
+        self.playback_location(video_id)
+        return self._onscreen.set_regions(video_id, regions)
+
+    def onscreen_subtitles(self, video_id: int) -> tuple[OnScreenSubtitle, ...]:
+        return self._onscreen.subtitles(video_id)
+
+    def process_next_onscreen_subtitle(self) -> OnScreenSubtitleQueueEntry | None:
+        """작업자 스레드용. 받아쓰기 작업자와 따로 돌아 서로를 기다리지 않는다."""
+        with self._subtitle_queue.processing():
+            result = self._onscreen.process_next()
+            if result and result.state == "completed":
+                with self._connect() as db:
+                    self._queue_order.finish(db, result.video_id, kind=ONSCREEN_SUBTITLE)
+            self._subtitle_queue.record(result)
+            return result
+
+    def stop_onscreen_subtitle_processing(self) -> None:
+        self._onscreen.stop_processing()
 
     def transcript(self, video_id: int) -> Transcript | None:
         return self._subtitles.transcript(video_id)
