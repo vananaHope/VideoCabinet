@@ -86,7 +86,9 @@ def assert_focus_returned(window, top, label):
 
     offscreen은 숨겼다 다시 보인 창을 활성 창으로 되돌리지 않으므로 창의 초점 위젯으로 확인하고,
     실제 키보드 초점은 실창 검사에서 확인한다.
+    Qt 창이 먼저 보인 뒤 Chromium의 초점 이벤트가 도착하므로 웹 입력란의 복귀도 기다린다.
     """
+    wait_for(lambda: top.focusWidget() is view(window) and active_label(window) == label)
     assert top.focusWidget() is view(window)
     assert active_label(window) == label
 
@@ -241,11 +243,12 @@ def test_playback_dialog_hides_pauses_and_returns_as_it_was(window):
         assert player.paused
         assert window.balloons == []
         assert dialogs.active and state(dialogs)["id"] == identifier
+        wait_for(lambda: js(window, "document.visibilityState") == "hidden")
+        # 준비 완료 대기가 아니라, 지연된 콜백이 숨긴 창을 다시 띄우지 않는지 보는 관찰 구간이다.
         QTest.qWait(300)
         assert not window.isVisible() and not container.isVisible()
 
-        window.tray.open()
-        QApplication.processEvents()
+        restore(window)
         assert window.isVisible() and window.pages.currentWidget() is window.playback_page
         assert dialogs.container is container and container.isVisible()
         assert window.web_host.view.parent() is container

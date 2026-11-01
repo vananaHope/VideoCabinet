@@ -15,7 +15,7 @@ from PySide6.QtTest import QTest
 
 from my_video_manager.web_tokens import web_tokens
 from qt_wait import wait_for
-from test_emergency_hide_dialogs_ui import js, press_emergency, restore, settle, view
+from test_emergency_hide_dialogs_ui import activated, js, press_emergency, restore, settle, view
 from test_emergency_hide_ui import app, window
 from wait_helpers import CHILD_READY_TIMEOUT
 
@@ -23,16 +23,19 @@ MOTION_CHILD = os.environ.get('MVM_MOTION_CHILD') == '1'
 MOTION = web_tokens()['motion']
 CTRL = Qt.KeyboardModifier.ControlModifier
 
-# 전환이 시작되는 순간 그 애니메이션을 멈춰 붙잡는다. 멈춘 동안(=전환 중) 넣은 입력이 바로 적용되는지 본다.
+# 시험에서만 전환을 시작부터 멈춘다. 부하로 animationstart 전달이 늦어도 이미 끝난 전환을 놓치지 않는다.
+# 실제 animationstart와 제품의 이름·길이·불투명도를 확인하고, 멈춘 전환 중 입력이 바로 적용되는지 본다.
 HOLD = """(() => {
   window.motionHeld = []
+  const pause = document.createElement('style')
+  pause.textContent = '* { animation-play-state: paused !important; }'
+  document.head.append(pause)
   document.addEventListener('animationstart', event => {
     const target = event.target
     const slot = target.dataset.slot ?? target.dataset.page
       ?? (target.matches('[role=dialog],[role=alertdialog]') || target.querySelector('[role=dialog],[role=alertdialog]') ? 'dialog' : target.tagName)
     for (const animation of target.getAnimations()) {
-      if (animation.animationName !== event.animationName || animation.playState !== 'running') continue
-      animation.pause()
+      if (animation.animationName !== event.animationName || animation.playState !== 'paused') continue
       window.motionHeld.push({ name: event.animationName, slot, time: animation.currentTime,
         duration: animation.effect.getComputedTiming().duration, opacity: Number(getComputedStyle(target).opacity) })
     }
@@ -124,16 +127,42 @@ def test_reduced_motion_draws_every_layer_instantly(window):
     assert json.loads(js(window, 'JSON.stringify(window.motionHeld)')) == []
 
 
+def test_hidden_key_guide_keeps_shell_actions_blocked_during_status_updates(window):
+    ready(window)
+    QTest.keyClick(view(window), Qt.Key.Key_F1)
+    wait_for(lambda: present(window, GUIDE) and window.web_host.dialogs.blocks_shell_actions)
+    press_emergency(view(window))
+    wait_for(lambda: js(window, "document.visibilityState") == "hidden")
+    assert not window.isVisible()
+
+    window.show_status("숨긴 동안 폴더 검사 완료")
+    wait_for(lambda: js(window, f"document.querySelector('{NOTICE}')?.textContent.includes('숨긴 동안 폴더 검사 완료')"))
+    assert window.web_host.dialogs.blocks_shell_actions
+    window.show_status("")
+    wait_for(lambda: not present(window, NOTICE))
+    assert window.web_host.dialogs.blocks_shell_actions
+    assert not window.isVisible()
+
+    restore(window)
+    activated(window)
+    QTest.keyClick(view(window), Qt.Key.Key_Escape)
+    wait_for(lambda: not present(window, GUIDE) and not window.web_host.dialogs.blocks_shell_actions)
+
+
+def run_motion_child(request):
+    """움직임 줄이기를 끈 Chromium에서 지정한 시험 하나를 실행한다."""
+    flags = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '--disable-gpu')
+    test = f'{Path(__file__).resolve()}::{request.node.name}'
+    result = subprocess.run([sys.executable, '-m', 'pytest', test, '-q', '-p', 'no:cacheprovider', '-p', 'no:randomly'],
+                            cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=CHILD_READY_TIMEOUT * 2,
+                            env={**os.environ, 'MVM_MOTION_CHILD': '1', 'QT_QPA_PLATFORM': 'offscreen',
+                                 'QTWEBENGINE_CHROMIUM_FLAGS': f'{flags} --force-prefers-no-reduced-motion'})
+    assert result.returncode == 0 and re.search(r'\b1 passed\b', result.stdout), result.stdout[-4000:] + result.stderr[-2000:]
+
+
 def test_transitions_run_without_reduced_motion_and_never_block_input(request):
     if not MOTION_CHILD:
-        # 움직임 줄이기를 끈 Chromium으로 이 테스트를 자식 프로세스에서 다시 돌린다.
-        flags = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '--disable-gpu')
-        test = f'{Path(__file__).resolve()}::{request.node.name}'
-        result = subprocess.run([sys.executable, '-m', 'pytest', test, '-q', '-p', 'no:cacheprovider', '-p', 'no:randomly'],
-                                cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=CHILD_READY_TIMEOUT * 2,
-                                env={**os.environ, 'MVM_MOTION_CHILD': '1', 'QT_QPA_PLATFORM': 'offscreen',
-                                     'QTWEBENGINE_CHROMIUM_FLAGS': f'{flags} --force-prefers-no-reduced-motion'})
-        assert result.returncode == 0 and re.search(r'\b1 passed\b', result.stdout), result.stdout[-4000:] + result.stderr[-2000:]
+        run_motion_child(request)
         return
     window = request.getfixturevalue('window')
     host = window.web_host
@@ -233,11 +262,57 @@ def test_transitions_run_without_reduced_motion_and_never_block_input(request):
     wait_for(lambda: active_page(window) == 'library')
 
     # 긴급 탈출은 열리는 중인 대화상자를 그대로 숨기고 되돌린다.
+    js(window, 'window.motionHeld = []')
     QTest.keyClick(view(window), Qt.Key.Key_F1)
+    # DOM 부착만이 아니라 실제 여는 전환이 시작됐음을 확인한다. 붙잡힌 전환은 끝내지 않는다.
+    wait_held(window, 'dialog', 'fade-enter', MOTION['motion-duration-enter'])
     wait_for(lambda: present(window, GUIDE) and window.web_host.dialogs.blocks_shell_actions)
     press_emergency(view(window))
     assert not window.isVisible()
     restore(window)
+    # visibilityState와 Qt 창 표시가 React 대화상자의 재표시까지 보증하지는 않는다.
+    wait_for(lambda: present(window, GUIDE) and window.web_host.dialogs.blocks_shell_actions)
+    QTest.keyClick(view(window), Qt.Key.Key_Escape)
+    wait_for(lambda: not present(window, GUIDE) and not window.web_host.dialogs.blocks_shell_actions)
+
+
+def open_guide_and_hide_immediately(window):
+    ready(window)
+    assert js(window, "matchMedia('(prefers-reduced-motion: reduce)').matches") is False
+    # HOLD도, 여는 전환/DOM 부착 대기도 없다. F1 바로 다음 입력으로 숨긴다.
+    QTest.keyClick(view(window), Qt.Key.Key_F1)
+    press_emergency(view(window))
+    assert not window.isVisible()
+    wait_for(lambda: js(window, 'document.visibilityState') == 'hidden')
+    restore(window)
+    activated(window)
+    assert window.isActiveWindow()
+    wait_for(lambda: present(window, GUIDE))
+
+
+def test_key_guide_closes_after_emergency_hide_immediately_after_opening(request):
+    if not MOTION_CHILD:
+        run_motion_child(request)
+        return
+    window = request.getfixturevalue('window')
+    open_guide_and_hide_immediately(window)
+    QTest.keyClick(view(window), Qt.Key.Key_Escape)
+    wait_for(lambda: not present(window, GUIDE) and not window.web_host.dialogs.blocks_shell_actions)
+
+
+def test_key_guide_restores_modal_shortcut_blocking_after_immediate_hide(request):
+    if not MOTION_CHILD:
+        run_motion_child(request)
+        return
+    window = request.getfixturevalue('window')
+    open_guide_and_hide_immediately(window)
+    settle(window)
+    # 숨긴 뒤 도착한 모달 알림을 Qt가 버렸어도, 복귀하면 배경 탭 키를 다시 막아야 한다.
+    QTest.keyClick(view(window), Qt.Key.Key_2, CTRL)
+    settle(window)
+    assert js(window, "document.querySelector('[data-page=library]').getClientRects().length > 0")
     assert present(window, GUIDE)
     QTest.keyClick(view(window), Qt.Key.Key_Escape)
     wait_for(lambda: not present(window, GUIDE) and not window.web_host.dialogs.blocks_shell_actions)
+    QTest.keyClick(view(window), Qt.Key.Key_2, CTRL)
+    wait_for(lambda: js(window, "document.querySelector('[data-page=recommend]').getClientRects().length > 0"))

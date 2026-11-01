@@ -29,6 +29,7 @@ export default function SearchPage() {
   useLayoutChange(data, error)
   const composing = useRef(false)
   const draft = useRef("")
+  const edited = useRef(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scroll = useRef(0)
   const focusAfterSearch = useRef(false)
@@ -45,7 +46,12 @@ export default function SearchPage() {
       // 첫 상태를 받기 전에는 화면의 검색어가 아직 정해지지 않았다. 웹 셸을 다시 불러오면 첫 응답보다 더 새 결과가
       // 먼저 올 수 있으므로, 첫 응답이든 먼저 온 결과든 더 새 쪽이 검색어와 결과를 함께 정한다.
       let started = false
-      const start = (initial: SearchData) => { started = true; setData(initial); setQuery(initial.query); draft.current = initial.query }
+      const start = (initial: SearchData) => {
+        started = true
+        setData(initial)
+        // 첫 응답 전에도 검색 칸은 입력을 받는다. 늦은 초기 상태가 사용자의 초안을 덮지 않는다.
+        if (!edited.current) { setQuery(initial.query); draft.current = initial.query }
+      }
       const changed = (json: string) => {
         const next: SearchData = JSON.parse(json)
         if (!started) { if (fresh(next)) start(next); return }
@@ -70,8 +76,7 @@ export default function SearchPage() {
     }).catch(showError)
     return () => { disposed = true; disconnect(); clearTimeout(timer.current) }
   }, [showError, fresh])
-  useEffect(() => { if (bridge) request(reply => bridge.ready(reply)).catch(showError) }, [bridge, showError])
-  function find(value: string) {
+  const find = useCallback((value: string) => {
     clearTimeout(timer.current)
     if (!bridge || composing.current) return
     setSearching(true)
@@ -81,8 +86,15 @@ export default function SearchPage() {
       setPending(false); setSearching(false)
       setData(previous => previous && { ...previous, query: value, results: [], selectedIndex: -1, truncated: false, state: "error", error: error instanceof Error ? error.message : String(error) })
     })
-  }
+  }, [bridge])
+  useEffect(() => {
+    if (!bridge) return
+    request(reply => bridge.ready(reply)).catch(showError)
+    // 초기 응답을 기다리는 동안 예약된 검색은 bridge가 없었다. 연결 뒤 최신 초안만 검색한다.
+    if (edited.current) find(draft.current)
+  }, [bridge, find, showError])
   function change(value: string) {
+    edited.current = true
     setQuery(value); draft.current = value; setPending(true); setError(""); scroll.current = 0; focusAfterSearch.current = false
     clearTimeout(timer.current)
     if (!composing.current) timer.current = setTimeout(() => find(value), 200)
