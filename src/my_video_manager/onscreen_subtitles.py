@@ -205,7 +205,8 @@ def merge_samples(samples: Sequence[tuple[float, str]],
     2. 앞뒤 덩어리가 같은 글자이고 그 사이 NOISE_SAMPLES장 이하만 다르게 읽혔으면 잇는다.
     3. 이웃한 덩어리의 글자가 거의 같고(SIMILAR_TEXT_RATIO 이상) 한쪽이 JITTER_SAMPLES장 이하이면 잇는다.
        OCR이 같은 자막의 글자 한둘을 잠깐 다르게 읽는 경우다. 줄의 글자는 가장 많은 장에서 읽힌 글자다.
-       둘 다 오래 보인 덩어리는 글자가 비슷해도 서로 다른 자막으로 둔다.
+       둘 다 오래 보인 덩어리는 글자가 비슷해도 서로 다른 자막으로 둔다. 흡수 뒤 대표 글자가 같아진 이웃은
+       길이와 관계없이 잇는다.
     4. 빈 글자와 MIN_LINE_SAMPLES장보다 짧은 줄은 버린다.
     시작은 처음 보인 장의 시각, 끝은 마지막으로 보인 장의 다음 장 시각이다.
     """
@@ -230,8 +231,9 @@ def merge_samples(samples: Sequence[tuple[float, str]],
     while index < len(runs):
         before, run = _run_text(runs[index - 1]), _run_text(runs[index])
         shorter = min(runs[index - 1][2] - runs[index - 1][1], runs[index][2] - runs[index][1]) + 1
-        if (before and run and shorter <= JITTER_SAMPLES
-                and SequenceMatcher(None, before, run).ratio() >= SIMILAR_TEXT_RATIO):
+        # 흔들림을 흡수해 대표 글자가 같아진 이웃은 길이와 관계없이 같은 줄이다. 길이 제한은 서로 다른 글자에만 둔다.
+        if before and run and (before == run or shorter <= JITTER_SAMPLES
+                               and SequenceMatcher(None, before, run).ratio() >= SIMILAR_TEXT_RATIO):
             runs[index - 1][0].update(runs[index][0])
             runs[index - 1][2] = runs[index][2]
             del runs[index]

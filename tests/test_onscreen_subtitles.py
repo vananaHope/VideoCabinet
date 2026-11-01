@@ -170,6 +170,16 @@ def test_neighbouring_readings_of_almost_the_same_text_are_one_line(setup):
     assert lines(core, a.id) == [(2, 4, "Round 1"), (4, 6, "Round 2"), (17, 21, "Goodbye for now")]
 
 
+def test_same_text_on_both_sides_of_a_long_misread_is_one_line(setup):
+    core, media, _, (a, _) = setup
+    # 0–2초 바른 글자, 2–2.75초(3장) 오인식, 다시 바른 글자 5초까지: 흔들림을 흡수한 뒤 같은 글자끼리 잇는다.
+    media.captions = ((1, 5, "Goodbye for now"),)
+    media.misread = {8: "Goodby for now", 9: "Goodby for now", 10: "Goodby for now"}
+    core.set_onscreen_subtitle_regions(a.id, [(BAND, "en")])
+    core.process_next_onscreen_subtitle()
+    assert lines(core, a.id) == [(1, 5, "Goodbye for now")]
+
+
 def test_long_lasting_similar_captions_stay_separate_lines(setup):
     core, media, _, (a, _) = setup
     # 거의 같은 글자라도 각각 충분히 오래 보였으면 OCR 흔들림이 아니라 다른 자막이다.

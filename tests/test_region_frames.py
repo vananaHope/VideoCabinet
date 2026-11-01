@@ -165,6 +165,37 @@ def test_cancellation_during_probe_stops_without_frames_or_error(reader, tmp_pat
     assert probes and all(process.poll() is not None for process in probes)
 
 
+def test_probe_timeout_fails_onscreen_job_with_retry_guidance_and_retry_requeues(reader, tmp_path, monkeypatch):
+    """크기 조사 시간 초과는 화면 자막 실패로 남고, 안내는 실제 복구 방법(재시도)을 말한다."""
+    from datetime import datetime, timezone
+    from my_video_manager.core import AppCore
+    from my_video_manager.subtitle_queue_kind import ONSCREEN_SUBTITLE
+    from test_onscreen_subtitles import FakeOcr
+    core = AppCore(media=reader, clock=lambda: datetime.now(timezone.utc), ocr_engine=FakeOcr(),
+                   database=tmp_path / "data/library.sqlite3")
+    core.set_minimum_duration(0)
+    core.add_file(encode(reader, tmp_path / "slow.mkv", duration=1, box=False))
+    video, = core.videos()
+    core.set_onscreen_subtitle_regions(video.id, [(RegionRect(0, .8, 1, .2), "en")])
+    popen = subprocess.Popen
+
+    def launch(command, *args, **kwargs):
+        if command[0] == reader.ffprobe:
+            command = [sys.executable, "-c", "import time; time.sleep(60)"]
+        return popen(command, *args, **kwargs)
+
+    monkeypatch.setattr(adapters.subprocess, "Popen", launch)
+    monkeypatch.setattr(adapters, "REGION_PROBE_TIMEOUT_SECONDS", 0.5, raising=False)
+    assert core.process_next_onscreen_subtitle().state == "failed"
+    item, = core.subtitle_queue_items()
+    assert item.state == "failed"
+    assert "실패 항목 모두 재시도" in item.error and "다시 검사" not in item.error
+    assert "영상 크기" in item.error
+    assert core.retry_failed_subtitles(kind=ONSCREEN_SUBTITLE).retried == 1
+    assert [entry.state for entry in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == ["queued"]
+
+
+
 def test_missing_file_raises_runtime_error(reader, tmp_path):
     with pytest.raises(RuntimeError):
         frames(reader, tmp_path / "missing.mkv", RegionRect(0, 0, 1, 1))
@@ -174,8 +205,8 @@ def test_decoder_failure_raises_runtime_error(reader, tmp_path, monkeypatch):
     path = encode(reader, tmp_path / "removed.mkv", duration=1, box=False)
     read = reader.read_resolution
 
-    def read_then_remove(path, *, cancellation):
-        info = read(path, cancellation=cancellation)
+    def read_then_remove(path, **options):
+        info = read(path, **options)
         path.unlink()
         return info
 

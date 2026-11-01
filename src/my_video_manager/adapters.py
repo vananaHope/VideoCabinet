@@ -18,6 +18,15 @@ from .media import parse_ffprobe_result
 from .onscreen_subtitles import RegionImage, RegionRect
 
 
+# 화면 자막 영역 읽기 전 영상 크기 조사(ffprobe)의 제한 시간. 일반 읽기(read)와 같은 120초로,
+# 받아쓰기 등으로 바쁜 PC에서도 실패하지 않으면서 응답 없는 파일에서 끝없이 기다리지는 않는다.
+REGION_PROBE_TIMEOUT_SECONDS = 120
+
+
+class ProbeTimeout(RuntimeError):
+    """영상 크기 조사가 제한 시간 안에 끝나지 않았다."""
+
+
 @dataclass(frozen=True)
 class VideoFrame:
     """재생 중인 영상의 한 장면. 화소는 bgr0(한 화소 4바이트), 한 행은 stride 바이트다."""
@@ -61,17 +70,17 @@ class FFmpegMediaReader:
         return parse_ffprobe_result(result.stdout, suffix=path.suffix,
                                     returncode=result.returncode, error=result.stderr)
 
-    def read_resolution(self, path: Path, *, cancellation) -> MediaInfo | None:
-        """채우기 전용: 낮은 우선순위로 읽고 종료/전경 작업 요청에 즉시 양보한다."""
+    def read_resolution(self, path: Path, *, cancellation, timeout: float = 15) -> MediaInfo | None:
+        """낮은 우선순위로 읽고 취소(종료·전경 작업·대기열 빼기)에 즉시 양보한다. 해상도 채우기와 화면 자막이 쓴다."""
         flags = (subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS) if sys.platform == 'win32' else 0
         process = subprocess.Popen([self.ffprobe, '-v', 'error', '-show_format', '-show_streams', '-of', 'json', str(path)],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    encoding='utf-8', errors='replace', creationflags=flags)
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + timeout
         try:
             while not cancellation.is_set():
                 if time.monotonic() >= deadline:
-                    raise RuntimeError('해상도 읽기 제한 시간(15초)을 초과했습니다. 다시 검사해 주세요.')
+                    raise ProbeTimeout(f'해상도 읽기 제한 시간({timeout:g}초)을 초과했습니다. 다시 검사해 주세요.')
                 try:
                     output, error = process.communicate(timeout=0.05)
                     return parse_ffprobe_result(output, suffix=path.suffix, returncode=process.returncode, error=error)
@@ -119,7 +128,12 @@ class FFmpegMediaReader:
     ) -> Iterator[tuple[float, RegionImage]]:
         """표시 방향의 영역을 디스크에 쓰지 않고 회색조 프레임으로 읽는다."""
         # 크기 조사도 취소를 받는다. 취소되면 아무 장도 내보내지 않고 끝나 실패가 아닌 대기로 돌아간다.
-        info = self.read_resolution(path, cancellation=cancellation)
+        try:
+            info = self.read_resolution(path, cancellation=cancellation, timeout=REGION_PROBE_TIMEOUT_SECONDS)
+        except ProbeTimeout as error:
+            # 해상도 채우기의 '다시 검사' 안내는 화면 자막 작업을 되살리지 않는다. 실제 복구 방법을 안내한다.
+            raise RuntimeError(f"화면 자막을 만들 영상 크기를 {REGION_PROBE_TIMEOUT_SECONDS:g}초 안에 읽지 못했습니다. "
+                               "자막 대기열의 '실패 항목 모두 재시도'로 다시 시도하세요.") from error
         if cancellation.is_set():
             return
         if info is None or not info.width or not info.height:
