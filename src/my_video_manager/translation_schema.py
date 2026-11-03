@@ -1,6 +1,6 @@
 """번역 출처 저장 구조와 원어 자막 참조 보장. 이전과 최초 생성이 공유한다."""
 
-from .translation_source import TRANSCRIPT
+from .translation_source import ONSCREEN, TRANSCRIPT
 
 
 SOURCE_TABLES = {
@@ -26,6 +26,55 @@ SOURCE_TABLES = {
 def create_source_tables(db):
     for table, schema in SOURCE_TABLES.items():
         db.execute(f"CREATE TABLE IF NOT EXISTS {table} ({schema})")
+
+
+def install_onscreen_references(db):
+    for table in ('translation_lines', 'translation_line_providers'):
+        for event in ('INSERT', 'UPDATE'):
+            db.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_onscreen_{event.lower()}
+                BEFORE {event} ON {table} WHEN new.source='{ONSCREEN}' AND NOT EXISTS (
+                    SELECT 1 FROM onscreen_subtitle_lines l JOIN onscreen_subtitles s ON s.id=l.generation_id
+                    JOIN onscreen_subtitle_regions r ON r.id=s.region_id
+                    WHERE l.id=new.line_id AND r.video_id=new.video_id)
+                BEGIN SELECT RAISE(ABORT, 'invalid onscreen line'); END""")
+    for event in ('INSERT', 'UPDATE'):
+        db.execute(f"""CREATE TRIGGER IF NOT EXISTS translation_targets_onscreen_{event.lower()}
+            BEFORE {event} ON translation_targets WHEN EXISTS (
+                SELECT 1 FROM translation_queue q WHERE q.id=new.queue_id AND q.source='{ONSCREEN}'
+                AND NOT EXISTS (SELECT 1 FROM onscreen_subtitle_lines l
+                    JOIN onscreen_subtitles s ON s.id=l.generation_id
+                    JOIN onscreen_subtitle_regions r ON r.id=s.region_id
+                    WHERE l.id=new.line_id AND r.video_id=q.video_id))
+            BEGIN SELECT RAISE(ABORT, 'invalid onscreen target'); END""")
+    db.execute(f"""CREATE TRIGGER IF NOT EXISTS translation_onscreen_line_delete
+        AFTER DELETE ON onscreen_subtitle_lines BEGIN
+        DELETE FROM translation_lines WHERE source='{ONSCREEN}' AND line_id=old.id;
+        DELETE FROM translation_line_providers WHERE source='{ONSCREEN}' AND line_id=old.id;
+        DELETE FROM translation_targets WHERE line_id=old.id AND queue_id IN
+            (SELECT id FROM translation_queue WHERE source='{ONSCREEN}'); END""")
+
+
+def migrate_onscreen_translation(db):
+    """v9: 완료된 작업과 무관하게 영상의 용어를 보존하고 화면 번역 수정본을 보호한다."""
+    from .translation_glossary import Glossary, GlossaryEntry, GlossaryStore
+    glossaries = {}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='translation_queue' AND type='table'").fetchone():
+        for video_id, source, target in db.execute(
+                'SELECT q.video_id, g.source, g.target FROM translation_glossary g '
+                'JOIN translation_queue q ON q.id=g.queue_id ORDER BY q.requested_at, q.rowid, g.ordinal'):
+            glossaries[video_id] = glossaries.get(video_id, Glossary()).updated((), (GlossaryEntry(source, target),))
+    db.execute('DROP TABLE translation_glossary')
+    db.execute('CREATE TABLE translation_glossary ('
+               'video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE, '
+               'source TEXT NOT NULL, target TEXT NOT NULL, ordinal INTEGER NOT NULL, PRIMARY KEY(video_id, source))')
+    for video_id, glossary in glossaries.items():
+        GlossaryStore.save(db, video_id, glossary)
+    db.execute('CREATE TABLE onscreen_translation_reviews ('
+               'line_id TEXT PRIMARY KEY REFERENCES onscreen_subtitle_lines(id) ON DELETE CASCADE, '
+               'translation_reviewed INTEGER NOT NULL DEFAULT 0)')
+    if all(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+           for name in SOURCE_TABLES):
+        install_onscreen_references(db)
 
 
 def install_transcript_references(db):

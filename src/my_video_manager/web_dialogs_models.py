@@ -50,7 +50,7 @@ class DialogModel:
             self.values.update(choice=self.translation['provider'], selections=self.translation['selections'],
                                fallback=self.translation['fallback'])
             self.network_busy = False
-            self.waiting = [e.video_id for e in self.core.translation_queue() if e.state in ('failed', 'held')]
+            self.waiting = [(e.video_id, e.source) for e in self.core.translation_queue() if e.state in ('failed', 'held')]
         elif kind == 'line':
             line = context['line']
             self.values['text'] = (line.translation or '') if context['translated'] else line.original.text
@@ -197,7 +197,7 @@ class DialogModel:
                         translation=self.translation, network_busy=self.network_busy,
                         description='한국어 번역 방식과 모델을 고르세요. 한국어 영상의 다듬기도 같은 방식을 씁니다. 키·설정 변경은 확인할 때 저장됩니다.')
             if self.waiting:
-                data['description'] += f' 확인하면 실패·보류 중인 번역·다듬기 {len(self.waiting)}건을 저장한 묶음부터 재시도합니다. 선택한 방식의 사용량 한도 보류 시간이 남았으면 그 시각까지 기다립니다.'
+                data['description'] += f' 확인하면 실패·보류 중인 번역·다듬기·화면 번역 {len(self.waiting)}건을 저장한 묶음부터 재시도합니다. 선택한 방식의 사용량 한도 보류 시간이 남았으면 그 시각까지 기다립니다.'
         if kind in ('review', 'line', 'range'):
             data['locked'] = any(e.video_id == ctx['video_id'] and e.state in ('queued', 'transcribing') for e in c.subtitle_queue())
             if data['locked']:
@@ -412,9 +412,9 @@ class DialogModel:
                 raise ValueError('키 확인 또는 목록 조회가 끝난 뒤 저장하세요.')
             notice = c.save_translation_settings(data['choice'], data.get('selections', self.values['selections']),
                 data.get('fallback', self.values['fallback']), key_action=data.get('key_action', 'keep'), key=data.get('key', ''))
-            for video_id in self.waiting:
+            for video_id, source in self.waiting:
                 try:
-                    c.request_translation(video_id)
+                    c.request_translation(video_id, source=source)
                 except ValueError:
                     pass  # Qt 경로와 같이 그 사이 원어가 재생성된 영상은 새 요청을 따른다.
             from .translation_models import provider

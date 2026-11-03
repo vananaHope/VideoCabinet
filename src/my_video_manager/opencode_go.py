@@ -20,6 +20,7 @@ from urllib.request import HTTPHandler, HTTPSHandler, HTTPRedirectHandler, Reque
 from .secret_store import Secret
 from .app_logging import safe_detail
 from .translation import TranslationCancelled, TranslationError
+from .translation_source import TRANSCRIPT
 from .translation_cli import (classify_cli_failure, parse_translation_response,
                               translation_prompt, translation_schema)
 from .translation_models import (ModelPolicy, TranslationModelChoice, DEFAULT_MODEL,
@@ -432,14 +433,14 @@ class OpenCodeGoTranslator:
             payload["response_format"] = {"type": "json_object"}
         return payload
 
-    def translate(self, lines, spoken_language, *, cli=None, cancellation=None, context=(), glossary=()):
+    def translate(self, lines, spoken_language, *, cli=None, cancellation=None, context=(), glossary=(), source=TRANSCRIPT):
         lines = tuple(lines)
         if cancellation is not None and cancellation.is_set():
             raise TranslationCancelled
         if not lines:
             return ()
         # Go의 strict JSON Schema 지원은 미확인. 계약을 프롬프트에 첨부하고 로컬에서 검증한다.
-        prompt = translation_prompt(lines, spoken_language, context=context, glossary=glossary)
+        prompt = translation_prompt(lines, spoken_language, context=context, glossary=glossary, source=source)
         prompt += "\nOUTPUT_JSON_SCHEMA:\n" + json.dumps(translation_schema(lines), ensure_ascii=False)
         prompt += '\nReturn a json object only. Example: {"lines": [{"id": "target id", "text": "번역"}], "glossary": []}.'
         extra = {}
@@ -465,7 +466,7 @@ class OpenCodeGoTranslator:
                 fenced = re.fullmatch(r"\s*```(?:json)?[ \t]*\r?\n(.*?)\r?\n```\s*", content, re.DOTALL)
                 if fenced:
                     content = fenced[1]
-            result = parse_translation_response(content, lines, spoken_language=spoken_language)
+            result = parse_translation_response(content, lines, spoken_language=spoken_language, source=source)
         except (TranslationError, ValueError, TypeError, KeyError, IndexError, AttributeError):
             pass
         if result is None:

@@ -119,9 +119,9 @@ class QueueBridge(QObject):
             elif name == 'remove':
                 core.remove_from_subtitle_queue(video_id, kind=queue_kind)
             elif name == 'retryHeld':
-                if queue_kind == TRANSCRIPTION and any(e.video_id == video_id and e.state == 'held'
-                                                       for e in core.translation_queue()):
-                    core.request_translation(video_id)
+                for entry in core.translation_queue():
+                    if entry.video_id == video_id and entry.queue_kind == queue_kind and entry.state == 'held':
+                        core.request_translation(video_id, source=entry.source)
             else:
                 raise ValueError('지원하지 않는 작업입니다.')
         return self.perform(execute)

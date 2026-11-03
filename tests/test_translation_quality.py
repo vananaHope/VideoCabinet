@@ -253,7 +253,7 @@ def test_glossary_survives_restart_and_failed_retry(quality, kind):
 
 
 @pytest.mark.parametrize('finish', ['complete', 'remove', 'regenerate'])
-def test_glossary_removed_with_job_and_never_leaks_into_new_job(quality, finish):
+def test_video_glossary_survives_completion_removal_and_regeneration(quality, finish):
     create, adapter, _ = quality
     core = create(25, batch_size=12)
     video = core.videos()[0].id
@@ -269,7 +269,7 @@ def test_glossary_removed_with_job_and_never_leaks_into_new_job(quality, finish)
     else:
         source(core, video)
     core.process_next_translation()
-    assert adapter.calls[-1][1]['glossary'] == ()
+    assert adapter.calls[-1][1]['glossary'] == (GlossaryEntry('Jon', '존'),)
 
 
 def test_request_replacement_keeps_committed_glossary_but_not_stale_result(quality):

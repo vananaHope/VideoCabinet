@@ -21,18 +21,20 @@ TRANSLATION_CLI_CHOICES = TRANSLATION_CHOICES
 
 
 from .translation_kind import translation_task, TRANSLATION
+from .translation_source import TRANSCRIPT
 
 TRANSLATION_INSTRUCTIONS = TRANSLATION.instructions
 
 
-def translation_prompt(lines, spoken_language, *, context=(), glossary=()):
-    return translation_task(spoken_language).instructions + "\nSUBTITLE_DATA_JSON:\n" + json.dumps({
+def translation_prompt(lines, spoken_language, *, context=(), glossary=(), source=TRANSCRIPT):
+    return translation_task(spoken_language, source=source).instructions + "\nSUBTITLE_DATA_JSON:\n" + json.dumps({
         "spoken_language": spoken_language, "target_language": "ko",
         "glossary": prompt_glossary(glossary),
         "context": [{"text": line.text,
                      **({"translation": line.translation} if line.translation is not None else {})}
                     for line in context],
-        "targets": [{"id": line.id, "text": line.text} for line in lines],
+        "targets": [{"id": line.id, "text": line.text,
+                     **({'language': line.language} if hasattr(line, 'language') else {})} for line in lines],
     }, ensure_ascii=False)
 
 
@@ -49,14 +51,14 @@ def translation_schema(lines):
             }}}}}
 
 
-def parse_translation_response(output, lines, *, spoken_language=None):
+def parse_translation_response(output, lines, *, spoken_language=None, source=TRANSCRIPT):
     try:
         data = json.loads(output)
         if (not isinstance(data, dict) or 'lines' not in data or set(data) - {'lines', 'glossary'}
                 or not isinstance(data['lines'], list)):
             raise ValueError("lines 배열이 필요합니다.")
         result = tuple(TranslatedLine(**line) for line in data["lines"])
-        return TranslationResponse(validate_translation(lines, result, spoken_language=spoken_language), parse_glossary(data.get('glossary')))
+        return TranslationResponse(validate_translation(lines, result, spoken_language=spoken_language, source=source), parse_glossary(data.get('glossary')))
     except (ValueError, TypeError, KeyError) as error:
         raise TranslationError("format", str(error)) from error
 
@@ -114,7 +116,7 @@ class SubscriptionCLITranslator:
         self.timeout = timeout
 
     def translate(self, lines, spoken_language, *, cli="codex", cancellation=None, model="", effort="",
-                  context=(), glossary=()):
+                  context=(), glossary=(), source=TRANSCRIPT):
         cancellation = cancellation if cancellation is not None else Event()
         if cancellation.is_set():
             raise TranslationCancelled
@@ -143,7 +145,7 @@ class SubscriptionCLITranslator:
             else:
                 # .cmd 런처는 따옴표 안의 줄바꿈도 명령 경계로 해석할 수 있다.
                 instructions_path = directory / "system-prompt.txt"
-                instructions_path.write_text(translation_task(spoken_language).instructions, encoding="utf-8")
+                instructions_path.write_text(translation_task(spoken_language, source=source).instructions, encoding="utf-8")
                 arguments = [*command, "-p", "--safe-mode", "--tools", "", "--strict-mcp-config",
                              "--permission-mode", "plan", "--permission-prompts", "none",
                              "--disable-slash-commands", "--no-session-persistence",
@@ -160,7 +162,7 @@ class SubscriptionCLITranslator:
                 else:
                     arguments.extend(["--effort", effort])
             output, error, code = self._run(arguments, directory, translation_prompt(
-                lines, spoken_language, context=context, glossary=glossary), cancellation)
+                lines, spoken_language, context=context, glossary=glossary, source=source), cancellation)
             if code:
                 detail = cli_failure_detail(cli, output, error)
                 raise TranslationError(classify_cli_failure(detail), detail)
@@ -177,7 +179,7 @@ class SubscriptionCLITranslator:
                     output = json.dumps(envelope["structured_output"], ensure_ascii=False)
                 except (ValueError, TypeError, KeyError, AttributeError) as error:
                     raise TranslationError("format", f"claude 응답 형식: {error}") from error
-            return parse_translation_response(output, lines, spoken_language=spoken_language)
+            return parse_translation_response(output, lines, spoken_language=spoken_language, source=source)
         finally:
             shutil.rmtree(directory)
 

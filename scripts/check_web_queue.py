@@ -272,21 +272,21 @@ try:
     visual_states = True
 
     def row_id(index):
-        """index번째 영상 행의 웹 id. 화면 자막 상태(읽는 중·완료)로 보인 행은 화면 자막 작업이다."""
-        kind = ONSCREEN_SUBTITLE if states[index % len(states)] in ('reading', 'completed') else TRANSCRIPTION
+        """화면 자막과 그 후속 화면 번역은 같은 대기열 작업 종류다."""
+        kind = ONSCREEN_SUBTITLE if states[index % len(states)] in ('reading', 'translating', 'held', 'completed', 'failed') else TRANSCRIPTION
         return f'queue-row-{videos[index].id}:{kind}'
 
     def display_items():
         items = list(original_items())[:visual_count]
         if visual_states:
-            # 화면 자막 작업은 읽는 중과 완료(줄 수)로, 나머지는 받아쓰기 작업으로 보인다.
+            # 화면 자막 읽기와 화면 번역의 진행·보류·완료·실패 이름을 함께 검증한다.
             def item(i, source):
                 state = states[i % len(states)]
-                kind = ONSCREEN_SUBTITLE if state in ('reading', 'completed') else TRANSCRIPTION
-                message = ('로그인을 확인한 뒤 선택한 번역 보류 재시도를 눌러 주세요. ' * 8 if state == 'held'
-                           else '화면 자막 12줄' if kind == ONSCREEN_SUBTITLE and state == 'completed' else None)
+                kind = ONSCREEN_SUBTITLE if state in ('reading', 'translating', 'held', 'completed', 'failed') else TRANSCRIPTION
+                message = ('OpenCode Go로 이어서 화면 번역 · 선택한 보류 재시도를 눌러 주세요. ' * 8 if state == 'held' else None)
+                task_label = '화면 번역' if kind == ONSCREEN_SUBTITLE and state != 'reading' else QUEUE_KIND_LABELS[kind]
                 return SubtitleQueueItem(source.video_id, source.title, state, (i % len(states)) / (len(states) - 1),
-                                         message, QUEUE_KIND_LABELS[kind], queue_kind=kind)
+                                         message, task_label, queue_kind=kind)
             items = [item(i, source) for i, source in enumerate(items)]
         if items:
             items[0] = replace(items[0], progress=(tick % 90) / 100,

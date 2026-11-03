@@ -18,6 +18,7 @@ from typing import Iterable, Iterator, Protocol, Sequence
 from uuid import uuid4
 
 from .subtitle_queue_kind import ONSCREEN_SUBTITLE
+from .translation_source import ONSCREEN
 
 
 # 영역마다 초당 4장을 읽는다. 줄의 시작·끝 오차는 한 장 간격(0.25초) 안이다.
@@ -298,6 +299,7 @@ class OnScreenSubtitles:
         self._ocr = ocr
         self._playback_location = playback_location
         self._order = order
+        self.translations = None
         self._processing = Lock()
         self._cancellation = Event()
         self._activity = Lock()
@@ -471,6 +473,8 @@ class OnScreenSubtitles:
                                        [(uuid4().hex, generation, ordinal, start, end, text)
                                         for ordinal, (start, end, text) in enumerate(region_lines)])
                     db.execute("DELETE FROM subtitle_queue WHERE id = ?", (pending.id,))
+                    if self.translations is not None:
+                        self.translations.request(pending.video_id, automatic=True, connection=db, source=ONSCREEN)
                 return OnScreenSubtitleQueueEntry(pending.id, pending.video_id, pending.requested_at, "completed", None,
                                                   progress=1.0, line_count=sum(map(len, lines.values())))
             except _Cancelled:
