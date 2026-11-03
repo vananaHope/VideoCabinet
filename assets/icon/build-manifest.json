@@ -2,74 +2,74 @@
   "frames": {
     "16": {
       "source": "assets/icon/app-icon-16.png",
-      "source_sha256": "abfd452b841388789ac1166a70539fc27b5031c96779bfec28d688125c49aee1",
-      "pixels_sha256": "e8fb7e474eee23b1c5796cac542e0a5f6cf59366329f0e946ecf5a36fed56899"
+      "source_sha256": "c39d6f77b066fb64f15b811ee9c3c9bd78a431c27627d13e2ade53e8478f997e",
+      "pixels_sha256": "be60ba33224e08f9e7ee29e19b0dd8d2668cb84b959bf15fcd84112340789b7d"
     },
     "20": {
       "source": "assets/icon/app-icon-20.png",
-      "source_sha256": "dbf5644fd068d4101c3046e8e24e485a485a64756dfb75f222035b46408d8815",
-      "pixels_sha256": "47ed26682181ef54dd46de5d73857f0bb8ec9d4f0bd7b6257ef3f686e8211053"
+      "source_sha256": "cb02e2e6c7cc3f25e71524190863537af313c8baf5796c594bebacaf7c8f13bd",
+      "pixels_sha256": "35f67baa5c871be8c0d9fea57360b0f61de41989d5163337474a55be622e1a98"
     },
     "24": {
       "source": "assets/icon/app-icon-24.png",
-      "source_sha256": "4f2f6b858a26f532602897a72dfa01d594c390c6812c06bdb844f85afba53037",
-      "pixels_sha256": "8fe898c12fafd20056a8d1a047893e3e28765c1ab2f01edcb5e1748886a446cf"
+      "source_sha256": "40fb2e7204cb166d420dfcf1657e756f78cee00c1056d5b949c5fadda45f7743",
+      "pixels_sha256": "56fa0421033d82fa60847ed969ac1e1065670f9945f8b41f9e3d9e9dd3755859"
     },
     "32": {
       "source": "assets/icon/app-icon-32.png",
-      "source_sha256": "96c3b2a0ebfb03a2e51346f95a8144a0b1388877a04b783738f0055326bee5c3",
-      "pixels_sha256": "0cb8f694f32a96476cd8592b8c8402def27aa1bfcc285cd3958edc8bb4d761d8"
+      "source_sha256": "7e3d5af2b56118cac85ce82241ab2ae39dd4cd31f0688baebcc3a41e5f1c97c6",
+      "pixels_sha256": "113eebfd3ed2d38fd8732b7c0930a81bb17a9cf852d4fbc340775a7089547fa3"
     },
     "40": {
       "source": "assets/icon/app-icon.svg",
-      "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
-      "pixels_sha256": "863fb005f805400687174a192655ad5e2153fdf56b2942029a487e9696574df3"
+      "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
+      "pixels_sha256": "1ebc6672c1d7c2c5a0188f505291b62eed6c3e9374e4ffe51b1fc7d6a6ed9d6e"
     },
     "48": {
       "source": "assets/icon/app-icon.svg",
-      "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
-      "pixels_sha256": "a3c9e519283b555ff36955649a1267bfcdd7500a8da4a4d16a5b6a3dda65bcae"
+      "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
+      "pixels_sha256": "4a82ff2df0a48ae591341d9469d6d6daa66efb6c43b2352878cec2644d46bf3c"
     },
     "64": {
       "source": "assets/icon/app-icon.svg",
-      "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
-      "pixels_sha256": "e6f153aa422f8314cffa2bfbb61d8b814a7572ffaba731d4891b0ba256e2c27c"
+      "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
+      "pixels_sha256": "31b5f5461a802ecb1d05132d01807c5fcc9d69d87df06691aedd76dd09368f2f"
     },
     "256": {
       "source": "assets/icon/app-icon.svg",
-      "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
-      "pixels_sha256": "cf541b5dafbba9a7a30e1a2bb7f9caf88a32900e100130e67825c3600bf8740d"
+      "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
+      "pixels_sha256": "cfa4baa20eb82598a41c49af514f7c5bf5398779de2823995c0babc63cd0fdc6"
     }
   },
   "web": {
     "path": "frontend/src/assets/app-icon.png",
     "size": 128,
     "source": "assets/icon/app-icon.svg",
-    "source_sha256": "c7e64fd803e950fddde5ee357277e8124b9c37f6e369fb086e8d32ab17750cb0",
-    "pixels_sha256": "2dc20ba6016d1002d287447ad56fa6d1a2e3a586e6e59d793c0e92ff7dc2b47d"
+    "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
+    "pixels_sha256": "9a44b66c65893948df7c011c2b47f4e46ee8cccf950d3ea6c7521fa4cf4bffdf"
   },
   "tray": {
     "path": "src/my_video_manager/tray.ico",
     "frames": {
       "16": {
         "source": "assets/icon/tray-icon-16.png",
-        "source_sha256": "85204368bd44c9ca4b74c449d55dae1fb26109e605778a847ffe13b580136056",
-        "pixels_sha256": "7bbd1d8dab0d9871511069bc3f2556746e2165964f984639f06bf12f1c748ac2"
+        "source_sha256": "81dda8c249372ccbed02a1b4aacb52a08fd0334b7e42b24b77f261c2a9331bfe",
+        "pixels_sha256": "15f3f957df6099fa1a4fb8b032059ef5878f86e659593f4d630f32c86da0a18c"
       },
       "20": {
         "source": "assets/icon/tray-icon-20.png",
-        "source_sha256": "991dfeca827ee7020cd90d30b365ccd99b56ebf37919712971a9e8455463b463",
-        "pixels_sha256": "069343b29d52c78d43f5fba9a34c17d8af866706ebc1fc161bd4a7701255268e"
+        "source_sha256": "842fda3eb0d015a4adbce23683a13ee168b5c40134591721862729263c69233e",
+        "pixels_sha256": "9f34ed9558a135efd18bf7cc84f8dfce5e3416d7504f01a22f333b9c8456d101"
       },
       "24": {
         "source": "assets/icon/tray-icon-24.png",
-        "source_sha256": "9d70633f29681fc7a2a61e73dea14f3dd70bccf12cab4012ef26a974d33f94c7",
-        "pixels_sha256": "5b8c6ac1d984b1b660876f48ed217b15c3765168fe6e0fb492a7ddeac7ce8e70"
+        "source_sha256": "ebc600992138532e9310f26b33d2d5351916e94b6784cefd2a6685affbc6719d",
+        "pixels_sha256": "203273ba24acaab646decbc95155f6cd50383a6f22388f672a615326a0db514f"
       },
       "32": {
         "source": "assets/icon/tray-icon-32.png",
-        "source_sha256": "1e39aaa45945425bee407e0c14108471185a256337499fa5256c2f21dcc2c25b",
-        "pixels_sha256": "dbe435b2bc5712475cb21e18e7cd0e79695b3ebd95ac092a6fe270cf0e26a575"
+        "source_sha256": "11d474a3f81e490212acd9dd33c6b710aa77bef25626d252950a020d7fd13363",
+        "pixels_sha256": "8895eae39131d8500286904080d0052e0e7b6037d9dd687bac149771f88ed7db"
       }
     }
   }
