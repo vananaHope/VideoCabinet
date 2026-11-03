@@ -21,14 +21,14 @@ TRANSLATION_CLI_CHOICES = TRANSLATION_CHOICES
 
 
 from .translation_kind import translation_task, TRANSLATION
-from .translation_source import TRANSCRIPT
+from .translation_source import ONSCREEN, TRANSCRIPT
 
 TRANSLATION_INSTRUCTIONS = TRANSLATION.instructions
 
 
 def translation_prompt(lines, spoken_language, *, context=(), glossary=(), source=TRANSCRIPT):
     return translation_task(spoken_language, source=source).instructions + "\nSUBTITLE_DATA_JSON:\n" + json.dumps({
-        "spoken_language": spoken_language, "target_language": "ko",
+        **({"spoken_language": spoken_language} if source != ONSCREEN else {}), "target_language": "ko",
         "glossary": prompt_glossary(glossary),
         "context": [{"text": line.text,
                      **({"translation": line.translation} if line.translation is not None else {})}

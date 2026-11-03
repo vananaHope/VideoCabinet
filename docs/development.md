@@ -933,15 +933,19 @@ v8은 화면 자막 영역·세대·줄 테이블(`onscreen_subtitle_regions`, `
 `tests/test_onscreen_subtitles.py`가 고정합니다. 화면 자막 작업자(`onscreen_controls.py`)는 받아쓰기 작업자와 따로 돌아갑니다.
 v9는 `translation_glossary`를 작업 ID에서 영상 ID 단위로 옮기고 `onscreen_translation_reviews`에
 화면 번역의 사용자 수정 여부를 저장합니다. 기존 용어는 요청 시각·작업 순서·용어 순서로 읽어 먼저 정한 표기를 보존합니다.
+용어집은 영상의 어느 출처든 번역 결과나 대기열 행이 남아 있는 동안 공유하며, 모두 사라진 뒤 새 작업을 등록할 때 비웁니다.
 화면 번역 결과와 줄별 방식은 v7의 공용 `translation_lines`·`translation_line_providers`에
 출처 `onscreen_subtitle`과 화면 자막 줄 ID로 저장하며, 줄 삭제 시 함께 정리합니다.
 화면 자막 저장과 후속 번역 등록은 같은 트랜잭션이며, v8에서 이미 읽은 미번역 영상도 시작할 때 등록합니다.
 `translation_queue.transcript_id`의 화면 자막 세대 토큰은 영상의 모든 `(region_id, generation_id)`를
 영역 ID 순으로 정렬한 JSON입니다. 빈 세대·아직 읽지 않은 영역도 포함하므로 영역 추가·삭제·재생성 때 달라집니다.
 무작위 UUID의 최댓값이나 되돌아갈 수 있는 순번 최댓값을 최신 세대로 취급하지 않습니다.
-전체 화면 번역 요청은 번역 없는 줄만 대상으로 하며, 영역별 언어를 각 대상에 포함합니다.
+전체 화면 번역 요청은 번역 없는 줄만 대상으로 하며, 영역별 언어를 각 대상의 `language`에 포함합니다.
+화면 번역 payload에는 최상위 `spoken_language`를 넣지 않습니다.
 참고 문맥은 대상 구간과 겹치거나 앞뒤 `ONSCREEN_CONTEXT_MARGIN = 2.0`초 안에 있는 말소리이며,
-공용 `CONTEXT_LIMIT = 100`줄 상한을 따릅니다. 저장된 번역이 있으면 함께 보내며 결과에는 넣지 않습니다.
+대상별 가까운 대사부터 순환 배분하고 중복을 제거해 시각순으로 보냅니다. 문맥 상한은 `max(100, 대상 수)`이며,
+`ONSCREEN_CONTEXT_LIMIT = 200`줄을 넘지 않도록 대상 묶음도 최대 200줄로 나눕니다.
+저장된 번역이 있으면 함께 보내며 결과에는 넣지 않습니다.
 `AppCore.onscreen_translation_skip_reason(video_id)`는 모든 영역의 읽기가 끝났고 줄 합이 0이면
 `no_onscreen_text`를 반환합니다. 영구 제외 기록을 남기지 않아 영역을 다시 읽으면 다시 등록됩니다.
 `edit_onscreen_translation_line(line_id, text)`는 사용자 수정본을 저장하고 진행 중 응답과 재번역으로부터 보호합니다.

@@ -90,6 +90,7 @@ def test_automatic_translation_is_one_to_one_and_resumes_after_restart(screen):
     assert set(core.translation_line_providers(video, source=ONSCREEN).values()) == {'codex'}
     assert [len(call[0]) for call in adapter.calls] == [2, 1]
     assert core.subtitle_queue_items()[0].task_label == '화면 번역'
+    assert core.subtitle_queue_items()[0].error == '화면 자막 3줄'
     assert core.take_subtitle_queue_completion() == (1, 0, 0, 0)
     assert core.take_subtitle_queue_completion() is None
     assert core.request_translation(video, source=ONSCREEN) is None
@@ -143,6 +144,87 @@ def test_context_is_contemporaneous_speech_and_never_a_target(screen, translated
     assert json.loads(prompt.split('SUBTITLE_DATA_JSON:\n')[1])['targets'][0]['language'] == 'en'
 
 
+def test_overlapping_screen_targets_share_deduplicated_speech_context(screen):
+    core, media, adapter, transcriber, *_ = screen
+    video = core.videos()[0].id
+    transcriber.result = TranscriberResult('en', (
+        TranscriptSegment(10, 11, 'Shared speech'), TranscriptSegment(12, 13, 'Next speech')),
+        model='test')
+    transcript = source(core, video)
+    core.remove_from_subtitle_queue(video)
+    read_screen(core, media, video, captions=((10, 12, 'Jon show'),),
+                regions=((BAND, 'en'), (RegionRect(0, 0, 1, .2), 'ja')))
+    finish(core)
+    targets, _, kwargs = adapter.calls[-1]
+    assert len(targets) == 2 and len({line.region_id for line in targets}) == 2
+    assert [line.id for line in kwargs['context']] == [line.id for line in transcript.lines]
+
+
+@pytest.mark.parametrize('count', [120, 250])
+def test_large_onscreen_batches_share_nearest_context_across_every_target(screen, tmp_path, count):
+    core, media, adapter, transcriber, _, _, _, reopen = screen
+    media.duration = max(1300, count * 10 + 20)
+    path = tmp_path / 'long.mkv'
+    path.write_bytes(b'long-context-video')
+    core.add_file(path)
+    video = next(v.id for v in core.videos() if v.title == 'long')
+    core = reopen(batch_size=count)
+    transcriber.result = TranscriberResult('en', tuple(
+        TranscriptSegment(i * 2, i * 2 + 1, f'Speech {i}') for i in range(count * 5)), model='test')
+    transcript = source(core, video)
+    core.remove_from_subtitle_queue(video)
+    read_screen(core, media, video, captions=tuple((i * 10, i * 10 + 2, f'Caption {i}') for i in range(count)))
+    finish(core)
+    speech = {line.id: line for line in transcript.lines}
+    assert sum(len(targets) for targets, _, _ in adapter.calls) == count
+    for targets, _, kwargs in adapter.calls:
+        context = kwargs['context']
+        assert len(targets) <= 200 and len(context) <= max(100, len(targets)) <= 200
+        assert len({line.id for line in context}) == len(context)
+        assert [speech[line.id].start for line in context] == sorted(speech[line.id].start for line in context)
+        # 먼저 가장 가까운 겹치는 말소리를 배분해야 앞쪽의 여유 문맥이 뒤쪽 대상을 밀어내지 않는다.
+        for target in targets:
+            assert any(speech[line.id].start == target.start for line in context), target
+        assert all(any(speech[line.id].start <= target.end + 2 and speech[line.id].end >= target.start - 2
+                       for target in targets) for line in context)
+
+
+@pytest.mark.parametrize('remaining', ['saved', 'progress', 'queue', 'none'])
+def test_regenerated_speech_shares_glossary_only_when_another_source_remains(screen, remaining):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    source(core, video)
+    finish(core)
+    if remaining != 'none':
+        read_screen(core, media, video)
+        if remaining == 'saved':
+            finish(core)
+        elif remaining == 'progress':
+            assert core.process_next_translation().completed_lines == 2
+    source(core, video)  # 원어 세대 교체로 기존 말소리 번역 결과와 작업은 사라진다.
+    core.promote_subtitle(video, kind=TRANSCRIPTION)
+    assert core.process_next_translation().source == TRANSCRIPT
+    assert adapter.calls[-1][2]['glossary'] == (() if remaining == 'none' else (GlossaryEntry('Jon', '존'),))
+
+
+def test_removing_all_partial_sources_clears_glossary_on_next_job_after_restart(screen):
+    core, media, adapter, _, _, _, _, reopen = screen
+    video = core.videos()[0].id
+    source(core, video)
+    core.process_next_translation()
+    read_screen(core, media, video)
+    core.promote_subtitle(video, kind=ONSCREEN_SUBTITLE)
+    core.process_next_translation()
+    for kind in (TRANSCRIPTION, ONSCREEN_SUBTITLE):
+        core.remove_from_subtitle_queue(video, kind=kind)
+    assert not core.translation_queue()
+    assert core.translation(video) is None and core.translation(video, source=ONSCREEN) is None
+    core = reopen()
+    core.request_translation(video, source=ONSCREEN)
+    core.process_next_translation()
+    assert adapter.calls[-1][2]['glossary'] == ()
+
+
 def test_mixed_region_languages_are_kept_per_target(screen):
     core, media, adapter, *_ = screen
     video = core.videos()[0].id
@@ -153,6 +235,7 @@ def test_mixed_region_languages_are_kept_per_target(screen):
     assert [(line.region_id, line.language) for line in targets] == [(r.id, r.language) for r in core.onscreen_subtitle_regions(video)]
     payload = json.loads(translation_prompt(targets, language, source=ONSCREEN).split('SUBTITLE_DATA_JSON:\n')[1])
     assert [line['language'] for line in payload['targets']] == ['en', 'ja']
+    assert 'spoken_language' not in payload
 
 
 @pytest.mark.parametrize('kind', ['usage_limit', 'other', 'format'])
@@ -174,6 +257,10 @@ def test_fallback_keeps_progress_settings_notice_and_line_providers(screen, kind
     data = json.JSONDecoder().raw_decode(prompt.split('SUBTITLE_DATA_JSON:\n')[1])[0]
     assert [l['id'] for l in data['targets']] == [original[2].id]
     assert data['glossary'] == [{'source': 'Jon', 'target': '존'}]
+    assert 'spoken_language' not in data
+    item = next(item for item in core.subtitle_queue_items() if item.queue_kind == ONSCREEN_SUBTITLE)
+    assert item.error.startswith('화면 자막 3줄 · ')
+    assert 'OpenCode Go로 이어서 화면 번역' in item.error
     assert reopen().translation(video, source=ONSCREEN) == core.translation(video, source=ONSCREEN)
 
 

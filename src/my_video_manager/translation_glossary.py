@@ -66,7 +66,15 @@ class Glossary:
 
 
 class GlossaryStore:
-    """진행 저장 트랜잭션을 빌려 쓰는 영상 단위 저장소. 출처·세대·작업 완료를 넘어 공유한다."""
+    """번역 결과나 진행 중 작업이 남아 있는 동안 출처·세대 사이에 공유하는 영상 단위 저장소."""
+
+    @staticmethod
+    def begin_job(db, video_id):
+        # 진행 저장 대상은 대기열 행에 속한다. 새 행을 만들기 전에 모든 출처를 확인한다.
+        db.execute('DELETE FROM translation_glossary WHERE video_id=? '
+                   'AND NOT EXISTS (SELECT 1 FROM translation_lines WHERE video_id=?) '
+                   'AND NOT EXISTS (SELECT 1 FROM translation_queue WHERE video_id=?)',
+                   (video_id, video_id, video_id))
 
     @staticmethod
     def load(db, video_id):

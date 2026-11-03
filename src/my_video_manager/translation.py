@@ -20,6 +20,7 @@ CONTEXT_LINES = 10
 CONTEXT_LIMIT = 100
 # 화면 글자와 겹치거나 앞뒤 2초 안의 말소리만 참고한다. 번역 대상에는 넣지 않는다.
 ONSCREEN_CONTEXT_MARGIN = 2.0
+ONSCREEN_CONTEXT_LIMIT = 200
 MIN_BATCH_SIZE = 10
 RECOVERY_SUCCESSES = 3
 
@@ -305,6 +306,7 @@ class Translations:
                     return None
             else:
                 db.execute("DELETE FROM translation_omissions WHERE video_id = ? AND source = ?", (video_id, source))
+            GlossaryStore.begin_job(db, video_id)
             if self._order:
                 # 새 직접 요청은 남은 순번 행과 무관하게 뒤에 서고, 후속 단계는 받은 순번을 잇는다.
                 self._order.request(db, video_id, kind=self.sources.queue_kind(source), automatic=automatic,
@@ -594,6 +596,9 @@ class Translations:
         if adapter is None:
             raise TranslationError('missing_cli', '번역 어댑터가 설정되지 않았습니다.')
         ceiling = self._batch_size or provider(cli).batch_size
+        if source == ONSCREEN:
+            # 대상마다 문맥 한 줄을 배분할 수 있도록 큰 사용자 지정 묶음도 나눈다.
+            ceiling = min(ceiling, ONSCREEN_CONTEXT_LIMIT)
         progress = self._batch_progress.setdefault((queue_id, cli), BatchProgress(ceiling))
         positions = {line.id: i for i, line in enumerate(transcript.lines)}
         attempt = 0
@@ -606,19 +611,20 @@ class Translations:
                                     AND s.state IN ('queued', 'transcribing', 'reading'))""", (queue_id, self.sources.queue_kind(source))).fetchone()
             if not current:
                 raise TranslationCancelled
-            lines = remaining[:progress.size]
-            # 떨어진 각 구간에 적어도 가장 가까운 앞 줄 하나를 줄 수 있게
-            # 맥락 예산을 넘는 구간은 다음 호출로 넘긴다. 연속 묶음 크기는 유지한다.
-            groups = 0
-            previous = -1
-            for offset, line in enumerate(lines):
-                index = positions[line.id]
-                if index > previous + 1:
-                    groups += 1
-                if groups > CONTEXT_LIMIT:
-                    lines = lines[:offset]
-                    break
-                previous = index
+            lines = remaining[:min(progress.size, ceiling)]
+            if source != ONSCREEN:
+                # 떨어진 각 구간에 적어도 가장 가까운 앞 줄 하나를 줄 수 있게
+                # 맥락 예산을 넘는 구간은 다음 호출로 넘긴다. 연속 묶음 크기는 유지한다.
+                groups = 0
+                previous = -1
+                for offset, line in enumerate(lines):
+                    index = positions[line.id]
+                    if index > previous + 1:
+                        groups += 1
+                    if groups > CONTEXT_LIMIT:
+                        lines = lines[:offset]
+                        break
+                    previous = index
             with self._connect() as db:
                 context = self._context(db, transcript, lines, queue_id, source)
             try:
@@ -681,14 +687,34 @@ class Translations:
         intervals = ' OR '.join('(l.start <= ? AND l.end >= ?)' for _ in targets)
         bounds = [value for line in targets for value in
                   (line.end + ONSCREEN_CONTEXT_MARGIN, line.start - ONSCREEN_CONTEXT_MARGIN)]
-        return tuple(ContextLine(*row) for row in db.execute(
-            'SELECT l.id, l.text, CASE WHEN target.line_id IS NOT NULL THEN target.text ELSE tr.text END '
+        rows = list(db.execute(
+            'SELECT l.id, l.text, CASE WHEN target.line_id IS NOT NULL THEN target.text ELSE tr.text END, l.start, l.end '
             'FROM transcript_lines l JOIN transcripts t ON t.id=l.transcript_id '
             'LEFT JOIN translation_lines tr ON tr.video_id=t.video_id AND tr.source=? AND tr.line_id=l.id '
             'LEFT JOIN translation_queue q ON q.video_id=t.video_id AND q.source=? '
             'LEFT JOIN translation_targets target ON target.queue_id=q.id AND target.line_id=l.id '
-            'WHERE t.video_id=? AND (' + intervals + ') ORDER BY l.ordinal LIMIT ?',
-            (TRANSCRIPT, TRANSCRIPT, video_id, *bounds, CONTEXT_LIMIT)))
+            'WHERE t.video_id=? AND (' + intervals + ') ORDER BY l.start, l.end, l.ordinal',
+            (TRANSCRIPT, TRANSCRIPT, video_id, *bounds)))
+        # 겹치는 대사부터, 같은 거리면 구간 중심이 가까운 대사부터 순환 배분한다.
+        candidates = [iter(sorted(
+            (row for row in rows if row[3] <= line.end + ONSCREEN_CONTEXT_MARGIN
+             and row[4] >= line.start - ONSCREEN_CONTEXT_MARGIN),
+            key=lambda row: (max(line.start - row[4], row[3] - line.end, 0),
+                             abs(line.start + line.end - row[3] - row[4]), row[3], row[4], row[0])))
+            for line in targets]
+        limit = min(ONSCREEN_CONTEXT_LIMIT, max(CONTEXT_LIMIT, len(targets)))
+        selected = set()
+        while len(selected) < limit:
+            previous_size = len(selected)
+            for nearby in candidates:
+                row = next((row for row in nearby if row[0] not in selected), None)
+                if row is not None:
+                    selected.add(row[0])
+                if len(selected) >= limit:
+                    break
+            if len(selected) == previous_size:
+                break
+        return tuple(ContextLine(*row[:3]) for row in rows if row[0] in selected)
 
     def _prune_progress(self, db):
         live = {r[0] for r in db.execute('SELECT id FROM translation_queue')}

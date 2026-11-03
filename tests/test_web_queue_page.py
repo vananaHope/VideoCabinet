@@ -263,11 +263,12 @@ def test_onscreen_work_notice_names_source_without_speech_toggle_hint(qapp, scre
 
 def test_onscreen_and_transcription_rows_of_one_video_are_separate(queue_page, setup):
     from test_onscreen_subtitles import BAND, FakeMedia, FakeOcr, NOW
+    from test_onscreen_translation import Translator
     from my_video_manager.core import AppCore
     core, transcriber, (a, b) = setup
     media = FakeMedia()
     core = queue_page.core = AppCore(media=media, clock=lambda: NOW, transcriber=transcriber, ocr_engine=FakeOcr(),
-                                     database=core.database)
+                                     database=core.database, translator=Translator())
     page = queue_page
     core.request_subtitles(a.id)
     core.set_onscreen_subtitle_regions(a.id, [(BAND, 'en')])
@@ -297,6 +298,10 @@ def test_onscreen_and_transcription_rows_of_one_video_are_separate(queue_page, s
     page.refresh()
     done = {row['key']: row for row in reply(page.bridge.snapshot())['rows']}[f'{b.id}:onscreen_subtitle']
     assert (done['state'], done['stateLabel'], done['message']) == ('queued', '화면 번역 · 대기', '')
+    assert core.process_next_translation().state == 'completed'
+    page.refresh()
+    done = {row['key']: row for row in reply(page.bridge.snapshot())['rows']}[f'{b.id}:onscreen_subtitle']
+    assert (done['state'], done['message']) == ('completed', '화면 자막 1줄')
 
 
 def test_tray_opens_web_queue(window_factory):

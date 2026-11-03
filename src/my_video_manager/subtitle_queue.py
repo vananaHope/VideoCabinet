@@ -298,12 +298,20 @@ class SubtitleQueue:
             return
         key = queue_task_key(result)
         with self._lock:
+            notice = getattr(result, "notice", "")
             with self.order.connect() as db:
                 if db.execute("SELECT 1 FROM subtitle_queue_hidden WHERE video_id = ? AND kind = ?", key).fetchone():
                     return
+                if result.state == "completed" and getattr(result, "source", None) == ONSCREEN:
+                    count = db.execute(
+                        'SELECT COUNT(*) FROM onscreen_subtitle_lines l '
+                        'JOIN onscreen_subtitles s ON s.id=l.generation_id '
+                        'JOIN onscreen_subtitle_regions r ON r.id=s.region_id WHERE r.video_id=?',
+                        (result.video_id,)).fetchone()[0]
+                    notice = ' · '.join(filter(None, (f'화면 자막 {count}줄', notice)))
             no_speech, no_text = getattr(result, "no_speech", False), getattr(result, "no_text", False)
             self._notices[key] = (NO_SPEECH_NOTICE if no_speech else NO_TEXT_NOTICE if no_text
-                                  else getattr(result, "notice", ""))
+                                  else notice)
             self._outcomes[key] = "no_speech" if no_speech else "no_text" if no_text else result.state
             if result.state == "completed":
                 self._completed.add(key)

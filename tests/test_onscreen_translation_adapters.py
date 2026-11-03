@@ -24,6 +24,7 @@ from my_video_manager.translation_kind import ONSCREEN_TRANSLATION
 instructions, raw = sys.stdin.read().split('\\nSUBTITLE_DATA_JSON:\\n')
 assert instructions == ONSCREEN_TRANSLATION.instructions
 data = json.loads(raw)
+assert 'spoken_language' not in data
 assert [line['language'] for line in data['targets']] == ['en', 'ja']
 assert data['context'] == [{'text': 'speech', 'translation': '말소리'}]
 assert data['glossary'] == [{'source': 'Jon', 'target': '존'}]
