@@ -21,7 +21,7 @@ Orca 대신 herdr-app(herdr-core `hc`)과 omp로 여러 이슈를 동시에 처�
 | UI 작업(`orchestration.md` "UI 작업") | `omp --model anthropic/claude-opus-5-5 --thinking high` | `reviewer`(Codex) |
 | 그 밖 | `omp --model openai-codex/gpt-6-astra --thinking high` | `claude-reviewer` |
 
-동시성·잠금·프로세스 수명을 다루는 일은 작아 보여도 위 표 그대로 `high`로 띄운다. `orchestration.md`의 "등급별 배치", "작업자 실패 알림", "Codex fast"는 Orca 전용이라 쓰지 않는다. 한도는 `omp usage`로 본다.
+동시성·잠금·프로세스 수명을 다루는 일은 작아 보여도 위 표 그대로 `high`로 띄운다. `orchestration.md`의 "등급별 배치", "작업자 실패 알림", "Codex fast"는 스킬(Orca·herdr app·T3 Code) 전용이라 쓰지 않는다. 한도는 `omp usage`로 본다.
 
 ## 작업 파일
 
