@@ -8,6 +8,10 @@ import sqlite3
 def snapshot_rows(db, columns, table):
     """표의 행을 값과 중복 개수로 돌려준다. 행의 물리 순서는 스키마가 보증하지 않으며,
     이전이 AUTOINCREMENT 표를 다시 만들면 `sqlite_sequence`의 행 순서가 바뀐다."""
+    if table == 'translation_glossary' and 'queue_id' in columns and any(
+            row[1] == 'video_id' for row in db.execute('PRAGMA table_info(translation_glossary)')):
+        return Counter(db.execute('SELECT q.id, g.source, g.target, g.ordinal FROM translation_glossary g '
+                                  'JOIN translation_queue q ON q.video_id=g.video_id').fetchall())
     return Counter(db.execute(f'SELECT {columns} FROM "{table}"').fetchall())
 
 
@@ -28,7 +32,18 @@ def frozen_database(database, version, *, copy_from=None):
             columns = ', '.join('"' + row[1] + '"' for row in db.execute(f'PRAGMA main.table_info("{name}")'))
             if kind == 'virtual':
                 columns = 'rowid, ' + columns
-            db.execute(f'INSERT INTO main."{name}" ({columns}) SELECT {columns} FROM original."{name}"')
+            if name == 'translation_glossary' and any(
+                    row[1] == 'video_id' for row in db.execute('PRAGMA original.table_info(translation_glossary)')):
+                db.execute('INSERT INTO main.translation_glossary SELECT q.id, g.source, g.target, g.ordinal '
+                           "FROM original.translation_glossary g JOIN original.translation_queue q ON q.video_id=g.video_id WHERE q.source='transcript'")
+            elif name in ('translation_lines', 'translation_line_providers', 'translation_queue', 'translation_omissions'):
+                db.execute(f'INSERT INTO main."{name}" ({columns}) SELECT {columns} FROM original."{name}" '
+                           "WHERE source='transcript'")
+            elif name.startswith('translation_') and '"queue_id"' in columns:
+                db.execute(f'INSERT INTO main."{name}" ({columns}) SELECT {columns} FROM original."{name}" '
+                           "WHERE queue_id IN (SELECT id FROM original.translation_queue WHERE source='transcript')")
+            else:
+                db.execute(f'INSERT INTO main."{name}" ({columns}) SELECT {columns} FROM original."{name}"')
         for _, sql in triggers:
             db.execute(sql)
         db.commit()

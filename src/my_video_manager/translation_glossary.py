@@ -66,15 +66,23 @@ class Glossary:
 
 
 class GlossaryStore:
-    """진행 저장 트랜잭션을 빌려 쓰는 작업 단위 저장소. 완료·삭제는 FK로 정리한다."""
+    """번역 결과나 진행 중 작업이 남아 있는 동안 출처·세대 사이에 공유하는 영상 단위 저장소."""
 
     @staticmethod
-    def load(db, queue_id):
+    def begin_job(db, video_id):
+        # 진행 저장 대상은 대기열 행에 속한다. 새 행을 만들기 전에 모든 출처를 확인한다.
+        db.execute('DELETE FROM translation_glossary WHERE video_id=? '
+                   'AND NOT EXISTS (SELECT 1 FROM translation_lines WHERE video_id=?) '
+                   'AND NOT EXISTS (SELECT 1 FROM translation_queue WHERE video_id=?)',
+                   (video_id, video_id, video_id))
+
+    @staticmethod
+    def load(db, video_id):
         return Glossary(tuple(GlossaryEntry(*row) for row in db.execute(
-            'SELECT source, target FROM translation_glossary WHERE queue_id=? ORDER BY ordinal', (queue_id,))))
+            'SELECT source, target FROM translation_glossary WHERE video_id=? ORDER BY ordinal', (video_id,))))
 
     @staticmethod
-    def save(db, queue_id, glossary):
-        db.execute('DELETE FROM translation_glossary WHERE queue_id=?', (queue_id,))
+    def save(db, video_id, glossary):
+        db.execute('DELETE FROM translation_glossary WHERE video_id=?', (video_id,))
         db.executemany('INSERT INTO translation_glossary VALUES (?, ?, ?, ?)',
-                       [(queue_id, entry.source, entry.target, i) for i, entry in enumerate(glossary.entries)])
+                       [(video_id, entry.source, entry.target, i) for i, entry in enumerate(glossary.entries)])

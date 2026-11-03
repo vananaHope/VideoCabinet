@@ -10,8 +10,8 @@ from typing import NamedTuple
 from .onscreen_subtitles import NO_TEXT_NOTICE
 from .subtitles import normalize_spoken_language
 from .translation_kind import translation_task
-from .subtitle_queue_kind import QUEUE_KIND_LABELS, TRANSCRIPTION, queue_task_key
-from .translation_source import TRANSCRIPT, TranslationSources
+from .subtitle_queue_kind import QUEUE_KIND_LABELS, ONSCREEN_SUBTITLE, TRANSCRIPTION, queue_task_key
+from .translation_source import ONSCREEN, TRANSCRIPT, TranslationSources
 
 
 @dataclass(frozen=True)
@@ -258,8 +258,9 @@ class SubtitleQueue:
                     "SELECT id, title, (SELECT spoken_language FROM transcripts WHERE video_id=v.id) AS language, "
                     "EXISTS(SELECT 1 FROM transcripts WHERE video_id = v.id) AS has_transcript, "
                     "EXISTS(SELECT 1 FROM translation_lines tr JOIN transcript_lines l ON l.id=tr.line_id "
-                    "JOIN transcripts t ON t.id=l.transcript_id WHERE t.video_id=v.id AND tr.source=?) AS has_result "
-                    "FROM videos v WHERE id IN (" + placeholders + ")", (TRANSCRIPT, *batch)))
+                    "JOIN transcripts t ON t.id=l.transcript_id WHERE t.video_id=v.id AND tr.source=?) AS has_result, "
+                    "EXISTS(SELECT 1 FROM translation_lines tr WHERE tr.video_id=v.id AND tr.source=?) AS has_onscreen_result "
+                    "FROM videos v WHERE id IN (" + placeholders + ")", (TRANSCRIPT, ONSCREEN, *batch)))
                 hidden.update((r["video_id"], r["kind"]) for r in db.execute(
                     "SELECT video_id, kind FROM subtitle_queue_hidden WHERE video_id IN (" + placeholders + ")", batch))
         result = []
@@ -281,9 +282,11 @@ class SubtitleQueue:
                 result.append(SubtitleQueueItem(video_id, title, t.state,
                                                t.completed_lines / max(1, t.total_lines),
                                                ' · '.join(filter(None, (summary, detail, t.notice))) or None,
-                                               translation_task(video["language"]).label, queue_kind=kind))
+                                               translation_task(video["language"], source=t.source).label, queue_kind=kind))
             elif key in completed and (kind != TRANSCRIPTION or video["has_transcript"]):
                 result.append(SubtitleQueueItem(video_id, title, "completed", 1, notices.get(key),
+                                                translation_task(None, source=ONSCREEN).label
+                                                if kind == ONSCREEN_SUBTITLE and video['has_onscreen_result'] else
                                                 translation_task(video["language"]).label
                                                 if kind == TRANSCRIPTION and video["has_result"]
                                                 and video["language"] not in (None, "und") else QUEUE_KIND_LABELS.get(kind, kind),
@@ -295,12 +298,20 @@ class SubtitleQueue:
             return
         key = queue_task_key(result)
         with self._lock:
+            notice = getattr(result, "notice", "")
             with self.order.connect() as db:
                 if db.execute("SELECT 1 FROM subtitle_queue_hidden WHERE video_id = ? AND kind = ?", key).fetchone():
                     return
+                if result.state == "completed" and getattr(result, "source", None) == ONSCREEN:
+                    count = db.execute(
+                        'SELECT COUNT(*) FROM onscreen_subtitle_lines l '
+                        'JOIN onscreen_subtitles s ON s.id=l.generation_id '
+                        'JOIN onscreen_subtitle_regions r ON r.id=s.region_id WHERE r.video_id=?',
+                        (result.video_id,)).fetchone()[0]
+                    notice = ' · '.join(filter(None, (f'화면 자막 {count}줄', notice)))
             no_speech, no_text = getattr(result, "no_speech", False), getattr(result, "no_text", False)
             self._notices[key] = (NO_SPEECH_NOTICE if no_speech else NO_TEXT_NOTICE if no_text
-                                  else getattr(result, "notice", ""))
+                                  else notice)
             self._outcomes[key] = "no_speech" if no_speech else "no_text" if no_text else result.state
             if result.state == "completed":
                 self._completed.add(key)

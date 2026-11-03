@@ -144,7 +144,7 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 8
+LIBRARY_DB_VERSION = 9
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
@@ -240,6 +240,10 @@ def migrate_library(db, *, before_upgrade=None) -> None:
             from .onscreen_subtitles import create_onscreen_tables
             create_onscreen_tables(db)
             db.execute("PRAGMA user_version = 8")
+        if version < 9:
+            from .translation_schema import migrate_onscreen_translation
+            migrate_onscreen_translation(db)
+            db.execute("PRAGMA user_version = 9")
         db.commit()
     except BaseException:
         db.rollback()

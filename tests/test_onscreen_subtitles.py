@@ -101,6 +101,7 @@ def lines(core, video_id):
 
 
 def test_same_text_frames_merge_into_lines_within_quarter_second_and_survive_restart(setup):
+    from test_onscreen_translation import Translator
     core, media, ocr, (a, _) = setup
     shown = ((1.1, 2.9, "Hello"), (4.3, 6.05, "World"))
     media.captions = shown
@@ -118,13 +119,16 @@ def test_same_text_frames_merge_into_lines_within_quarter_second_and_survive_res
     assert media.calls == [(a.locations[0].path, BAND, SAMPLES_PER_SECOND)]
     assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
     item, = core.subtitle_queue_items()
-    assert (item.state, item.task_label, item.error) == ("completed", "화면 자막", "화면 자막 2줄")
-    assert core.take_subtitle_queue_completion() == (1, 0, 0, 0)
+    assert (item.state, item.task_label, item.error) == ("queued", "화면 번역", None)
+    assert core.take_subtitle_queue_completion() is None  # 자동 요청한 화면 번역까지 끝나야 알린다.
 
-    core = reopen(core, media, ocr)
+    core = AppCore(media=media, clock=lambda: NOW, ocr_engine=ocr, database=core.database, translator=Translator())
     region, = core.onscreen_subtitle_regions(a.id)
     assert (region.rect, region.language) == (BAND, "en")
     assert lines(core, a.id) == saved
+    assert core.process_next_translation().state == 'completed'
+    item, = core.subtitle_queue_items()
+    assert (item.state, item.task_label, item.error) == ('completed', '화면 번역', '화면 자막 2줄')
 
 
 def test_unchanged_frames_reuse_the_previous_reading(setup):

@@ -8,6 +8,13 @@ from .subtitles import TranscriptLine
 
 
 TRANSCRIPT = "transcript"
+ONSCREEN = "onscreen_subtitle"
+
+
+@dataclass(frozen=True)
+class OnScreenTranslationSourceLine(TranscriptLine):
+    region_id: int
+    language: str
 
 
 @dataclass(frozen=True)
@@ -18,6 +25,7 @@ class TranslationSourceLines:
     video_id: int
     spoken_language: str | None
     lines: tuple[TranscriptLine, ...]
+    complete: bool = True
 
 
 class SourceLineReader(Protocol):

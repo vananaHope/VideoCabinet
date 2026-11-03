@@ -30,7 +30,8 @@ from .translation import (Translator, Translations, Translation, TranslationQueu
 from .subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION, queue_task_key
 from .onscreen_subtitles import (OcrEngine, OnScreenSubtitle, OnScreenSubtitleQueueEntry, OnScreenSubtitleRegion,
                                  OnScreenSubtitles, RegionRect)
-from .translation_source import TRANSCRIPT, TranslationSources
+from .translation_source import ONSCREEN, TRANSCRIPT, TranslationSources
+from .onscreen_translation import OnScreenTranslationSource
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
@@ -185,6 +186,9 @@ class AppCore:
         # 영역 이미지는 같은 미디어 어댑터(ffmpeg)가, 글자 읽기는 주입한 OCR 엔진이 맡는다.
         self._onscreen = OnScreenSubtitles(self._connect, clock, media, ocr_engine, self.playback_location,
                                            self._queue_order)
+        self._onscreen_translation = OnScreenTranslationSource(self._connect)
+        self._translation_sources.register(ONSCREEN, self._onscreen_translation.lines, queue_kind=ONSCREEN_SUBTITLE,
+                                           protected_lines=self._onscreen_translation.protected_lines)
         from .translation_options import TranslationOptions
         self._translation_options = TranslationOptions(self.settings, self._connect, self.database.parent, clock,
                                                        secret_store=translation_secret_store, transport=translation_transport)
@@ -192,6 +196,8 @@ class AppCore:
                                           batch_size=translation_batch_size, order=self._queue_order,
                                           protected_lines=self._review.protected_lines, options=self._translation_options,
                                           sources=self._translation_sources)
+        self._onscreen.translations = self._translations
+        self._translations.enqueue_onscreen()
         self._review.translations = self._translations
         self._auto_subtitle_rules = AutoSubtitleRules(self._connect, self)
         self._subtitle_queue = SubtitleQueue(self, self._queue_order)
@@ -466,8 +472,8 @@ class AppCore:
         """전체 또는 지정한 원어 줄 ID만 번역한다. 실패/보류 재요청은 완료한 묶음을 유지한다."""
         return self._translations.request(video_id, line_ids, source=source)
 
-    def subtitle_task(self, video_id):
-        return self._translations.task(video_id)
+    def subtitle_task(self, video_id, *, source=TRANSCRIPT):
+        return self._translations.task(video_id, source=source)
 
     def request_refinement(self, video_id):
         return self._translations.request_refinement(video_id)
@@ -736,6 +742,17 @@ class AppCore:
 
     def onscreen_subtitles(self, video_id: int) -> tuple[OnScreenSubtitle, ...]:
         return self._onscreen.subtitles(video_id)
+
+    def onscreen_translation_skip_reason(self, video_id: int) -> str | None:
+        """모든 영역의 읽기가 끝났는데 영상 전체에 줄이 없을 때의 번역 미등록 사유."""
+        return self._onscreen_translation.skip_reason(video_id)
+
+    def edit_onscreen_translation_line(self, line_id: str, text: str) -> None:
+        """화면 번역 한 줄을 저장하고 재번역·진행 중 응답으로부터 보호한다."""
+        self._onscreen_translation.edit(line_id, text, self._translations)
+
+    def onscreen_translation_reviewed_lines(self, video_id: int) -> frozenset[str]:
+        return self._onscreen_translation.reviewed_lines(video_id)
 
     def process_next_onscreen_subtitle(self) -> OnScreenSubtitleQueueEntry | None:
         """작업자 스레드용. 받아쓰기 작업자와 따로 돌아 서로를 기다리지 않는다."""

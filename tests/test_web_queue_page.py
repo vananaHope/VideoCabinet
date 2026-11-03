@@ -6,6 +6,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from test_subtitles import setup
+from test_onscreen_translation import screen
 from test_web_library_page import window_factory
 from test_web_library_data import core
 from my_video_manager.app_version import DISPLAY_NAME
@@ -195,13 +196,79 @@ def test_retry_held_translation_uses_existing_public_request(queue_page, setup):
     assert core.translation_queue()[0].state == 'queued'
 
 
+def test_held_retry_and_translation_dialog_preserve_source(queue_page, screen):
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QStatusBar
+    from my_video_manager.web_dialogs_models import DialogModel
+    from my_video_manager.translation import TranslationError
+    from my_video_manager.translation_source import ONSCREEN, TRANSCRIPT
+    from test_translation import source
+    from test_translation_connection import save
+    from test_onscreen_translation import read_screen
+    core, media, adapter, _, _, _, clock, _ = screen
+    from datetime import timedelta
+    queue_page.core = core
+    video = core.videos()[0].id
+    save(core, fallback=False)
+    source(core, video)
+    adapter.action = lambda *_: (_ for _ in ()).throw(TranslationError('usage_limit', 'held'))
+    assert core.process_next_translation().state == 'held'
+    read_screen(core, media, video)
+    clock[0] += timedelta(minutes=16)
+    core.promote_subtitle(video, kind='onscreen_subtitle')
+    assert core.process_next_translation().state == 'held'
+    queue_page.refresh()
+    rows = reply(queue_page.bridge.snapshot())['rows']
+    assert {r['queueKind']: r['taskLabel'] for r in rows} == {'transcription': '번역', 'onscreen_subtitle': '화면 번역'}
+    reply(queue_page.bridge.action('retryHeld', video, 'onscreen_subtitle'))
+    assert {e.source: e.state for e in core.translation_queue()} == {TRANSCRIPT: 'held', ONSCREEN: 'queued'}
+    clock[0] += timedelta(minutes=16)
+    assert core.process_next_translation().source == ONSCREEN
+    assert all(e.state == 'held' for e in core.translation_queue())
+    closed = []
+    bar = QStatusBar()
+    owner = SimpleNamespace(core=core, window=SimpleNamespace(statusBar=lambda: bar),
+                            pop=lambda **kw: closed.append(kw))
+    model = DialogModel(owner, 'translation')
+    model.act('save', model.values)
+    assert closed == [{'accepted': True}]
+    assert {e.source: e.state for e in core.translation_queue()} == {TRANSCRIPT: 'queued', ONSCREEN: 'queued'}
+
+
+@pytest.mark.parametrize('failure', [None, 'usage_limit', 'other'])
+def test_onscreen_work_notice_names_source_without_speech_toggle_hint(qapp, screen, failure):
+    from PySide6.QtWidgets import QMainWindow
+    from my_video_manager.translation_controls import TranslationControls
+    from my_video_manager.translation import TranslationError
+    from test_onscreen_translation import read_screen
+    from test_translation_connection import save
+    core, media, adapter, *_ = screen
+    save(core, fallback=False)
+    video = core.videos()[0].id
+    read_screen(core, media, video)
+    if failure:
+        adapter.action = lambda *_: (_ for _ in ()).throw(TranslationError(failure, 'synthetic'))
+    result = core.process_next_translation()
+    host = QMainWindow()
+    host.core, host.player = core, None
+    controls = TranslationControls(host)
+    controls.timer.stop()
+    controls.completed(result)
+    message = host.statusBar().currentMessage()
+    assert message.startswith('화면 번역 ')
+    assert ('보류' if failure == 'usage_limit' else '실패' if failure else '진행') in message
+    assert '전환:' not in message
+    host.deleteLater()
+
+
 def test_onscreen_and_transcription_rows_of_one_video_are_separate(queue_page, setup):
     from test_onscreen_subtitles import BAND, FakeMedia, FakeOcr, NOW
+    from test_onscreen_translation import Translator
     from my_video_manager.core import AppCore
     core, transcriber, (a, b) = setup
     media = FakeMedia()
     core = queue_page.core = AppCore(media=media, clock=lambda: NOW, transcriber=transcriber, ocr_engine=FakeOcr(),
-                                     database=core.database)
+                                     database=core.database, translator=Translator())
     page = queue_page
     core.request_subtitles(a.id)
     core.set_onscreen_subtitle_regions(a.id, [(BAND, 'en')])
@@ -230,7 +297,11 @@ def test_onscreen_and_transcription_rows_of_one_video_are_separate(queue_page, s
     core.process_next_onscreen_subtitle()
     page.refresh()
     done = {row['key']: row for row in reply(page.bridge.snapshot())['rows']}[f'{b.id}:onscreen_subtitle']
-    assert (done['state'], done['stateLabel'], done['message']) == ('completed', '화면 자막 · 완료', '화면 자막 1줄')
+    assert (done['state'], done['stateLabel'], done['message']) == ('queued', '화면 번역 · 대기', '')
+    assert core.process_next_translation().state == 'completed'
+    page.refresh()
+    done = {row['key']: row for row in reply(page.bridge.snapshot())['rows']}[f'{b.id}:onscreen_subtitle']
+    assert (done['state'], done['message']) == ('completed', '화면 자막 1줄')
 
 
 def test_tray_opens_web_queue(window_factory):

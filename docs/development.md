@@ -913,7 +913,7 @@ GIF·정지 이미지 형식과 단일 프레임, 첨부 그림은 새 영상으
 전체 검사 때 정리합니다. `reconnected` 안내는 검사 시작 때 이미 파일 없음이던 영상에만 적용됩니다.
 인자 없는 `scan()`은 감시 폴더 전체와 직접 추가한 위치를 지금처럼 검사합니다.
 전체/지정 폴더 검사는 자동 자막 규칙 조회부터 후처리까지 앱 코어의 잠금으로 직렬 실행합니다.
-기존 DB는 최초 실행 때 라이브러리 테이블을 v8로 이전합니다(`PRAGMA user_version = 8`).
+기존 DB는 최초 실행 때 라이브러리 테이블을 v9로 이전합니다(`PRAGMA user_version = 9`).
 영상 ID와 다른 기능 테이블은 그대로 유지하며, 이전 위치는 첫 검사에서 캐시 정보를 채웁니다.
 이전 직전에는 원래 버전 DB의 자동 백업을 남깁니다. v3은 가로·세로 및 해상도 확인 상태 열을,
 v4는 번역 작업의 용어집과 최근 사용 순서를 저장하는 테이블을 추가합니다.
@@ -931,6 +931,25 @@ v8은 화면 자막 영역·세대·줄 테이블(`onscreen_subtitle_regions`, `
 영역 이미지는 `RegionFrameReader`(ffmpeg `FFmpegMediaReader.region_frames`), 글자 읽기는 `OcrEngine`
 (`WindowsOcrEngine`) 어댑터로 주입합니다. 줄 합치기 기준값(초당 4장, 잡음 2장, 최소 3장, 비슷한 글자 0.9·흔들림 4장 이하, 같은 그림 판정)은
 `tests/test_onscreen_subtitles.py`가 고정합니다. 화면 자막 작업자(`onscreen_controls.py`)는 받아쓰기 작업자와 따로 돌아갑니다.
+v9는 `translation_glossary`를 작업 ID에서 영상 ID 단위로 옮기고 `onscreen_translation_reviews`에
+화면 번역의 사용자 수정 여부를 저장합니다. 기존 용어는 요청 시각·작업 순서·용어 순서로 읽어 먼저 정한 표기를 보존합니다.
+용어집은 영상의 어느 출처든 번역 결과나 대기열 행이 남아 있는 동안 공유하며, 모두 사라진 뒤 새 작업을 등록할 때 비웁니다.
+화면 번역 결과와 줄별 방식은 v7의 공용 `translation_lines`·`translation_line_providers`에
+출처 `onscreen_subtitle`과 화면 자막 줄 ID로 저장하며, 줄 삭제 시 함께 정리합니다.
+화면 자막 저장과 후속 번역 등록은 같은 트랜잭션이며, v8에서 이미 읽은 미번역 영상도 시작할 때 등록합니다.
+`translation_queue.transcript_id`의 화면 자막 세대 토큰은 영상의 모든 `(region_id, generation_id)`를
+영역 ID 순으로 정렬한 JSON입니다. 빈 세대·아직 읽지 않은 영역도 포함하므로 영역 추가·삭제·재생성 때 달라집니다.
+무작위 UUID의 최댓값이나 되돌아갈 수 있는 순번 최댓값을 최신 세대로 취급하지 않습니다.
+전체 화면 번역 요청은 번역 없는 줄만 대상으로 하며, 영역별 언어를 각 대상의 `language`에 포함합니다.
+화면 번역 payload에는 최상위 `spoken_language`를 넣지 않습니다.
+참고 문맥은 대상 구간과 겹치거나 앞뒤 `ONSCREEN_CONTEXT_MARGIN = 2.0`초 안에 있는 말소리이며,
+대상별 가까운 대사부터 순환 배분하고 중복을 제거해 시각순으로 보냅니다. 문맥 상한은 `max(100, 대상 수)`이며,
+`ONSCREEN_CONTEXT_LIMIT = 200`줄을 넘지 않도록 대상 묶음도 최대 200줄로 나눕니다.
+저장된 번역이 있으면 함께 보내며 결과에는 넣지 않습니다.
+`AppCore.onscreen_translation_skip_reason(video_id)`는 모든 영역의 읽기가 끝났고 줄 합이 0이면
+`no_onscreen_text`를 반환합니다. 영구 제외 기록을 남기지 않아 영역을 다시 읽으면 다시 등록됩니다.
+`edit_onscreen_translation_line(line_id, text)`는 사용자 수정본을 저장하고 진행 중 응답과 재번역으로부터 보호합니다.
+`onscreen_translation_reviewed_lines(video_id)`는 보호된 줄 ID를 반환합니다. 편집 화면은 후속 #285 범위입니다.
 새 등록과 파일 변경 검사 때 ffprobe의 첫 일반 영상 스트림 크기를 저장하며 display matrix와
 구형 rotate 태그의 90/270도 회전을 반영합니다. 해상도 미확인 기존 영상은 유휴 시간에
 한 번에 한 개씩 약 1초 간격으로 읽습니다. 재생·받아쓰기·검사가 시작되면 채우기를 취소하고,

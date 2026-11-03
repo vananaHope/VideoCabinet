@@ -4,6 +4,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 from .core import CommandType
 from .key_display import display_keys
+from .translation_source import ONSCREEN, TRANSCRIPT
 
 
 class TranslationWorker(QThread):
@@ -48,7 +49,7 @@ class TranslationControls(QObject):
     def completed(self, result):
         if result is None:
             return
-        task = self.core.subtitle_task(result.video_id)
+        task = self.core.subtitle_task(result.video_id, source=result.source)
         bar = self.window.statusBar()
         bar.setToolTip(result.error_detail or "")
         if result.state == "held":
@@ -59,9 +60,11 @@ class TranslationControls(QObject):
             keys = next((display_keys(row.keys) for row in self.core.key_bindings()
                          if row.command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE), "키 미할당")
             bar.showMessage(f"{task.label} {'완료' if result.state == 'completed' else '진행'} · "
-                            f"{result.completed_lines}/{result.total_lines}줄 · 원어/{task.short_label} 전환: {keys}")
+                            f"{result.completed_lines}/{result.total_lines}줄" +
+                            ('' if result.source == ONSCREEN else f' · 원어/{task.short_label} 전환: {keys}'))
             session = self.core.playback.session
-            if result.state == "completed" and self.window.player and session and session.video_id == result.video_id:
+            if (result.source == TRANSCRIPT and result.state == "completed" and self.window.player
+                    and session and session.video_id == result.video_id):
                 try:
                     self.window.player.set_subtitle(self.core.playback_subtitle(result.video_id))
                 except Exception as error:
