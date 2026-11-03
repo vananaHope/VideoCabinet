@@ -20,7 +20,10 @@ class DialogsBridge(QObject):
 
     @DIALOGS.slot('modalState')
     def modalState(self, opened):
-        self.dialogs.web_modal = bool(opened) and self.dialogs.host.isVisible()
+        # 주 창의 숨김·최소화와 재생 화면에 가려진 셸을 구분한다. 숨김 중에도
+        # 열림/닫힘을 수신 순서대로 기록해야 트레이 복귀의 동기 판단에 쓸 수 있다.
+        # 재생으로 셸 자체가 숨겨졌다면 늦은 열림 알림은 차단을 되살리지 않는다.
+        self.dialogs.web_modal = bool(opened) and self.dialogs.host.isVisibleTo(self.dialogs.window)
         self.dialogs.sync_shortcut()
         return encode({'ok': True})
 
