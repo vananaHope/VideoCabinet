@@ -261,9 +261,11 @@ def test_tray_drawer_filling_plate_fails_as_too_full(icon, built):
                for problem in icon.icon_problems(built))
 
 
-def test_tray_drawer_without_contrast_fails_as_too_small(icon, built):
+@pytest.mark.parametrize('drawer_color', ['#7c7c85', '#4f46e5'])
+def test_tray_drawer_without_contrast_fails_as_too_small(icon, built, drawer_color):
+    # 흰 서랍을 테두리 회색(인디고 판과 1.7:1)으로 바꾸면 서랍이 있어도 마크로 읽히지 않는다. 판 색이면 서랍이 사라진다.
     frames = tray_frames_of(icon, built)
-    frames[16] = recolor(frames[16], '#ffffff', '#4f46e5')
+    frames[16] = recolor(frames[16], '#ffffff', drawer_color)
     replace_tray_frames(icon, built, frames)
     assert any(problem.startswith('트레이 16px: 판과') and '너무 작음' in problem
                for problem in icon.icon_problems(built))

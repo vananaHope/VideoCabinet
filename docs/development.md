@@ -217,6 +217,7 @@ Windows OCR의 함수 내부 지연 import도 PyInstaller가 분석합니다. �
 (`UsePreviousTasks=no`) 지운 바로 가기를 설치가 되살리지 않습니다. 바로 가기 아이콘은 설치 폴더의
 `my_video_manager\app.ico`를 가리켜 패치로 아이콘 파일만 바뀌어도 따라갑니다. 실행 파일 버전 정보(제품 이름·파일 설명)도
 같은 이름과 앱 버전으로 `prepare_bundle.py`가 만든 `build/bundle-assets/version-info.txt`에서 들어갑니다.
+`installer/my-video-manager.iss`는 옛 바로 가기 이름(`상영실.lnk`)이 한글이라 UTF-8(BOM)으로 저장합니다(BOM이 없으면 ISCC가 ANSI로 읽어 한글 경로가 깨집니다). `tests/test_bundle_packaging.py`가 BOM을 확인합니다.
 
 앱 부분만 담은 패치도 만들려면 `scripts/build.ps1 -Patch`를 사용합니다. 전체 설치 파일과 함께 `dist/installer/MyVideoManager-Patch-<version>.exe`를 만듭니다.
 기본 빌드는 패치를 추가 압축하지 않습니다. 기존 번들에서는 `-SkipPyInstaller -Patch`를 함께 쓰며,
