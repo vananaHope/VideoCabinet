@@ -17,7 +17,7 @@ export default function ShellModals() {
       }
       const observer = new MutationObserver(update)
       observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state', 'hidden', 'style'] })
-      // 숨긴 뒤 도착한 모달 알림은 Qt가 무시한다. 복귀 때 DOM이 그대로여도 다시 알려야 한다.
+      // Qt는 숨김 중에도 상태를 기록한다. 복귀 때 현재 DOM을 다시 알려 마지막 수신 상태와 맞춘다.
       const resync = () => { previous = undefined; requestAnimationFrame(update) }
       const reshown = () => { if (document.visibilityState === 'visible') resync() }
       shell.shellChanged.connect(resync)
