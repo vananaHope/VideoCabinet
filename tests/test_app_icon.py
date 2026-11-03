@@ -127,26 +127,25 @@ def test_low_contrast_outline_fails_on_each_taskbar(icon, built, background):
     # 테두리를 판 색(어두운 배경에 묻힘) 또는 밝은 면 색(밝은 배경에 묻힘)으로 바꾼다.
     frames = frames_of(icon, built)
     frames[32] = recolor(frames[32], '#7c7c85', '#09090b' if background == '어두운' else '#e4e4e7')
-    if background == '밝은':
-        frames[32] = recolor(frames[32], '#09090b', '#fafafa')
     replace_frames(icon, built, frames)
     assert any(problem.startswith(f'32px: 가장자리가 {background} 작업 표시줄') for problem in icon.icon_problems(built))
 
 
 def test_mark_without_contrast_against_plate_fails_as_too_small(icon, built):
+    # 흰 서랍을 테두리 회색으로 바꾸면 인디고 판과 1.7:1이라 마크로 읽히지 않는다.
     frames = frames_of(icon, built)
-    frames[20] = recolor(frames[20], '#4f46e5', '#18181b')
+    frames[20] = recolor(frames[20], '#ffffff', '#7c7c85')
     replace_frames(icon, built, frames)
     assert any(problem.startswith('20px: 판과') and '너무 작음' in problem for problem in icon.icon_problems(built))
 
 
 def test_mark_filling_plate_fails_as_too_full(icon, built):
-    # 테두리와 그 안쪽 한 줄의 판만 남기고 글자가 판을 다 덮는다.
+    # 테두리와 그 안쪽 한 줄의 판만 남기고 흰 서랍이 판을 다 덮는다.
     frames = frames_of(icon, built)
     frames[16] = frames[16].copy()
     for y in range(2, 14):
         for x in range(2, 14):
-            frames[16].setPixelColor(x, y, QColor('#4f46e5'))
+            frames[16].setPixelColor(x, y, QColor('#ffffff'))
     replace_frames(icon, built, frames)
     assert any(problem.startswith('16px:') and '꽉 참' in problem for problem in icon.icon_problems(built))
 
@@ -215,7 +214,7 @@ def test_tray_frames_come_from_their_own_hand_tuned_sources(icon):
         source = f'assets/icon/tray-icon-{size}.png'
         assert manifest['tray']['frames'][str(size)]['source'] == source
         assert icon.pixel_digest(image) == icon.pixel_digest(icon.read_png(ROOT / source))
-        # 앱 아이콘 같은 크기 프레임을 그대로 쓰지 않는다(판 없는 단순화 모양).
+        # 앱 아이콘 같은 크기 프레임을 그대로 쓰지 않는다(서랍 앞면과 자막 두 줄만 남긴 단순화 모양).
         assert icon.pixel_digest(image) != icon.pixel_digest(frames_of(icon, ROOT)[size])
 
 
@@ -240,8 +239,8 @@ def test_low_contrast_tray_outline_fails_on_each_taskbar(icon, built, background
     assert any(problem.startswith(f'트레이 20px: 가장자리가 {background} 작업 표시줄') for problem in problems)
 
 
-def test_tray_mark_without_outline_disappears_on_dark_taskbar(icon, built):
-    # 판도 윤곽도 없는 인디고 글자만이면 어두운 작업 표시줄(#202020)과 2.6:1이라 묻힌다. 윤곽을 두는 이유다.
+def test_tray_plate_without_border_disappears_on_dark_taskbar(icon, built):
+    # 테두리 없는 인디고 판만이면 어두운 작업 표시줄(#202020)과 2.6:1이라 묻힌다. 회색 테두리를 두는 이유다.
     frames = tray_frames_of(icon, built)
     frames[24] = recolor(frames[24], '#7c7c85', 'transparent')
     replace_tray_frames(icon, built, frames)
@@ -250,19 +249,25 @@ def test_tray_mark_without_outline_disappears_on_dark_taskbar(icon, built):
     assert not any(problem.startswith('트레이 24px: 가장자리가 밝은 작업 표시줄') for problem in problems)
 
 
-def test_tray_filled_like_a_plate_fails(icon, built):
+def test_tray_drawer_filling_plate_fails_as_too_full(icon, built):
+    # 테두리 안쪽 한 줄의 판만 남기고 흰 서랍이 자막 자리와 판을 다 덮으면 흰 덩어리다.
     frames = tray_frames_of(icon, built)
-    frames[32] = recolor(frames[32], 'transparent', '#7c7c85')
+    frames[32] = frames[32].copy()
+    for y in range(3, 29):
+        for x in range(3, 29):
+            frames[32].setPixelColor(x, y, QColor('#ffffff'))
     replace_tray_frames(icon, built, frames)
-    assert any(problem.startswith('트레이 32px: 실루엣 면적') and '판처럼 꽉 참' in problem
+    assert any(problem.startswith('트레이 32px: 판과') and '꽉 참' in problem
                for problem in icon.icon_problems(built))
 
 
-def test_tray_mark_reduced_to_outline_fails_as_too_small(icon, built):
+@pytest.mark.parametrize('drawer_color', ['#7c7c85', '#4f46e5'])
+def test_tray_drawer_without_contrast_fails_as_too_small(icon, built, drawer_color):
+    # 흰 서랍을 테두리 회색(인디고 판과 1.7:1)으로 바꾸면 서랍이 있어도 마크로 읽히지 않는다. 판 색이면 서랍이 사라진다.
     frames = tray_frames_of(icon, built)
-    frames[16] = recolor(frames[16], '#4f46e5', '#7c7c85')
+    frames[16] = recolor(frames[16], '#ffffff', drawer_color)
     replace_tray_frames(icon, built, frames)
-    assert any(problem.startswith('트레이 16px: 윤곽 안쪽 글자 마크') and '너무 작음' in problem
+    assert any(problem.startswith('트레이 16px: 판과') and '너무 작음' in problem
                for problem in icon.icon_problems(built))
 
 
@@ -333,15 +338,15 @@ def test_icon_colors_are_web_tokens(icon):
     import re
     from my_video_manager.web_tokens import web_tokens
     colors = web_tokens()['colors']
-    expected = {colors['primary'], colors['background'], colors['input']}
+    expected = {colors['primary'], colors['primary-foreground'], colors['input']}
     svg = (ROOT / icon.VECTOR_SOURCE).read_text(encoding='utf-8')
     assert set(re.findall(r'(?:fill|stroke)="(#[0-9a-f]{6})"', svg)) == expected
     for size in icon.TUNED_SIZES:
         image = icon.read_png(ROOT / icon.source_for(size))
         used = {image.pixelColor(x, y).name() for y in range(size) for x in range(size) if image.pixelColor(x, y).alpha()}
         assert used == expected, size
-    # 트레이는 판을 빼고 글자(primary)와 윤곽(input) 두 색만 쓴다.
+    # 트레이도 판(primary)·서랍(primary-foreground)·테두리(input) 세 색만 쓴다.
     for size in icon.TRAY_SIZES:
         image = icon.read_png(ROOT / icon.tray_source_for(size))
         used = {image.pixelColor(x, y).name() for y in range(size) for x in range(size) if image.pixelColor(x, y).alpha()}
-        assert used == {colors['primary'], colors['input']}, size
+        assert used == expected, size

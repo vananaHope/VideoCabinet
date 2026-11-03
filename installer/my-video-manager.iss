@@ -1,4 +1,4 @@
-; scripts/build.ps1이 pyproject.toml의 버전, 앱 표시 이름(#306)과 절대 경로를 전달한다.
+﻿; scripts/build.ps1이 pyproject.toml의 버전, 앱 표시 이름(#306)과 절대 경로를 전달한다.
 #ifndef AppVersion
   #error AppVersion is required. Run scripts/build.ps1.
 #endif
@@ -79,8 +79,12 @@ Source: "{#AppDirectory}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 
 [InstallDelete]
 ; 덮어 설치와 패치 설치 모두 옛 이름의 바로 가기를 지운다. 새 이름 바로 가기는 [Icons]가 만든다.
+; 옛 이름: My Video Manager(v0.8.0까지 발행), 상영실(#301, 발행 전 개발판에서만 썼다).
+; 한글 경로가 있어 이 파일은 UTF-8(BOM)으로 저장한다.
 Type: files; Name: "{#ShortcutPrograms}\My Video Manager.lnk"
 Type: files; Name: "{#ShortcutDesktop}\My Video Manager.lnk"
+Type: files; Name: "{#ShortcutPrograms}\상영실.lnk"
+Type: files; Name: "{#ShortcutDesktop}\상영실.lnk"
 
 [Icons]
 Name: "{#ShortcutPrograms}\{#AppDisplayName}"; Filename: "{app}\my-video-manager.exe"; WorkingDir: "{app}"; IconFilename: "{app}\my_video_manager\app.ico"
@@ -102,10 +106,11 @@ end;
 
 function InitializeSetup: Boolean;
 begin
-  // [InstallDelete]가 옛 바로 가기를 지우기 전에 바탕 화면 바로 가기가 있었는지 기억한다.
+  // [InstallDelete]가 옛 이름(My Video Manager·상영실) 바로 가기를 지우기 전에 바탕 화면 바로 가기가 있었는지 기억한다.
   // 패치·조용한 설치에서는 이전 작업 선택(UsePreviousTasks)에 기대지 않는다.
   HadDesktopShortcutBeforeInstall :=
     FileExists(ExpandConstant('{#ShortcutDesktop}\My Video Manager.lnk')) or
+    FileExists(ExpandConstant('{#ShortcutDesktop}\상영실.lnk')) or
     FileExists(ExpandConstant('{#ShortcutDesktop}\{#AppDisplayName}.lnk'));
   Result := True;
 end;

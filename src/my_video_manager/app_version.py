@@ -6,7 +6,7 @@ from pathlib import Path
 RELEASE_REPOSITORY = 'vananaHope/my-video-manager-releases'
 RELEASES_URL = f'https://github.com/{RELEASE_REPOSITORY}/releases'
 # 사용자에게 보이는 앱 이름. 창·트레이·경고·웹 셸이 이 값만 읽는다. 식별자(설치 AppId·데이터 폴더·패키지 이름)는 바꾸지 않는다.
-DISPLAY_NAME = '상영실'
+DISPLAY_NAME = 'VideoCabinet'
 
 
 def current_version():

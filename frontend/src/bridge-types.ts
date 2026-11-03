@@ -62,7 +62,7 @@ export type Tab = "library" | "recommend" | "reel" | "search" | "queue" | "stati
 export type UpdateChoice = "update" | "later" | "skip" | "unskip"
 export type UpdateAction = "cancel" | "install" | "later" | "retry" | "dismiss"
 export const tabs = [["library", "라이브러리"], ["recommend", "추천"], ["reel", "모아보기"], ["search", "검색"], ["queue", "자막 대기열"], ["statistics", "통계"], ["folders", "폴더 관리"], ["settings", "설정"]] as const
-export const appName = "상영실" as const
+export const appName = "VideoCabinet" as const
 export interface ShellBridge {
   ready: (reply: Reply) => void
   shellSnapshot: (reply: Reply) => void

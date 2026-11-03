@@ -1,13 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="256" height="256" viewBox="0 0 256 256">
-  <!-- 상영실 앱 아이콘 벡터 원본. 40·48·64·256px은 빌드가 이 파일을 그 크기로 렌더링한다(scripts/app_icon.py).
-       테두리 #7c7c85(input), 판 #09090b(background), 글자 #4f46e5(primary): web_tokens.json 색. -->
+  <!-- VideoCabinet 앱 아이콘 벡터 원본(#343 D안 "자막 서랍"). 40·48·64·256px은 빌드가 이 파일을 그 크기로 렌더링한다(scripts/app_icon.py).
+       테두리 #7c7c85(input), 판 #4f46e5(primary), 서랍 #ffffff(primary-foreground): web_tokens.json 색.
+       자막 두 줄과 재생 삼각형은 흰 서랍 위에 판 색으로 뚫은 자리다. -->
   <rect x="0" y="0" width="256" height="256" rx="36" ry="36" fill="#7c7c85"/>
-  <rect x="10" y="10" width="236" height="236" rx="27" ry="27" fill="#09090b"/>
-  <g fill="none" stroke="#4f46e5" stroke-width="26">
-    <path d="M97,30 C97,76 80,102 40,122"/>
-    <path d="M101,72 C108,96 124,108 152,118"/>
-    <path d="M174,30 L174,140"/>
-    <path d="M187,85 L222,85"/>
-    <circle cx="124" cy="182" r="37"/>
-  </g>
+  <rect x="10" y="10" width="236" height="236" rx="27" ry="27" fill="#4f46e5"/>
+  <path fill="#ffffff" fill-rule="evenodd" d="M58,100 L74,64 L182,64 L198,100 Z M74,100 L84,78 L172,78 L182,100 Z"/>
+  <rect x="38" y="100" width="180" height="92" rx="12" ry="12" fill="#ffffff"/>
+  <rect x="64" y="126" width="92" height="14" rx="7" ry="7" fill="#4f46e5"/>
+  <rect x="64" y="152" width="60" height="14" rx="7" ry="7" fill="#4f46e5"/>
+  <path fill="#4f46e5" d="M172,122 L172,170 L202,146 Z"/>
 </svg>

@@ -30,6 +30,7 @@ ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 256)
 # 작업 표시줄·트레이·창 모서리 크기. 벡터를 그대로 줄이지 않고 픽셀에 맞춰 손본 PNG를 원본으로 쓴다.
 TUNED_SIZES = (16, 20, 24, 32)
 # 알림 영역(트레이) 아이콘. 화면 배율 100·125·150·200%의 크기를 각각 손본 PNG에서 그대로 담는다. 벡터 원본은 없다.
+# 앱 아이콘과 같은 테두리·판에 서랍 앞면과 자막 두 줄만 남긴 단순화 모양이라 같은 픽셀 규칙으로 검사한다.
 TRAY_ICO = 'src/my_video_manager/tray.ico'
 TRAY_SIZES = (16, 20, 24, 32)
 
@@ -42,13 +43,11 @@ MIN_EDGE_CONTRAST_SHARE = 0.9
 # 보이는 픽셀 중 반투명(0<alpha<255) 픽셀 비율의 상한. 손본 원본은 0%이고, 벡터를 그대로 16px로 줄이면
 # 둥근 모서리만으로 이 값을 넘는다. 가장자리가 번진(흐린) 아이콘을 막는다.
 MAX_SEMITRANSPARENT_SHARE = 0.02
-# 글자 마크(판과 3:1 이상 구별되는 안쪽 픽셀)가 캔버스에서 차지하는 비율. 너무 작으면 안 보이고 크면 덩어리다.
+# 서랍 마크(판과 3:1 이상 구별되는 안쪽 픽셀: 흰 서랍에서 자막·재생 자리를 뺀 면)가 캔버스에서 차지하는 비율.
+# 너무 작으면 안 보이고 크면 판이 사라진 덩어리다. 손본 원본은 앱 아이콘 22~32%, 트레이 32~40%다.
 MARK_SHARE_RANGE = (0.12, 0.45)
 # 실루엣(alpha 합)이 캔버스에서 차지하는 비율의 하한.
 MIN_SILHOUETTE_SHARE = 0.5
-# 트레이는 판 없이 윤곽 두른 글자만이라 캔버스를 다 채우지 않는다(손본 원본 53~66%). 너무 작으면 알림 영역에서
-# 안 보이고, 크면 글자가 아니라 판(덩어리)이다. 앱 아이콘의 하한 하나 대신 이 범위를 쓴다.
-TRAY_SILHOUETTE_SHARE_RANGE = (0.35, 0.8)
 # 다른 프레임을 Qt로 늘이거나 줄인 결과와 채널 차이가 이 값 이하인 픽셀이 전부면 그 프레임을 복사본으로 본다.
 SCALED_COPY_TOLERANCE = 2
 
@@ -253,40 +252,27 @@ def _mark_share_problems(label, mark, what):
     return [f'{label}: {what} 면적 {mark:.0%}가 {low:.0%}~{high:.0%} 밖입니다({"너무 작음" if mark < low else "꽉 참"})']
 
 
-def frame_problems(size, image):
-    """작업 표시줄 크기 프레임 하나의 픽셀 규칙 위반을 사람이 읽는 문장으로 돌려준다."""
+def frame_problems(size, image, label=None):
+    """작업 표시줄 크기 프레임 하나의 픽셀 규칙 위반을 사람이 읽는 문장으로 돌려준다. 앱 아이콘과 트레이가 같이 쓴다."""
     size, pixels = _grid(image)
-    band, inner = edge_band(size, pixels, max(1, size // 16))
-    if not band:
-        return [f'{size}px: 불투명한 실루엣이 없습니다']
-    problems = _visibility_problems(f'{size}px', pixels, band)
-    silhouette = _silhouette_share(size, pixels)
-    if silhouette < MIN_SILHOUETTE_SHARE:
-        problems.append(f'{size}px: 실루엣 면적 {silhouette:.0%} < {MIN_SILHOUETTE_SHARE:.0%}(너무 작음)')
-    # 판 색: 가장자리 띠 바로 안쪽 픽셀에서 가장 흔한 색. 글자가 판보다 넓어져도 판을 글자로 착각하지 않는다.
-    plate = Counter(pixels[y][x][:3] for x, y in inner
-                    if any((x + dx, y + dy) in band for dx in (-1, 0, 1) for dy in (-1, 0, 1))).most_common(1)
-    mark = sum(contrast(pixels[y][x][:3], plate[0][0]) >= MIN_CONTRAST for x, y in inner) / size ** 2 if plate else 0
-    return problems + _mark_share_problems(f'{size}px', mark, f'판과 {MIN_CONTRAST}:1 이상 구별되는 글자 마크')
-
-
-def tray_frame_problems(size, image):
-    """트레이 프레임 하나의 픽셀 규칙 위반. 대비·흐림은 앱 아이콘과 같고, 판이 없어 면적은 윤곽과 글자로 본다."""
-    size, pixels = _grid(image)
-    label = f'트레이 {size}px'
+    label = label or f'{size}px'
     band, inner = edge_band(size, pixels, max(1, size // 16))
     if not band:
         return [f'{label}: 불투명한 실루엣이 없습니다']
     problems = _visibility_problems(label, pixels, band)
     silhouette = _silhouette_share(size, pixels)
-    low, high = TRAY_SILHOUETTE_SHARE_RANGE
-    if not low <= silhouette <= high:
-        problems.append(f'{label}: 실루엣 면적 {silhouette:.0%}가 {low:.0%}~{high:.0%} 밖입니다'
-                        f'({"너무 작음" if silhouette < low else "판처럼 꽉 참"})')
-    # 윤곽 색: 가장자리 띠에서 가장 흔한 색. 글자 마크는 윤곽 안쪽에서 윤곽 색과 다른 픽셀이다.
-    outline = Counter(pixels[y][x][:3] for x, y in band).most_common(1)[0][0]
-    mark = sum(pixels[y][x][:3] != outline for x, y in inner) / size ** 2
-    return problems + _mark_share_problems(label, mark, '윤곽 안쪽 글자 마크')
+    if silhouette < MIN_SILHOUETTE_SHARE:
+        problems.append(f'{label}: 실루엣 면적 {silhouette:.0%} < {MIN_SILHOUETTE_SHARE:.0%}(너무 작음)')
+    # 판 색: 가장자리 띠 바로 안쪽 픽셀에서 가장 흔한 색. 마크가 판보다 넓어져도 판을 마크로 착각하지 않는다.
+    plate = Counter(pixels[y][x][:3] for x, y in inner
+                    if any((x + dx, y + dy) in band for dx in (-1, 0, 1) for dy in (-1, 0, 1))).most_common(1)
+    mark = sum(contrast(pixels[y][x][:3], plate[0][0]) >= MIN_CONTRAST for x, y in inner) / size ** 2 if plate else 0
+    return problems + _mark_share_problems(label, mark, f'판과 {MIN_CONTRAST}:1 이상 구별되는 서랍 마크')
+
+
+def tray_frame_problems(size, image):
+    """트레이 프레임 하나의 픽셀 규칙 위반. 앱 아이콘과 같은 테두리·판을 쓰므로 기준도 같다."""
+    return frame_problems(size, image, f'트레이 {size}px')
 
 
 def _scaled_copy(image, other):

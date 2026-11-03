@@ -152,11 +152,16 @@ def shortcut_properties(path):
     return json.loads(result.stdout)
 
 
-def make_old_shortcuts(shortcut_root, desktop=True):
+# 옛 표시 이름. My Video Manager는 v0.8.0까지 발행했고, 상영실(#301)은 발행 전 개발판에서만 썼다.
+OLD_NAMES = ('My Video Manager', '상영실')
+
+
+def make_old_shortcuts(shortcut_root, desktop=True, names=OLD_NAMES):
     for folder in ('Programs', 'Desktop') if desktop else ('Programs',):
         directory = shortcut_root / folder
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / 'My Video Manager.lnk').write_bytes(b'old shortcut')
+        for name in names:
+            (directory / f'{name}.lnk').write_bytes(b'old shortcut')
 
 
 @pytest.fixture
@@ -240,8 +245,9 @@ def test_silent_installer_accepts_only_matching_identity(bundle, patch_exe, tmp_
         assert {p.relative_to(installed).as_posix() for p in installed.rglob('*') if p.is_dir()} == directories_before
         assert '전체 설치 파일을 사용하세요' in log.read_text(encoding='utf-8-sig')
         # 설치를 거부하면 바로 가기도 그대로다.
-        assert (shortcuts / 'Programs' / 'My Video Manager.lnk').exists()
-        assert (shortcuts / 'Desktop' / 'My Video Manager.lnk').exists()
+        for name in OLD_NAMES:
+            assert (shortcuts / 'Programs' / f'{name}.lnk').exists()
+            assert (shortcuts / 'Desktop' / f'{name}.lnk').exists()
 
 
 @pytest.mark.parametrize('desktop_before, select_desktop_task', [
@@ -271,7 +277,7 @@ def test_overwrite_install_replaces_old_shortcuts_with_one_display_name(
     assert sorted(p.name for p in (shortcuts / 'Programs').iterdir()) == [f'{DISPLAY_NAME}.lnk']
     desktop = sorted(p.name for p in (shortcuts / 'Desktop').iterdir()) if (shortcuts / 'Desktop').is_dir() else []
     assert desktop == ([f'{DISPLAY_NAME}.lnk'] if desktop_before or select_desktop_task else [])
-    assert not list(shortcuts.rglob('My Video Manager.lnk'))
+    assert not [path for name in OLD_NAMES for path in shortcuts.rglob(f'{name}.lnk')]
     if desktop:
         link = shortcut_properties(shortcuts / 'Desktop' / f'{DISPLAY_NAME}.lnk')
         assert Path(link['target']).name == 'my-video-manager.exe'
