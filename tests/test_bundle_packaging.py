@@ -262,7 +262,7 @@ def test_executable_installer_and_uninstall_entry_use_built_icon():
     spec = (root / 'installer/my-video-manager.spec').read_text(encoding='utf-8')
     assert "app_icon = root / 'src' / 'my_video_manager' / 'app.ico'" in spec
     assert "'app.ico'])" in spec and 'icon=str(app_icon)' in spec and "stage / 'app.ico'" not in spec
-    setup = dict(line.split('=', 1) for line in (root / 'installer/my-video-manager.iss').read_text(encoding='utf-8').splitlines()
+    setup = dict(line.split('=', 1) for line in (root / 'installer/my-video-manager.iss').read_text(encoding='utf-8-sig').splitlines()
                  if '=' in line and not line.startswith((';', '#', 'Name:', 'Source:')))
     assert setup['SetupIconFile'] == r'{#AppDirectory}\my_video_manager\app.ico'
     assert setup['UninstallDisplayIcon'] == r'{app}\my_video_manager\app.ico'
@@ -276,11 +276,14 @@ def _installer_metadata(monkeypatch):
 
 
 def _setup_source():
-    return (Path(__file__).resolve().parents[1] / 'installer/my-video-manager.iss').read_text(encoding='utf-8')
+    # 옛 이름 '상영실' 바로 가기 경로가 있어 UTF-8(BOM)으로 저장한다. BOM이 없으면 Inno Setup이 한글 경로를 잘못 읽을 수 있다.
+    raw = (Path(__file__).resolve().parents[1] / 'installer/my-video-manager.iss').read_bytes()
+    assert raw.startswith(b'\xef\xbb\xbf')
+    return raw.decode('utf-8-sig')
 
 
 def test_installer_names_setup_and_shortcuts_from_display_name(monkeypatch, tmp_path):
-    """설치 프로그램·바로 가기·설치된 앱 목록 이름이 표시 이름 원본에서 오고 옛 바로 가기를 지운다(#306)."""
+    """설치 프로그램·바로 가기·설치된 앱 목록 이름이 표시 이름 원본에서 오고 옛 두 이름의 바로 가기를 지운다(#306·#343)."""
     from my_video_manager.app_version import DISPLAY_NAME
     module = _installer_metadata(monkeypatch)
     source = _setup_source()
@@ -300,11 +303,14 @@ def test_installer_names_setup_and_shortcuts_from_display_name(monkeypatch, tmp_
     assert all('IconFilename: "{app}\\my_video_manager\\app.ico"' in line for line in icons)
     assert [line for line in lines if line.startswith('Type: files')] == [
         'Type: files; Name: "{#ShortcutPrograms}\\My Video Manager.lnk"',
-        'Type: files; Name: "{#ShortcutDesktop}\\My Video Manager.lnk"']
+        'Type: files; Name: "{#ShortcutDesktop}\\My Video Manager.lnk"',
+        'Type: files; Name: "{#ShortcutPrograms}\\상영실.lnk"',
+        'Type: files; Name: "{#ShortcutDesktop}\\상영실.lnk"']
     # 바탕 화면 바로 가기는 작업 선택과 별도로, 설치 전에 있었는지로도 다시 만든다.
     assert 'function HadDesktopShortcut: Boolean;' in lines
     assert 'Check: HadDesktopShortcut' in source
     assert "FileExists(ExpandConstant('{#ShortcutDesktop}\\My Video Manager.lnk'))" in source
+    assert "FileExists(ExpandConstant('{#ShortcutDesktop}\\상영실.lnk'))" in source
     assert "FileExists(ExpandConstant('{#ShortcutDesktop}\\{#AppDisplayName}.lnk'))" in source
     # 격리 설치 테스트는 임시 폴더를 쓰고 제품 빌드는 사용자 시작 메뉴·바탕 화면을 쓴다.
     assert '#define ShortcutPrograms ShortcutRoot + "\\Programs"' in lines

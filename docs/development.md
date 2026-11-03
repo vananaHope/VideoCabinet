@@ -209,10 +209,10 @@ Windows OCR의 함수 내부 지연 import도 PyInstaller가 분석합니다. �
 트레이가 이 파일을 읽고 설치본에도 실립니다. 빌드의 생성 검사는 `scripts/app_icon.py --check`로
 앱·트레이 아이콘의 원본 내용 해시와 픽셀 규칙(DESIGN.md "App Icon")을 확인하고 어긋나면 멈춥니다.
 
-설치 프로그램 제목·시작 메뉴·바탕 화면 바로 가기·"설치된 앱" 목록 이름은 `app_version.DISPLAY_NAME`(상영실)을 따릅니다.
+설치 프로그램 제목·시작 메뉴·바탕 화면 바로 가기·"설치된 앱" 목록 이름은 `app_version.DISPLAY_NAME`(VideoCabinet)을 따릅니다.
 `build.ps1`은 Inno 컴파일 직전에 `scripts/installer_metadata.py`로 UTF-8(BOM) `build/bundle-assets/display-name.iss`를 만들고
 `/DDisplayNameInclude=<ASCII 절대 경로>`로 넘겨 `.iss`가 `#include`로 읽습니다(한글을 `/D` 값으로 넘기지 않습니다).
-덮어 설치와 패치 설치 모두 `[InstallDelete]`로 옛 이름 `My Video Manager.lnk`를 지우고, 설치 전에 바탕 화면 바로 가기가
+덮어 설치와 패치 설치 모두 `[InstallDelete]`로 옛 이름 `My Video Manager.lnk`·`상영실.lnk`를 지우고, 설치 전에 바탕 화면 바로 가기가
 있던 사용자는 작업 선택과 무관하게 새 이름 바탕 화면 바로 가기 하나를 더 만듭니다. 이전 작업 선택은 기억하지 않아
 (`UsePreviousTasks=no`) 지운 바로 가기를 설치가 되살리지 않습니다. 바로 가기 아이콘은 설치 폴더의
 `my_video_manager\app.ico`를 가리켜 패치로 아이콘 파일만 바뀌어도 따라갑니다. 실행 파일 버전 정보(제품 이름·파일 설명)도
@@ -329,7 +329,7 @@ Release에서 읽습니다. 태그는 `vX.Y.Z`여야 하며 새 버전 이상이
 배포 저장소에는 그 태그가 없으므로 `gh release create --target main`으로 배포 저장소 기본 브랜치에 같은 이름의 태그를 만들며
 전체 설치 파일·체크섬·매니페스트·서명과 해당하는 패치를 게시합니다.
 노트는 현재 main에 포함된 가장 높은 버전 태그 이후의 커밋 제목입니다(태그가 없으면 전체).
-이름이 바뀐 첫 Release에는 노트 맨 앞에 "앱 이름이 상영실로 바뀌었고 라이브러리·설정 데이터와 설치 위치는 그대로"라는 안내를 넣습니다(`release.ps1`의 `$RenameNote`·`$IncludeRenameNote`). 이 Release를 발행한 뒤 `$RenameNote`·`$IncludeRenameNote` 선언, 이를 쓰는 DryRun·노트 분기, `tests/test_release_script.py`의 이름 안내 단언, 이 문서 문단을 함께 지웁니다.
+이름이 바뀐 첫 Release에는 노트 맨 앞에 "앱 이름이 My Video Manager에서 VideoCabinet으로 바뀌었고 라이브러리·설정 데이터와 설치 위치는 그대로"라는 안내를 넣습니다(`release.ps1`의 `$RenameNote`·`$IncludeRenameNote`). 이 Release를 발행한 뒤 `$RenameNote`·`$IncludeRenameNote` 선언, 이를 쓰는 DryRun·노트 분기, `tests/test_release_script.py`의 이름 안내 단언, 이 문서 문단을 함께 지웁니다.
 설치 파일은 `dist/installer/MyVideoManager-Setup-<version>.exe`, 체크섬은 그 옆의 `.exe.sha256`입니다.
 패치는 `dist/installer/MyVideoManager-Patch-<version>.exe`, 메타데이터는
 `dist/installer/<version>/update-manifest.json`과 `update-manifest.json.sig`에 보존합니다.

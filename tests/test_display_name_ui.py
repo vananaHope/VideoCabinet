@@ -16,11 +16,11 @@ from test_emergency_hide_dialogs_ui import js
 
 def test_display_name_is_fixed():
     # 상수가 엉뚱한 값으로 바뀌어도 아래 단언들이 함께 통과하지 않게 정한 이름을 한 번 고정한다.
-    assert DISPLAY_NAME == '상영실'
+    assert DISPLAY_NAME == 'VideoCabinet'
 
 
 def test_window_tray_and_web_shell_show_display_name(window):
-    assert window.windowTitle() == '상영실'
+    assert window.windowTitle() == 'VideoCabinet'
     assert window.tray.icon.toolTip() == f'{DISPLAY_NAME} · 자막 대기열'
     wait_for(lambda: window.loaded)
     assert js(window, 'document.title') == DISPLAY_NAME

@@ -144,7 +144,7 @@ try {
     $FullInstallNote = '이번 버전은 전체 설치 파일로 한 번 설치해야 합니다. 이후 런타임 지문이 같은 버전부터 패치를 사용할 수 있습니다.'
     # 이름이 바뀐 첫 Release에만 넣는다. 이 Release를 발행한 뒤 $RenameNote·$IncludeRenameNote 선언,
     # 이를 쓰는 DryRun·노트 분기, tests/test_release_script.py의 이름 안내 단언, docs/development.md의 이 문서 문단을 함께 지운다.
-    $RenameNote = '이번 버전부터 앱 이름이 **상영실**로 바뀌었습니다. 라이브러리·설정 데이터와 설치 위치는 그대로이므로 다시 설정하거나 옮길 필요가 없습니다.'
+    $RenameNote = '이번 버전부터 앱 이름이 My Video Manager에서 **VideoCabinet**으로 바뀌었습니다. 라이브러리·설정 데이터와 설치 위치는 그대로이므로 다시 설정하거나 옮길 필요가 없습니다.'
     $IncludeRenameNote = $true
 
     if ($DryRun) {
