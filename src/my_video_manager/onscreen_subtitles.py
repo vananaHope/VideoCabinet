@@ -359,11 +359,6 @@ class OnScreenSubtitles:
                             "VALUES (?, NULL, ?, ?)", (video_id, now, ONSCREEN_SUBTITLE))
         return self._entry(db.execute("SELECT * FROM subtitle_queue WHERE id = ?", (cursor.lastrowid,)).fetchone())
 
-    def _translation_changed(self, db, video_id):
-        """영역의 줄이 바뀌었다. 화면 번역 작업을 남은 줄에 맞춘다(번역 규칙은 번역 모듈이 정한다)."""
-        if self.translations is not None:
-            self.translations.request(video_id, automatic=True, connection=db, source=ONSCREEN)
-
     def set_regions(self, video_id: int, regions: Iterable[tuple[RegionRect, str]]) -> OnScreenSubtitleQueueEntry:
         """영상의 영역 목록을 바꾸고 화면 자막 만들기를 직접 요청으로 대기열에 넣는다.
 
@@ -397,9 +392,7 @@ class OnScreenSubtitles:
             now = self._clock().isoformat()
             db.execute("INSERT INTO onscreen_subtitle_regions(video_id, x, y, width, height, language, created_at) "
                        "VALUES (?, ?, ?, ?, ?, ?, ?)", (video_id, *_rect_values(rect), language, now))
-            entry = self._request(db, video_id, now)
-            self._translation_changed(db, video_id)
-            return entry
+            return self._request(db, video_id, now)
 
     def update_region(self, region_id: int, rect: RegionRect, language: str) -> OnScreenSubtitleQueueEntry:
         """영역 하나의 자리·크기·읽을 언어를 그 자리에서 고친다. 그 영역의 화면 자막·화면 번역 자막·검수 기록을
@@ -414,14 +407,13 @@ class OnScreenSubtitles:
                 raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
             # 세대를 지우면 줄이 지워지고, 줄에 걸린 화면 번역 자막과 검수 기록도 함께 지워진다.
             db.execute("DELETE FROM onscreen_subtitles WHERE region_id = ?", (region_id,))
-            entry = self._request(db, video_id, self._clock().isoformat())
-            self._translation_changed(db, video_id)
-            return entry
+            return self._request(db, video_id, self._clock().isoformat())
 
     def delete_region(self, region_id: int) -> None:
         """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다.
 
         읽기를 기다리는 다른 영역이 남으면 그 영역들만 읽도록 다시 넣고, 없으면 대기열에서 뺀다.
+        화면 번역 작업은 번역 작업자가 바뀐 세대를 보고 남은 줄에 맞춘다(낡은 응답은 버린다).
         """
         video_id = self.region(region_id).video_id
         self._cancel_reading(video_id)
@@ -435,7 +427,6 @@ class OnScreenSubtitles:
                 self._request(db, video_id, self._clock().isoformat())
             else:
                 db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, ONSCREEN_SUBTITLE))
-            self._translation_changed(db, video_id)
             self._order.finish(db, video_id, kind=ONSCREEN_SUBTITLE)
 
     def subtitles(self, video_id: int) -> tuple[OnScreenSubtitle, ...]:

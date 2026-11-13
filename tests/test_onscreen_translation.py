@@ -537,3 +537,110 @@ def test_upgrade_backup_restore_keeps_onscreen_results_protection_progress_and_v
     if version == 9:
         finish(restored)
         assert adapter.calls[-1][2]['glossary'] == (GlossaryEntry('Jon', '존'),)
+
+
+# #283 영역 하나씩 고치기·지우기: 그 영역의 화면 번역 자막과 검수 기록만 따라간다.
+TOP = RegionRect(0.6, 0.02, 0.38, 0.1)
+
+
+def read_two_regions(core, media, video):
+    media.captions_by_region = {BAND: ((10, 12, 'Jon show'), (20, 22, 'Next')), TOP: ((5, 7, 'Corner'),)}
+    core.add_onscreen_subtitle_region(video, BAND, 'en')
+    core.add_onscreen_subtitle_region(video, TOP, 'ja')
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    return core.onscreen_subtitles(video)
+
+
+def translated(core, video):
+    return {line.id: line.text for line in core.translation(video, source=ONSCREEN).lines}
+
+
+def test_each_region_line_gets_its_own_onscreen_translation_in_its_language(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    assert translated(core, video) == {**{l.id: '번역 ' + l.text for l in bottom.lines},
+                                       top.lines[0].id: '번역 Corner'}
+    languages = {line.id: line.language for call in adapter.calls for line in call[0]}
+    assert languages == {**{l.id: 'en' for l in bottom.lines}, top.lines[0].id: 'ja'}
+
+
+def test_reviewed_line_count_is_per_region_and_none_until_read(screen):
+    core, media, *_ = screen
+    video = core.videos()[0].id
+    core.add_onscreen_subtitle_region(video, BAND, 'en')
+    waiting, = core.onscreen_subtitle_regions(video)
+    assert core.onscreen_subtitle_region_reviewed_line_count(waiting.id) is None
+    core.delete_onscreen_subtitle_region(waiting.id)
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    assert [core.onscreen_subtitle_region_reviewed_line_count(s.region.id) for s in (bottom, top)] == [0, 0]
+    core.edit_onscreen_translation_line(bottom.lines[0].id, '고친 번역')
+    core.edit_onscreen_translation_line(bottom.lines[1].id, '또 고친 번역')
+    core.edit_onscreen_translation_line(top.lines[0].id, '고친 코너')
+    assert [core.onscreen_subtitle_region_reviewed_line_count(s.region.id) for s in (bottom, top)] == [2, 1]
+    # 읽은 글자가 없는 영역도 화면 자막이 있는 영역이다(줄 0개).
+    media.captions_by_region[RegionRect(0, 0.4, 0.5, 0.2)] = ()
+    core.add_onscreen_subtitle_region(video, RegionRect(0, 0.4, 0.5, 0.2), 'en')
+    core.process_next_onscreen_subtitle()
+    empty = core.onscreen_subtitles(video)[2]
+    assert empty.no_text and core.onscreen_subtitle_region_reviewed_line_count(empty.region.id) == 0
+    with pytest.raises(ValueError):
+        core.onscreen_subtitle_region_reviewed_line_count(waiting.id)
+
+
+def test_updating_one_region_retranslates_only_its_lines_and_keeps_other_reviews(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    core.edit_onscreen_translation_line(bottom.lines[0].id, '고친 번역')
+    core.edit_onscreen_translation_line(top.lines[0].id, '고친 코너')
+    kept = {line.id: translated(core, video)[line.id] for line in bottom.lines}
+    moved = RegionRect(0.1, 0.4, 0.8, 0.2)
+    media.captions_by_region[moved] = ((40, 42, 'Moved corner'),)
+    core.update_onscreen_subtitle_region(top.region.id, moved, 'en')
+    assert core.onscreen_translation_reviewed_lines(video) == {bottom.lines[0].id}
+    assert core.onscreen_subtitle_region_reviewed_line_count(top.region.id) is None
+    assert core.onscreen_subtitle_region_reviewed_line_count(bottom.region.id) == 1
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    adapter.calls.clear()
+    finish(core)
+    _, new_top = core.onscreen_subtitles(video)
+    # 다시 번역하는 것은 고친 영역의 새 줄뿐이다. 다른 영역의 번역·검수 수정은 그대로다.
+    assert [[line.text for line in call[0]] for call in adapter.calls] == [['Moved corner']]
+    assert translated(core, video) == {**kept, new_top.lines[0].id: '번역 Moved corner'}
+    assert core.onscreen_translation_reviewed_lines(video) == {bottom.lines[0].id}
+
+
+def test_deleting_one_region_removes_its_translations_and_reviews_only(screen):
+    core, media, adapter, *_, reopen = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    core.edit_onscreen_translation_line(bottom.lines[0].id, '고친 번역')
+    core.edit_onscreen_translation_line(top.lines[0].id, '고친 코너')
+    kept = {line.id: translated(core, video)[line.id] for line in bottom.lines}
+    calls = len(adapter.calls)
+    core.delete_onscreen_subtitle_region(top.region.id)
+    assert translated(core, video) == kept
+    assert core.onscreen_translation_reviewed_lines(video) == {bottom.lines[0].id}
+    assert core.translation_queue() == () and len(adapter.calls) == calls
+    reopened = reopen()
+    assert reopened.onscreen_subtitles(video) == (bottom,)
+    assert translated(reopened, video) == kept
+    assert reopened.onscreen_translation_reviewed_lines(video) == {bottom.lines[0].id}
+
+
+def test_deleting_a_region_mid_translation_finishes_only_the_remaining_lines(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    assert core.process_next_translation().completed_lines == 2  # 묶음 크기 2: 세 줄 중 두 줄
+    core.delete_onscreen_subtitle_region(top.region.id)
+    adapter.calls.clear()
+    finish(core)
+    sent = {line.text for call in adapter.calls for line in call[0]}
+    assert 'Corner' not in sent
+    assert set(translated(core, video)) == {line.id for line in bottom.lines}
