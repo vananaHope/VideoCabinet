@@ -347,22 +347,40 @@ class PlaybackPage(QWidget):
         video = self.core.video(session.video_id)
         aspect = (video.width / video.height if video.width and video.height
                   else self.surface.width() / max(1, self.surface.height()))
-        selector = self.region_selector = RegionSelector(self.surface, image, aspect)
         video_id = session.video_id
-        # 대화상자는 끌기 입력 처리가 끝난 뒤에 연다.
+        selector = self.region_selector = RegionSelector(self.surface, image, aspect,
+                                                         self.core.onscreen_subtitle_regions(video_id))
+        # 대화상자는 끌기·키 입력 처리가 끝난 뒤에 연다.
         selector.selected.connect(lambda rect: QTimer.singleShot(0, lambda: self.confirm_onscreen_region(video_id, rect)))
+        selector.changed.connect(lambda region, rect: QTimer.singleShot(
+            0, lambda: self.confirm_onscreen_region(video_id, rect, region.id)))
+        selector.delete_requested.connect(lambda region: QTimer.singleShot(
+            0, lambda: self.confirm_onscreen_region_delete(video_id, region.id)))
         selector.cancelled.connect(self.close_region_selector)
         selector.show()
         selector.raise_()
         selector.setFocus()
 
-    def confirm_onscreen_region(self, video_id, rect):
-        """읽을 언어를 웹 업무 대화상자로 확인한다. 확인하면 자막 대기열에 화면 자막 만들기가 들어간다."""
+    def confirm_onscreen_region(self, video_id, rect, region_id=None):
+        """읽을 언어를 웹 업무 대화상자로 확인한다. 확인하면 자막 대기열에 화면 자막 만들기가 들어간다.
+
+        region_id가 있으면 그 영역을 고친다(자리·크기·읽을 언어). 확인하든 취소하든 영역 정하기를 끝낸다.
+        """
         from .web_dialogs_entries import OnScreenRegionDialog
         if self.region_selector is None:
             return
         try:
-            OnScreenRegionDialog(self.core, video_id, rect, self.shell).exec()
+            OnScreenRegionDialog(self.core, video_id, rect, self.shell, region_id=region_id).exec()
+        finally:
+            self.close_region_selector()
+
+    def confirm_onscreen_region_delete(self, video_id, region_id):
+        """고른 영역을 지울지 웹 확인 창으로 묻는다. 확인하든 취소하든 영역 정하기를 끝낸다."""
+        from .web_dialogs_entries import OnScreenRegionDeleteDialog
+        if self.region_selector is None:
+            return
+        try:
+            OnScreenRegionDeleteDialog(self.core, video_id, region_id, self.shell).exec()
         finally:
             self.close_region_selector()
 

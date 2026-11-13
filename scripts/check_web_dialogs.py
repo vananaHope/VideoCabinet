@@ -97,10 +97,12 @@ class Translator:
 
 
 class Ocr(WindowsOcrEngine):
-    """영어만 언어 팩이 있는 PC. 설치 안내 문구는 실제 Windows OCR 어댑터의 것이다."""
+    """영어만 언어 팩이 있는 PC. 설치 안내 문구는 실제 Windows OCR 어댑터의 것이다.
+    긴 언어 이름 촬영은 available에 그 언어를 잠깐 더한다."""
+    available = {'en'}
 
     def language_available(self, language):
-        return language == 'en'
+        return language in self.available
 
     def read_text(self, image, language):
         return SHOWN[image.pixels]
@@ -293,6 +295,64 @@ def memory():
     return round(sum(p['WorkingSet64'] for p in result if p['ProcessName'] in ('python', 'pythonw', 'QtWebEngineProcess')) / 2**20, 2)
 
 
+
+
+def onscreen_region_edits():
+    """#283 이미 화면 자막이 있는 영역 고치기(읽을 언어 대화상자)·지우기(확인 창). 검수로 고친 줄 수
+    0 / 적음(3) / 최대(9,999) / 긴 텍스트(긴 영상 제목·가장 긴 언어 이름)를 재생 중 컨테이너로 찍는다."""
+    dialogs = window.web_host.dialogs
+    media.captions = ((5, 8, 'Corner title'), (20, 24, 'Next scene'), (30, 33, 'Third caption'))
+    targets = core.videos()[4:8]
+    core.rename_video(targets[3].id, '아주 긴 영상 제목이 이어지는 예능 특집 ' * 4 + '공백없는긴제목' * 6)
+    Ocr.available.add('zh-Hant')
+    scenarios = []
+    for name, target, reviewed, language in (('zero', targets[0], 0, 'en'), ('few', targets[1], 3, 'en'),
+                                             ('max', targets[2], 3, 'en'), ('long', targets[3], 3, 'zh-Hant')):
+        core.add_onscreen_subtitle_region(target.id, RegionRect(0.05, 0.02, 0.4, 0.12), 'en')
+        core.add_onscreen_subtitle_region(target.id, RegionRect(0.08, 0.78, 0.84, 0.17), language)
+        assert core.process_next_onscreen_subtitle().state == 'completed'
+        _, subtitle = core.onscreen_subtitles(target.id)
+        for line in subtitle.lines[:reviewed]:
+            core.edit_onscreen_translation_line(line.id, '화면 번역 ' + line.text)
+        scenarios.append((name, target, subtitle.region))
+    count = core.onscreen_subtitle_region_reviewed_line_count
+    for name, target, region in scenarios:
+        expected = {'zero': 0, 'few': 3, 'max': 9999, 'long': 3}[name]
+        if name == 'max':
+            # 줄 9,999개를 실제로 검수하지 않고 자릿수가 큰 수의 배치만 본다. 수 세기 자체는 pytest가 본다.
+            core.onscreen_subtitle_region_reviewed_line_count = lambda region_id: 9999
+        else:
+            assert count(region.id) == expected
+        core.playback.start(target.id, 0)
+        try:
+            def edit_check(name=name, expected=expected):
+                wait(lambda: dialogs.container is not None)
+                settle(300)
+                container = dialogs.container
+                assert container.width() <= window.width() and container.height() <= window.height()
+                data = current()
+                assert data['values']['choice'] == region.language
+                assert f'검수로 고친 줄 {expected:,}개의 수정이 사라집니다' in data['information'], data['information']
+                footer_layout(f'onscreen-region-edit-{name}')
+                capture(f'container-onscreen-region-edit-{name}', container)
+            web_modal('onscreen-region', {'video_id': target.id, 'region': region.rect, 'region_id': region.id}, edit_check)
+            def delete_check(name=name, expected=expected):
+                wait(lambda: dialogs.container is not None)
+                settle(300)
+                container = dialogs.container
+                assert container.width() <= window.width() and container.height() <= window.height()
+                assert f'검수로 고친 줄 {expected:,}개의 수정이 사라집니다' in current()['confirmation']
+                footer_layout(f'onscreen-region-delete-{name}')
+                capture(f'container-onscreen-region-delete-{name}', container)
+                click('취소')
+                assert not dialogs.active and core.onscreen_subtitle_regions(target.id)[1] == region
+            web_modal('onscreen-region-delete', {'video_id': target.id, 'region_id': region.id}, delete_check)
+        finally:
+            core.playback.end()
+            if name == 'max':
+                del core.onscreen_subtitle_region_reviewed_line_count
+    Ocr.available.discard('zh-Hant')
+    metrics['checks'].append('화면 자막 영역 고치기·지우기(검수로 고친 줄 0·3·9,999·긴 제목/언어) 컨테이너 촬영, 지우기 취소 무변경')
 
 
 def native_save_cancel():
@@ -547,8 +607,8 @@ try:
         web_modal('random-scope', {}, random_scope_check)
         core.set_random_continuous_enabled(False)
         core.playback.end()
-        # #274 화면 자막 영역의 읽을 언어(재생 중 컨테이너): 원어를 몰라 직접 고르기 / 원어 기본값 + 영역 바꿈 안내
-        # / 언어 팩 없음 경고까지 겹친 가장 긴 상태.
+        # #274 화면 자막 영역의 읽을 언어(재생 중 컨테이너): 원어를 몰라 직접 고르기 / 원어 기본값(이미 정한 영역이
+        # 있어도 새 영역만 더한다) / 언어 팩 없음 경고까지 겹친 가장 긴 상태.
         band = RegionRect(0.08, 0.78, 0.84, 0.17)
         for name, target in (('choose', empty), ('replace', video)):
             if name == 'replace':
@@ -569,7 +629,8 @@ try:
                     capture('container-onscreen-region-missing-pack', dialogs.container)
             web_modal('onscreen-region', {'video_id': target.id, 'region': band}, onscreen_region_check)
             core.playback.end()
-        metrics['checks'].append('화면 자막 읽을 언어(직접 고르기·원어 기본값·영역 바꿈 안내·언어 팩 없음 경고) 컨테이너 촬영')
+        metrics['checks'].append('화면 자막 읽을 언어(직접 고르기·원어 기본값·언어 팩 없음 경고) 컨테이너 촬영')
+        onscreen_region_edits()
         metrics['checks'].append('무작위 이어 재생 범위(재생 중 컨테이너)·태그 이름 변경 촬영과 끝 단추 배치 기록')
         window.pages.setCurrentWidget(host)
         settle(300)
