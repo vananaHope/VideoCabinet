@@ -433,8 +433,9 @@ class AppCore:
     def subtitle_range_bounds(self, video_id, start, end):
         return self._review.range_bounds(video_id, start, end)
 
-    def subtitle_export(self, video_id, *, translated=False) -> SubtitleExport:
-        return self._review.export(video_id, translated=translated)
+    def subtitle_export(self, video_id, *, translated=False, source=TRANSCRIPT) -> SubtitleExport:
+        """source가 ONSCREEN이면 화면 자막(translated면 화면 번역 자막)을 내보낸다."""
+        return self._review.export(video_id, translated=translated, source=source)
 
     def write_subtitle_export(self, export: SubtitleExport, path: Path):
         """확인한 스냅샷을 사용자가 고른 경로에만 쓴다. Windows 인식을 위해 UTF-8 BOM 사용."""

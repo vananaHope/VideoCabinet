@@ -7,10 +7,10 @@ from pathlib import Path
 import re
 from uuid import uuid4
 
-from .subtitles import TranscriptLine, transcript_srt, normalize_subtitle_text
+from .subtitles import TranscriptLine, subtitle_srt, transcript_srt, normalize_subtitle_text
 from .subtitle_queue_kind import TRANSCRIPTION
 from .translation_kind import translation_task
-from .translation_source import TRANSCRIPT
+from .translation_source import ONSCREEN, TRANSCRIPT
 
 
 class ReviewConfirmationRequired(ValueError):
@@ -36,9 +36,10 @@ class SubtitleExport:
 
     @property
     def warning(self):
-        if self.task_label == "번역":
+        if self.task_label != "다듬기":
+            saved = "번역" if self.task_label == "번역" else self.subtitle_label
             return (f"{self.missing_lines}줄 미번역 · 재번역 대기 {self.pending_retranslation_lines}줄입니다. "
-                    "저장된 번역으로 내보낼까요?")
+                    f"저장된 {saved}으로 내보낼까요?")
         return (f"{self.missing_lines}줄 다듬지 않음 · 다시 {self.task_label} 대기 {self.pending_retranslation_lines}줄입니다. "
                 f"저장된 {self.subtitle_label}으로 내보낼까요?")
 
@@ -219,7 +220,9 @@ class Review:
                                       preserve_state=True, continue_order=True)
         self.translations.finish_ready(db, pending.video_id)
 
-    def export(self, video_id, *, translated=False):
+    def export(self, video_id, *, translated=False, source=TRANSCRIPT):
+        if source == ONSCREEN:
+            return self._export_onscreen(video_id, translated)
         with self._connect() as db:
             db.execute("BEGIN")
             transcript = self._subtitles.transcript(video_id, connection=db)
@@ -227,21 +230,59 @@ class Review:
                 raise ValueError("내보낼 원어 자막이 없습니다.")
             lines = self.lines(video_id, connection=db)
             title = db.execute("SELECT title FROM videos WHERE id = ?", (video_id,)).fetchone()[0]
-            pending = db.execute("SELECT COUNT(*) FROM translation_targets target "
-                                 "JOIN translation_lines saved ON saved.line_id = target.line_id AND saved.source=? "
-                                 "JOIN translation_queue q ON q.id = target.queue_id "
-                                 "WHERE q.video_id = ? AND q.source=?", (TRANSCRIPT, video_id, TRANSCRIPT)).fetchone()[0] if translated else 0
+            pending = _pending_retranslation(db, video_id, TRANSCRIPT) if translated else 0
         selected = tuple(replace(line.original, text=line.translation) if translated else line.original
                          for line in lines if not translated or line.translation is not None)
         if not selected:
             raise ValueError("내보낼 자막 줄이 없습니다")
-        filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", title).rstrip(". ") or "영상"
         task = translation_task(transcript.spoken_language)
         language = ("ko.refined" if task.kind == "refinement" else "ko") if translated else transcript.spoken_language or "und"
+        return SubtitleExport(transcript_srt(replace(transcript, lines=selected)), len(lines) - len(selected),
+                              self._export_path(video_id, title, language), pending, task.label, task.subtitle_label)
+
+    def _export_onscreen(self, video_id, translated):
+        """영역이 여럿이어도 화면 자막 줄의 시각 순서(시작, 영역, 줄 순서)로 한 파일에 합친다."""
+        with self._connect() as db:
+            db.execute("BEGIN")
+            original = self.translations.sources.lines(ONSCREEN, video_id, connection=db)
+            # 영역만 정하고 아직 읽지 않았으면 화면 자막이 없다. 읽은 글자 없음은 줄이 빈 화면 자막이다.
+            if original is None or not original.complete and not original.lines:
+                raise ValueError("내보낼 화면 자막이 없습니다")
+            title = db.execute("SELECT title FROM videos WHERE id = ?", (video_id,)).fetchone()[0]
+            # 검수 줄과 같은 규칙: 확정 번역 줄이 먼저이고, 없으면 진행 중인 요청의 저장된 묶음을 쓴다.
+            saved = {**dict(db.execute("SELECT target.line_id, target.text FROM translation_targets target "
+                                       "JOIN translation_queue q ON q.id = target.queue_id "
+                                       "WHERE q.video_id = ? AND q.source = ? AND target.text IS NOT NULL",
+                                       (video_id, ONSCREEN))),
+                     **dict(db.execute("SELECT line_id, text FROM translation_lines WHERE video_id = ? AND source = ?",
+                                       (video_id, ONSCREEN)))} if translated else {}
+            pending = _pending_retranslation(db, video_id, ONSCREEN) if translated else 0
+        lines = original.lines
+        selected = tuple(TranscriptLine(line.id, line.start, line.end, saved[line.id]) if translated else line
+                         for line in lines if not translated or line.id in saved)
+        if not selected:
+            raise ValueError("내보낼 자막 줄이 없습니다")
+        task = translation_task(None, source=ONSCREEN)
+        # 영역마다 읽을 언어가 다를 수 있다. 여러 언어면 ISO 639의 mul(여러 언어)로 적는다.
+        languages = {line.language for line in lines}
+        language = "ko" if translated else languages.pop() if len(languages) == 1 else "mul"
+        return SubtitleExport(subtitle_srt(selected), len(lines) - len(selected),
+                              self._export_path(video_id, title, f"{language}.onscreen"), pending,
+                              task.label, task.subtitle_label)
+
+    def _export_path(self, video_id, title, suffix):
+        filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", title).rstrip(". ") or "영상"
         # 파일 없음 영상도 검수·내보내기는 가능하다. 위치가 없으면 홈 폴더를 제안한다.
         try:
             folder = self._playback_location(video_id).path.parent
         except (ValueError, FileNotFoundError):
             folder = Path.home()
-        return SubtitleExport(transcript_srt(replace(transcript, lines=selected)),
-                              len(lines) - len(selected), folder / f"{filename}.{language}.srt", pending, task.label, task.subtitle_label)
+        return folder / f"{filename}.{suffix}.srt"
+
+
+def _pending_retranslation(db, video_id, source):
+    """저장된 번역이 있지만 다시 번역을 기다리는 줄 수."""
+    return db.execute("SELECT COUNT(*) FROM translation_targets target "
+                      "JOIN translation_lines saved ON saved.line_id = target.line_id AND saved.source=? "
+                      "JOIN translation_queue q ON q.id = target.queue_id "
+                      "WHERE q.video_id = ? AND q.source=?", (source, video_id, source)).fetchone()[0]

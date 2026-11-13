@@ -5,9 +5,13 @@ from threading import Event
 import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
+from my_video_manager.onscreen_subtitles import RegionRect
 from my_video_manager.review import ReviewConfirmationRequired
 from my_video_manager.subtitles import TranscriberCancelled, TranscriberResult, TranscriptSegment
 from my_video_manager.translation import TranslatedLine, TranslationError
+from my_video_manager.translation_source import ONSCREEN
+from test_onscreen_subtitles import BAND
+from test_onscreen_translation import read_screen, screen
 
 
 class Media:
@@ -905,3 +909,85 @@ def test_review_line_after_video_end_is_clamped_for_play_and_seek(setup):
     assert seek.action == "seek" and seek.start == 100
     assert core.playback.session is session
     assert len(core.viewings(vid)) == 1
+
+
+def srt_lines(text):
+    """SRT 블록을 (시작, 끝, 글자)로 되읽는다. 번호가 1부터 이어지는지도 본다."""
+    def seconds(stamp):
+        clock, milliseconds = stamp.split(",")
+        hours, minutes, whole = map(int, clock.split(":"))
+        return round(hours * 3600 + minutes * 60 + whole + int(milliseconds) / 1000, 3)
+
+    result = []
+    for number, block in enumerate(text.strip("\n").split("\n\n"), 1):
+        index, timing, *body = block.split("\n")
+        assert index == str(number)
+        start, end = timing.split(" --> ")
+        result.append((seconds(start), seconds(end), "\n".join(body)))
+    return result
+
+
+def saved_onscreen_lines(core, video_id):
+    return sorted((round(line.start, 3), round(line.end, 3), line.text)
+                  for subtitle in core.onscreen_subtitles(video_id) for line in subtitle.lines)
+
+
+def test_onscreen_exports_merge_regions_in_time_order_and_match_saved_lines(screen, tmp_path):
+    core, media, *_ = screen
+    video = core.videos()[0]
+    top = RegionRect(0.1, 0.0, 0.8, 0.15)
+    media.captions_by_region = {BAND: ((10, 12, "Bottom one"), (30, 32, "Bottom two")),
+                                top: ((20, 21.5, "Top one"),)}
+    read_screen(core, media, video.id, captions=(), regions=((BAND, "en"), (top, "en")))
+    saved = saved_onscreen_lines(core, video.id)
+    assert [text for *_, text in saved] == ["Bottom one", "Top one", "Bottom two"]
+    shown = core.subtitle_export(video.id, source=ONSCREEN)
+    assert shown.default_path == tmp_path / "a.en.onscreen.srt"
+    assert srt_lines(shown.text) == saved
+    assert core.process_next_translation().completed_lines == 2  # 세 줄 중 두 줄만 저장
+    partial = core.subtitle_export(video.id, translated=True, source=ONSCREEN)
+    assert partial.missing_lines == 1
+    assert "1줄 미번역" in partial.warning and "저장된 화면 번역 자막으로" in partial.warning
+    assert srt_lines(partial.text) == [(s, e, "번역 " + t) for s, e, t in saved[:2]]
+    finish(core)
+    translated = core.subtitle_export(video.id, translated=True, source=ONSCREEN)
+    assert translated.default_path == tmp_path / "a.ko.onscreen.srt"
+    assert translated.missing_lines == translated.pending_retranslation_lines == 0
+    assert srt_lines(translated.text) == [(s, e, "번역 " + t) for s, e, t in saved]
+    assert not list(tmp_path.glob("*.srt"))
+    destination = tmp_path / "고른 화면 번역.srt"
+    core.write_subtitle_export(translated, destination)
+    assert destination.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert destination.read_text(encoding="utf-8-sig") == translated.text
+    # 고친 화면 번역 줄은 내보내기에도 그대로 나온다.
+    first = next(line for subtitle in core.onscreen_subtitles(video.id) for line in subtitle.lines
+                 if line.text == "Top one")
+    core.edit_onscreen_translation_line(first.id, "직접 고친\n위 글자")
+    edited = srt_lines(core.subtitle_export(video.id, translated=True, source=ONSCREEN).text)
+    assert edited[1] == (saved[1][0], saved[1][1], "직접 고친\n위 글자")
+
+
+def test_onscreen_export_of_mixed_region_languages_names_multiple_languages(screen, tmp_path):
+    core, media, *_ = screen
+    video = core.videos()[0]
+    top = RegionRect(0.1, 0.0, 0.8, 0.15)
+    read_screen(core, media, video.id, regions=((BAND, "en"), (top, "ja")))
+    assert core.subtitle_export(video.id, source=ONSCREEN).default_path == tmp_path / "a.mul.onscreen.srt"
+
+
+def test_missing_onscreen_exports_are_rejected(screen):
+    core, media, *_ = screen
+    a, b = core.videos()
+    for translated in (False, True):
+        with pytest.raises(ValueError, match="^내보낼 화면 자막이 없습니다$"):
+            core.subtitle_export(a.id, translated=translated, source=ONSCREEN)
+    core.set_onscreen_subtitle_regions(a.id, [(BAND, "en")])  # 아직 읽지 않은 영역
+    with pytest.raises(ValueError, match="^내보낼 화면 자막이 없습니다$"):
+        core.subtitle_export(a.id, source=ONSCREEN)
+    read_screen(core, media, a.id)
+    with pytest.raises(ValueError, match="^내보낼 자막 줄이 없습니다$"):
+        core.subtitle_export(a.id, translated=True, source=ONSCREEN)  # 아직 번역하지 않음
+    read_screen(core, media, b.id, captions=())  # 읽은 글자 없음
+    for translated in (False, True):
+        with pytest.raises(ValueError, match="^내보낼 자막 줄이 없습니다$"):
+            core.subtitle_export(b.id, translated=translated, source=ONSCREEN)

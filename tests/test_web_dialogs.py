@@ -14,6 +14,10 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 from test_web_library_data import core
 from test_web_library_page import window_factory
 from test_review import setup, finish
+from test_onscreen_subtitles import BAND
+from test_onscreen_translation import read_screen, screen
+from my_video_manager.onscreen_subtitles import RegionRect
+from my_video_manager.translation_source import ONSCREEN
 from my_video_manager.web_dialogs_entries import TagEditor, TagManager
 from my_video_manager.web_dialogs_entries import SeriesEditor
 from my_video_manager.web_dialogs_entries import HighlightEditor, HighlightList
@@ -463,3 +467,62 @@ def test_translation_entry_retries_held_work_with_selected_cli(review_window, se
     within(window.translations.settings, dialogs, check)
     assert core.translation_cli == 'claude'
     assert core.translation_queue()[0].state == 'queued'
+
+
+@pytest.fixture
+def screen_window(screen):
+    from my_video_manager.ui import MainWindow
+    app = QApplication.instance() or QApplication([])
+    core = screen[0]
+    window = MainWindow(core)
+    window.subtitles.timer.stop()
+    window.translations.timer.stop()
+    window.show()
+    yield window, screen
+    window.tray.quit()
+    window.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_review_offers_onscreen_exports_only_when_saved_and_writes_them_through_native_save(
+        screen_window, monkeypatch, tmp_path):
+    window, (core, media, *_) = screen_window
+    a, b = core.videos()
+    media.captions_by_region = {BAND: ((10, 12, 'Bottom one'), (30, 32, 'Bottom two')),
+                                RegionRect(0.1, 0, 0.8, 0.15): ((20, 21.5, 'Top one'),)}
+    read_screen(core, media, a.id, captions=(), regions=((BAND, 'en'), (RegionRect(0.1, 0, 0.8, 0.15), 'en')))
+    core.process_next_translation()  # 세 줄 중 두 줄만 화면 번역
+    dialogs = window.web_host.dialogs
+    chosen = []
+    def choose(parent, title, default, filter):
+        chosen.append(default)
+        return str(tmp_path / f'저장 {len(chosen)}.srt'), filter
+    monkeypatch.setattr(QFileDialog, 'getSaveFileName', choose)
+    expected = core.subtitle_export(a.id, source=ONSCREEN)
+    partial = core.subtitle_export(a.id, translated=True, source=ONSCREEN)
+
+    def check():
+        data = state(dialogs)
+        # 원어 자막이 없어도 화면 자막 내보내기는 고를 수 있다. 원어 내보내기는 줄이 없어 막힌다.
+        assert data['rows'] == []
+        assert [(r['id'], r['title']) for r in data['exports']] == [
+            ('export-onscreen', '화면 자막 SRT 저장'), ('export-onscreen-translation', '화면 번역 SRT 저장')]
+        act(dialogs, 'export-onscreen')
+        QTest.qWait(30)
+        assert chosen[0] == str(expected.default_path)
+        assert (tmp_path / '저장 1.srt').read_bytes().startswith(b'\xef\xbb\xbf')
+        assert (tmp_path / '저장 1.srt').read_text(encoding='utf-8-sig') == expected.text
+        warning = act(dialogs, 'export-onscreen-translation')
+        assert '1줄 미번역' in warning['confirmation'] and '화면 번역 자막' in warning['confirmation']
+        act(dialogs, 'confirm')
+        QTest.qWait(30)
+        assert chosen[1] == str(tmp_path / 'a.ko.onscreen.srt')
+        assert (tmp_path / '저장 2.srt').read_text(encoding='utf-8-sig') == partial.text
+    within(lambda: ReviewDialog(core, a.id, window.review_jump, window.review_changed, window).exec(), dialogs, check)
+
+    def check_without_onscreen():
+        assert state(dialogs)['exports'] == []
+        result = json.loads(dialogs.bridge.act(state(dialogs)['id'], 'export-onscreen', '{}'))
+        assert result['error'] == '내보낼 화면 자막이 없습니다'
+    within(lambda: ReviewDialog(core, b.id, window.review_jump, window.review_changed, window).exec(),
+           dialogs, check_without_onscreen)

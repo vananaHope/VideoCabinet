@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import re
 from threading import Event, Lock
-from typing import Callable, Protocol
+from typing import Callable, Protocol, Sequence
 from uuid import uuid4
 
 from .subtitle_queue_kind import TRANSCRIPTION
@@ -384,6 +384,11 @@ def normalize_subtitle_text(text: str) -> str:
 
 def transcript_srt(transcript: Transcript) -> str:
     """플레이어 전달용 순수 변환. 영구 저장과 줄의 식별은 DB가 담당한다."""
+    return subtitle_srt(transcript.lines)
+
+
+def subtitle_srt(lines: Sequence[TranscriptLine]) -> str:
+    """시각이 붙은 줄을 주어진 순서대로 SRT로 바꾼다."""
     def timestamp(seconds):
         milliseconds = round(seconds * 1000)
         seconds, ms = divmod(milliseconds, 1000)
@@ -392,4 +397,4 @@ def transcript_srt(transcript: Transcript) -> str:
         return f"{hours:02}:{minute:02}:{sec:02},{ms:03}"
 
     return "\n\n".join(f"{i}\n{timestamp(line.start)} --> {timestamp(line.end)}\n{normalize_subtitle_text(line.text)}"
-                       for i, line in enumerate(transcript.lines, 1)) + "\n"
+                       for i, line in enumerate(lines, 1)) + "\n"
