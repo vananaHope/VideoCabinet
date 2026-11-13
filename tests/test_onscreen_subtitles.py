@@ -68,6 +68,7 @@ class FakeOcr:
     def __init__(self, languages=("en",)):
         self.languages = set(languages)
         self.calls = 0
+        self.readings = set()  # (읽은 글자, 읽을 언어)
 
     def language_available(self, language):
         return language in self.languages
@@ -77,6 +78,7 @@ class FakeOcr:
 
     def read_text(self, image, language):
         self.calls += 1
+        self.readings.add((SHOWN[image.pixels], language))
         return "  " + SHOWN[image.pixels] + " \n"  # 정규화를 거쳐 저장되는지도 본다.
 
 
@@ -399,3 +401,152 @@ def test_v7_library_migrates_with_automatic_backup_and_accepts_regions(setup):
     migrated.set_onscreen_subtitle_regions(a.id, [(BAND, "en")])
     assert migrated.process_next_onscreen_subtitle().line_count == 1
     assert migrated.create_backup(core.database.parent / "after.zip").metadata.db_version == LIBRARY_DB_VERSION
+
+
+# #283 한 영상의 화면 자막 영역 여러 개: 영역 하나씩 더하기·고치기·지우기.
+TOP = RegionRect(0.6, 0.02, 0.38, 0.1)
+
+
+def read_bottom_and_top(core, media, ocr, video_id):
+    """아래 자막 띠(영어)와 위 코너 제목(일본어) 두 영역을 하나씩 더해 읽는다."""
+    ocr.languages.add("ja")
+    media.captions_by_region = {BAND: ((1, 3, "Bottom band"), (10, 12, "Bottom again")),
+                                TOP: ((5, 7, "Corner title"),)}
+    core.add_onscreen_subtitle_region(video_id, BAND, "en")
+    core.add_onscreen_subtitle_region(video_id, TOP, "ja")
+    assert core.process_next_onscreen_subtitle().state == "completed"
+    return core.onscreen_subtitles(video_id)
+
+
+def texts(subtitles):
+    return [(s.region.rect, [line.text for line in s.lines]) for s in subtitles]
+
+
+def test_each_added_region_gets_its_own_lines_read_in_its_own_language(setup):
+    core, media, ocr, (a, b) = setup
+    ocr.languages.add("ja")
+    media.captions_by_region = {BAND: ((1, 3, "Bottom band"),), TOP: ((5, 7, "Corner title"),)}
+    first = core.add_onscreen_subtitle_region(a.id, BAND, "en")
+    second = core.add_onscreen_subtitle_region(a.id, TOP, "ja")
+    assert (first.state, second.state, second.queue_kind) == ("queued", "queued", ONSCREEN_SUBTITLE)
+    # 대기열 항목은 (영상, 작업 종류) 하나다. 영역마다 줄을 서지 않는다.
+    assert [e.video_id for e in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == [a.id]
+    assert [(r.rect, r.language) for r in core.onscreen_subtitle_regions(a.id)] == [(BAND, "en"), (TOP, "ja")]
+    assert core.process_next_onscreen_subtitle().line_count == 2
+    # 아래 자막 띠와 코너 제목이 한 줄로 섞이지 않는다.
+    assert texts(core.onscreen_subtitles(a.id)) == [(BAND, ["Bottom band"]), (TOP, ["Corner title"])]
+    assert {("Bottom band", "en"), ("Corner title", "ja")} <= ocr.readings
+    assert not {("Bottom band", "ja"), ("Corner title", "en")} & ocr.readings
+    assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+    assert core.onscreen_subtitle_regions(b.id) == ()
+
+
+def test_adding_a_region_reads_only_the_new_region(setup):
+    core, media, ocr, (a, _) = setup
+    media.captions_by_region = {BAND: ((1, 3, "Bottom band"),), TOP: ((5, 7, "Corner title"),)}
+    core.add_onscreen_subtitle_region(a.id, BAND, "en")
+    core.process_next_onscreen_subtitle()
+    bottom, = core.onscreen_subtitles(a.id)
+    media.calls.clear()
+    core.add_onscreen_subtitle_region(a.id, TOP, "en")
+    assert core.onscreen_subtitles(a.id) == (bottom,)
+    core.process_next_onscreen_subtitle()
+    assert [region for _, region, _ in media.calls] == [TOP]
+    assert core.onscreen_subtitles(a.id)[0] == bottom
+    assert texts(core.onscreen_subtitles(a.id)) == [(BAND, ["Bottom band"]), (TOP, ["Corner title"])]
+
+
+@pytest.mark.parametrize("change", ["move", "language"])
+def test_updating_one_region_rereads_only_that_region(setup, change):
+    core, media, ocr, (a, _) = setup
+    bottom, top = read_bottom_and_top(core, media, ocr, a.id)
+    moved = RegionRect(0.1, 0.55, 0.8, 0.2) if change == "move" else TOP
+    language = "en" if change == "language" else "ja"
+    media.captions_by_region[moved] = ((20, 22, "Changed corner"),)
+    entry = core.update_onscreen_subtitle_region(top.region.id, moved, language)
+    assert (entry.video_id, entry.state) == (a.id, "queued")
+    # 고친 영역은 같은 영역으로 남고, 화면 자막은 다시 읽을 때까지 없다. 다른 영역은 그대로다.
+    assert [(r.id, r.rect, r.language) for r in core.onscreen_subtitle_regions(a.id)] == [
+        (bottom.region.id, BAND, "en"), (top.region.id, moved, language)]
+    assert core.onscreen_subtitles(a.id) == (bottom,)
+    media.calls.clear()
+    ocr.readings.clear()
+    assert core.process_next_onscreen_subtitle().line_count == 1
+    assert [region for _, region, _ in media.calls] == [moved]
+    assert ocr.readings == {("Changed corner", language), ("", language)}
+    again_bottom, new_top = core.onscreen_subtitles(a.id)
+    assert again_bottom == bottom
+    assert [line.text for line in new_top.lines] == ["Changed corner"] and new_top.id != top.id
+
+
+def test_updating_or_adding_with_an_unreadable_language_changes_nothing(setup):
+    core, media, ocr, (a, _) = setup
+    bottom, top = read_bottom_and_top(core, media, ocr, a.id)
+    before = (core.onscreen_subtitle_regions(a.id), core.onscreen_subtitles(a.id))
+    with pytest.raises(OcrLanguageUnavailable, match="ru 언어 팩을 설치하세요"):
+        core.update_onscreen_subtitle_region(top.region.id, BAND, "ru")
+    with pytest.raises(ValueError, match="한국어"):
+        core.add_onscreen_subtitle_region(a.id, TOP, "ko")
+    assert (core.onscreen_subtitle_regions(a.id), core.onscreen_subtitles(a.id)) == before
+    assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+
+
+def test_deleting_one_region_removes_only_its_lines_even_after_restart(setup):
+    core, media, ocr, (a, _) = setup
+    bottom, top = read_bottom_and_top(core, media, ocr, a.id)
+    core.delete_onscreen_subtitle_region(bottom.region.id)
+    assert core.onscreen_subtitle_regions(a.id) == (top.region,)
+    assert core.onscreen_subtitles(a.id) == (top,)
+    assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+    reopened = reopen(core, media, ocr)
+    assert reopened.onscreen_subtitles(a.id) == (top,)
+    with pytest.raises(ValueError):
+        reopened.delete_onscreen_subtitle_region(bottom.region.id)
+    with pytest.raises(ValueError):
+        reopened.update_onscreen_subtitle_region(bottom.region.id, BAND, "en")
+    reopened.delete_onscreen_subtitle_region(top.region.id)
+    assert reopened.onscreen_subtitle_regions(a.id) == () and reopened.onscreen_subtitles(a.id) == ()
+
+
+def test_deleting_a_waiting_region_keeps_the_queue_only_while_other_regions_wait(setup):
+    core, media, ocr, (a, _) = setup
+    media.captions_by_region = {BAND: ((1, 3, "Bottom band"),), TOP: ((5, 7, "Corner title"),)}
+    core.add_onscreen_subtitle_region(a.id, BAND, "en")
+    core.add_onscreen_subtitle_region(a.id, TOP, "en")
+    _, top = core.onscreen_subtitle_regions(a.id)
+    core.delete_onscreen_subtitle_region(top.id)
+    assert [e.state for e in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == ["queued"]
+    core.process_next_onscreen_subtitle()
+    assert texts(core.onscreen_subtitles(a.id)) == [(BAND, ["Bottom band"])]
+    core.add_onscreen_subtitle_region(a.id, TOP, "en")
+    waiting = core.onscreen_subtitle_regions(a.id)[1]
+    core.delete_onscreen_subtitle_region(waiting.id)
+    assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+    # 남은 아래 자막 띠의 화면 번역 단계만 대기열에 보인다.
+    assert [(i.task_label, i.state) for i in core.subtitle_queue_items()] == [("화면 번역", "queued")]
+
+
+@pytest.mark.parametrize("change", ["update", "delete"])
+def test_changing_a_region_while_it_is_read_discards_that_reading(setup, change):
+    core, media, ocr, (a, _) = setup
+    media.captions_by_region = {BAND: ((1, 3, "Bottom band"),), TOP: ((5, 7, "Corner title"),)}
+    core.add_onscreen_subtitle_region(a.id, BAND, "en")
+    core.add_onscreen_subtitle_region(a.id, TOP, "en")
+    _, top = core.onscreen_subtitle_regions(a.id)
+    moved = RegionRect(0.1, 0.55, 0.8, 0.2)
+    media.captions_by_region[moved] = ((20, 22, "Moved corner"),)
+
+    def edit(index):
+        if index == 5 and len(media.calls) == 2:  # 두 번째 영역(코너)을 읽는 중
+            media.hook = None
+            if change == "update":
+                core.update_onscreen_subtitle_region(top.id, moved, "en")
+            else:
+                core.delete_onscreen_subtitle_region(top.id)
+    media.hook = edit
+    core.process_next_onscreen_subtitle()
+    assert core.onscreen_subtitles(a.id) == ()
+    assert [e.state for e in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == ["queued"]
+    core.process_next_onscreen_subtitle()
+    assert texts(core.onscreen_subtitles(a.id)) == [(BAND, ["Bottom band"])] + (
+        [(moved, ["Moved corner"])] if change == "update" else [])

@@ -745,6 +745,32 @@ class AppCore:
         self.playback_location(video_id)
         return self._onscreen.set_regions(video_id, regions)
 
+    def add_onscreen_subtitle_region(self, video_id: int, rect: RegionRect, language: str) -> OnScreenSubtitleQueueEntry:
+        """영상에 화면 자막 영역 하나를 더하고 그 영역만 읽도록 직접 요청한다. 다른 영역은 그대로다.
+
+        읽을 언어의 언어 팩이 없으면 OcrLanguageUnavailable을 던지고 아무것도 바꾸지 않는다.
+        """
+        self.playback_location(video_id)
+        return self._onscreen.add_region(video_id, rect, language)
+
+    def update_onscreen_subtitle_region(self, region_id: int, rect: RegionRect,
+                                        language: str) -> OnScreenSubtitleQueueEntry:
+        """영역 하나의 자리·크기·읽을 언어를 고친다. 그 영역의 화면 자막과 화면 번역 자막(검수로 고친 줄 포함)만
+        지우고 다시 읽도록 직접 요청한다. 읽기가 끝나면 그 영역의 줄만 다시 번역된다."""
+        self.playback_location(self._onscreen.region(region_id).video_id)
+        return self._onscreen.update_region(region_id, rect, language)
+
+    def delete_onscreen_subtitle_region(self, region_id: int) -> None:
+        """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다."""
+        self._onscreen.delete_region(region_id)
+
+    def onscreen_subtitle_region_reviewed_line_count(self, region_id: int) -> int | None:
+        """영역의 현재 화면 자막에서 검수로 고친 줄 수. 고치거나 지우면 사라질 수를 확인 창에 보인다.
+
+        아직 화면 자막이 없는 영역(읽기를 기다리는 중)은 None이다. 읽은 글자가 없어 줄이 0개여도 0이다.
+        """
+        return self._onscreen_translation.reviewed_line_count(region_id)
+
     def onscreen_subtitles(self, video_id: int) -> tuple[OnScreenSubtitle, ...]:
         return self._onscreen.subtitles(video_id)
 
