@@ -975,19 +975,29 @@ def test_onscreen_export_of_mixed_region_languages_names_multiple_languages(scre
     assert core.subtitle_export(video.id, source=ONSCREEN).default_path == tmp_path / "a.mul.onscreen.srt"
 
 
-def test_missing_onscreen_exports_are_rejected(screen):
+def test_missing_onscreen_exports_are_rejected_and_not_offered(screen):
     core, media, *_ = screen
     a, b = core.videos()
+
+    def rejected(video_id, translated, message):
+        with pytest.raises(ValueError, match=f"^{message}$"):
+            core.subtitle_export(video_id, translated=translated, source=ONSCREEN)
+        # 검수 화면이 단추를 보일지 묻는 가벼운 조회도 같은 판단을 한다.
+        assert not core.onscreen_export_available(video_id, translated=translated)
+
     for translated in (False, True):
-        with pytest.raises(ValueError, match="^내보낼 화면 자막이 없습니다$"):
-            core.subtitle_export(a.id, translated=translated, source=ONSCREEN)
+        rejected(a.id, translated, "내보낼 화면 자막이 없습니다")
     core.set_onscreen_subtitle_regions(a.id, [(BAND, "en")])  # 아직 읽지 않은 영역
-    with pytest.raises(ValueError, match="^내보낼 화면 자막이 없습니다$"):
-        core.subtitle_export(a.id, source=ONSCREEN)
+    rejected(a.id, False, "내보낼 화면 자막이 없습니다")
     read_screen(core, media, a.id)
-    with pytest.raises(ValueError, match="^내보낼 자막 줄이 없습니다$"):
-        core.subtitle_export(a.id, translated=True, source=ONSCREEN)  # 아직 번역하지 않음
+    assert core.onscreen_export_available(a.id)
+    rejected(a.id, True, "내보낼 자막 줄이 없습니다")  # 아직 번역하지 않음
+    core.process_next_translation()  # 진행 중 요청에 저장된 묶음만 있어도 내보낼 수 있다.
+    assert core.onscreen_export_available(a.id, translated=True)
+    core.subtitle_export(a.id, translated=True, source=ONSCREEN)
     read_screen(core, media, b.id, captions=())  # 읽은 글자 없음
     for translated in (False, True):
-        with pytest.raises(ValueError, match="^내보낼 자막 줄이 없습니다$"):
-            core.subtitle_export(b.id, translated=translated, source=ONSCREEN)
+        rejected(b.id, translated, "내보낼 자막 줄이 없습니다")
+    read_screen(core, media, a.id, captions=((40, 42, "New caption"),))  # 다시 만든 화면 자막은 번역 전이다.
+    assert core.onscreen_export_available(a.id)
+    rejected(a.id, True, "내보낼 자막 줄이 없습니다")

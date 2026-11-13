@@ -270,6 +270,21 @@ class Review:
                               self._export_path(video_id, title, f"{language}.onscreen"), pending,
                               task.label, task.subtitle_label)
 
+    def onscreen_export_available(self, video_id, *, translated=False):
+        """_export_onscreen이 거부하지 않는가. 줄 묶음과 SRT를 만들지 않고 현재 화면 자막 줄 하나만 찾는다."""
+        translation = """ AND (EXISTS (SELECT 1 FROM translation_lines saved
+                WHERE saved.video_id = r.video_id AND saved.source = :source AND saved.line_id = l.id)
+            OR EXISTS (SELECT 1 FROM translation_queue q JOIN translation_targets target ON target.queue_id = q.id
+                WHERE q.video_id = r.video_id AND q.source = :source AND target.line_id = l.id
+                AND target.text IS NOT NULL))"""
+        with self._connect() as db:
+            return bool(db.execute(
+                "SELECT EXISTS (SELECT 1 FROM onscreen_subtitle_lines l "
+                "JOIN onscreen_subtitles s ON s.id = l.generation_id "
+                "JOIN onscreen_subtitle_regions r ON r.id = s.region_id "
+                f"WHERE r.video_id = :video{translation if translated else ''})",
+                dict(video=video_id, source=ONSCREEN)).fetchone()[0])
+
     def _export_path(self, video_id, title, suffix):
         filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", title).rstrip(". ") or "영상"
         # 파일 없음 영상도 검수·내보내기는 가능하다. 위치가 없으면 홈 폴더를 제안한다.

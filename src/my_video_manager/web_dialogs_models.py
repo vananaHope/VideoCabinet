@@ -192,7 +192,7 @@ class DialogModel:
                                                        (not line.translation_reviewed and provenance.get(line.original.id), names.get(not line.translation_reviewed and provenance.get(line.original.id), ''))) if flag),
                     line.original.start, line.original.end) for line in c.review_lines(ctx['video_id'])])
             data['exports'] = [row(action, title) for action, title in ONSCREEN_EXPORTS
-                               if self.exportable(ctx['video_id'], action)]
+                               if c.onscreen_export_available(ctx['video_id'], translated=EXPORT_ACTIONS[action][0])]
         elif kind == 'range':
             data['maximum'] = c.video(ctx['video_id']).duration
             try:
@@ -214,15 +214,6 @@ class DialogModel:
                 data['warning'] = '자막 재생성 대기·진행 중에는 줄 수정과 구간 재생성을 할 수 없습니다.'
         data['warning'] = data['warning'] or self.message
         return data
-
-    def exportable(self, video_id, action):
-        # 내보내기와 같은 규칙으로 판단해 고를 수 있는 단추가 거부되는 일이 없게 한다.
-        translated, source = EXPORT_ACTIONS[action]
-        try:
-            self.core.subtitle_export(video_id, translated=translated, source=source)
-        except ValueError:
-            return False
-        return True
 
     @staticmethod
     def time_value(value):

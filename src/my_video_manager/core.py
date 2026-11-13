@@ -437,6 +437,10 @@ class AppCore:
         """source가 ONSCREEN이면 화면 자막(translated면 화면 번역 자막)을 내보낸다."""
         return self._review.export(video_id, translated=translated, source=source)
 
+    def onscreen_export_available(self, video_id, *, translated=False) -> bool:
+        """subtitle_export(source=ONSCREEN)가 거부하지 않을지를 내보낼 줄을 만들지 않고 답한다."""
+        return self._review.onscreen_export_available(video_id, translated=translated)
+
     def write_subtitle_export(self, export: SubtitleExport, path: Path):
         """확인한 스냅샷을 사용자가 고른 경로에만 쓴다. Windows 인식을 위해 UTF-8 BOM 사용."""
         Path(path).write_text(export.text, encoding="utf-8-sig")
