@@ -780,7 +780,7 @@ Esc·Tab·Enter는 해당 모달이 처리합니다. 탐색·재생 진입·웹 
 
 ```powershell
 .venv/Scripts/python scripts/check_web_dialogs.py --offscreen
-# 실창은 공유 데스크톱 잠금 안에서만 실행(agent-orchestra 플러그인이 지휘 시작 때 이 경로에 둠)
+# 실창은 공유 데스크톱 잠금 안에서만 실행(vstack 플러그인의 지휘가 시작 때 이 경로에 둠. 경로 이름은 agent-orchestra 때의 것)
 python $HOME/.agent-orchestra/bin/desktop_lock.py run --owner issue-53 -- .venv/Scripts/python scripts/check_web_dialogs.py --real
 ```
 
