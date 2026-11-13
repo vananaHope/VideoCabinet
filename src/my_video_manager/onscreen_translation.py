@@ -65,6 +65,19 @@ class OnScreenTranslationSource:
                        '(SELECT id FROM translation_queue WHERE video_id=? AND source=?)', (line_id, video_id, ONSCREEN))
             translations.finish_ready(db, video_id, source=ONSCREEN)
 
+    def reviewed_line_count(self, region_id, *, connection=None):
+        """영역의 현재 세대에서 검수로 고친 줄 수. 세대가 아직 없으면 None이다."""
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            row = db.execute(
+                'SELECT r.id, s.id AS generation, (SELECT COUNT(*) FROM onscreen_subtitle_lines l '
+                'JOIN onscreen_translation_reviews p ON p.line_id=l.id '
+                'WHERE l.generation_id=s.id AND p.translation_reviewed=1) AS reviewed '
+                'FROM onscreen_subtitle_regions r LEFT JOIN onscreen_subtitles s ON s.region_id=r.id WHERE r.id=?',
+                (region_id,)).fetchone()
+        if row is None:
+            raise ValueError('화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.')
+        return None if row['generation'] is None else row['reviewed']
+
     def reviewed_lines(self, video_id):
         with self._connect() as db:
             return frozenset(r[0] for r in db.execute(

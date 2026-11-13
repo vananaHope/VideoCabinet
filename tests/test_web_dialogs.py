@@ -526,3 +526,53 @@ def test_review_offers_onscreen_exports_only_when_saved_and_writes_them_through_
         assert result['error'] == '내보낼 화면 자막이 없습니다'
     within(lambda: ReviewDialog(core, b.id, window.review_jump, window.review_changed, window).exec(),
            dialogs, check_without_onscreen)
+
+
+def test_onscreen_region_delete_of_an_unread_region_has_no_count_and_cancel_keeps_it(screen_window):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDeleteDialog
+    window, (core, *_) = screen_window
+    video = core.videos()[0]
+    core.add_onscreen_subtitle_region(video.id, BAND, 'en')
+    region, = core.onscreen_subtitle_regions(video.id)
+    dialogs = window.web_host.dialogs
+    core.playback.start(video.id, 0)
+
+    def check():
+        data = state(dialogs)
+        assert (data['kind'], data['confirm_title'], data['confirm_destructive']) == (
+            'onscreen-region-delete', '화면 자막 영역 지우기', True)
+        assert '아직 화면 자막을 만들기 전인 영역입니다' in data['confirmation']
+        assert '검수로 고친 줄' not in data['confirmation']
+        act(dialogs, 'cancel-confirm')
+        assert not dialogs.active
+    within(lambda: OnScreenRegionDeleteDialog(core, video.id, region.id, window).exec(), dialogs, check)
+    assert core.onscreen_subtitle_regions(video.id) == (region,)
+    assert [e.state for e in core.subtitle_queue(kind='onscreen_subtitle')] == ['queued']
+
+    def expire():
+        assert dialogs.active
+        core.playback.end()  # 그 영상의 재생이 끝나면 영역 지우기 창은 쓸모가 없어 닫힌다.
+        wait_for(lambda: not dialogs.active)
+    core.playback.start(video.id, 0)
+    within(lambda: OnScreenRegionDeleteDialog(core, video.id, region.id, window).exec(), dialogs, expire)
+    assert core.onscreen_subtitle_regions(video.id) == (region,)
+
+
+def test_onscreen_region_delete_closes_when_the_region_is_already_gone(screen_window):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDeleteDialog
+    window, (core, *_) = screen_window
+    video = core.videos()[0]
+    core.add_onscreen_subtitle_region(video.id, BAND, 'en')
+    core.add_onscreen_subtitle_region(video.id, RegionRect(0.1, 0, 0.8, 0.15), 'en')
+    region, other = core.onscreen_subtitle_regions(video.id)
+    dialogs = window.web_host.dialogs
+    core.playback.start(video.id, 0)
+
+    def check():
+        state(dialogs)
+        core.delete_onscreen_subtitle_region(region.id)  # 창이 열린 사이 다른 경로로 지워졌다
+        act(dialogs, 'confirm')
+        assert not dialogs.active
+        assert '영역이 바뀌었습니다' in window.statusBar().currentMessage()
+    within(lambda: OnScreenRegionDeleteDialog(core, video.id, region.id, window).exec(), dialogs, check)
+    assert core.onscreen_subtitle_regions(video.id) == (other,)

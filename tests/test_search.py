@@ -444,3 +444,29 @@ def test_onscreen_lines_of_every_region_are_found_in_time_order(screen):
     read_screen(core, media, video.id, captions=(), regions=((BAND, "en"), (top, "en")))
     assert [(r.text, r.start) for r in core.search("caption").results] == [
         ("Caption top", 5), ("Caption bottom", 30)]
+
+
+def test_deleted_or_updated_region_lines_leave_search_and_other_regions_stay(screen):
+    core, media, *_ = screen
+    video = core.videos()[0]
+    top = RegionRect(0.1, 0.0, 0.8, 0.15)
+    media.captions_by_region = {BAND: ((30, 32, "Caption bottom"),), top: ((5, 7, "Caption top"),)}
+    core.add_onscreen_subtitle_region(video.id, BAND, "en")
+    core.add_onscreen_subtitle_region(video.id, top, "en")
+    core.process_next_onscreen_subtitle()
+    finish(core)
+    bottom_region, top_region = core.onscreen_subtitle_regions(video.id)
+    assert {r.text for r in core.search("caption").results} == {
+        "Caption top", "Caption bottom", "번역 Caption top", "번역 Caption bottom"}
+    core.delete_onscreen_subtitle_region(top_region.id)
+    assert [(r.source, r.text) for r in core.search("caption").results] == [
+        ("onscreen", "Caption bottom"), ("onscreen_translation", "번역 Caption bottom")]
+    moved = RegionRect(0.1, 0.5, 0.8, 0.15)
+    media.captions_by_region[moved] = ((40, 42, "Moved caption"),)
+    core.update_onscreen_subtitle_region(bottom_region.id, moved, "en")
+    assert core.search("caption bottom").results == ()
+    core.process_next_onscreen_subtitle()
+    finish(core)
+    reopened = AppCore(media=media, clock=lambda: datetime.now(timezone.utc), database=core.database)
+    assert [(r.source, r.text, r.start) for r in reopened.search("caption").results] == [
+        ("onscreen", "Moved caption", 40), ("onscreen_translation", "번역 Moved caption", 40)]

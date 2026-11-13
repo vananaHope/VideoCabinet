@@ -43,10 +43,20 @@ class RandomScopeChooser(_Entry):
 
 
 class OnScreenRegionDialog(_Entry):
-    """화면 자막 영역을 끈 뒤 읽을 언어를 확인한다. 재생 화면에서 연다."""
+    """화면 자막 영역을 끈 뒤 읽을 언어를 확인한다. 재생 화면에서 연다.
 
-    def __init__(self, core, video_id, region, parent):
-        super().__init__(parent, 'onscreen-region', video_id=video_id, region=region)
+    region_id가 있으면 이미 정한 그 영역을 region 자리로 고친다(읽을 언어 기본값은 지금 언어).
+    """
+
+    def __init__(self, core, video_id, region, parent, *, region_id=None):
+        super().__init__(parent, 'onscreen-region', video_id=video_id, region=region, region_id=region_id)
+
+
+class OnScreenRegionDeleteDialog(_Entry):
+    """이미 정한 화면 자막 영역 하나를 지울지 묻는다. 재생 화면에서 연다."""
+
+    def __init__(self, core, video_id, region_id, parent):
+        super().__init__(parent, 'onscreen-region-delete', video_id=video_id, region_id=region_id)
 
 
 class ReviewDialog(_Entry):

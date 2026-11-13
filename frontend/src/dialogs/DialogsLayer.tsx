@@ -89,8 +89,10 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     if (index < 0 || target < 0 || target >= form.members.length) return
     const next = [...form.members]; [next[index], next[target]] = [next[target], next[index]]; update({ members: next })
   }
-  if (kind === 'video-exclude') return <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }}
-    title={data.confirm_title} description={data.confirmation} variant="destructive" onConfirm={() => void act('confirm')} />
+  // 확인 창만 있는 대화상자: 영상 제외, 화면 자막 영역 지우기.
+  if (kind === 'video-exclude' || kind === 'onscreen-region-delete') return <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }}
+    title={data.confirm_title} description={data.confirmation} confirmLabel={kind === 'onscreen-region-delete' ? '영역 지우기' : undefined}
+    variant="destructive" onConfirm={() => void act('confirm')} />
   return <DialogFrame title={data.title} description={data.description} onClose={() => { if (!data.confirmation) void act('close') }} composing={composing} onSize={onSize} wide={['review', 'series', 'highlights'].includes(kind)}>
     <div ref={content} data-dialog-body={kind} className={body({ scroll: kind === 'translation' || kind === 'random-scope' })} onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { setTimeout(() => { composing.current = false }, 0) }}
       onKeyDown={event => {
