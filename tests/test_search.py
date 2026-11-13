@@ -9,7 +9,12 @@ import pytest
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
+from my_video_manager.onscreen_subtitles import RegionRect
 from my_video_manager.translation import TranslatedLine
+from my_video_manager.web_search_data import result_data
+from test_onscreen_subtitles import BAND
+from test_onscreen_translation import read_screen, screen
+from test_translation import finish
 
 
 class Media:
@@ -395,3 +400,47 @@ def test_bulk_preparation_preserves_existing_results_and_later_external_edits(li
     with sqlite3.connect(core.database) as db:
         db.execute("DELETE FROM transcript_lines WHERE id=?", (line.id,))
     assert core.search("대량갱신성공").results == ()
+
+
+def test_onscreen_subtitles_and_translations_are_found_with_their_source_and_line_time(screen):
+    core, media, *_ = screen
+    video = core.videos()[0]
+    original = read_screen(core, media, video.id, captions=((10, 12, "Jon show"), (20, 22, "Corner title")))
+    finish(core)
+    # 화면 번역 자막은 "번역 " + 원문이라 원문으로 찾으면 둘 다 같은 시각에 나온다.
+    shown, also = core.search("jon show").results
+    assert (shown.video_id, shown.source, shown.text, shown.start) == (video.id, "onscreen", "Jon show", 10)
+    assert (also.source, also.text, also.start) == ("onscreen_translation", "번역 Jon show", 10)
+    translated, = core.search("번역 corner").results
+    assert (translated.video_id, translated.source, translated.text, translated.start) == (
+        video.id, "onscreen_translation", "번역 Corner title", 20)
+    # 결과의 출처 표시는 용어집 이름이며 원어·번역 자막과 구별된다.
+    assert result_data(shown, "jon show")["source"] == "화면 자막"
+    assert result_data(translated, "번역 corner")["source"] == "화면 번역 자막"
+    assert core.switch_to(translated.video_id, start=translated.start) == 20
+    core.playback.end()
+    # 고친 화면 번역 줄을 바로 찾고, 고치기 전 문장은 찾지 않는다.
+    core.edit_onscreen_translation_line(original[1].id, "고친 코너 제목")
+    assert core.search("번역 corner").results == ()
+    edited, = core.search("고친코너").results
+    assert (edited.source, edited.start) == ("onscreen_translation", 20)
+    # 화면 자막을 다시 만들면 이전 세대의 화면 자막·화면 번역 자막은 검색되지 않는다.
+    read_screen(core, media, video.id, captions=((40, 42, "New caption"),))
+    assert core.search("jon show").results == ()
+    assert core.search("고친코너").results == ()
+    assert core.search("번역 corner").results == ()
+    finish(core)
+    assert [(r.source, r.start) for r in core.search("new caption").results] == [
+        ("onscreen", 40), ("onscreen_translation", 40)]
+    reopened = AppCore(media=media, clock=lambda: datetime.now(timezone.utc), database=core.database)
+    assert reopened.search("new caption").results == core.search("new caption").results
+
+
+def test_onscreen_lines_of_every_region_are_found_in_time_order(screen):
+    core, media, *_ = screen
+    video = core.videos()[0]
+    top = RegionRect(0.1, 0.0, 0.8, 0.15)
+    media.captions_by_region = {BAND: ((30, 32, "Caption bottom"),), top: ((5, 7, "Caption top"),)}
+    read_screen(core, media, video.id, captions=(), regions=((BAND, "en"), (top, "en")))
+    assert [(r.text, r.start) for r in core.search("caption").results] == [
+        ("Caption top", 5), ("Caption bottom", 30)]

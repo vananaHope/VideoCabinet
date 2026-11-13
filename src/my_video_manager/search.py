@@ -3,20 +3,26 @@
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock
-from .translation_kind import translation_task
-from .translation_source import TRANSCRIPT
+from .translation_kind import ONSCREEN_TRANSLATION, translation_task
+from .translation_source import ONSCREEN, TRANSCRIPT
 
 from typing import Literal
 import unicodedata
 
 
-SearchSource = Literal["title", "filename", "tag", "note", "transcript", "translation", "refinement", "external"]
+SearchSource = Literal["title", "filename", "tag", "note", "transcript", "translation", "refinement", "external",
+                       "onscreen", "onscreen_translation"]
 SEARCH_LIMIT = 500
 SOURCE_LABELS = {"title": "제목", "filename": "파일 이름", "tag": "태그", "note": "메모",
-                 "transcript": "원어 자막", "translation": "번역 자막", "refinement": translation_task("ko").subtitle_label, "external": "외부 자막"}
-SUBTITLE_SOURCES = (("transcript", "transcript_lines", "id"),
-                    ("translation", "translation_lines", "line_id"),
-                    ("external", "external_subtitle_lines", "id"))
+                 "transcript": "원어 자막", "translation": "번역 자막", "refinement": translation_task("ko").subtitle_label,
+                 "external": "외부 자막", "onscreen": "화면 자막", "onscreen_translation": ONSCREEN_TRANSLATION.subtitle_label}
+# (검색 출처, 표, 줄 ID 열, 번역 출처). 번역 출처가 있으면 translation_lines에서 그 출처의 줄만 색인한다.
+SUBTITLE_SOURCES = (("transcript", "transcript_lines", "id", None),
+                    ("translation", "translation_lines", "line_id", TRANSCRIPT),
+                    ("external", "external_subtitle_lines", "id", None),
+                    ("onscreen", "onscreen_subtitle_lines", "id", None),
+                    ("onscreen_translation", "translation_lines", "line_id", ONSCREEN))
+SUBTITLE_RESULT_SOURCES = ("transcript", "translation", "refinement", "external", "onscreen", "onscreen_translation")
 BULK_NORMALIZATION_THRESHOLD = 10_000
 
 CONTENT_UPDATE_TRIGGER = """CREATE TRIGGER IF NOT EXISTS search_content_update
@@ -70,8 +76,8 @@ class Search:
             if not self.ready:
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
-                    for source, table, identifier in SUBTITLE_SOURCES:
-                        self._backfill_source(db, source, table, identifier)
+                    for source, table, identifier, translation_source in SUBTITLE_SOURCES:
+                        self._backfill_source(db, source, table, identifier, translation_source)
                     self._normalize_pending(db)
                 self._ready.set()
 
@@ -79,7 +85,7 @@ class Search:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             # 이전 검색 빌드의 함수 의존 트리거를 반드시 교체한다.
-            for source, _, _ in SUBTITLE_SOURCES:
+            for source, *_ in SUBTITLE_SOURCES:
                 for event in ("insert", "delete", "update"):
                     db.execute(f"DROP TRIGGER IF EXISTS search_{source}_{event}")
             db.execute("DROP TABLE IF EXISTS subtitle_search")
@@ -101,30 +107,31 @@ class Search:
                 INSERT INTO subtitle_search_v2(subtitle_search_v2, rowid, normalized)
                 VALUES('delete', old.id, old.normalized); END""")
             db.execute(CONTENT_UPDATE_TRIGGER)
-            for source, table, identifier in SUBTITLE_SOURCES:
-                self._install_source(db, source, table, identifier)
+            for source, table, identifier, translation_source in SUBTITLE_SOURCES:
+                self._install_source(db, source, table, identifier, translation_source)
 
     @staticmethod
-    def _install_source(db, source, table, identifier):
+    def _install_source(db, source, table, identifier, translation_source):
         # 식별자는 위의 상수만 사용한다. 원문 저장·수정·삭제는 함수 없는 접속에서도 동작한다.
         insert = f"""INSERT INTO search_subtitle_lines(source, line_id, text)
             VALUES('{source}', new.{identifier}, new.text)
             ON CONFLICT(source, line_id) DO UPDATE SET text=excluded.text, normalized=NULL;"""
         # line_id is TEXT even for integer external IDs; matching affinity keeps
-        # SQLite on the (source, line_id) index for all three subtitle sources.
+        # SQLite on the (source, line_id) index for every subtitle source.
         delete = f"DELETE FROM search_subtitle_lines WHERE source='{source}' AND line_id=CAST(old.{identifier} AS TEXT);"
         for event, body in (("INSERT", insert), ("DELETE", delete), ("UPDATE", delete + insert)):
             trigger_event = "UPDATE OF text" if event == "UPDATE" else event
             reference = "old" if event == "DELETE" else "new"
-            condition = f"WHEN {reference}.source='{TRANSCRIPT}'" if source == "translation" else ""
+            condition = f"WHEN {reference}.source='{translation_source}'" if translation_source else ""
             db.execute(f"""CREATE TRIGGER search_{source}_{event.lower()}
                 AFTER {trigger_event} ON {table} {condition} BEGIN {body} END""")
     @staticmethod
-    def _backfill_source(db, source, table, identifier):
+    def _backfill_source(db, source, table, identifier, translation_source):
         # 준비 전에 새 줄을 저장해도 기존 줄을 빠뜨리지 않도록 완료 표식은 별도로 둔다.
+        # 출처마다 표식이 따로라 새로 더한 출처도 처음 준비할 때 기존 줄을 한 번 채운다.
         if not db.execute("SELECT 1 FROM search_backfill_sources WHERE source=?", (source,)).fetchone():
-            condition = " WHERE source=?" if source == "translation" else ""
-            parameters = (source, TRANSCRIPT) if source == "translation" else (source,)
+            condition = " WHERE source=?" if translation_source else ""
+            parameters = (source, translation_source) if translation_source else (source,)
             db.execute(f"""INSERT OR IGNORE INTO search_subtitle_lines(source, line_id, text)
                 SELECT ?, {identifier}, text FROM {table}{condition}""", parameters)
             db.execute("INSERT INTO search_backfill_sources VALUES (?)", (source,))
@@ -160,8 +167,8 @@ class Search:
 
         def response():
             selected = results[:SEARCH_LIMIT]
-            subtitles = [result for result in selected if result.source in ("transcript", "translation", "refinement", "external")]
-            other = [result for result in selected if result.source not in ("transcript", "translation", "refinement", "external")]
+            subtitles = [result for result in selected if result.source in SUBTITLE_RESULT_SOURCES]
+            other = [result for result in selected if result.source not in SUBTITLE_RESULT_SOURCES]
             subtitles.sort(key=lambda result: (result.video_id, result.start, result.source, result.text))
             return SearchResponse(tuple(other + subtitles), len(results) > SEARCH_LIMIT)
 
@@ -194,14 +201,20 @@ class Search:
                     JOIN search_subtitle_lines c ON c.id=f.rowid WHERE subtitle_search_v2 MATCH ?"""
                 value = '"' + key.replace('"', '""') + '"'
             seen_korean_lines = set()
-            for row in db.execute(f"""SELECT c.source, c.line_id, t.spoken_language, c.text, coalesce(l.start, e.start) AS start,
-                    coalesce(t.video_id, f.video_id) AS video_id, s.language
+            # 화면 번역 자막은 화면 자막 줄과 일대일이라 그 줄의 시각과 영상을 쓴다.
+            # 지난 세대의 줄이면 영상을 찾지 못해 결과에서 빠진다.
+            for row in db.execute(f"""SELECT c.source, c.line_id, t.spoken_language, c.text,
+                    coalesce(l.start, e.start, o.start) AS start,
+                    coalesce(t.video_id, f.video_id, r.video_id) AS video_id, s.language
                     FROM ({candidates}) c
                     LEFT JOIN transcript_lines l ON c.source IN ('transcript', 'translation') AND l.id=c.line_id
                     LEFT JOIN transcripts t ON t.id=l.transcript_id
                     LEFT JOIN external_subtitle_lines e ON c.source='external' AND e.id=c.line_id
                     LEFT JOIN external_subtitles s ON s.id=e.subtitle_id
-                    LEFT JOIN external_subtitle_files f ON f.id=s.file_id""", (value,)):
+                    LEFT JOIN external_subtitle_files f ON f.id=s.file_id
+                    LEFT JOIN onscreen_subtitle_lines o ON c.source IN ('onscreen', 'onscreen_translation') AND o.id=c.line_id
+                    LEFT JOIN onscreen_subtitles g ON g.id=o.generation_id
+                    LEFT JOIN onscreen_subtitle_regions r ON r.id=g.region_id""", (value,)):
                 source, text = row['source'], row['text']
                 task = translation_task(row['spoken_language'])
                 if task.kind == 'refinement' and source in ('transcript', 'translation'):
