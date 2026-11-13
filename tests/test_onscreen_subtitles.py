@@ -550,3 +550,24 @@ def test_changing_a_region_while_it_is_read_discards_that_reading(setup, change)
     core.process_next_onscreen_subtitle()
     assert texts(core.onscreen_subtitles(a.id)) == [(BAND, ["Bottom band"])] + (
         [(moved, ["Moved corner"])] if change == "update" else [])
+
+
+@pytest.mark.parametrize("change", ["update", "delete"])
+def test_a_change_that_saw_an_outdated_reviewed_count_is_refused_without_changing_anything(setup, change):
+    from my_video_manager.onscreen_subtitles import OnScreenRegionChanged
+    core, media, ocr, (a, _) = setup
+    media.captions = ((1, 3, "Hello"),)
+    core.add_onscreen_subtitle_region(a.id, BAND, "en")
+    region, = core.onscreen_subtitle_regions(a.id)
+    core.process_next_onscreen_subtitle()  # 확인 창이 '아직 화면 자막 없음(None)'을 본 뒤 읽기가 끝났다
+    before = (core.onscreen_subtitle_regions(a.id), core.onscreen_subtitles(a.id), core.subtitle_queue(kind=None))
+    apply_change = ((lambda seen: core.update_onscreen_subtitle_region(region.id, TOP, "en", expected_reviewed_line_count=seen))
+                    if change == "update" else
+                    (lambda seen: core.delete_onscreen_subtitle_region(region.id, expected_reviewed_line_count=seen)))
+    with pytest.raises(OnScreenRegionChanged) as refused:
+        apply_change(None)
+    assert refused.value.reviewed_line_count == 0
+    assert (core.onscreen_subtitle_regions(a.id), core.onscreen_subtitles(a.id), core.subtitle_queue(kind=None)) == before
+    apply_change(0)
+    assert core.onscreen_subtitles(a.id) == ()
+    assert [r.rect for r in core.onscreen_subtitle_regions(a.id)] == ([TOP] if change == "update" else [])

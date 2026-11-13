@@ -28,8 +28,8 @@ from .subtitles import Subtitles, Transcriber, Transcript, SubtitleQueueEntry, t
 from .translation import (Translator, Translations, Translation, TranslationQueueEntry, SubtitleSelection,
                           translation_skip_reason)
 from .subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION, queue_task_key
-from .onscreen_subtitles import (OcrEngine, OnScreenSubtitle, OnScreenSubtitleQueueEntry, OnScreenSubtitleRegion,
-                                 OnScreenSubtitles, RegionRect)
+from .onscreen_subtitles import (OcrEngine, OnScreenRegionChanged, OnScreenSubtitle, OnScreenSubtitleQueueEntry,
+                                 OnScreenSubtitleRegion, OnScreenSubtitles, RegionRect)
 from .translation_source import ONSCREEN, TRANSCRIPT, TranslationSources
 from .onscreen_translation import OnScreenTranslationSource
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
@@ -95,6 +95,8 @@ DEFAULT_KEY_BINDINGS = {
 
 MIN_PLAYBACK_SPEED = 0.25
 MAX_PLAYBACK_SPEED = 100
+# 확인 창이 본 수를 넘기지 않은 호출(검사하지 않음). None은 '아직 화면 자막이 없음'이라 기본값으로 쓸 수 없다.
+UNCHECKED = object()
 
 
 def playback_speed(current: float, change: float) -> float:
@@ -753,16 +755,32 @@ class AppCore:
         self.playback_location(video_id)
         return self._onscreen.add_region(video_id, rect, language)
 
-    def update_onscreen_subtitle_region(self, region_id: int, rect: RegionRect,
-                                        language: str) -> OnScreenSubtitleQueueEntry:
+    def update_onscreen_subtitle_region(self, region_id: int, rect: RegionRect, language: str, *,
+                                        expected_reviewed_line_count=UNCHECKED) -> OnScreenSubtitleQueueEntry:
         """영역 하나의 자리·크기·읽을 언어를 고친다. 그 영역의 화면 자막과 화면 번역 자막(검수로 고친 줄 포함)만
-        지우고 다시 읽도록 직접 요청한다. 읽기가 끝나면 그 영역의 줄만 다시 번역된다."""
-        self.playback_location(self._onscreen.region(region_id).video_id)
-        return self._onscreen.update_region(region_id, rect, language)
+        지우고 다시 읽도록 직접 요청한다. 읽기가 끝나면 그 영역의 줄만 다시 번역된다.
 
-    def delete_onscreen_subtitle_region(self, region_id: int) -> None:
-        """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다."""
-        self._onscreen.delete_region(region_id)
+        expected_reviewed_line_count는 확인 창이 보인 onscreen_subtitle_region_reviewed_line_count 값이다.
+        바꾸는 순간 그 값과 다르면 OnScreenRegionChanged를 던지고 아무것도 바꾸지 않는다.
+        """
+        self.playback_location(self._onscreen.region(region_id).video_id)
+        return self._onscreen.update_region(region_id, rect, language,
+                                            guard=self._reviewed_guard(region_id, expected_reviewed_line_count))
+
+    def delete_onscreen_subtitle_region(self, region_id: int, *, expected_reviewed_line_count=UNCHECKED) -> None:
+        """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다.
+        expected_reviewed_line_count는 update_onscreen_subtitle_region과 같다."""
+        self._onscreen.delete_region(region_id, guard=self._reviewed_guard(region_id, expected_reviewed_line_count))
+
+    def _reviewed_guard(self, region_id, expected):
+        if expected is UNCHECKED:
+            return None
+
+        def guard(db):
+            current = self._onscreen_translation.reviewed_line_count(region_id, connection=db)
+            if current != expected:
+                raise OnScreenRegionChanged(current)
+        return guard
 
     def onscreen_subtitle_region_reviewed_line_count(self, region_id: int) -> int | None:
         """영역의 현재 화면 자막에서 검수로 고친 줄 수. 고치거나 지우면 사라질 수를 확인 창에 보인다.

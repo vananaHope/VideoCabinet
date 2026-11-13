@@ -448,3 +448,80 @@ def test_escape_while_moving_discards_the_move_and_small_moves_only_pick(window)
     key(window, Qt.Key.Key_Escape)
     assert window.playback_page.region_selector is None and not window.web_host.dialogs.active
     assert saved(window.core, video.id) == before
+
+
+# #283 R1: 창이 열린 동안 그 영역의 읽기가 끝나(화면 자막이 생겨) 사라질 것이 바뀌는 경우.
+OPERATIONS = {"edit": (Qt.Key.Key_Return, "save"), "delete": (Qt.Key.Key_Delete, "confirm")}
+
+
+def open_waiting_region(window, operation):
+    """읽기를 기다리는 영역을 고르고 고치기(Enter) 또는 지우기(Delete) 창을 연다."""
+    core = window.core
+    video = core.videos()[0]
+    window.media.captions = ((1, 3, "Hello"),)
+    core.add_onscreen_subtitle_region(video.id, BOTTOM, "en")
+    region, = core.onscreen_subtitle_regions(video.id)
+    _, selector = start(window)
+    click(selector, (0.5, 0.85))
+    press(selector, OPERATIONS[operation][0])
+    return video, region
+
+
+def warning(data):
+    return data["information"] + data["confirmation"]
+
+
+def answer(dialogs, identifier, action):
+    """웹 단추와 같은 브리지 명령. 그 사이 새 상태를 읽지 않는다(사용자가 새 안내를 보기 전에 누른 경우)."""
+    result = json.loads(dialogs.bridge.act(identifier, action, json.dumps({"choice": "en"})))
+    assert "error" not in result, result
+    return result["dialog"]
+
+
+@pytest.mark.parametrize("operation", ["edit", "delete"])
+def test_warning_follows_a_reading_that_finishes_while_the_dialog_is_open(window, operation):
+    video, region = open_waiting_region(window, operation)
+    core, seen = window.core, []
+
+    def finish_reading(dialogs):
+        seen.append(warning(state(dialogs)))
+        assert core.process_next_onscreen_subtitle().state == "completed"
+        seen.append(warning(state(dialogs)))
+        answer(dialogs, state(dialogs)["id"], OPERATIONS[operation][1])  # 새 안내를 본 뒤의 확인은 한 번이다
+        assert not dialogs.active
+    with_dialog(window, finish_reading)
+    assert "검수로 고친 줄" not in seen[0]
+    assert "검수로 고친 줄 0개의 수정이 사라집니다" in seen[1] and "만들기 전" not in seen[1]
+    if operation == "edit":
+        assert core.onscreen_subtitles(video.id) == ()  # 읽은 화면 자막을 지우고 다시 읽는다
+        assert [e.state for e in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == ["queued"]
+    else:
+        assert core.onscreen_subtitle_regions(video.id) == ()
+
+
+@pytest.mark.parametrize("operation", ["edit", "delete"])
+def test_confirming_before_seeing_the_new_warning_changes_nothing_and_asks_again(window, operation):
+    video, region = open_waiting_region(window, operation)
+    core, seen = window.core, {}
+
+    def confirm_too_early(dialogs):
+        identifier = state(dialogs)["id"]
+        assert core.process_next_onscreen_subtitle().state == "completed"
+        subtitle, = core.onscreen_subtitles(video.id)
+        before = saved(core, video.id)
+        again = answer(dialogs, identifier, OPERATIONS[operation][1])
+        assert dialogs.active and saved(core, video.id) == before  # 본 안내와 달라 바꾸지 않는다
+        assert core.onscreen_subtitles(video.id) == (subtitle,)
+        seen["again"] = again
+        answer(dialogs, identifier, OPERATIONS[operation][1])  # 새 안내를 확인하면 바꾼다
+        assert not dialogs.active
+    with_dialog(window, confirm_too_early)
+    again = seen["again"]
+    assert "검수로 고친 줄 0개의 수정이 사라집니다" in warning(again)
+    assert "다시 확인" in again["warning"] + again["confirmation"]
+    if operation == "delete":
+        assert again["confirm_destructive"] and core.onscreen_subtitle_regions(video.id) == ()
+    else:
+        assert core.onscreen_subtitles(video.id) == ()
+        region_now, = core.onscreen_subtitle_regions(video.id)
+        assert region_now.id == region.id

@@ -556,3 +556,23 @@ def test_onscreen_region_delete_of_an_unread_region_has_no_count_and_cancel_keep
     core.playback.start(video.id, 0)
     within(lambda: OnScreenRegionDeleteDialog(core, video.id, region.id, window).exec(), dialogs, expire)
     assert core.onscreen_subtitle_regions(video.id) == (region,)
+
+
+def test_onscreen_region_delete_closes_when_the_region_is_already_gone(screen_window):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDeleteDialog
+    window, (core, *_) = screen_window
+    video = core.videos()[0]
+    core.add_onscreen_subtitle_region(video.id, BAND, 'en')
+    core.add_onscreen_subtitle_region(video.id, RegionRect(0.1, 0, 0.8, 0.15), 'en')
+    region, other = core.onscreen_subtitle_regions(video.id)
+    dialogs = window.web_host.dialogs
+    core.playback.start(video.id, 0)
+
+    def check():
+        state(dialogs)
+        core.delete_onscreen_subtitle_region(region.id)  # 창이 열린 사이 다른 경로로 지워졌다
+        act(dialogs, 'confirm')
+        assert not dialogs.active
+        assert '영역이 바뀌었습니다' in window.statusBar().currentMessage()
+    within(lambda: OnScreenRegionDeleteDialog(core, video.id, region.id, window).exec(), dialogs, check)
+    assert core.onscreen_subtitle_regions(video.id) == (other,)

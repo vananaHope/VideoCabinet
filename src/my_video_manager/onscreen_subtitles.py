@@ -137,6 +137,15 @@ class OcrLanguageUnavailable(ValueError):
                          f"화면 글자를 읽을 수 없습니다. {guidance}".strip())
 
 
+class OnScreenRegionChanged(ValueError):
+    """확인 창이 보인 뒤 그 영역의 화면 자막이 바뀌어(읽기가 끝남 등) 고치거나 지우면 사라질 것이 달라졌다.
+    아무것도 바꾸지 않았다. reviewed_line_count는 지금 상태다(아직 화면 자막이 없으면 None)."""
+
+    def __init__(self, reviewed_line_count: int | None):
+        self.reviewed_line_count = reviewed_line_count
+        super().__init__("그 사이 이 영역의 화면 자막이 바뀌었습니다. 바뀐 안내를 다시 확인하세요.")
+
+
 @dataclass(frozen=True)
 class OnScreenSubtitleLine:
     id: str
@@ -394,14 +403,20 @@ class OnScreenSubtitles:
                        "VALUES (?, ?, ?, ?, ?, ?, ?)", (video_id, *_rect_values(rect), language, now))
             return self._request(db, video_id, now)
 
-    def update_region(self, region_id: int, rect: RegionRect, language: str) -> OnScreenSubtitleQueueEntry:
+    def update_region(self, region_id: int, rect: RegionRect, language: str, *,
+                      guard=None) -> OnScreenSubtitleQueueEntry:
         """영역 하나의 자리·크기·읽을 언어를 그 자리에서 고친다. 그 영역의 화면 자막·화면 번역 자막·검수 기록을
-        지우고 그 영역만 다시 읽도록 대기열에 넣는다. 다른 영역은 그대로다."""
+        지우고 그 영역만 다시 읽도록 대기열에 넣는다. 다른 영역은 그대로다.
+
+        guard(db)는 쓰기 트랜잭션 안에서 바꾸기 전에 부른다. 예외를 던지면 아무것도 바꾸지 않는다.
+        """
         self._check_region(rect, language)
         video_id = self.region(region_id).video_id
         self._cancel_reading(video_id)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if guard is not None:
+                guard(db)
             if not db.execute("UPDATE onscreen_subtitle_regions SET x = ?, y = ?, width = ?, height = ?, language = ? "
                               "WHERE id = ?", (*_rect_values(rect), language, region_id)).rowcount:
                 raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
@@ -409,7 +424,7 @@ class OnScreenSubtitles:
             db.execute("DELETE FROM onscreen_subtitles WHERE region_id = ?", (region_id,))
             return self._request(db, video_id, self._clock().isoformat())
 
-    def delete_region(self, region_id: int) -> None:
+    def delete_region(self, region_id: int, *, guard=None) -> None:
         """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다.
 
         읽기를 기다리는 다른 영역이 남으면 그 영역들만 읽도록 다시 넣고, 없으면 대기열에서 뺀다.
@@ -419,6 +434,8 @@ class OnScreenSubtitles:
         self._cancel_reading(video_id)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if guard is not None:
+                guard(db)
             if not db.execute("DELETE FROM onscreen_subtitle_regions WHERE id = ?", (region_id,)).rowcount:
                 raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
             waiting = db.execute("SELECT 1 FROM onscreen_subtitle_regions r WHERE r.video_id = ? AND NOT EXISTS "

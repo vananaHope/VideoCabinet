@@ -65,9 +65,9 @@ class OnScreenTranslationSource:
                        '(SELECT id FROM translation_queue WHERE video_id=? AND source=?)', (line_id, video_id, ONSCREEN))
             translations.finish_ready(db, video_id, source=ONSCREEN)
 
-    def reviewed_line_count(self, region_id):
+    def reviewed_line_count(self, region_id, *, connection=None):
         """영역의 현재 세대에서 검수로 고친 줄 수. 세대가 아직 없으면 None이다."""
-        with self._connect() as db:
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
             row = db.execute(
                 'SELECT r.id, s.id AS generation, (SELECT COUNT(*) FROM onscreen_subtitle_lines l '
                 'JOIN onscreen_translation_reviews p ON p.line_id=l.id '

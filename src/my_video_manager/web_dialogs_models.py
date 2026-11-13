@@ -3,8 +3,8 @@ from uuid import uuid4
 from math import isfinite
 
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
-from .onscreen_subtitles import (ONSCREEN_LANGUAGES, OcrLanguageUnavailable, default_onscreen_language,
-                                 onscreen_language_name)
+from .onscreen_subtitles import (ONSCREEN_LANGUAGES, OcrLanguageUnavailable, OnScreenRegionChanged,
+                                 default_onscreen_language, onscreen_language_name)
 from .review import ReviewConfirmationRequired
 from .translation_kind import ONSCREEN_TRANSLATION
 from .translation_source import ONSCREEN, TRANSCRIPT
@@ -101,23 +101,14 @@ class DialogModel:
             self.values['choice'] = default_onscreen_language(self.spoken_language) or ''
             self.editing = self.reviewed = None
             if context.get('region_id') is not None:
-                # 고치기: 읽을 언어의 기본값은 그 영역의 지금 언어다. 사라질 검수 수정 수는 창을 열 때 한 번 센다.
+                # 고치기: 읽을 언어의 기본값은 그 영역의 지금 언어다. self.reviewed는 창이 보인 사라질 검수 수정 수다.
                 self.editing = onscreen_region(self.core, context['video_id'], context['region_id'])
                 self.values['choice'] = self.editing.language
                 self.reviewed = self.core.onscreen_subtitle_region_reviewed_line_count(self.editing.id)
         elif kind == 'onscreen-region-delete':
-            video = self.core.video(context['video_id'])
-            region = onscreen_region(self.core, video.id, context['region_id'])
-            reviewed = self.core.onscreen_subtitle_region_reviewed_line_count(region.id)
-            lost = ('아직 화면 자막을 만들기 전인 영역입니다.' if reviewed is None else
-                    f'이 영역의 화면 자막과 화면 번역 자막, 검수로 고친 줄 {reviewed:,}개의 수정이 사라집니다.')
-            def delete():
-                self.core.delete_onscreen_subtitle_region(region.id)
-                self.owner.window.statusBar().showMessage('화면 자막 영역을 지웠습니다.')
-                self.owner.pop(accepted=True)
-            self.confirm(f"'{video.title}'에서 화면 자막 영역({region_place(region.rect)}, 읽을 언어 "
-                         f"{region_language(region.language)})을 지울까요?\n{lost} 다른 영역은 그대로입니다.",
-                         delete, title=TITLES[kind], destructive=True)
+            self.region = onscreen_region(self.core, context['video_id'], context['region_id'])
+            self.reviewed = self.core.onscreen_subtitle_region_reviewed_line_count(self.region.id)
+            self.ask_region_delete()
         elif kind == 'video-exclude':
             video = self.core.video(context['video_id'])
             def exclude():
@@ -125,6 +116,42 @@ class DialogModel:
                 self.owner.pop(accepted=True)
             self.confirm(f"'{video.title}'을 제외할까요?\n실제 파일과 기록은 남으며 제외 목록에서 되돌릴 수 있습니다.",
                          exclude, title='영상 제외', destructive=True)
+
+    def ask_region_delete(self, notice=''):
+        """지우기 확인 창. 확인할 때 창이 보인 수(self.reviewed)를 넘겨, 그 사이 바뀌었으면 지우지 않고 다시 묻는다."""
+        region, reviewed = self.region, self.reviewed
+        lost = ('아직 화면 자막을 만들기 전인 영역입니다.' if reviewed is None else
+                f'이 영역의 화면 자막과 화면 번역 자막, 검수로 고친 줄 {reviewed:,}개의 수정이 사라집니다.')
+
+        def delete():
+            try:
+                self.core.delete_onscreen_subtitle_region(region.id, expected_reviewed_line_count=reviewed)
+            except OnScreenRegionChanged as changed:
+                self.reviewed = changed.reviewed_line_count
+                self.ask_region_delete(f'{changed}\n')
+                return
+            except ValueError as gone:
+                # 그 사이 영역이 사라졌다. 지울 것이 없으니 창을 닫고 알린다.
+                self.owner.window.statusBar().showMessage(str(gone))
+                self.owner.pop()
+                return
+            self.owner.window.statusBar().showMessage('화면 자막 영역을 지웠습니다.')
+            self.owner.pop(accepted=True)
+        title = self.core.video(self.context['video_id']).title
+        self.confirm(f"{notice}'{title}'에서 화면 자막 영역({region_place(region.rect)}, 읽을 언어 "
+                     f"{region_language(region.language)})을 지울까요?\n{lost} 다른 영역은 그대로입니다.",
+                     delete, title=TITLES[self.kind], destructive=True)
+
+    def refresh_region_warning(self):
+        """창이 열린 동안 그 영역의 읽기가 끝나면(화면 자막이 생기면) 사라질 것의 안내를 지금 상태로 바꾼다."""
+        try:
+            reviewed = self.core.onscreen_subtitle_region_reviewed_line_count(self.context['region_id'])
+        except ValueError:
+            return  # 영역이 사라졌다. 확인하면 코어가 알린다.
+        if reviewed != self.reviewed:
+            self.reviewed = reviewed
+            if self.kind == 'onscreen-region-delete' and self.pending:
+                self.ask_region_delete()
 
     @property
     def expired(self):
@@ -152,6 +179,8 @@ class DialogModel:
 
     def snapshot(self):
         c, ctx, kind = self.core, self.context, self.kind
+        if kind in ('onscreen-region', 'onscreen-region-delete') and ctx.get('region_id') is not None:
+            self.refresh_region_warning()
         task = c.subtitle_task(ctx['video_id']) if 'video_id' in ctx else None
         data = dict(task_kind=task.kind if task else '', task_label=task.label if task else '',
                     subtitle_label=task.subtitle_label if task else '', short_label=task.short_label if task else '',
@@ -387,9 +416,14 @@ class DialogModel:
                 raise ValueError('읽을 언어를 고르세요.')
             try:
                 if ctx.get('region_id') is not None:
-                    c.update_onscreen_subtitle_region(ctx['region_id'], ctx['region'], data['choice'])
+                    c.update_onscreen_subtitle_region(ctx['region_id'], ctx['region'], data['choice'],
+                                                      expected_reviewed_line_count=self.reviewed)
                 else:
                     c.add_onscreen_subtitle_region(ctx['video_id'], ctx['region'], data['choice'])
+            except OnScreenRegionChanged as changed:
+                # 창이 보인 안내와 사라질 것이 달라졌다. 바꾸지 않고 새 안내를 보인 채 다시 확인받는다.
+                self.reviewed, self.message = changed.reviewed_line_count, str(changed)
+                return
             except OcrLanguageUnavailable as missing:
                 # 경고 안내로 설치 방법을 보이고 대기열에는 넣지 않는다. 다른 언어를 고르거나 취소할 수 있다.
                 self.message = str(missing)
