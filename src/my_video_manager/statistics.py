@@ -1,6 +1,6 @@
 """시청 통계의 순수 계산과 일괄 조회 어댑터. 결과는 asdict 후 JSON으로 보낼 수 있다."""
 
-from .translation_source import TRANSCRIPT
+from .translation_source import ONSCREEN, TRANSCRIPT
 
 from dataclasses import dataclass
 from bisect import bisect_right
@@ -357,20 +357,33 @@ class StatisticsReader:
         korean = {row[0] for row in db.execute(
             "SELECT video_id FROM transcripts WHERE spoken_language = 'ko'").fetchall()}
         # 완료 시 targets → lines로 이동한 행도 뒤쪽 스캔에 들어오도록 대상을 먼저 읽는다.
+        # 화면 번역 자막도 한국어 번역 줄이다. 원어 자막이 없는 영상도 현재 화면 자막 줄의 번역이면 센다.
+        # 표마다 범위는 한 번만 잡고, 두 출처는 같은 묶음 조회 안에서 합친다.
+        onscreen_lines = """JOIN onscreen_subtitle_lines l ON l.id = g.line_id
+                JOIN onscreen_subtitles s ON s.id = l.generation_id
+                JOIN onscreen_subtitle_regions r ON r.id = s.region_id"""
         queries = (
-            ('translation_targets', """SELECT DISTINCT q.video_id FROM translation_targets g
+            ('translation_targets', f"""SELECT q.video_id FROM translation_targets g
                 JOIN translation_queue q ON q.id = g.queue_id
                 JOIN transcripts t ON t.video_id = q.video_id
                 JOIN transcript_lines l ON l.id = g.line_id AND l.transcript_id = t.id
-                WHERE g.rowid > ? AND g.rowid <= ? AND g.text IS NOT NULL AND q.source=?"""),
-            ('translation_lines', """SELECT DISTINCT t.video_id FROM translation_lines g
+                WHERE g.rowid > :lower AND g.rowid <= :upper AND g.text IS NOT NULL AND q.source = :transcript
+                UNION SELECT q.video_id FROM translation_targets g
+                JOIN translation_queue q ON q.id = g.queue_id
+                {onscreen_lines} AND r.video_id = q.video_id
+                WHERE g.rowid > :lower AND g.rowid <= :upper AND g.text IS NOT NULL AND q.source = :onscreen"""),
+            ('translation_lines', f"""SELECT t.video_id FROM translation_lines g
                 JOIN transcript_lines l ON l.id = g.line_id
                 JOIN transcripts t ON t.id = l.transcript_id
-                WHERE g.rowid > ? AND g.rowid <= ? AND g.source=?"""),
+                WHERE g.rowid > :lower AND g.rowid <= :upper AND g.source = :transcript
+                UNION SELECT r.video_id FROM translation_lines g
+                {onscreen_lines}
+                WHERE g.rowid > :lower AND g.rowid <= :upper AND g.source = :onscreen"""),
         )
         for table, query in queries:
             last_rowid = db.execute(f'SELECT COALESCE(MAX(rowid), 0) FROM {table}').fetchone()[0]
             for lower in range(0, last_rowid, 10000):
-                rows = db.execute(query, (lower, lower + 10000, TRANSCRIPT)).fetchall()
+                rows = db.execute(query, dict(lower=lower, upper=lower + 10000,
+                                              transcript=TRANSCRIPT, onscreen=ONSCREEN)).fetchall()
                 korean.update(row[0] for row in rows)
         return korean
