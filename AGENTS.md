@@ -28,9 +28,9 @@ Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agen
 
 ### Issue orchestration
 
-Settings for the `orchestrate-issues` skill (agent-orchestra plugin). See `docs/agents/orchestration.md` and `docs/agents/common-findings.md`.
+Settings for the `orchestrate-issues` skill (vstack plugin). See `docs/agents/orchestration.md` and `docs/agents/common-findings.md`.
 
-이 스킬은 Orca·herdr app·T3 Code에서 쓴다(실행 환경은 스킬이 고른다). omp에서는 스킬을 찾지 말고 `docs/agents/omp-orchestration.md`의 절차로 지휘한다.
+이 스킬은 vstack 플러그인의 `/vstack:orchestrate-issues`이고 Orca에서 쓴다(herdr app 실행 환경 문서도 있지만 vstack에서 검증하지 않았다. T3 Code는 다루지 않는다). omp에서는 스킬을 찾지 말고 `docs/agents/omp-orchestration.md`의 절차로 지휘한다.
 
 - `orchestration.md`의 스킬 전용 절(등급별 배치, 작업자 실패 알림, Codex fast)은 omp에서 쓰지 않는다. 배치는 `omp-orchestration.md`를 따른다.
 - 나머지 절(이슈 저장소, 병합, 구현 제약, 테스트, 추가 완료 조건, 실창 검사)과 `common-findings.md`는 환경과 관계없이 따른다.

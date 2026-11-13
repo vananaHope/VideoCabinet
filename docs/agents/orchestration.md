@@ -1,6 +1,6 @@
 # 이슈 지휘 설정
 
-`orchestrate-issues` 스킬(agent-orchestra 플러그인)이 읽는 이 프로젝트의 설정이다.
+`orchestrate-issues` 스킬(vstack 플러그인)이 읽는 이 프로젝트의 설정이다.
 
 ## 이슈 저장소
 
