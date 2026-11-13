@@ -186,7 +186,7 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
     within(window.translations.settings, dialogs, check)
 
 
-RESET = '이 방식의 모델·강도 기본값'
+RESET = '모델·강도 기본값'
 
 
 @pytest.mark.parametrize('provider,changed,default', [('codex', 'my-codex', 'gpt-5.6-terra'), ('opencode_go', 'custom-model', 'deepseek-v4.1-flash')])
