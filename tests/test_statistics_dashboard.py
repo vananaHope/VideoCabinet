@@ -7,6 +7,8 @@ import pytest
 from my_video_manager.core import AppCore, MediaInfo
 from test_statistics import library, watch, NOW, KST, UTC
 from test_translation import setup, source, finish
+from test_onscreen_translation import read_screen, screen
+from my_video_manager.translation_source import ONSCREEN
 
 
 @pytest.mark.parametrize('days', [7, 30, 90, 365])
@@ -250,3 +252,28 @@ def test_dashboard_query_count_does_not_grow_with_library(library, tmp_path, mon
     statements.clear()
     core.statistics_dashboard(365)
     assert sum(sql.startswith('SELECT') for sql in statements) == before == 10
+
+
+def test_dashboard_korean_subtitles_include_videos_with_only_onscreen_translation(screen):
+    core, media, *_ = screen
+    a, b = core.videos()
+
+    def korean():
+        return core.statistics_dashboard(7).inventory.korean_subtitled_count
+
+    read_screen(core, media, a.id)
+    assert core.transcript(a.id) is None  # 원어 자막이 없는 영상
+    assert korean() == 0  # 번역 전 화면 자막은 한국어 자막이 아니다.
+    core.process_next_translation()
+    assert core.translation(a.id, source=ONSCREEN) is None
+    assert korean() == 1  # 번역 자막과 같이 진행 중 요청의 저장된 묶음도 센다.
+    finish(core)
+    assert korean() == 1
+    read_screen(core, media, b.id, captions=())  # 읽은 글자 없음은 번역 줄이 없다.
+    assert korean() == 1
+    read_screen(core, media, a.id, captions=((40, 42, 'New caption'),))
+    assert korean() == 0  # 다시 만든 화면 자막의 번역 전에는 지난 세대의 번역 줄을 세지 않는다.
+    finish(core)
+    assert korean() == 1
+    core.exclude_video(a.id)
+    assert korean() == 0

@@ -37,6 +37,7 @@ class FakeMedia:
     def __init__(self, duration=100.0):
         self.duration = duration
         self.captions = ()  # (보이기 시작, 사라짐, 글자)
+        self.captions_by_region = {}  # 영역 → 그 영역의 captions. 없는 영역은 captions를 쓴다.
         self.misread = {}  # 장 번호 → 다르게 읽히는 글자(잡음)
         self.hook = None  # 장마다 부르는 함수(장 번호)
         self.error_at = None
@@ -58,7 +59,8 @@ class FakeMedia:
             if self.hook:
                 self.hook(index)
             seconds = index / fps
-            text = self.misread.get(index) or next((t for start, end, t in self.captions if start <= seconds < end), "")
+            captions = self.captions_by_region.get(region, self.captions)
+            text = self.misread.get(index) or next((t for start, end, t in captions if start <= seconds < end), "")
             yield seconds, image(text)
 
 

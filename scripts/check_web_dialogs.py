@@ -7,6 +7,7 @@ import argparse
 import ctypes
 from ctypes import wintypes
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -42,7 +43,7 @@ from my_video_manager.web_dialogs_entries import TagEditor, TagManager
 from my_video_manager.web_dialogs_entries import SeriesEditor
 from my_video_manager.web_dialogs_entries import HighlightList, HighlightEditor
 from my_video_manager.web_dialogs_entries import ReviewDialog
-from my_video_manager.onscreen_subtitles import RegionRect
+from my_video_manager.onscreen_subtitles import RegionImage, RegionRect
 from my_video_manager.windows_ocr import WindowsOcrEngine
 
 app = QApplication([])
@@ -55,9 +56,26 @@ temporary = tempfile.TemporaryDirectory(prefix='dialogs-', dir=args.output)
 directory = Path(temporary.name)
 
 
+# 영역 이미지 → 그 이미지에 보이는 글자. 가짜 OCR이 이 대응으로 읽는다(#277 화면 자막 내보내기 촬영).
+SHOWN = {}
+
+
+def region_image(text):
+    pixels = hashlib.shake_256(text.encode()).digest(64) if text else bytes(64)
+    SHOWN[pixels] = text
+    return RegionImage(16, 4, pixels)
+
+
 class Media:
+    captions = ()  # (보이기 시작, 사라짐, 화면 글자)
+
     def read(self, path):
         return MediaInfo(100, 'matroska')
+
+    def region_frames(self, path, region, *, fps, cancellation):
+        for index in range(round(100 * fps)):
+            seconds = index / fps
+            yield seconds, region_image(next((t for start, end, t in self.captions if start <= seconds < end), ''))
 
     def capture(self, path, destination, seconds):
         image = QImage(320, 180, QImage.Format.Format_RGB32)
@@ -66,8 +84,10 @@ class Media:
 
 
 class Transcriber:
+    language = 'en'
+
     def transcribe(self, path, language, **kwargs):
-        return TranscriberResult('en', tuple(TranscriptSegment(i, i + .75,
+        return TranscriberResult(self.language, tuple(TranscriptSegment(i, i + .75,
             f'{i:03d} 긴 원어 자막과 줄바꿈\n' + 'Long subtitle text 한글 ' * 8) for i in range(80)), model="large-v3")
 
 
@@ -82,10 +102,14 @@ class Ocr(WindowsOcrEngine):
     def language_available(self, language):
         return language == 'en'
 
+    def read_text(self, image, language):
+        return SHOWN[image.pixels]
 
-core = AppCore(media=Media(), database=directory / 'data/library.sqlite3',
+
+media, transcriber = Media(), Transcriber()
+core = AppCore(media=media, database=directory / 'data/library.sqlite3',
                clock=lambda: datetime.now(timezone.utc),
-               transcriber=Transcriber(), translator=Translator(), ocr_engine=Ocr())
+               transcriber=transcriber, translator=Translator(), ocr_engine=Ocr())
 for i in range(40):
     path = directory / f'검사 영상 {i:03d}.mkv'
     path.write_bytes(f'dialog sample {i}'.encode())
@@ -113,6 +137,23 @@ core.request_subtitles(video.id)
 core.process_next_subtitle()
 core.process_next_translation()
 core.edit_translation_line(video.id, core.review_lines(video.id)[0].original.id, '직접 검수한 번역')
+# #277 검수 화면의 화면 자막 SRT 저장 단추. 적음: 원어 자막 없이 화면 자막만 있는 영상(화면 자막 저장 하나).
+# 최대: 한국어 원어(다듬기 단추까지)에 영역 둘의 화면 자막과 화면 번역 자막이 모두 있는 영상(끝 단추가 가장 많다).
+onscreen_few, onscreen_max = core.videos()[2:4]
+media.captions = ((5, 8, 'Corner title'), (20, 24, 'Next scene'))
+core.set_onscreen_subtitle_regions(onscreen_few.id, [(RegionRect(0.08, 0.78, 0.84, 0.17), 'en')])
+assert core.process_next_onscreen_subtitle().state == 'completed'
+transcriber.language = 'ko'
+core.request_subtitles(onscreen_max.id)
+core.process_next_subtitle()
+transcriber.language = 'en'
+media.captions = tuple((i * 3, i * 3 + 2, f'{i:02d} Long on-screen caption ' + 'burned in text ' * 6) for i in range(30))
+core.set_onscreen_subtitle_regions(onscreen_max.id, [(RegionRect(0.08, 0.78, 0.84, 0.17), 'en'),
+                                                     (RegionRect(0.05, 0.02, 0.4, 0.12), 'en')])
+assert core.process_next_onscreen_subtitle().state == 'completed'
+for subtitle in core.onscreen_subtitles(onscreen_max.id):
+    for line in subtitle.lines:
+        core.edit_onscreen_translation_line(line.id, '화면 번역 ' + line.text)
 
 window = MainWindow(core)
 window.subtitles.timer.stop()
@@ -414,6 +455,27 @@ try:
         metrics['checks'].append('검수 경고·줄 수정·구간 범위·취소')
     review_context = dict(video_id=video.id, jump=window.review_jump, changed=window.review_changed)
     web_modal('review', review_context, review_checks, lambda: ReviewDialog(core, **review_context, parent=window).exec())
+
+    # #277 화면 자막 SRT 저장 단추: 0개(review-many-long·review-empty), 적음, 최대. 끝 단추가 틀 밖으로 넘치지 않는다.
+    for name, target, expected in (('none', video, []), ('few', onscreen_few, ['화면 자막 SRT 저장']),
+                                   ('max', onscreen_max, ['화면 자막 SRT 저장', '화면 번역 SRT 저장'])):
+        def onscreen_exports(name=name, expected=expected):
+            assert [row['title'] for row in current()['exports']] == expected, current()['exports']
+            footer = json.loads(js("""(() => {
+              const content = Array.from(document.querySelectorAll('[role=dialog]')).filter(e => e.getClientRects().length).at(-1)
+              const frame = content.getBoundingClientRect()
+              const buttons = Array.from(content.querySelectorAll('button')).filter(b => b.getClientRects().length && b.textContent.endsWith('SRT 저장'))
+              return JSON.stringify({overflow: content.scrollWidth > content.clientWidth || buttons.some(b => {
+                const box = b.getBoundingClientRect(); return box.left < frame.left || box.right > frame.right || box.bottom > frame.bottom }),
+                enabled: buttons.filter(b => !b.disabled).map(b => b.textContent)})
+            })()"""))
+            assert not footer['overflow'], footer
+            assert footer['enabled'][-len(expected):] == expected if expected else '화면 자막 SRT 저장' not in footer['enabled'], footer
+            footer_layout(f'review-onscreen-{name}')
+            capture(f'review-onscreen-{name}')
+        context = dict(video_id=target.id, jump=window.review_jump, changed=window.review_changed)
+        web_modal('review', context, onscreen_exports)
+    metrics['checks'].append('검수 화면 자막·화면 번역 SRT 저장 단추(0개·적음·최대) 촬영과 끝 단추 넘침 검사')
     core.request_subtitle_range(video.id, 0, .5)
     def locked_check():
         capture('review-locked')

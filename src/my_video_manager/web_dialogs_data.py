@@ -38,6 +38,8 @@ class DialogData(TypedDict):
     # 무작위 이어 재생 범위 고르기의 태그별 후보 영상 ID. 화면은 고른 태그의 합집합 크기만 센다.
     tag_candidates: list[TagCandidatesData]
     available: list[DialogRow]
+    # 검수 화면이 더 보여 줄 SRT 저장(화면 자막·화면 번역 자막). id는 작업 이름, title은 단추 이름이다.
+    exports: list[DialogRow]
     choices: list[DialogRow]
     values: DialogValues
     maximum: float

@@ -5,6 +5,7 @@
 """
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -32,6 +33,8 @@ from my_video_manager.web_thumbnail import register_thumbnail_scheme
 register_thumbnail_scheme()
 from my_video_manager.adapters import executable
 from my_video_manager.core import AppCore, MediaInfo
+from my_video_manager.onscreen_subtitles import RegionImage, RegionRect
+from my_video_manager.translation import TranslatedLine
 from my_video_manager.ui import MainWindow
 from my_video_manager.web_tabs import TABS
 from my_video_manager.web_tokens import web_tokens
@@ -59,6 +62,41 @@ class Media:
         painter.drawText(image.rect(), Qt.AlignmentFlag.AlignCenter, '하이라이트 모아보기 · 장면')
         painter.end()
         image.save(str(destination), 'JPG')
+
+
+# 영역 이미지 → 보이는 글자. #277 화면 자막·화면 번역 자막 검색 결과 촬영용 가짜 OCR이 읽는다.
+SHOWN = {}
+
+
+class OnScreenMedia(Media):
+    captions = ()  # (보이기 시작, 사라짐, 화면 글자)
+
+    def read(self, path):
+        return MediaInfo(120, 'mp4')
+
+    def region_frames(self, path, region, *, fps, cancellation):
+        for index in range(round(120 * fps)):
+            seconds = index / fps
+            text = next((t for start, end, t in self.captions if start <= seconds < end), '')
+            pixels = hashlib.shake_256(text.encode()).digest(64) if text else bytes(64)
+            SHOWN[pixels] = text
+            yield seconds, RegionImage(16, 4, pixels)
+
+
+class Ocr:
+    def language_available(self, language):
+        return language == 'en'
+
+    def missing_language_guidance(self, language):
+        return ''
+
+    def read_text(self, image, language):
+        return SHOWN[image.pixels]
+
+
+class Translator:
+    def translate(self, lines, language, **kwargs):
+        return tuple(TranslatedLine(line.id, '화면 번역 ' + line.text) for line in lines)
 
 
 def wait_until(predicate, timeout=20):
@@ -131,7 +169,7 @@ def show_results(window, core, text):
     wait_until(lambda: read(window, f"document.querySelectorAll('#search-results [role=\"option\"]').length === {expected} && document.getElementById('search-results').getAttribute('aria-busy') === 'false'"))
 
 
-def capture_page(core, label, tab, text='', preparing=False, failed=False, completed=False, previous=None):
+def capture_page(core, label, tab, text='', preparing=False, failed=False, completed=False, previous=None, sources=()):
     if args.no_screenshots:
         return
     window = make_window(core)
@@ -163,6 +201,9 @@ def capture_page(core, label, tab, text='', preparing=False, failed=False, compl
             wait_until(lambda: read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('색인 준비 중')"))
         else:
             show_results(window, core, text)
+            # 출처 표시는 용어집 이름 그대로다. 보이는 결과 행의 첫 표시를 모은다.
+            shown = set(read(window, "Array.from(document.querySelectorAll('#search-results [role=\"option\"] [data-slot=status-badge]')).map(e => e.textContent)"))
+            assert set(sources) <= shown, (label, sources, shown)
             if core.search(text).truncated:
                 assert read(window, "document.querySelector('main[aria-label=\"검색\"] [role=\"status\"]').textContent.includes('500개')")
     wait_until(lambda: read(window, f"!document.querySelector('main[aria-label=\"{'검색' if tab == 'search' else '하이라이트 모아보기'}\"]').parentElement.hidden"))
@@ -226,6 +267,39 @@ def screenshots():
     capture_page(core, 'reel-many', 'reel')
     capture_page(core, 'search-cap', 'search', '장면')
     capture_page(core, 'search-cap-pending', 'search', '장면 4', previous='장면')
+    onscreen_screenshots()
+
+
+def onscreen_screenshots():
+    """#277 화면 자막·화면 번역 자막 검색 결과: 적음, 긴 텍스트, 상한(영역 셋 × 많은 줄)."""
+    media = OnScreenMedia()
+    core = AppCore(media=media, clock=lambda: datetime.now(timezone.utc), database=directory / 'onscreen.sqlite3',
+                   ocr_engine=Ocr(), translator=Translator())
+    path = directory / '화면 자막 영상.mp4'
+    path.write_bytes(b'onscreen fixture')
+    core.add_file(path)
+    video = core.videos()[0]
+
+    def read_screen(captions, regions):
+        core.resume_subtitle_processing()  # 촬영 창을 닫으면 자막 작업이 멈춘다.
+        media.captions = captions
+        core.set_onscreen_subtitle_regions(video.id, [(region, 'en') for region in regions])
+        assert core.process_next_onscreen_subtitle().state == 'completed'
+        while core.translation_ready():
+            core.process_next_translation()
+
+    band = RegionRect(0.08, 0.78, 0.84, 0.17)
+    read_screen(((5, 8, 'Corner title'), (20, 24, 'Next corner')), (band,))
+    core.prepare_search()
+    sources = ('화면 자막', '화면 번역 자막')
+    capture_page(core, 'search-onscreen-few', 'search', 'corner', sources=sources)
+    read_screen(((5, 9, 'Long burned-in caption ' + 'NoSpaceOnScreenText' * 12 + ' and more words ' * 8),), (band,))
+    capture_page(core, 'search-onscreen-long', 'search', 'caption', sources=sources)
+    # 줄마다 1초씩 보이고 글자가 크게 달라야 서로 다른 줄로 남는다. 120줄 × 영역 셋 × (화면 자막, 화면 번역) > 500.
+    read_screen(tuple((i, i + 1, f'Caption {i:03d} ' + hashlib.md5(str(i).encode()).hexdigest()) for i in range(120)),
+                (band, RegionRect(0.05, 0.02, 0.4, 0.12), RegionRect(0.55, 0.02, 0.4, 0.12)))
+    assert core.search('caption').truncated
+    capture_page(core, 'search-onscreen-cap', 'search', 'caption', sources=sources)
 
 
 def verify():

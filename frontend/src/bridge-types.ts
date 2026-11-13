@@ -725,6 +725,7 @@ export interface DialogData {
   tags: Array<TagUsageData>
   tag_candidates: Array<TagCandidatesData>
   available: Array<DialogRow>
+  exports: Array<DialogRow>
   choices: Array<DialogRow>
   values: DialogValues
   maximum: number

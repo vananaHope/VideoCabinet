@@ -5,6 +5,8 @@ from math import isfinite
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 from .onscreen_subtitles import ONSCREEN_LANGUAGES, OcrLanguageUnavailable, default_onscreen_language
 from .review import ReviewConfirmationRequired
+from .translation_kind import ONSCREEN_TRANSLATION
+from .translation_source import ONSCREEN, TRANSCRIPT
 from .web_dialogs_data import row, values
 from .web_library_data import tag_candidates_data, tag_usage_data
 
@@ -19,6 +21,12 @@ TITLES = {
     'random-scope': '무작위 이어 재생 범위', 'onscreen-region': '화면 자막 영역 · 읽을 언어',
 }
 RANDOM_SCOPE_CHOICES = (('all', '영상 전체'), ('list', '재생을 시작한 목록'), ('tags', '태그 고르기'))
+# 검수 화면의 SRT 저장 작업 → (번역 자막인가, 번역 출처).
+EXPORT_ACTIONS = {'export-original': (False, TRANSCRIPT), 'export-translation': (True, TRANSCRIPT),
+                  'export-onscreen': (False, ONSCREEN), 'export-onscreen-translation': (True, ONSCREEN)}
+# 저장된 줄이 있을 때만 검수 화면이 더 보여 주는 화면 자막 SRT 저장.
+ONSCREEN_EXPORTS = (('export-onscreen', '화면 자막 SRT 저장'),
+                    ('export-onscreen-translation', f'{ONSCREEN_TRANSLATION.short_label} SRT 저장'))
 
 
 class DialogModel:
@@ -112,7 +120,7 @@ class DialogModel:
         task = c.subtitle_task(ctx['video_id']) if 'video_id' in ctx else None
         data = dict(task_kind=task.kind if task else '', task_label=task.label if task else '',
                     subtitle_label=task.subtitle_label if task else '', short_label=task.short_label if task else '',
-                    keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], tags=[], tag_candidates=[], available=[],
+                    keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], tags=[], tag_candidates=[], available=[], exports=[],
                     choices=[], values=self.values.copy(), maximum=0.0, locked=False, warning='',
                     confirmation=self.confirmation, confirm_title=self.confirm_title, confirm_destructive=self.confirm_destructive, translation=None, network_busy=False, information=self.information)
         if kind == 'tags':
@@ -183,6 +191,8 @@ class DialogModel:
                                                        (line.translation_reviewed, '사용자가 고친 줄' if task.kind == 'refinement' else '직접 수정'),
                                                        (not line.translation_reviewed and provenance.get(line.original.id), names.get(not line.translation_reviewed and provenance.get(line.original.id), ''))) if flag),
                     line.original.start, line.original.end) for line in c.review_lines(ctx['video_id'])])
+            data['exports'] = [row(action, title) for action, title in ONSCREEN_EXPORTS
+                               if c.onscreen_export_available(ctx['video_id'], translated=EXPORT_ACTIONS[action][0])]
         elif kind == 'range':
             data['maximum'] = c.video(ctx['video_id']).duration
             try:
@@ -373,9 +383,9 @@ class DialogModel:
                     transcript = c.transcript(ctx['video_id'])
                     c.request_subtitles(ctx['video_id'], transcript.spoken_language if transcript and transcript.language_specified else None)
                 self.confirm(c.subtitle_regeneration_warning(ctx['video_id']), regenerate, destructive=True)
-            elif action in ('export-original', 'export-translation'):
-                translated = action == 'export-translation'
-                export = c.subtitle_export(ctx['video_id'], translated=translated)
+            elif action in EXPORT_ACTIONS:
+                translated, source = EXPORT_ACTIONS[action]
+                export = c.subtitle_export(ctx['video_id'], translated=translated, source=source)
                 callback = lambda: self.owner.save_export(export)
                 if translated and (export.missing_lines or export.pending_retranslation_lines):
                     self.confirm(export.warning, callback)
