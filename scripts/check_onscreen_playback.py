@@ -33,7 +33,7 @@ parser.add_argument('--output', type=Path, required=True)
 args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QObject, QTimer
 from PySide6.QtGui import QCursor, QFontDatabase, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -228,6 +228,17 @@ def real(app, directory, result):
     # 다른 앱이 검사 창 위로 올라와 OS 입력을 가로채지 않게 검사 동안만 맨 위에 둔다.
     user32.SetWindowPos(int(window.winId()), -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
     page = window.playback_page
+    keys = result.setdefault('keys', [])
+
+    class KeyLog(QObject):
+        """앱이 받은 키 입력(진단용)."""
+        def eventFilter(self, watched, event):
+            if event.type() == QEvent.Type.KeyPress and watched is QApplication.focusWidget():
+                keys.append([hex(event.key()), event.text(), hex(event.nativeVirtualKey())])
+            return False
+
+    key_log = KeyLog()
+    app.installEventFilter(key_log)
     window.play(video_id)
     wait(lambda: core.playback.position > 1, '재생 시작')
     shots = iter(range(1, 100))
@@ -237,8 +248,9 @@ def real(app, directory, result):
         assert window.isActiveWindow(), f'키 {vk:#x}: 앱 창이 활성 창이 아님({QApplication.activeWindow()!r})'
         if QApplication.focusWidget() is None:
             window.surface.setFocus()
-        user32.keybd_event(vk, 0, 0, 0)
-        user32.keybd_event(vk, 0, 0x2, 0)
+        scan = user32.MapVirtualKeyW(vk, 0)  # 기호 키는 스캔 코드가 있어야 배치에 맞는 글자로 읽힌다.
+        user32.keybd_event(vk, scan, 0, 0)
+        user32.keybd_event(vk, scan, 0x2, 0)
         settle(300)
 
     def click(widget):
