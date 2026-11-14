@@ -304,3 +304,16 @@ def test_tray_hide_label_follows_emergency_key(window):
     assert hide_action(window).text() == "창 숨기기 · Ctrl+Alt+H / Ctrl+Alt+J"
     rebind(window, Command(CommandType.EMERGENCY_HIDE), ())
     assert hide_action(window).text() == "창 숨기기"
+
+
+def test_playback_key_help_lists_onscreen_translation_toggle_with_current_key(window):
+    window.play_video(window.core.videos()[0].id)
+    page = window.playback_page
+    page.toggle_help()
+    text = page.help_panel.text.text()
+    assert "<b>] (닫는 대괄호)</b></td><td style='padding-right:16px'>화면 번역 자막 켜기 / 끄기" in text
+    rebind(window, Command(CommandType.TOGGLE_ONSCREEN_TRANSLATION), ("K",))
+    window.refresh_key_help()
+    assert "<b>K</b></td><td style='padding-right:16px'>화면 번역 자막 켜기 / 끄기" in page.help_panel.text.text()
+    assert page.onscreen_button.toolTip().endswith("· K")
+    page.close_help()

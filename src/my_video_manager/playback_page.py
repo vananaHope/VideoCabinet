@@ -1,5 +1,6 @@
 """영상 중심 재생 페이지. 창 상태는 셸, 도메인 상태는 AppCore가 소유한다."""
 
+from dataclasses import replace
 import math
 import time
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 from .core import Command, CommandType
 from .highlight_ui import HighlightProgress, PlaybackHighlights
+from .onscreen_playback import OnScreenTranslationDisplay
 from .time_display import timestamp
 from .key_display import display_keys
 from .qt_keys import key_name
@@ -26,6 +28,8 @@ SPEED_CHOICES = (0.5, 0.75, 1, 1.25, 1.5, 1.75, 2)
 CONTROL_SPACING, TIGHT_CONTROL_SPACING = 8, 4
 # 재생 상태 표시가 영상 위에 머무는 시간(초).
 STATUS_SECONDS = 1.5
+# 화면 번역 자막이 없는 영상에서 켜기/끄기를 누를 때의 안내. 켬·끔은 바뀌지 않아 재생 상태 표시가 아니다.
+NO_ONSCREEN_TRANSLATION = "이 영상에는 화면 번역 자막이 없습니다"
 
 
 def tool_button_menu_point(button, menu):
@@ -104,6 +108,8 @@ class PlaybackPage(QWidget):
         self._reel = False
         # 화면 자막 영역을 끄는 덮개. 정하는 동안만 있다.
         self.region_selector = None
+        # 화면 번역 자막의 켬·끔과 지금 엔진에 그린 띠. 재생 화면을 떠나면(end_playback) 처음 상태로 돌아간다.
+        self._onscreen = OnScreenTranslationDisplay()
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
@@ -207,6 +213,11 @@ class PlaybackPage(QWidget):
         self.subtitles_button = self._command_button("자막 켜짐", "자막 표시", CommandType.TOGGLE_SUBTITLES)
         self.subtitles_button.setCheckable(True)
         self.subtitles_button.setChecked(True)
+        # 화면 번역 자막이 없는 영상에서도 보이고 눌린다(꺼짐 모양, 누르면 안내). 영상마다 조작 줄이 밀리지 않는다.
+        self.onscreen_button = self._command_button(
+            "화면 번역", "화면 번역 자막", CommandType.TOGGLE_ONSCREEN_TRANSLATION)
+        self.onscreen_button.setCheckable(True)
+        self.onscreen_button.set_label("화면 번역", "화면")
         self.subtitle_language_button = self._command_button(
             "자막 없음", "자막 종류 자막 없음", CommandType.TOGGLE_SUBTITLE_LANGUAGE)
         self.subtitle_work_label = QLabel()
@@ -224,7 +235,7 @@ class PlaybackPage(QWidget):
             button.setProperty('playbackRole', 'symbol')
         for widget in (self.list_button, self.previous_button, self.pause_button, self.next_button,
                        self.position_label, self.random_button, self.random_scope_button, *self.reel_buttons, self.point_button, self.range_button,
-                       self.open_range_label, self.speed_button, self.subtitles_button,
+                       self.open_range_label, self.speed_button, self.subtitles_button, self.onscreen_button,
                        self.subtitle_language_button):
             row.addWidget(widget)
         row.addWidget(self.subtitle_work_label, 1)
@@ -233,7 +244,7 @@ class PlaybackPage(QWidget):
         # 단추·Tab 순서와 같다. 이 단추에 초점이 있어도 재생 키는 그대로 동작한다.
         self.control_buttons = (self.list_button, self.previous_button, self.pause_button, self.next_button,
                                 self.random_button, self.random_scope_button, *self.reel_buttons, self.point_button, self.range_button, self.speed_button,
-                                self.subtitles_button, self.subtitle_language_button,
+                                self.subtitles_button, self.onscreen_button, self.subtitle_language_button,
                                 self.key_guide_button, self.fullscreen_button)
         # 창이 좁을 때 이 순서대로 짧은 글자로 바꾼다. 하이라이트·속도 단추가 먼저 아이콘·값만 남기고, 다음에 범위 이름을 줄인다.
         # 모아보기 단추가 더해진 가장 넓은 줄은 열린 구간 표시·메뉴 단추와 전체 화면의 목록 단추까지 줄여야 들어간다.
@@ -242,7 +253,7 @@ class PlaybackPage(QWidget):
         self.compact_order = [self.point_button, self.range_button, self.speed_button, self.random_scope_button,
                               self.reel_repeat_button,
                               self.fullscreen_button, self.subtitle_language_button, self.subtitles_button,
-                              self.open_range_label, self.menu_button, self.list_button]
+                              self.onscreen_button, self.open_range_label, self.menu_button, self.list_button]
         self.menu_button.setToolTip("재생 작업 메뉴 · 키 안내는 F1")
         self.menu_button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -493,6 +504,7 @@ class PlaybackPage(QWidget):
         # Esc는 바꿀 수 없는 목록 복귀 키다. 이름은 모아보기 중 표시('모아보기 목록')를 따른다.
         self.list_button.setToolTip(f'{self.list_button.label} · Esc')
         self.update_subtitle_language_tooltip()
+        self.update_onscreen_button()
         self.highlights_button.setText('하이라이트 패널 ' + ('접기' if self.highlights_expanded else '펴기'))
         self.highlights_button.setToolTip('하이라이트 패널 접기 / 펴기 · '
                                          + bindings[CommandType.TOGGLE_HIGHLIGHT_LIST])
@@ -691,6 +703,8 @@ class PlaybackPage(QWidget):
         video_id = self.core.playback.session.video_id
         self._details = self.core.library_details(video_id)
         self._random_scope_shown = None  # 태그 이름이 바뀌었을 수 있어 범위 이름을 다시 읽는다.
+        # 영역을 고치거나 지워 화면 번역 자막이 사라진 것도 이 주기로 읽는다.
+        self.refresh_onscreen_translation()
         self.refresh_highlights()
         self.update_controls()
 
@@ -698,6 +712,85 @@ class PlaybackPage(QWidget):
         task = translation_task(self._details.spoken_language if self._details else None)
         self.subtitle_language_button.setToolTip(
             f'원어 / {task.subtitle_label} 전환 · {self._keys[CommandType.TOGGLE_SUBTITLE_LANGUAGE]}')
+
+    def update_onscreen_button(self):
+        """화면 번역 단추는 자막 단추처럼 눌림으로 켬을 보인다. 화면 번역 자막이 없는 영상은 꺼짐 모양이다."""
+        display = self._onscreen
+        self.onscreen_button.setChecked(display.shown)
+        self.onscreen_button.setAccessibleName("화면 번역 자막 " + ("켜짐" if display.shown else "꺼짐"))
+        keys = self._keys[CommandType.TOGGLE_ONSCREEN_TRANSLATION]
+        self.onscreen_button.setToolTip(f"화면 번역 자막 켜기/끄기 · {keys}" if display.available
+                                        else f"{NO_ONSCREEN_TRANSLATION} · {keys}")
+
+    def refresh_onscreen_translation(self):
+        """지금 영상의 화면 번역 자막을 다시 읽어 그린다(새 영상, 보는 중 완성·검수·영역 변경).
+
+        보는 중에 없음에서 있음으로 바뀌면 켬 상태일 때 바로 그리고 재생 상태 표시로 알린다.
+        """
+        session = self.core.playback.session
+        video_id = session.video_id if session else None
+        regions = self.core.onscreen_translation_regions(video_id) if video_id is not None else None
+        previous = self._onscreen
+        self._onscreen = replace(previous, video_id=video_id, regions=regions)
+        self.draw_onscreen_translation()
+        self.update_onscreen_button()
+        completed = video_id is not None and previous.video_id == video_id and not previous.available
+        if completed and self._onscreen.shown and self.shell.player is not None:
+            show_status = getattr(self.shell.player, "show_status", None)
+            if show_status:
+                show_status("화면 번역 자막을 켰습니다", STATUS_SECONDS)
+
+    def onscreen_translation_changed(self, video_id):
+        """화면 번역 완성·검수 수정 신호. 지금 보는 영상이면 1초 주기를 기다리지 않고 다시 읽는다."""
+        session = self.core.playback.session
+        if session is not None and session.video_id == video_id:
+            self.refresh_onscreen_translation()
+
+    def draw_onscreen_translation(self):
+        """지금 위치에 맞는 띠 묶음과 받아쓰기 자막 자리를 엔진에 맞춘다. 바뀐 것만 보낸다.
+
+        엔진이 바뀌었으면 새 엔진에는 아무것도 없는 것으로 보고 처음부터 그린다.
+        닫는 중인 엔진(위치 타이머가 멈춤)에는 보내지 않는다.
+        """
+        player = self.shell.player
+        if player is None or not self.shell.position_timer.isActive():
+            return
+        display = self._onscreen.on_player(player)
+        bands, raised = display.target(self.core.playback.position)
+        if raised != display.subtitles_raised:
+            if setter := getattr(player, "set_subtitles_raised", None):
+                setter(raised)
+        if bands != display.bands:
+            if bands:
+                if show := getattr(player, "show_onscreen_translation", None):
+                    show(bands)
+            elif clear := getattr(player, "clear_onscreen_translation", None):
+                clear()
+        self._onscreen = replace(display, bands=bands, subtitles_raised=raised)
+
+    def toggle_onscreen_translation(self) -> bool:
+        """화면 번역 자막 켜기/끄기. 없는 영상이면 상태를 바꾸지 않고 안내하며 False를 돌려준다."""
+        if not self._onscreen.available:
+            self.shell.statusBar().showMessage(NO_ONSCREEN_TRANSLATION, 4000)
+            return False
+        self._onscreen = replace(self._onscreen, enabled=not self._onscreen.enabled)
+        self.draw_onscreen_translation()
+        self.update_onscreen_button()
+        return True
+
+    def retire_onscreen_translation(self, player):
+        """엔진을 내리기 전에 그 엔진의 띠를 지운다. 닫히는 마지막 장면에 띠가 남지 않는다."""
+        display = self._onscreen
+        if display.player is not player:
+            return
+        if display.bands and (clear := getattr(player, "clear_onscreen_translation", None)):
+            clear()
+        self._onscreen = replace(display, player=None, bands=(), subtitles_raised=False)
+
+    def reset_onscreen_translation(self):
+        """재생 화면을 떠났다(목록·모아보기 목록 복귀). 다음 재생은 켬으로 시작한다."""
+        self._onscreen = OnScreenTranslationDisplay()
+        self.update_onscreen_button()
 
     def update_range_button(self):
         """열린 구간이 있으면 구간 단추가 '구간 끝내기'로 바뀌고 눌린 상태가 된다."""
@@ -740,6 +833,7 @@ class PlaybackPage(QWidget):
     def update_controls(self):
         """조작 줄의 재생·자막 상태를 플레이어와 코어에서 읽어 보여 준다."""
         self.update_range_button()
+        self.update_onscreen_button()
         self.update_random_buttons()
         # 명령이 실행되지 않은 단추 누름이 눌림 상태만 바꿔 두지 않게 코어 상태로 되돌린다.
         self.show_reel_repeat(self._reel and self.core.reel_repeat)
@@ -792,6 +886,8 @@ class PlaybackPage(QWidget):
             episode = f" · {series.video_ids.index(video.id) + 1}/{len(series.video_ids)}" if series else ""
             self.title_label.setText(video.title + episode)
             self.title_label.setToolTip(video.title + episode)
+            # 숨은 창(긴급 탈출 중 자동 전환)에서도 새 영상의 화면 번역 자막을 읽는다.
+            self.refresh_onscreen_translation()
             self.refresh_details()
         self.progress.duration = duration
         self.progress.position = position
@@ -806,6 +902,7 @@ class PlaybackPage(QWidget):
         self.position_label.setToolTip(f"구간 시작 {timestamp(open_start)} · {range_keys}: 끝내기"
                                       if open_start is not None else "")
         self.open_range_label.setToolTip(self.position_label.toolTip())
+        self.draw_onscreen_translation()
         self.update_controls()
 
     def show_reel(self, current, repeat, keys):
@@ -916,6 +1013,9 @@ class PlaybackPage(QWidget):
             elif command.kind == CommandType.TOGGLE_SUBTITLE_LANGUAGE:
                 if not repeated:
                     changed = window.translations.toggle()
+            elif command.kind == CommandType.TOGGLE_ONSCREEN_TRANSLATION:
+                if not repeated:
+                    changed = self.toggle_onscreen_translation()
             elif command.kind == CommandType.TOGGLE_RANDOM_CONTINUOUS:
                 # 켜면 범위는 재생을 시작한 목록이고, 끄면 영상 끝에서 멈춘다. 모아보기 중에는 🔀가 숨어 키도 동작하지 않는다.
                 if not repeated and window.core.reel_playback is None:
@@ -956,6 +1056,8 @@ class PlaybackPage(QWidget):
             return "【 구간 시작" if core.open_highlight_start is not None else "】 구간 끝"
         if command.kind == CommandType.TOGGLE_REEL_REPEAT and core.reel_playback is not None:
             return f"모아보기 반복 {'켜짐' if core.reel_repeat else '꺼짐'}"
+        if command.kind == CommandType.TOGGLE_ONSCREEN_TRANSLATION:
+            return "화면 번역 자막 " + ("켜짐" if self._onscreen.enabled else "꺼짐")
         if command.kind == CommandType.TOGGLE_RANDOM_CONTINUOUS:
             return f"🔀 무작위 이어 재생 {'켜짐' if core.random_continuous_enabled else '꺼짐'}"
         return None

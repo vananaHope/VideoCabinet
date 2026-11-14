@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         self.playback_page = PlaybackPage(self)
         self.settings_menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self.playback_page.focus_content))
         self.pages.addWidget(self.playback_page)
+        self.translations.video_changed.connect(self.playback_page.onscreen_translation_changed)
         # 기존 화면 어댑터용 연결점. 위젯 구성과 갱신은 각 페이지 모듈이 소유한다.
         self.surface = self.playback_page.surface
         self.progress = self.playback_page.progress
@@ -373,6 +374,7 @@ class MainWindow(QMainWindow):
                 # 코어가 바꾼 선택은 웹이 이전 선택을 보존하지 않는 갱신으로 알린다.
                 self.library_page.move_selection(session.video_id)
         self.stop_player()
+        self.playback_page.reset_onscreen_translation()
         self.core.end_playback()
         self.reel.shown = None
         self.playback_page.show_reel(None, False, {})
@@ -411,6 +413,7 @@ class MainWindow(QMainWindow):
             prepare = getattr(player, 'prepare_close', None)
             self._stopping_player = True
             try:
+                self.playback_page.retire_onscreen_translation(player)
                 if prepare is not None:
                     prepare()
                 else:
@@ -605,6 +608,7 @@ class MainWindow(QMainWindow):
         session = self.core.playback.session
         if self.player and session and session.video_id == video_id:
             self.player.set_subtitle(self.core.playback_subtitle(video_id))
+        self.playback_page.onscreen_translation_changed(video_id)
 
     def eventFilter(self, watched, event):
         # Qt 입력 이벤트는 WebEngine 입력란에도 전달된다. 조합 종료·초점 이동 때만 해제한다.

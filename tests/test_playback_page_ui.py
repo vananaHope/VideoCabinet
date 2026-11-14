@@ -185,7 +185,7 @@ def test_help_reflects_saved_keys_and_menu_keyboard_restores_surface_focus(windo
     # 무작위 이어 재생이 꺼져 있으면 범위 이름 단추는 숨어 있어 건너뛴다.
     assert visited == [page.previous_button, page.pause_button, page.next_button, page.random_button,
                        page.point_button, page.range_button, page.speed_button, page.subtitles_button,
-                       page.subtitle_language_button, page.key_guide_button, page.fullscreen_button,
+                       page.onscreen_button, page.subtitle_language_button, page.key_guide_button, page.fullscreen_button,
                        page.menu_button]
     key(window, Qt.Key.Key_Space)
     assert page.menu.isVisible()
@@ -797,12 +797,12 @@ def test_highlight_button_tooltips_follow_saved_bindings(window):
     bindings = {row.command: row.keys for row in window.core.key_bindings()}
     bindings[Command(CommandType.POINT_HIGHLIGHT)] = ("P",)
     bindings[Command(CommandType.RANGE_HIGHLIGHT)] = ()
-    bindings[Command(CommandType.CHANGE_SPEED, 0.25)] = ("]",)
+    bindings[Command(CommandType.CHANGE_SPEED, 0.25)] = ("[",)
     window.core.save_key_bindings(bindings)
     window.refresh_key_help()
     assert page.point_button.toolTip() == "지점 하이라이트 추가 · P"
     assert page.range_button.toolTip() == "구간 하이라이트 시작 · 키 미할당"
-    assert page.speed_button.toolTip() == "재생 속도 · 올리기 ] (닫는 대괄호) / 내리기 ↓"
+    assert page.speed_button.toolTip() == "재생 속도 · 올리기 [ (여는 대괄호) / 내리기 ↓"
 
 
 def with_menu(button, menu, action=None):
