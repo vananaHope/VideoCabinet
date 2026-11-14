@@ -29,9 +29,10 @@ from .translation import (Translator, Translations, Translation, TranslationQueu
                           translation_skip_reason)
 from .subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION, queue_task_key
 from .onscreen_subtitles import (OcrEngine, OnScreenRegionChanged, OnScreenSubtitle, OnScreenSubtitleQueueEntry,
-                                 OnScreenSubtitleRegion, OnScreenSubtitles, RegionRect)
+                                 OnScreenSubtitleRegion, OnScreenSubtitles, RegionOrigin, RegionRect)
 from .translation_source import ONSCREEN, TRANSCRIPT, TranslationSources
 from .onscreen_translation import OnScreenTranslationSource
+from .onscreen_series import OnScreenSeriesImpact, OnScreenSeriesRegions
 from .onscreen_playback import OnScreenTranslationRegion
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewLine, ReviewPlayback, SubtitleExport
@@ -126,6 +127,10 @@ class LibrarySnapshot:
 _RANDOM_HISTORY_LOCK = Lock()
 
 
+def _expected(value):
+    return None if value is UNCHECKED else value
+
+
 class AppCore:
     # 직전에 무작위로 고른 영상 ID. 앱을 다시 켜면 잊는다.
     _last_random_video_id: int | None = None
@@ -193,6 +198,8 @@ class AppCore:
         self._onscreen = OnScreenSubtitles(self._connect, clock, media, ocr_engine, self.playback_location,
                                            self._queue_order)
         self._onscreen_translation = OnScreenTranslationSource(self._connect)
+        self._onscreen_series = OnScreenSeriesRegions(self._connect, clock, self._onscreen,
+                                                      self._onscreen_translation.reviewed_line_count)
         self._translation_sources.register(ONSCREEN, self._onscreen_translation.lines, queue_kind=ONSCREEN_SUBTITLE,
                                            protected_lines=self._onscreen_translation.protected_lines)
         from .translation_options import TranslationOptions
@@ -756,30 +763,68 @@ class AppCore:
         self.playback_location(video_id)
         return self._onscreen.set_regions(video_id, regions)
 
-    def add_onscreen_subtitle_region(self, video_id: int, rect: RegionRect, language: str) -> OnScreenSubtitleQueueEntry:
+    def add_onscreen_subtitle_region(self, video_id: int, rect: RegionRect, language: str, *, series=False,
+                                     expected_series_impact=UNCHECKED) -> OnScreenSubtitleQueueEntry:
         """영상에 화면 자막 영역 하나를 더하고 그 영역만 읽도록 직접 요청한다. 다른 영역은 그대로다.
+
+        series=False면 이 화만 바꾼다. 시리즈에서 온 화였으면 이 화의 영역 묶음은 직접 정함이 된다.
+        series=True면 시리즈 전체에 적용한다(시리즈에 속한 영상만). 이 화가 시리즈에서 왔으면 시리즈 영역에 이 영역을
+        더해 시리즈에서 온 다른 화도 이 영역만 더 읽는다. 아니면 이 화의 영역 묶음 전체가 시리즈 영역이 되고(이전 시리즈
+        영역은 통째로 바뀐다) 이 화는 시리즈에서 옴이 된다. 어느 쪽이든 시리즈에서 온 화와 영역이 없는 화가 시리즈 영역과
+        같아지고 자동 대상으로 대기열에 들어간다. 직접 정한 다른 화는 바뀌지 않는다.
+        expected_series_impact는 확인 창이 보인 onscreen_subtitle_region_series_impact 값이다. 바꾸는 순간 그 값과
+        다르면 OnScreenSeriesChanged를 던지고 아무것도 바꾸지 않는다.
 
         읽을 언어의 언어 팩이 없으면 OcrLanguageUnavailable을 던지고 아무것도 바꾸지 않는다.
         """
         self.playback_location(video_id)
+        if series:
+            return self._onscreen_series.add(video_id, rect, language, expected=_expected(expected_series_impact))
         return self._onscreen.add_region(video_id, rect, language)
 
-    def update_onscreen_subtitle_region(self, region_id: int, rect: RegionRect, language: str, *,
-                                        expected_reviewed_line_count=UNCHECKED) -> OnScreenSubtitleQueueEntry:
+    def update_onscreen_subtitle_region(self, region_id: int, rect: RegionRect, language: str, *, series=False,
+                                        expected_reviewed_line_count=UNCHECKED,
+                                        expected_series_impact=UNCHECKED) -> OnScreenSubtitleQueueEntry:
         """영역 하나의 자리·크기·읽을 언어를 고친다. 그 영역의 화면 자막과 화면 번역 자막(검수로 고친 줄 포함)만
         지우고 다시 읽도록 직접 요청한다. 읽기가 끝나면 그 영역의 줄만 다시 번역된다.
 
-        expected_reviewed_line_count는 확인 창이 보인 onscreen_subtitle_region_reviewed_line_count 값이다.
-        바꾸는 순간 그 값과 다르면 OnScreenRegionChanged를 던지고 아무것도 바꾸지 않는다.
+        series=False면 이 화만 고친다. 시리즈에서 온 화였으면 이 화의 영역 묶음은 직접 정함이 되어 이후 시리즈 영역
+        변경을 따르지 않는다. expected_reviewed_line_count는 확인 창이 보인 onscreen_subtitle_region_reviewed_line_count
+        값이다. 바꾸는 순간 그 값과 다르면 OnScreenRegionChanged를 던지고 아무것도 바꾸지 않는다.
+        series=True면 시리즈 전체에 적용한다. 시리즈에서 온 영역이면 시리즈 영역을 고치고 시리즈에서 온 화마다 그 영역만
+        다시 읽는다(다른 화는 자동 대상). 직접 정한 화의 영역이면 고친 뒤 이 화의 영역 묶음이 시리즈 영역이 된다
+        (add_onscreen_subtitle_region의 series=True와 같다). expected_series_impact는 add_onscreen_subtitle_region과 같다.
         """
-        self.playback_location(self._onscreen.region(region_id).video_id)
+        video_id = self._onscreen.region(region_id).video_id
+        self.playback_location(video_id)
+        if series:
+            return self._onscreen_series.update(region_id, rect, language, video_id=video_id,
+                                                expected=_expected(expected_series_impact))
         return self._onscreen.update_region(region_id, rect, language,
                                             guard=self._reviewed_guard(region_id, expected_reviewed_line_count))
 
-    def delete_onscreen_subtitle_region(self, region_id: int, *, expected_reviewed_line_count=UNCHECKED) -> None:
+    def delete_onscreen_subtitle_region(self, region_id: int, *, expected_reviewed_line_count=UNCHECKED,
+                                        expected_series_impact=UNCHECKED) -> None:
         """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다.
-        expected_reviewed_line_count는 update_onscreen_subtitle_region과 같다."""
+        expected_reviewed_line_count는 update_onscreen_subtitle_region과 같다.
+
+        시리즈에서 온 영역이면 시리즈 영역을 지우고, 시리즈에서 온 모든 화에서 그 영역을 지운다. 직접 정한 화는 그대로다.
+        이때의 확인은 expected_series_impact(onscreen_subtitle_region_series_impact(..., delete=True) 값)로 한다."""
+        region = self._onscreen.region(region_id)
+        if region.origin == RegionOrigin.SERIES:
+            self._onscreen_series.delete(region_id, video_id=region.video_id,
+                                         expected=_expected(expected_series_impact))
+            return
         self._onscreen.delete_region(region_id, guard=self._reviewed_guard(region_id, expected_reviewed_line_count))
+
+    def onscreen_subtitle_region_series_impact(self, video_id: int, region_id: int | None = None, *,
+                                               delete=False) -> OnScreenSeriesImpact:
+        """지금 화(video_id)에서 시리즈 전체에 적용하면 바뀌는 범위: 영역이 바뀌는 다른 화 수, 지금 화를 포함해 사라질
+        검수로 고친 줄 수의 합, 기존 시리즈 영역을 고치거나 지우거나 바꾸는지(확인 창을 거친다).
+
+        region_id가 없으면 새 영역, 있으면 그 영역 고치기, delete면 시리즈에서 온 그 영역 지우기다. 시리즈에 속하지 않은
+        영상이면 ValueError다."""
+        return self._onscreen_series.impact(video_id, region_id, delete=delete)
 
     def _reviewed_guard(self, region_id, expected):
         if expected is UNCHECKED:

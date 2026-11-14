@@ -505,7 +505,7 @@ def test_v9_migration_failure_rolls_back_and_preserves_backup(screen):
     assert restored.translation_queue()[0].source == ONSCREEN
 
 
-@pytest.mark.parametrize('version', [7, 8, 9, 10])
+@pytest.mark.parametrize('version', [7, 8, 9, 10, 11])
 def test_upgrade_backup_restore_keeps_onscreen_results_protection_progress_and_video_glossary(screen, tmp_path, version):
     core, media, adapter, _, _, _, _, reopen = screen
     a, b = core.videos()
@@ -518,12 +518,12 @@ def test_upgrade_backup_restore_keeps_onscreen_results_protection_progress_and_v
     read_screen(core, media, b.id)
     core.process_next_translation()
     if version < LIBRARY_DB_VERSION:
-        # 고정된 이전 버전 DDL에는 화면 번역·보호·영상 용어집(v9), 원문 검수·구간 요청(v10)이 아직 없다.
+        # 고정된 이전 버전 DDL에는 화면 번역·보호·영상 용어집(v9), 원문 검수·구간 요청(v10), 시리즈 영역(v11)이 아직 없다.
         replace_with_frozen(core.database, version)
     archive = core.create_backup(tmp_path / f'v{version}.zip')
     assert archive.metadata.db_version == version
     upgraded = reopen()
-    assert upgraded.create_backup(tmp_path / 'upgraded.zip').metadata.db_version == LIBRARY_DB_VERSION == 10
+    assert upgraded.create_backup(tmp_path / 'upgraded.zip').metadata.db_version == LIBRARY_DB_VERSION == 11
     if version < LIBRARY_DB_VERSION:
         assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == version
     if version >= 9:
@@ -762,7 +762,7 @@ def test_v9_library_upgrades_keeping_onscreen_lines_translations_and_reviews(scr
     replace_with_frozen(core.database, 9)
     upgraded = reopen()
     with closing(sqlite3.connect(core.database)) as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION == 10
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION == 11
     assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == 9
     assert (upgraded.onscreen_subtitles(video), upgraded.translation(video, source=ONSCREEN),
             upgraded.translation_line_providers(video, source=ONSCREEN),
@@ -771,6 +771,57 @@ def test_v9_library_upgrades_keeping_onscreen_lines_translations_and_reviews(scr
     assert not any(flags[2] for flags in review_flags(upgraded, video).values())
     upgraded.edit_onscreen_subtitle_line(bottom.lines[0].id, 'Jon shows')
     assert review_flags(upgraded, video)[bottom.lines[0].id][2]
+
+
+def test_v10_library_upgrades_with_every_region_directly_set_and_series_apply_keeps_them(screen):
+    """#284 v11: 기존 영역은 모두 직접 정함이다. 줄·화면 번역·검수가 그대로이고, 시리즈 전체에 적용해도 바뀌지 않는다."""
+    core, media, adapter, *_, reopen = screen
+    video, other = (v.id for v in core.videos())
+    core.create_series('시리즈', (video, other))
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    core.edit_onscreen_subtitle_line(bottom.lines[0].id, 'Jon shows')
+    core.edit_onscreen_translation_line(top.lines[0].id, '고친 코너')
+    finish(core)
+    expected = (core.onscreen_subtitles(video), core.translation(video, source=ONSCREEN),
+                core.translation_line_providers(video, source=ONSCREEN), core.onscreen_translation_reviewed_lines(video),
+                review_flags(core, video))
+    replace_with_frozen(core.database, 10)
+    upgraded = reopen()
+    with closing(sqlite3.connect(core.database)) as db:
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION == 11
+    assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == 10
+    assert [r.origin.value for r in upgraded.onscreen_subtitle_regions(video)] == ['direct', 'direct']
+    assert (upgraded.onscreen_subtitles(video), upgraded.translation(video, source=ONSCREEN),
+            upgraded.translation_line_providers(video, source=ONSCREEN),
+            upgraded.onscreen_translation_reviewed_lines(video), review_flags(upgraded, video)) == expected
+    assert [upgraded.onscreen_subtitle_region_reviewed_line_count(s.region.id) for s in expected[0]] == [1, 1]
+    # 다른 화에서 시리즈 전체에 적용해도 직접 정한 화는 그대로다.
+    upgraded.add_onscreen_subtitle_region(other, BAND, 'en', series=True)
+    assert upgraded.onscreen_subtitles(video) == expected[0]
+    assert [r.origin.value for r in upgraded.onscreen_subtitle_regions(other)] == ['series']
+
+
+def test_v11_migration_failure_rolls_back_to_v10_and_keeps_regions(screen):
+    from my_video_manager.library import migrate_library
+    core, media, *_, reopen = screen
+    video = core.videos()[0].id
+    read_two_regions(core, media, video)
+    replace_with_frozen(core.database, 10)
+    before = core.database.read_bytes()
+    with closing(sqlite3.connect(core.database)) as db:
+        db.execute('PRAGMA foreign_keys=ON')
+        db.set_authorizer(lambda action, name, *_: sqlite3.SQLITE_DENY
+                          if action == sqlite3.SQLITE_CREATE_TABLE and name == 'series_onscreen_regions'
+                          else sqlite3.SQLITE_OK)
+        with pytest.raises(sqlite3.DatabaseError):
+            migrate_library(db)
+        db.set_authorizer(lambda *_: sqlite3.SQLITE_OK)
+        assert not db.in_transaction and db.execute('PRAGMA user_version').fetchone()[0] == 10
+        assert 'series_region_id' not in [row[1] for row in db.execute('PRAGMA table_info(onscreen_subtitle_regions)')]
+    assert core.database.read_bytes() == before
+    restored = reopen()
+    assert len(restored.onscreen_subtitles(video)) == 2
 
 
 def test_editing_original_of_a_hand_fixed_translation_asks_and_cancel_changes_nothing(screen):
