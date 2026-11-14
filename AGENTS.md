@@ -30,9 +30,8 @@ Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agen
 
 Settings for the `orchestrate-issues` skill (vstack plugin). See `docs/agents/orchestration.md` and `docs/agents/common-findings.md`.
 
-이 스킬은 vstack 플러그인의 `/vstack:orchestrate-issues`이고 Orca에서 쓴다(herdr app과 T3 Code는 쓰지 않는다). omp에서는 스킬을 찾지 말고 `docs/agents/omp-orchestration.md`의 절차로 지휘한다.
+이 스킬은 vstack 플러그인의 `/vstack:orchestrate-issues`이고 Orca에서 쓴다(herdr app, omp, T3 Code로는 지휘하지 않는다).
 
-- `orchestration.md`의 스킬 전용 절(등급별 배치, 작업자 실패 알림, Codex fast)은 omp에서 쓰지 않는다. 배치는 `omp-orchestration.md`를 따른다.
-- 나머지 절(이슈 저장소, 병합, 구현 제약, 테스트, 추가 완료 조건, 실창 검사)과 `common-findings.md`는 환경과 관계없이 따른다.
-- worktree 정리·생성은 스킬로 지휘하면 스킬의 실행 환경 문서를, omp에서는 `~/.omp/agent/AGENTS.md`의 "이슈 worktree" 절을 따른다. 이 저장소의 worktree 준비 명령은 `scripts/setup.ps1 -Worktree`다.
-- 문서의 `~/.agent-orchestra/bin/desktop_lock.py run ... -- <명령>`은 이 스크립트가 없으면 `<명령>`만 실행한다. 실창 검사는 한 번에 하나만 돌리고, omp 지휘에서는 `omp-orchestration.md`의 "실창 차례"로 순서를 정한다.
+- `orchestration.md`의 모든 절과 `common-findings.md`를 따른다.
+- worktree 정리·생성은 스킬의 실행 환경 문서(Orca)를 따른다. 이 저장소의 worktree 준비 명령은 `scripts/setup.ps1 -Worktree`다.
+- 문서의 `~/.agent-orchestra/bin/desktop_lock.py run ... -- <명령>`은 이 스크립트가 없으면 `<명령>`만 실행한다. 실창 검사는 한 번에 하나만 돌린다.
