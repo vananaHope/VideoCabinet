@@ -5,7 +5,7 @@ python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scri
 
 --offscreen은 가짜 플레이어로 1100×720(가장 넓은 상태 포함)과 더 좁은 창의 조작 줄이 넘치지 않는지,
 하이라이트·속도 단추부터 짧게 줄이는지 보고 위젯 grab 이미지를 남긴다. 모아보기 단추가 더해진 가장 넓은 줄과
-그 전체 화면 구성(1280 폭), 무작위 이어 재생을 켜고 가장 긴 범위 이름을 보인 줄(창 모드·전체 화면)도 재고, 상태별 남은 폭(slack)과 더 줄여 확보할 수 있는 폭(reducible)을 결과 JSON에 남긴다.
+그 전체 화면 구성(1280 폭), 늘 보이는 화면 번역 단추, 무작위 이어 재생을 켜고 가장 긴 범위 이름을 보인 줄(창 모드·전체 화면)도 재고, 상태별 남은 폭(slack)과 더 줄여 확보할 수 있는 폭(reducible)을 결과 JSON에 남긴다.
 --real은 데스크톱 잠금 안에서 합성 영상과 실제 mpv, Windows 마우스·키 입력으로 단추 클릭, Tab 이동,
 단추 초점에서의 재생 키, 하이라이트·구간 단추, 속도 목록 고르기와 목록 밖 속도 표시,
 재생 메뉴 '설정'(창 모드·전체 화면), 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기,
@@ -151,6 +151,8 @@ def offscreen(app, directory, result):
         # 위치 갱신(0.1초)이 의도한 상태를 되돌렸으면 여기서 실패한다.
         assert page.subtitle_language_button.label == language, (name, page.subtitle_language_button.label)
         assert fits(page), name
+        # 화면 번역 단추는 화면 번역 자막이 없는 영상에서도 늘 보여 영상마다 줄이 밀리지 않는다.
+        assert page.onscreen_button.isVisible() and page.onscreen_button.isEnabled(), name
         shortened = [button for button in page.compact_order if button.compact]
         # 짧은 글자가 따로 없는 단추(창 모드의 ⛶)와 숨은 단추(일반 재생의 모아보기 단추)는 순서에서 건너뛴다.
         order = [button for button in page.compact_order
@@ -174,7 +176,8 @@ def offscreen(app, directory, result):
 
     window.core.toggle_subtitle_language()
     assert core.playback_subtitle_language == 'original'
-    check('plain', '원어 자막')
+    # 화면 번역 단추가 더해진 1100 폭 일반 줄은 하이라이트 단추가 아이콘만 남아야 들어간다.
+    check('plain', '원어 자막', compact=(page.point_button, page.range_button))
     # 열린 구간('구간 끝내기')·목록 밖 긴 속도·자막 꺼짐·일시정지와 다듬은 자막이 함께 보이는 가장 넓은 창 모드 줄.
     # 1100 폭에서는 하이라이트 단추가 아이콘만 남아야 들어간다.
     window.core.toggle_subtitle_language()
@@ -188,7 +191,7 @@ def offscreen(app, directory, result):
     assert page.open_range_label.isVisible() and page.pause_button.text() == '▶'
     assert page.range_button.isChecked() and page.range_button.accessibleName() == '구간 하이라이트 끝내기'
     assert page.range_button.label == '】 구간 끝내기' and page.range_button.text() == '】'
-    assert page.subtitles_button.text() == '자막 꺼짐' and page.speed_button.label == '속도 99.75×'
+    assert page.subtitles_button.label == '자막 꺼짐' and page.speed_button.label == '속도 99.75×'
     # 전체 화면 줄에는 '목록으로'와 '⛶ 전체 화면 끄기'가 더해진다. 최소 창 폭(1100)의 화면에서 그 구성을 잰다.
     fullscreen_bar(page, True)
     check('fullscreen-widest-1100', '다듬은 자막', compact=(page.point_button, page.range_button, page.speed_button))

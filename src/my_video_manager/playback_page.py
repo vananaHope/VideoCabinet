@@ -217,7 +217,8 @@ class PlaybackPage(QWidget):
         self.onscreen_button = self._command_button(
             "화면 번역", "화면 번역 자막", CommandType.TOGGLE_ONSCREEN_TRANSLATION)
         self.onscreen_button.setCheckable(True)
-        self.onscreen_button.set_label("화면 번역", "화면")
+        # 가장 좁은 줄(1100 폭 전체 화면의 모아보기·무작위 범위)에도 들어가는 한 글자. 툴팁·접근성 이름은 그대로다.
+        self.onscreen_button.set_label("화면 번역", "T")
         self.subtitle_language_button = self._command_button(
             "자막 없음", "자막 종류 자막 없음", CommandType.TOGGLE_SUBTITLE_LANGUAGE)
         self.subtitle_work_label = QLabel()
