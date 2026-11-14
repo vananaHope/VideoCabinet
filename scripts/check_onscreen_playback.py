@@ -16,6 +16,7 @@ python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scri
 
 import argparse
 import ctypes
+import ctypes.wintypes
 from datetime import datetime, timezone
 import json
 import os
@@ -258,7 +259,18 @@ def real(app, directory, result):
         center = widget.mapToGlobal(widget.rect().center())
         user32.SetCursorPos(round(center.x() * ratio), round(center.y() * ratio))
         settle(80)
-        assert QApplication.widgetAt(QCursor.pos()) is widget, f'커서 아래가 {widget.accessibleName()}가 아님'
+        under = QApplication.widgetAt(QCursor.pos())
+        if under is not widget:
+            x, y = round(center.x() * ratio), round(center.y() * ratio)
+            hwnd = user32.WindowFromPoint(ctypes.wintypes.POINT(x, y))
+            title, kind = ctypes.create_unicode_buffer(256), ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, title, 256)
+            user32.GetClassNameW(hwnd, kind, 256)
+            foreground = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(user32.GetForegroundWindow(), foreground, 256)
+            print(f'가린 창: {title.value!r} {kind.value!r} · 전경 창 {foreground.value!r} · 커서 {QCursor.pos()} '
+                  f'· 위젯 {center} ×{ratio} · 창 {window.geometry()} · 아래 {under!r}')
+        assert under is widget, f'커서 아래가 {widget.accessibleName()}가 아님'
         user32.mouse_event(0x0002, 0, 0, 0, 0)
         user32.mouse_event(0x0004, 0, 0, 0, 0)
         settle(300)
