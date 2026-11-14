@@ -4,6 +4,7 @@
 움직임 줄이기 켜짐·꺼짐은 이 PC의 Windows 설정에 기대지 않고 Chromium 플래그를 준 자식 pytest 프로세스에서 확인한다.
 """
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -233,3 +234,81 @@ def test_playback_control_press_uses_accent_and_differs_from_hover_and_focus(win
     button.setFocus(Qt.FocusReason.TabFocusReason)
     wait_for(button.hasFocus)
     assert colour(button, 0) == colors['ring'] and colour(button, 4) == colors['secondary']
+
+
+def edge_points(rect):
+    """요소의 왼쪽·오른쪽·위·아래 가장자리에서 안쪽 1px(가로·세로 가운데)."""
+    left, top = rect['x'], rect['y']
+    right, bottom = left + rect['width'], top + rect['height']
+    middle_x, middle_y = math.floor(left + rect['width'] / 2), math.floor(top + rect['height'] / 2)
+    return {'왼쪽': QPoint(math.floor(left) + 1, middle_y), '오른쪽': QPoint(math.ceil(right) - 2, middle_y),
+            '위': QPoint(middle_x, math.floor(top) + 1), '아래': QPoint(middle_x, math.ceil(bottom) - 2)}
+
+
+def click_in_place(window, point):
+    """마우스를 그 자리에 두고 눌렀다가 움직이지 않고 같은 자리에서 놓는다."""
+    QTest.mouseMove(view(window), point)
+    settle(window)
+    QTest.mousePress(view(window), Qt.MouseButton.LeftButton, pos=point)
+    settle(window)
+    QTest.mouseRelease(view(window), Qt.MouseButton.LeftButton, pos=point)
+    settle(window)
+
+
+def rect_of(window, selector):
+    return json.loads(js(window, f"JSON.stringify({shown(selector)}.getBoundingClientRect())"))
+
+
+def make_highlights(window):
+    core = window.core
+    for video in core.videos():
+        core.playback.start(video.id, 0)
+        core.playback.report(10)
+        core.execute_highlight_command(Command(CommandType.POINT_HIGHLIGHT))
+        core.playback.end()
+
+
+def test_pressing_an_edge_and_releasing_in_place_runs_that_element(window):
+    """누르는 동안 작아져도, 원래 영역 가장자리 안쪽 1px에서 누르고 같은 자리에서 놓으면 그 요소의 동작이 실행된다."""
+    make_highlights(window)
+    ready(window)
+    cases = []
+
+    def settings_category(edge):
+        js(window, "document.querySelector('nav [data-tab=settings]').click()")
+        wait_for(lambda: js(window, f"!!{shown('#settings-category [data-category=keys]')}"))
+        js(window, "document.querySelector('#settings-category [data-category=general]').click()")
+        wait_for(lambda: js(window, "document.querySelector('#settings-category [aria-current=true]')?.dataset.category") == 'general')
+        return '#settings-category [data-category=keys]', lambda: js(window, "document.querySelector('#settings-category [aria-current=true]')?.dataset.category") == 'keys'
+
+    def video_card(edge):
+        js(window, "document.querySelector('nav [data-tab=library]').click()")
+        wait_for(lambda: js(window, f"!!{shown('#library-grid [role=gridcell][aria-selected=false]')}"))
+        card = f'#{js(window, shown("#library-grid [role=gridcell][aria-selected=false]") + ".id")}'
+        return card, lambda: js(window, f"document.querySelector('{card}').getAttribute('aria-selected')") == 'true'
+
+    def reel_row(edge):
+        js(window, "document.querySelector('nav [data-tab=reel]').click()")
+        wait_for(lambda: js(window, f"!!{shown('#reel-list [role=option][aria-selected=false]')}"))
+        row = f'#{js(window, shown("#reel-list [role=option][aria-selected=false]") + ".id")}'
+        return row, lambda: js(window, f"document.querySelector('{row}').getAttribute('aria-selected')") == 'true'
+
+    def icon_button(edge):
+        js(window, "document.querySelector('nav [data-tab=library]').click()")
+        wait_for(lambda: js(window, "!document.querySelector('[role=dialog]')"))
+        return 'header [data-slot=button][data-size=icon-sm]', lambda: js(window, "!!document.querySelector('[role=dialog]')")
+
+    for name, prepare in (('설정 분류', settings_category), ('영상 카드', video_card), ('모아보기 행', reel_row), ('키 안내 아이콘 단추', icon_button)):
+        for edge in ('왼쪽', '오른쪽', '위', '아래'):
+            selector, done = prepare(edge)
+            away(window)
+            point = edge_points(rect_of(window, selector))[edge]
+            assert js(window, f"document.elementFromPoint({point.x()}, {point.y()})?.closest({json.dumps(selector)}) === {shown(selector)}"), (name, edge)
+            click_in_place(window, point)
+            if not done():
+                cases.append((name, edge))
+            if name == '키 안내 아이콘 단추' and done():
+                QTest.keyClick(view(window), Qt.Key.Key_Escape)
+                wait_for(lambda: js(window, "!document.querySelector('[role=dialog]')") and not window.web_host.dialogs.blocks_shell_actions)
+    assert cases == [], f'가장자리 클릭이 그 요소에 가지 않음: {cases}'
+
