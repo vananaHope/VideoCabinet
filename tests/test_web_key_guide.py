@@ -12,7 +12,8 @@ from my_video_manager.core import Command, CommandType
 from my_video_manager.key_guide import app_key_guide
 from my_video_manager.web_contract import TABS
 from test_emergency_hide_ui import app, window, key, emergency_key
-from test_emergency_hide_dialogs_ui import js, view, focus_field, field_value, rename_dialog, settle, type_text
+from test_emergency_hide_dialogs_ui import (active_label, js, view, focus_field, field_value, rename_dialog, settle,
+                                            type_text)
 from test_web_dialogs import within
 from qt_wait import wait_for
 
@@ -197,6 +198,8 @@ def test_closing_returns_focus_to_the_search_field_and_typing_continues(window):
     wait_guide(window)
     QTest.keyClick(view(window), Qt.Key.Key_Escape)
     wait_closed(window)
+    # Radix는 DOM 제거 뒤 별도 작업에서 초점을 복원한다. 복원 전에 치면 글자가 body로 간다.
+    wait_for(lambda: active_label(window) == "영상 제목 빠른 검색")
     type_text(window, "ab")
     assert field_value(window, "영상 제목 빠른 검색") == "ab"
 
