@@ -56,23 +56,19 @@
 
 | 등급 | 구현 목록(앞부터) | 검토 목록(앞부터) |
 | --- | --- | --- |
-| `light` | opencode:opencode-go/deepseek-v4.1-flash@high → codex:gpt-6-astra@high | codex:gpt-6-astra@medium → 관리자 → claude@high |
-| `standard` | opencode:opencode-go/deepseek-v4.1-flash@high → codex:gpt-6-astra@high | codex:gpt-6-astra@high → claude@high |
+| `light` | codex:gpt-6.1-sol@medium → claude:sonnet@medium | codex:gpt-6-astra@medium → 관리자 → claude@high |
+| `standard` | codex:gpt-6-astra@medium → claude:opus@medium | codex:gpt-6-astra@high → claude@high |
 | `hard` | codex:gpt-6-astra@high → claude@high | claude@high → codex:gpt-6-astra@high |
 | `UI` | claude | codex:gpt-6-astra@high → claude |
 
-- OpenCode `standard` 크기 상한: 제품 코드 변경 300줄 안팎. 테스트·문서 줄과 파일 수는 세지 않는다.
 - 2차 의견: standard 이상
 - UI 작업은 등급과 따로 Claude가 구현한다. 위 `hard` 순서는 UI가 아닌 일에만 적용된다.
 - 동시성·잠금·프로세스 수명을 다루는 일은 작아 보여도 `standard` 이상으로 정한다(#183에서 `light`로 맡긴 잠금 수정이 새 결함 3개를 만듦).
 
 ## 작업자 실패 알림
 
-- OpenCode가 인증·로그인 오류로 실패하면 사용자에게 바로 알리고, 그 세션에서는 OpenCode를 건너뛴다. 안내는 환경에 맞춘다.
-  - 클라우드: "OpenCode 클라우드 로그인 갱신 필요(`OPENCODE_AUTH`)"
-  - 로컬: "OpenCode 로그인 필요(PC에서 `opencode auth login`)"
 - Codex 로그인 오류는 플러그인 기본을 따른다(클라우드는 "Codex 클라우드 로그인 갱신 필요", 로컬은 한도 측정 `unknown` 보고).
-- 그 밖의 이유로 작업자가 실패해 다음 작업자로 넘겼으면 이슈 결과 보고에 한 줄로 적는다. 예: "OpenCode 실패(테스트 시간 초과) → Codex".
+- 그 밖의 이유로 작업자가 실패해 다음 작업자로 넘겼으면 이슈 결과 보고에 한 줄로 적는다. 예: "Codex 실패(테스트 시간 초과) → Claude".
 
 ## Codex fast
 
@@ -89,6 +85,10 @@
   - 묶음의 마지막 남은 일
   - 사용자가 기다리거나 급하다고 함. 앱을 못 쓰게 만드는 결함(실행 실패, 재생 불가, 라이브러리 데이터 손실) 수정도 여기에 든다(#183 같은 긴급 탈출).
 - 그 밖(다른 이슈와 나란히 도는 구현 등)은 끔.
+
+## 명세 점검
+
+- 점검자(앞부터): claude:sonnet
 
 ## 추가 완료 조건
 
