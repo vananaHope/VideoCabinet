@@ -34,7 +34,7 @@ args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 
 from PySide6.QtCore import QEvent, QEventLoop, QObject, QTimer
-from PySide6.QtGui import QCursor, QFontDatabase, QImage
+from PySide6.QtGui import QCursor, QFontDatabase, QImage, QWindow
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -233,7 +233,7 @@ def real(app, directory, result):
     class KeyLog(QObject):
         """앱이 받은 키 입력(진단용)."""
         def eventFilter(self, watched, event):
-            if event.type() == QEvent.Type.KeyPress and watched is QApplication.focusWidget():
+            if event.type() == QEvent.Type.KeyPress and isinstance(watched, QWindow):
                 keys.append([hex(event.key()), event.text(), hex(event.nativeVirtualKey())])
             return False
 
@@ -318,13 +318,13 @@ def real(app, directory, result):
     window.player.pause()  # 줄이 바뀌지 않게 멈춘다(일시정지 키는 이 검사 대상이 아니다)
     wait(lambda: window.player.paused, '일시정지')
     expect(screenshot('start-on'), 'start-on', bottom='band', top='band')
-    press(0xDD)  # ]: 화면 번역 자막 끄기
-    wait(lambda: not page.onscreen_button.isChecked(), '] 키로 끄기')
-    expect(screenshot('key-off'), 'key-off', bottom='white', top='white')
     click(page.onscreen_button)
-    wait(page.onscreen_button.isChecked, '단추로 켜기')
+    wait(lambda: not page.onscreen_button.isChecked(), '단추로 끄기')
     assert window.surface.hasFocus(), '단추 클릭이 영상 초점을 가져감'
-    expect(screenshot('button-on'), 'button-on', bottom='band', top='band')
+    expect(screenshot('button-off'), 'button-off', bottom='white', top='white')
+    press(0xDD)  # ]: 화면 번역 자막 켜기
+    wait(page.onscreen_button.isChecked, '] 키로 켜기')
+    expect(screenshot('key-on'), 'key-on', bottom='band', top='band')
     assert window.player._player.sub_align_y == 'bottom', '위·아래 영역이면 받아쓰기 자막은 그대로'
 
     # 위 영역 줄이 끝난 뒤(40초): 위 영역은 원래 그림(파란 바탕), 아래 영역만 띠.
