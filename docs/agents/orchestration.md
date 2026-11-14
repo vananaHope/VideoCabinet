@@ -61,7 +61,7 @@
 | `hard` | codex:gpt-6-astra@high → claude@high | claude@high → codex:gpt-6-astra@high |
 | `UI` | claude | codex:gpt-6-astra@high → claude |
 
-- 2차 의견: standard 이상
+- 2차 의견: 같은 계열 검토일 때만
 - UI 작업은 등급과 따로 Claude가 구현한다. 위 `hard` 순서는 UI가 아닌 일에만 적용된다.
 - 동시성·잠금·프로세스 수명을 다루는 일은 작아 보여도 `standard` 이상으로 정한다(#183에서 `light`로 맡긴 잠금 수정이 새 결함 3개를 만듦).
 
