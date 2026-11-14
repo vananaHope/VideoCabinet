@@ -72,8 +72,8 @@ class Media:
     def read(self, path):
         return MediaInfo(100, 'matroska')
 
-    def region_frames(self, path, region, *, fps, cancellation):
-        for index in range(round(100 * fps)):
+    def region_frames(self, path, region, *, fps, cancellation, start=None, end=None):
+        for index in range(round((start or 0) * fps), round((100 if end is None else end) * fps)):
             seconds = index / fps
             yield seconds, region_image(next((t for start, end, t in self.captions if start <= seconds < end), ''))
 

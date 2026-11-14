@@ -213,3 +213,15 @@ def test_decoder_failure_raises_runtime_error(reader, tmp_path, monkeypatch):
     monkeypatch.setattr(reader, "read_resolution", read_then_remove)
     with pytest.raises(RuntimeError):
         frames(reader, path, RegionRect(0, 0, 1, 1))
+
+
+def test_range_reads_only_that_interval_with_video_times(reader, tmp_path):
+    path = encode(reader, tmp_path / "range.mkv")  # 1–2초에 흰 상자
+    images = list(reader.region_frames(path, RegionRect(.25, .25, .25, .25), fps=4, cancellation=Event(),
+                                       start=1.5, end=2.5))
+    times = [time for time, _ in images]
+    assert times[0] == 1.5 and times == [1.5 + index / 4 for index in range(len(images))]
+    assert len(images) == pytest.approx(4, abs=1) and times[-1] < 2.5
+    bright = {time: sum(image.pixels) / len(image.pixels) > 200 for time, image in images}
+    assert bright[1.5] and bright[1.75]
+    assert not any(value for time, value in bright.items() if time > 2.1)

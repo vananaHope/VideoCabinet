@@ -40,8 +40,9 @@ class FakeMedia:
         self.captions_by_region = {}  # 영역 → 그 영역의 captions. 없는 영역은 captions를 쓴다.
         self.misread = {}  # 장 번호 → 다르게 읽히는 글자(잡음)
         self.hook = None  # 장마다 부르는 함수(장 번호)
-        self.error_at = None
+        self.error_at = None  # 이 장 번호(영상 처음부터 센다)에서 읽기 실패
         self.calls = []
+        self.intervals = []  # (영역, 시작, 끝). 구간 없이 읽으면 시작·끝이 None이다.
 
     def read(self, path):
         return MediaInfo(self.duration, "matroska", 1280, 720)
@@ -49,9 +50,11 @@ class FakeMedia:
     def capture(self, path, destination, seconds):
         destination.write_bytes(b"thumbnail")
 
-    def region_frames(self, path, region, *, fps, cancellation):
+    def region_frames(self, path, region, *, fps, cancellation, start=None, end=None):
         self.calls.append((Path(path), region, fps))
-        for index in range(round(self.duration * fps)):
+        self.intervals.append((region, start, end))
+        first, last = round((start or 0) * fps), round((self.duration if end is None else end) * fps)
+        for index in range(first, last):
             if cancellation.is_set():
                 return
             if self.error_at == index:
@@ -571,3 +574,34 @@ def test_a_change_that_saw_an_outdated_reviewed_count_is_refused_without_changin
     apply_change(0)
     assert core.onscreen_subtitles(a.id) == ()
     assert [r.rect for r in core.onscreen_subtitle_regions(a.id)] == ([TOP] if change == "update" else [])
+
+
+# #285 구간 다시 생성: 그 영역의 줄 경계까지 넓힌 구간만 다시 읽는다.
+def test_range_bounds_widen_over_that_regions_lines_and_invalid_ranges_are_rejected(setup):
+    core, media, ocr, (a, _) = setup
+    top = RegionRect(0.1, 0.02, 0.8, 0.1)
+    media.captions_by_region = {BAND: ((10, 12, "Hello"), (12, 14, "World"), (40, 42, "Later")),
+                                top: ((9, 15, "Corner"),)}
+    core.add_onscreen_subtitle_region(a.id, BAND, "en")
+    core.add_onscreen_subtitle_region(a.id, top, "en")
+    assert core.process_next_onscreen_subtitle().state == "completed"
+    bottom, corner = core.onscreen_subtitles(a.id)
+    bounds = core.onscreen_subtitle_range_bounds
+    # 경계에 걸친 줄과 그 줄에 이어 걸친 줄까지 넓힌다. 다른 영역의 줄은 넓히지 않는다.
+    assert bounds(bottom.region.id, 11.5, 12.5) == (10, 14)
+    assert bounds(bottom.region.id, 50, 60) == (50, 60)
+    assert bounds(corner.region.id, 11.5, 12.5) == (9, 15)
+    for start, end in ((-1, 5), (90, 100.5), (5, 5), (6, 5), (float("nan"), 5), (0, float("inf"))):
+        for call in (bounds, core.request_onscreen_subtitle_range):
+            with pytest.raises(ValueError):
+                call(bottom.region.id, start, end)
+    assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+    assert core.onscreen_subtitles(a.id) == (bottom, corner)
+
+
+def test_range_of_a_region_not_read_yet_is_refused(setup):
+    core, media, ocr, (a, _) = setup
+    core.add_onscreen_subtitle_region(a.id, BAND, "en")
+    waiting, = core.onscreen_subtitle_regions(a.id)
+    with pytest.raises(ValueError, match="화면 자막"):
+        core.request_onscreen_subtitle_range(waiting.id, 0, 10)

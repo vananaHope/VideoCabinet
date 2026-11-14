@@ -803,6 +803,15 @@ class AppCore:
     def onscreen_translation_reviewed_lines(self, video_id: int) -> frozenset[str]:
         return self._onscreen_translation.reviewed_lines(video_id)
 
+    def request_onscreen_subtitle_range(self, region_id: int, start: float, end: float) -> OnScreenSubtitleQueueEntry:
+        """화면 자막 영역 하나의 구간(영상 시각 초)을 그 영역의 줄 경계까지 넓혀 다시 읽도록 직접 요청한다.
+        읽기가 끝나면 구간 안의 줄만 새 줄로 바뀌고 새 줄만 번역한다. 읽기가 실패하거나 취소되면 원래 줄이 남는다."""
+        return self._onscreen.request_range(region_id, start, end)
+
+    def onscreen_subtitle_range_bounds(self, region_id: int, start: float, end: float) -> tuple[float, float]:
+        """request_onscreen_subtitle_range가 실제로 다시 읽을 구간. 잘못된 구간은 ValueError다."""
+        return self._onscreen.range_bounds(region_id, start, end)
+
     def onscreen_review_lines(self, region_id: int) -> tuple[ReviewLine, ...]:
         """영역 하나의 화면 자막 줄과 화면 번역, 원문 검수됨·직접 수정 상태. 아직 읽지 않은 영역은 빈 목록이다."""
         return self._onscreen_translation.review_lines(region_id)

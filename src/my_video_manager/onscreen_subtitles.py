@@ -17,6 +17,7 @@ from threading import Event, Lock
 from typing import Iterable, Iterator, Protocol, Sequence
 from uuid import uuid4
 
+from .review import widen_range
 from .subtitle_queue_kind import ONSCREEN_SUBTITLE
 from .translation_source import ONSCREEN
 
@@ -106,9 +107,10 @@ class RegionImage:
 
 
 class RegionFrameReader(Protocol):
-    def region_frames(self, path: Path, region: RegionRect, *, fps: float,
-                      cancellation: Event) -> Iterator[tuple[float, RegionImage]]:
-        """영상 전체에서 영역만 잘라 (영상 시각 초, 영역 이미지)를 시각 순서로 내보낸다.
+    def region_frames(self, path: Path, region: RegionRect, *, fps: float, cancellation: Event,
+                      start: float | None = None, end: float | None = None) -> Iterator[tuple[float, RegionImage]]:
+        """영상 전체(start·end를 주면 그 구간, 영상 시각 초)에서 영역만 잘라 (영상 시각 초, 영역 이미지)를
+        시각 순서로 내보낸다. 구간을 읽어도 시각은 영상 처음 기준이다.
 
         이미지는 디스크에 쓰지 않는다. 취소 신호를 받으면 곧 멈춘다. 읽지 못하면 RuntimeError를 던진다.
         """
@@ -467,6 +469,39 @@ class OnScreenSubtitles:
                 db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, ONSCREEN_SUBTITLE))
             self._order.finish(db, video_id, kind=ONSCREEN_SUBTITLE)
 
+    def range_bounds(self, region_id: int, start: float, end: float, *, connection=None) -> tuple[float, float]:
+        """영역 하나의 구간을 검사하고 그 영역의 줄 경계까지 넓힌다. 다른 영역의 줄은 보지 않는다."""
+        with (nullcontext(connection) if connection is not None else self._connect()) as db:
+            row = db.execute("SELECT v.duration FROM onscreen_subtitle_regions r JOIN videos v ON v.id = r.video_id "
+                             "WHERE r.id = ?", (region_id,)).fetchone()
+            if row is None:
+                raise ValueError("화면 자막 영역이 바뀌었습니다. 검수 화면을 다시 여세요.")
+            lines = db.execute("SELECT l.start, l.end FROM onscreen_subtitle_lines l "
+                               "JOIN onscreen_subtitles s ON s.id = l.generation_id WHERE s.region_id = ?",
+                               (region_id,)).fetchall()
+        return widen_range(start, end, lines, row[0])
+
+    def request_range(self, region_id: int, start: float, end: float) -> OnScreenSubtitleQueueEntry:
+        """영역 하나의 넓힌 구간만 다시 읽도록 화면 자막 만들기를 직접 요청한다.
+
+        구간 기록은 영역과 그 세대에 붙는다. 처리는 세대가 없는 영역 전체와 함께 그 구간을 읽고,
+        구간 안의 줄만 새 줄로 바꾼다. 그 영상의 화면 자막 읽기가 대기·읽는 중이면 막는다.
+        """
+        video_id = self.region(region_id).video_id
+        # 위치 확인은 사라진 파일을 정리할 수 있으므로 쓰기 트랜잭션 밖에서 한다.
+        self._playback_location(video_id)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            start, end = self.range_bounds(region_id, start, end, connection=db)
+            ensure_onscreen_reviewable(db, video_id)
+            generation = db.execute("SELECT id FROM onscreen_subtitles WHERE region_id = ?", (region_id,)).fetchone()
+            if generation is None:
+                raise ValueError("먼저 이 영역의 화면 자막을 만드세요.")
+            entry = self._request(db, video_id, self._clock().isoformat())
+            db.execute("INSERT OR REPLACE INTO onscreen_subtitle_review_ranges VALUES (?, ?, ?, ?)",
+                       (region_id, generation[0], start, end))
+            return entry
+
     def subtitles(self, video_id: int) -> tuple[OnScreenSubtitle, ...]:
         """영역마다 현재 세대. 아직 읽지 않은 영역은 없다."""
         with self._connect() as db:
@@ -570,19 +605,33 @@ class OnScreenSubtitles:
                     if not db.execute("SELECT 1 FROM subtitle_queue WHERE id = ?", (pending.id,)).fetchone():
                         return pending
                     now = self._clock().isoformat()
-                    for region_id, region_lines in lines.items():
-                        generation = uuid4().hex
-                        db.execute("DELETE FROM onscreen_subtitles WHERE region_id = ?", (region_id,))
-                        db.execute("INSERT INTO onscreen_subtitles(region_id, id, created_at) VALUES (?, ?, ?)",
-                                   (region_id, generation, now))
-                        db.executemany("INSERT INTO onscreen_subtitle_lines VALUES (?, ?, ?, ?, ?, ?)",
-                                       [(uuid4().hex, generation, ordinal, start, end, text)
-                                        for ordinal, (start, end, text) in enumerate(region_lines)])
+                    new_ids, line_count = [], 0
+                    for region_id, interval, region_lines in lines:
+                        if interval is None:
+                            generation = uuid4().hex
+                            db.execute("DELETE FROM onscreen_subtitles WHERE region_id = ?", (region_id,))
+                            db.execute("INSERT INTO onscreen_subtitles(region_id, id, created_at) VALUES (?, ?, ?)",
+                                       (region_id, generation, now))
+                            db.executemany("INSERT INTO onscreen_subtitle_lines VALUES (?, ?, ?, ?, ?, ?)",
+                                           [(uuid4().hex, generation, ordinal, start, end, text)
+                                            for ordinal, (start, end, text) in enumerate(region_lines)])
+                        else:
+                            new_ids += _replace_range(db, interval, region_lines)
+                            generation = interval["generation_id"]
+                        line_count += db.execute("SELECT COUNT(*) FROM onscreen_subtitle_lines WHERE generation_id = ?",
+                                                 (generation,)).fetchone()[0]
                     db.execute("DELETE FROM subtitle_queue WHERE id = ?", (pending.id,))
                     if self.translations is not None:
-                        self.translations.request(pending.video_id, automatic=True, connection=db, source=ONSCREEN)
+                        if any(interval is None for _, interval, _ in lines):
+                            self.translations.request(pending.video_id, automatic=True, connection=db, source=ONSCREEN)
+                        if new_ids:
+                            # 구간 안의 새 줄만 번역한다. 구간 밖 줄의 번역·진행 중 묶음은 그대로다.
+                            self.translations.request(pending.video_id, new_ids, connection=db, preserve_state=True,
+                                                      continue_order=True, source=ONSCREEN)
+                        else:
+                            self.translations.finish_ready(db, pending.video_id, source=ONSCREEN)
                 return OnScreenSubtitleQueueEntry(pending.id, pending.video_id, pending.requested_at, "completed", None,
-                                                  progress=1.0, line_count=sum(map(len, lines.values())))
+                                                  progress=1.0, line_count=line_count)
             except _Cancelled:
                 with self._connect() as db:
                     db.execute("UPDATE subtitle_queue SET state = 'queued' WHERE id = ? AND state = 'reading'",
@@ -603,34 +652,73 @@ class OnScreenSubtitles:
                 self._progress.pop(pending.id, None)
             self._processing.release()
 
-    def _read(self, pending, duration, cancellation) -> dict[int, tuple[tuple[float, float, str], ...]]:
-        """아직 세대가 없는 영역을 차례로 훑어 영역별 줄을 만든다. DB는 잠그지 않는다."""
+    def _read(self, pending, duration, cancellation):
+        """아직 세대가 없는 영역 전체와 구간 요청이 있는 영역의 그 구간을 차례로 훑는다. DB는 잠그지 않는다.
+
+        결과는 (영역 ID, 구간 기록 또는 None(영역 전체), 줄)이다. 구간 줄은 구간 안으로 자른다.
+        """
         if self._frames is None or self._ocr is None:
             raise RuntimeError("화면 자막 어댑터가 설정되지 않았습니다.")
         with self._connect() as db:
-            regions = tuple(region for region in self.regions(pending.video_id, connection=db)
-                            if not db.execute("SELECT 1 FROM onscreen_subtitles WHERE region_id = ?",
-                                              (region.id,)).fetchone())
+            generations = dict(db.execute("SELECT s.region_id, s.id FROM onscreen_subtitles s "
+                                          "JOIN onscreen_subtitle_regions r ON r.id = s.region_id WHERE r.video_id = ?",
+                                          (pending.video_id,)).fetchall())
+            ranges = {row["region_id"]: row for row in db.execute(
+                "SELECT rr.* FROM onscreen_subtitle_review_ranges rr "
+                "JOIN onscreen_subtitle_regions r ON r.id = rr.region_id WHERE r.video_id = ?", (pending.video_id,))}
+            work = tuple((region, ranges.get(region.id)) for region in self.regions(pending.video_id, connection=db)
+                         if region.id not in generations or region.id in ranges)
         path = self._playback_location(pending.video_id).path
-        result = {}
-        for index, region in enumerate(regions):
+        result = []
+        for index, (region, interval) in enumerate(work):
             if not self._ocr.language_available(region.language):
                 raise OcrLanguageUnavailable(region.language, self._ocr.missing_language_guidance(region.language))
+            begin, finish = (0.0, duration) if interval is None else (interval["start"], interval["end"])
             samples, anchor, text = [], None, ""
-            for seconds, image in self._frames.region_frames(path, region.rect, fps=SAMPLES_PER_SECOND,
-                                                             cancellation=cancellation):
+            for seconds, image in self._frames.region_frames(
+                    path, region.rect, fps=SAMPLES_PER_SECOND, cancellation=cancellation,
+                    start=None if interval is None else begin, end=None if interval is None else finish):
                 if cancellation.is_set():
                     break
                 if anchor is None or not images_similar(anchor, image):
                     text = normalize_onscreen_text(self._ocr.read_text(image, region.language))
                     anchor = image
                 samples.append((seconds, text))
-                done = (index + min(1.0, seconds / max(duration, 0.001))) / len(regions)
+                done = (index + min(1.0, (seconds - begin) / max(finish - begin, 0.001))) / len(work)
                 self._progress[pending.id] = min(0.99, max(0.0, done))
             if cancellation.is_set():
                 raise _Cancelled
-            result[region.id] = merge_samples(samples)
+            lines = merge_samples(samples)
+            if interval is not None:
+                lines = tuple((max(begin, s), min(finish, e), t) for s, e, t in lines if max(begin, s) < min(finish, e))
+            result.append((region.id, interval, lines))
         return result
+
+
+def _replace_range(db, interval, lines) -> list[str]:
+    """세대 안에서 구간 안의 줄을 새 줄로 바꾼다. 지운 줄의 화면 번역·검수 기록도 함께 사라진다.
+
+    그사이 세대가 바뀌었거나 영역이 지워져 구간 기록이 없으면 아무것도 쓰지 않는다. 새 줄 ID를 돌려준다.
+    """
+    generation, start, end = interval["generation_id"], interval["start"], interval["end"]
+    if not db.execute("DELETE FROM onscreen_subtitle_review_ranges WHERE region_id = ? AND generation_id = ? "
+                      "AND start = ? AND end = ?", (interval["region_id"], generation, start, end)).rowcount:
+        return []
+    db.execute("DELETE FROM onscreen_subtitle_lines WHERE generation_id = ? AND start < ? AND end > ?",
+               (generation, end, start))
+    retained = db.execute("SELECT id, start FROM onscreen_subtitle_lines WHERE generation_id = ? ORDER BY ordinal",
+                          (generation,)).fetchall()
+    # UNIQUE는 행마다 검사된다. 남은 줄의 순서를 먼저 충돌하지 않는 음수로 옮긴다.
+    db.execute("UPDATE onscreen_subtitle_lines SET ordinal = -ordinal - 1 WHERE generation_id = ?", (generation,))
+    new = [(uuid4().hex, line) for line in lines]
+    ordered = sorted([(row["id"], row["start"]) for row in retained] + [(id_, line[0]) for id_, line in new],
+                     key=lambda item: item[1])
+    ordinals = {id_: index for index, (id_, _) in enumerate(ordered)}
+    db.executemany("UPDATE onscreen_subtitle_lines SET ordinal = ? WHERE id = ?",
+                   [(ordinals[row["id"]], row["id"]) for row in retained])
+    db.executemany("INSERT INTO onscreen_subtitle_lines VALUES (?, ?, ?, ?, ?, ?)",
+                   [(id_, generation, ordinals[id_], s, e, text) for id_, (s, e, text) in new])
+    return [id_ for id_, _ in new]
 
 
 def _rect_values(rect: RegionRect) -> tuple[float, float, float, float]:

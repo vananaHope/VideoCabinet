@@ -124,9 +124,10 @@ class FFmpegMediaReader:
             process.communicate()
 
     def region_frames(
-        self, path: Path, region: RegionRect, *, fps: float, cancellation: Event
+        self, path: Path, region: RegionRect, *, fps: float, cancellation: Event,
+        start: float | None = None, end: float | None = None,
     ) -> Iterator[tuple[float, RegionImage]]:
-        """표시 방향의 영역을 디스크에 쓰지 않고 회색조 프레임으로 읽는다."""
+        """표시 방향의 영역을 디스크에 쓰지 않고 회색조 프레임으로 읽는다. start·end를 주면 그 구간만 읽는다."""
         # 크기 조사도 취소를 받는다. 취소되면 아무 장도 내보내지 않고 끝나 실패가 아닌 대기로 돌아간다.
         try:
             info = self.read_resolution(path, cancellation=cancellation, timeout=REGION_PROBE_TIMEOUT_SECONDS)
@@ -151,8 +152,11 @@ class FFmpegMediaReader:
         filters += ",format=gray"
         flags = (subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS) if sys.platform == "win32" else 0
         try:
+            # 입력 앞 -ss는 그 시각부터 정확히 디코딩한다(트랜스코딩). 나오는 장의 시각은 0부터라 offset을 더한다.
+            seek = ["-ss", f"{start:.6f}"] if start else []
+            limit = ["-t", f"{end - (start or 0):.6f}"] if end is not None else []
             process = subprocess.Popen(
-                [self.ffmpeg, "-v", "error", "-nostdin", "-i", str(path),
+                [self.ffmpeg, "-v", "error", "-nostdin", *seek, "-i", str(path), *limit,
                  "-map", "0:V:0", "-an", "-sn", "-vf", filters,
                  "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags,
@@ -187,7 +191,7 @@ class FFmpegMediaReader:
                     return
                 if len(pixels) != frame_size:
                     break
-                yield index / fps, RegionImage(width, height, pixels)
+                yield (start or 0) + index / fps, RegionImage(width, height, pixels)
                 index += 1
             code = process.wait()
             error_reader.join()
