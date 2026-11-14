@@ -364,6 +364,7 @@ components:
 - **Quick** (`motion-duration-quick`, 100ms): 단추·탭·카드·입력란의 hover 색 전환(`transition-colors`)과 탭 내용 전환(`animate-tab-enter`).
 - **Enter** (`motion-duration-enter`, 150ms): 떠 있는 층과 안내가 열릴 때. 대화상자·경고 대화상자·키 안내·덮개와 안내(Notice)는 투명도만(`animate-fade-enter`), 메뉴·우클릭 메뉴·선택 목록·필터 팝오버는 투명도와 트리거 쪽에서 커지는 작은 크기 변화(`animate-layer-enter`, `motion-enter-scale` 0.97).
 - **곡선** (`motion-ease`): `cubic-bezier(0.23, 1, 0.32, 1)`. 처음에 빨리 다가와 바로 반응한 느낌을 준다.
+- **Press** (`motion-enter-scale`, 0.97): 누르는 동안(`:active`) 모든 조작 요소(단추·탭·설정 분류·카드·목록 행·메뉴 항목)가 이 크기로 작아진다. `index.css`의 전역 규칙 하나가 맡고, 색·면은 올림과 같으며 비활성 요소는 작아지지 않는다. 전환 없이 바로 바뀐다.
 
 **The Instant Close Rule.** 열 때만 전환하고 닫힘은 즉시다. 닫히는 층이 초점 가두기·포인터 차단으로 다음 입력을 막지 않는다. 열리는 도중에도 키·클릭은 바로 새 화면이 받는다.
 
@@ -377,6 +378,7 @@ components:
 - **Do** 색·간격·둥글기·글자 크기를 바꿀 때는 `src/my_video_manager/web_tokens.json`을 고치고 `scripts/generate_web_types.py`로 `tokens.css`를 다시 만든다(**The Token Source Rule**).
 - **Do** 모든 색을 테마 토큰 유틸리티(`bg-card`, `text-muted-foreground`, `border-ring` 등)로 쓴다.
 - **Do** 특별한 모양이 필요하면 쓰는 곳에서 덮어쓰지 말고, `cva` variant를 가진 전용 컴포넌트를 만든다.
+- **Do** 누름은 전역 규칙의 `motion-enter-scale` 축소 하나로 보인다. 부품마다 누름 색을 따로 칠하지 않는다.
 - **Do** 선택과 키보드 초점은 `ring`(#818cf8)으로, 호버는 면 한 단계(목록 행 `muted`, 안에 `muted` 면(배지·태그 칩·썸네일 자리)이 있는 카드·행 `popover`)로 구별한다. 선택 면은 `accent`다.
 - **Do** 썸네일·카드·패널의 크기를 내용이 오기 전에 확보한다.
 - **Do** 1100×720 offscreen 스크린샷(`scripts/check_web_*.py --offscreen`)으로 결과를 확인한다.
