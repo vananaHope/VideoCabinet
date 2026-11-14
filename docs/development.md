@@ -956,7 +956,8 @@ v10은 `onscreen_translation_reviews`에 `original_reviewed`(화면 자막 원�
 남기고 그 줄의 화면 번역만 다시 요청합니다. 직접 고친 화면 번역이 있으면 `ReviewConfirmationRequired`로 확인을 받고,
 확인하면 보호를 풀어 다시 번역합니다. 읽지 못한(실패한) 영역이 남아 있으면 화면 번역을 요청할 수 없어 거부합니다.
 `request_onscreen_subtitle_range(region_id, start, end)`·`onscreen_subtitle_range_bounds`는 그 영역의 줄 경계까지 넓힌 구간만
-다시 읽습니다. 구간 기록은 대기열 항목이 아니라 영역과 그 세대에 붙어 영역을 더해도 남고, 세대가 바뀌거나 영역이 지워지면 함께 지워집니다.
+다시 읽습니다. 구간 기록은 대기열 항목이 아니라 영역과 그 세대에 붙어 영역을 더하거나 다른 영역을 지워도 남고, 세대가 바뀌거나 그 영역이 지워지면 함께 지워집니다.
+대기열 항목을 남길지는 "세대가 없는 영역이나 현재 세대의 구간 요청이 있는가" 한 판정으로 정하고, 사용자가 대기열에서 빼면 그 영상의 구간 요청도 버립니다.
 처리 한 번은 세대가 없는 영역 전체와 구간을 함께 읽고(`region_frames(..., start=, end=)`, 시각은 영상 기준), 구간 안의 줄만 새 줄로 바꿔
 새 줄만 번역합니다. 그 영상의 화면 자막 읽기가 대기·읽는 중이면 원문 줄 수정과 구간 요청을 막습니다(화면 번역 줄 수정은 코어에서 막지 않고
 검수 화면이 함께 막습니다). `onscreen_review_lines(region_id)`는 영역의 검수 줄을, `onscreen_subtitle_region_reviewed_line_count`는

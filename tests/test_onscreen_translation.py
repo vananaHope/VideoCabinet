@@ -957,3 +957,71 @@ def test_failed_region_is_read_again_together_with_a_range_request(screen):
     assert media.intervals == [(BAND, 20, 22), (extra, None, None)]
     finish(core)
     assert sorted(line.text for call in adapter.calls for line in call[0]) == ['Extra', 'Replaced']
+
+
+# R1: 구간 요청은 다른 영역을 지우거나 대기열에서 빼는 경로에서도 같은 규칙으로 남거나 사라진다.
+def test_deleting_another_region_keeps_the_requested_range(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    media.captions_by_region[BAND] = ((10, 12, 'Jon show'), (20, 22, 'Replaced'))
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    core.delete_onscreen_subtitle_region(top.region.id)
+    assert [e.state for e in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == ['queued']
+    media.intervals.clear()
+    adapter.calls.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(BAND, 20, 22)]
+    new_bottom, = core.onscreen_subtitles(video)
+    assert [l.text for l in new_bottom.lines] == ['Jon show', 'Replaced'] and new_bottom.lines[0] == bottom.lines[0]
+    finish(core)
+    assert [line.text for call in adapter.calls for line in call[0]] == ['Replaced']
+    assert translated(core, video) == {bottom.lines[0].id: '번역 Jon show', new_bottom.lines[1].id: '번역 Replaced'}
+
+
+def test_deleting_another_region_while_it_is_read_keeps_the_requested_range(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    extra = RegionRect(0, 0.4, 0.5, 0.2)
+    media.captions_by_region[extra] = ((50, 52, 'Extra'),)
+    media.captions_by_region[BAND] = ((10, 12, 'Jon show'), (20, 22, 'Replaced'))
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    core.add_onscreen_subtitle_region(video, extra, 'en')
+    added = core.onscreen_subtitle_regions(video)[2]
+
+    def delete_extra(index):
+        if index == 200:  # 구간을 읽은 뒤, 더한 영역을 읽는 도중(50초)
+            media.hook = None
+            core.delete_onscreen_subtitle_region(added.id)
+    media.hook = delete_extra
+    media.intervals.clear()
+    core.process_next_onscreen_subtitle()
+    assert media.intervals == [(BAND, 20, 22), (extra, None, None)]
+    assert core.onscreen_subtitles(video) == (bottom, top)  # 지우기 전 읽던 결과는 저장하지 않는다
+    assert [e.state for e in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == ['queued']
+    media.intervals.clear()
+    adapter.calls.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(BAND, 20, 22)]
+    assert [l.text for l in core.onscreen_subtitles(video)[0].lines] == ['Jon show', 'Replaced']
+    finish(core)
+    assert [line.text for call in adapter.calls for line in call[0]] == ['Replaced']
+
+
+def test_removing_the_queue_item_drops_the_range_request(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    media.captions_by_region[BAND] = ((20, 22, 'Replaced'),)
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    core.remove_from_subtitle_queue(video, kind=ONSCREEN_SUBTITLE)
+    assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+    # 나중에 다른 이유로 화면 자막을 다시 요청해도 버린 구간 요청은 되살아나지 않는다.
+    extra = RegionRect(0, 0.4, 0.5, 0.2)
+    media.captions_by_region[extra] = ((50, 52, 'Extra'),)
+    core.add_onscreen_subtitle_region(video, extra, 'en')
+    media.intervals.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(extra, None, None)]
+    assert core.onscreen_subtitles(video)[:2] == (bottom, top)

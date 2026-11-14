@@ -461,9 +461,9 @@ class OnScreenSubtitles:
                 guard(db)
             if not db.execute("DELETE FROM onscreen_subtitle_regions WHERE id = ?", (region_id,)).rowcount:
                 raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
-            waiting = db.execute("SELECT 1 FROM onscreen_subtitle_regions r WHERE r.video_id = ? AND NOT EXISTS "
-                                 "(SELECT 1 FROM onscreen_subtitles s WHERE s.region_id = r.id)", (video_id,)).fetchone()
-            if waiting:
+            # 남은 영역의 읽기(세대 없는 영역, 구간 요청)가 있으면 처리 기회를 남긴다. 지운 영역의 구간 요청은
+            # 그 영역과 함께 사라졌다.
+            if _pending_reads(db, video_id):
                 self._request(db, video_id, self._clock().isoformat())
             else:
                 db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, ONSCREEN_SUBTITLE))
@@ -541,9 +541,12 @@ class OnScreenSubtitles:
         return self._order.sort(entries)
 
     def remove(self, video_id: int) -> None:
+        """대기열에서 뺀다. 그 영상의 구간 요청도 버려, 나중에 다른 이유로 다시 요청할 때 되살아나지 않는다."""
         with self._activity:
             with self._connect() as db:
                 db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, ONSCREEN_SUBTITLE))
+                db.execute("DELETE FROM onscreen_subtitle_review_ranges WHERE region_id IN "
+                           "(SELECT id FROM onscreen_subtitle_regions WHERE video_id = ?)", (video_id,))
             if self._active_video == video_id and self._active_cancellation:
                 self._active_cancellation.set()
 
@@ -660,14 +663,9 @@ class OnScreenSubtitles:
         if self._frames is None or self._ocr is None:
             raise RuntimeError("화면 자막 어댑터가 설정되지 않았습니다.")
         with self._connect() as db:
-            generations = dict(db.execute("SELECT s.region_id, s.id FROM onscreen_subtitles s "
-                                          "JOIN onscreen_subtitle_regions r ON r.id = s.region_id WHERE r.video_id = ?",
-                                          (pending.video_id,)).fetchall())
-            ranges = {row["region_id"]: row for row in db.execute(
-                "SELECT rr.* FROM onscreen_subtitle_review_ranges rr "
-                "JOIN onscreen_subtitle_regions r ON r.id = rr.region_id WHERE r.video_id = ?", (pending.video_id,))}
-            work = tuple((region, ranges.get(region.id)) for region in self.regions(pending.video_id, connection=db)
-                         if region.id not in generations or region.id in ranges)
+            reads = _pending_reads(db, pending.video_id)
+            work = tuple((region, reads[region.id]) for region in self.regions(pending.video_id, connection=db)
+                         if region.id in reads)
         path = self._playback_location(pending.video_id).path
         result = []
         for index, (region, interval) in enumerate(work):
@@ -693,6 +691,20 @@ class OnScreenSubtitles:
                 lines = tuple((max(begin, s), min(finish, e), t) for s, e, t in lines if max(begin, s) < min(finish, e))
             result.append((region.id, interval, lines))
         return result
+
+
+def _pending_reads(db, video_id) -> dict:
+    """그 영상의 화면 자막 대기열 항목이 처리할 읽기: 영역 ID → 그 영역의 현재 세대에 붙은 구간 기록
+    (None이면 영역 전체). 세대가 없는 영역과 구간 요청이 있는 영역이다. 비어 있으면 대기열 항목을 남길 일이 없다.
+    대기열 항목을 남길지 정하는 곳과 처리가 읽을 것을 정하는 곳이 이 판정 하나를 쓴다."""
+    ranges = {row["region_id"]: row for row in db.execute(
+        "SELECT rr.* FROM onscreen_subtitle_review_ranges rr "
+        "JOIN onscreen_subtitles s ON s.id = rr.generation_id AND s.region_id = rr.region_id "
+        "JOIN onscreen_subtitle_regions r ON r.id = rr.region_id WHERE r.video_id = ?", (video_id,))}
+    return {row["id"]: ranges.get(row["id"]) for row in db.execute(
+        "SELECT r.id, s.id AS generation FROM onscreen_subtitle_regions r "
+        "LEFT JOIN onscreen_subtitles s ON s.region_id = r.id WHERE r.video_id = ? ORDER BY r.id", (video_id,))
+        if row["generation"] is None or row["id"] in ranges}
 
 
 def _replace_range(db, interval, lines) -> list[str]:
