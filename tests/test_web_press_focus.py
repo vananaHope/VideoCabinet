@@ -268,49 +268,115 @@ def make_highlights(window):
         core.playback.end()
 
 
-def test_pressing_an_edge_and_releasing_in_place_runs_that_element(window):
-    """누르는 동안 작아져도, 원래 영역 가장자리 안쪽 1px에서 누르고 같은 자리에서 놓으면 그 요소의 동작이 실행된다."""
-    make_highlights(window)
-    ready(window)
-    cases = []
-
-    def settings_category(edge):
+def pressable_cases(window):
+    """가장자리 시험 대상: (이름, 준비). 준비는 대상 선택자와 '그 요소의 동작이 실행됐는가'를 돌려준다."""
+    def settings_category():
         js(window, "document.querySelector('nav [data-tab=settings]').click()")
         wait_for(lambda: js(window, f"!!{shown('#settings-category [data-category=keys]')}"))
         js(window, "document.querySelector('#settings-category [data-category=general]').click()")
         wait_for(lambda: js(window, "document.querySelector('#settings-category [aria-current=true]')?.dataset.category") == 'general')
         return '#settings-category [data-category=keys]', lambda: js(window, "document.querySelector('#settings-category [aria-current=true]')?.dataset.category") == 'keys'
 
-    def video_card(edge):
+    def video_card():
         js(window, "document.querySelector('nav [data-tab=library]').click()")
         wait_for(lambda: js(window, f"!!{shown('#library-grid [role=gridcell][aria-selected=false]')}"))
         card = f'#{js(window, shown("#library-grid [role=gridcell][aria-selected=false]") + ".id")}'
         return card, lambda: js(window, f"document.querySelector('{card}').getAttribute('aria-selected')") == 'true'
 
-    def reel_row(edge):
+    def reel_row():
         js(window, "document.querySelector('nav [data-tab=reel]').click()")
         wait_for(lambda: js(window, f"!!{shown('#reel-list [role=option][aria-selected=false]')}"))
         row = f'#{js(window, shown("#reel-list [role=option][aria-selected=false]") + ".id")}'
         return row, lambda: js(window, f"document.querySelector('{row}').getAttribute('aria-selected')") == 'true'
 
-    def icon_button(edge):
+    def icon_button():
         js(window, "document.querySelector('nav [data-tab=library]').click()")
         wait_for(lambda: js(window, "!document.querySelector('[role=dialog]')"))
         return 'header [data-slot=button][data-size=icon-sm]', lambda: js(window, "!!document.querySelector('[role=dialog]')")
 
-    for name, prepare in (('설정 분류', settings_category), ('영상 카드', video_card), ('모아보기 행', reel_row), ('키 안내 아이콘 단추', icon_button)):
+    return (('설정 분류', settings_category), ('영상 카드', video_card), ('모아보기 행', reel_row), ('키 안내 아이콘 단추', icon_button))
+
+
+def undo(window, name, done):
+    """키 안내 대화상자가 열렸으면 닫아 다음 시도를 같은 상태에서 시작한다."""
+    if name == '키 안내 아이콘 단추' and done():
+        QTest.keyClick(view(window), Qt.Key.Key_Escape)
+        wait_for(lambda: js(window, "!document.querySelector('[role=dialog]')") and not window.web_host.dialogs.blocks_shell_actions)
+
+
+def outside_points(rect):
+    """요소의 왼쪽·오른쪽·위·아래 가장자리 바깥 2px(가로·세로 가운데)."""
+    left, top = rect['x'], rect['y']
+    right, bottom = left + rect['width'], top + rect['height']
+    middle_x, middle_y = math.floor(left + rect['width'] / 2), math.floor(top + rect['height'] / 2)
+    return {'왼쪽': QPoint(math.floor(left) - 2, middle_y), '오른쪽': QPoint(math.ceil(right) + 1, middle_y),
+            '위': QPoint(middle_x, math.floor(top) - 2), '아래': QPoint(middle_x, math.ceil(bottom) + 1)}
+
+
+def drag(window, start, end):
+    """start에서 누르고, 누른 채 end로 옮겨 end에서 놓는다."""
+    QTest.mouseMove(view(window), start)
+    settle(window)
+    QTest.mousePress(view(window), Qt.MouseButton.LeftButton, pos=start)
+    settle(window)
+    QTest.mouseMove(view(window), end)
+    settle(window)
+    QTest.mouseRelease(view(window), Qt.MouseButton.LeftButton, pos=end)
+    settle(window)
+
+
+def test_pressing_an_edge_and_releasing_in_place_runs_that_element(window):
+    """누르는 동안 작아져도, 원래 영역 가장자리 안쪽 1px에서 누르고 같은 자리에서 놓으면 그 요소의 동작이 실행된다."""
+    make_highlights(window)
+    ready(window)
+    cases = []
+    for name, prepare in pressable_cases(window):
         for edge in ('왼쪽', '오른쪽', '위', '아래'):
-            selector, done = prepare(edge)
+            selector, done = prepare()
             away(window)
             point = edge_points(rect_of(window, selector))[edge]
             assert js(window, f"document.elementFromPoint({point.x()}, {point.y()})?.closest({json.dumps(selector)}) === {shown(selector)}"), (name, edge)
             click_in_place(window, point)
             if not done():
                 cases.append((name, edge))
-            if name == '키 안내 아이콘 단추' and done():
-                QTest.keyClick(view(window), Qt.Key.Key_Escape)
-                wait_for(lambda: js(window, "!document.querySelector('[role=dialog]')") and not window.web_host.dialogs.blocks_shell_actions)
+            undo(window, name, done)
     assert cases == [], f'가장자리 클릭이 그 요소에 가지 않음: {cases}'
+
+
+def test_pressing_the_middle_and_releasing_anywhere_in_the_original_area_runs_that_element(window):
+    """가운데에서 누른 채 원래 영역 가장자리 안쪽 1px로 옮겨 놓으면 그 요소의 동작이 실행된다(누르는 동안 작아진 면과 무관)."""
+    make_highlights(window)
+    ready(window)
+    cases = []
+    for name, prepare in pressable_cases(window):
+        for edge in ('왼쪽', '오른쪽', '위', '아래'):
+            selector, done = prepare()
+            away(window)
+            rect = rect_of(window, selector)
+            drag(window, center(window, selector), edge_points(rect)[edge])
+            if not done():
+                cases.append((name, edge))
+            undo(window, name, done)
+    assert cases == [], f'원래 영역 안에서 놓은 클릭이 그 요소에 가지 않음: {cases}'
+
+
+def test_pressing_the_middle_and_releasing_outside_the_original_area_cancels(window):
+    """가운데에서 누른 채 원래 영역 바깥 2px로 옮겨 놓으면 지금처럼 취소되어 그 요소의 동작이 실행되지 않는다."""
+    make_highlights(window)
+    ready(window)
+    cases = []
+    for name, prepare in pressable_cases(window):
+        for side in ('왼쪽', '오른쪽', '위', '아래'):
+            selector, done = prepare()
+            away(window)
+            rect = rect_of(window, selector)
+            point = outside_points(rect)[side]
+            assert not js(window, f"document.elementFromPoint({point.x()}, {point.y()})?.closest({json.dumps(selector)})"), (name, side)
+            drag(window, center(window, selector), point)
+            if done():
+                cases.append((name, side))
+            undo(window, name, done)
+    assert cases == [], f'원래 영역 밖에서 놓았는데 동작이 실행됨: {cases}'
 
 
 def test_tag_picker_option_shows_its_keyboard_focus(window):

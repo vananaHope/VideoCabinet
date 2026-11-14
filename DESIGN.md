@@ -364,7 +364,7 @@ components:
 - **Quick** (`motion-duration-quick`, 100ms): 단추·탭·카드·입력란의 hover 색 전환(`transition-colors`)과 탭 내용 전환(`animate-tab-enter`).
 - **Enter** (`motion-duration-enter`, 150ms): 떠 있는 층과 안내가 열릴 때. 대화상자·경고 대화상자·키 안내·덮개와 안내(Notice)는 투명도만(`animate-fade-enter`), 메뉴·우클릭 메뉴·선택 목록·필터 팝오버는 투명도와 트리거 쪽에서 커지는 작은 크기 변화(`animate-layer-enter`, `motion-enter-scale` 0.97).
 - **곡선** (`motion-ease`): `cubic-bezier(0.23, 1, 0.32, 1)`. 처음에 빨리 다가와 바로 반응한 느낌을 준다.
-- **Press** (`motion-enter-scale`, 0.97): 누르는 동안(`:active`) 모든 조작 요소(단추·탭·설정 분류·카드·목록 행·메뉴 항목)가 이 크기로 작아진다. `index.css`의 전역 규칙 하나가 맡고, 색·면은 올림과 같으며 비활성 요소는 작아지지 않는다. 전환 없이 바로 바뀐다. 줄어드는 기준점은 누른 자리(`lib/press-origin.ts`, 키보드로 누르면 가운데)라 원래 영역 가장자리에서 누르고 같은 자리에서 놓아도 그 요소가 click을 받는다.
+- **Press** (`motion-enter-scale`, 0.97): 누르는 동안(`:active`) 모든 조작 요소(단추·탭·설정 분류·카드·목록 행·메뉴 항목)가 이 크기로 작아진다. `index.css`의 전역 규칙 하나가 맡고, 색·면은 올림과 같으며 비활성 요소는 작아지지 않는다. 전환 없이 바로 바뀐다. 줄어드는 기준점은 누르고 있는 동안의 포인터 자리(`lib/press-origin.ts`, 키보드로 누르면 가운데)라, 누른 채 원래 영역 안 어디로 옮겨 놓아도 그 요소가 click을 받고 영역 밖에서 놓으면 취소된다. 끄는 동안 면이 포인터 쪽으로 최대 1.5%까지 따라 움직인다.
 
 **The Instant Close Rule.** 열 때만 전환하고 닫힘은 즉시다. 닫히는 층이 초점 가두기·포인터 차단으로 다음 입력을 막지 않는다. 열리는 도중에도 키·클릭은 바로 새 화면이 받는다.
 
