@@ -913,7 +913,7 @@ GIF·정지 이미지 형식과 단일 프레임, 첨부 그림은 새 영상으
 전체 검사 때 정리합니다. `reconnected` 안내는 검사 시작 때 이미 파일 없음이던 영상에만 적용됩니다.
 인자 없는 `scan()`은 감시 폴더 전체와 직접 추가한 위치를 지금처럼 검사합니다.
 전체/지정 폴더 검사는 자동 자막 규칙 조회부터 후처리까지 앱 코어의 잠금으로 직렬 실행합니다.
-기존 DB는 최초 실행 때 라이브러리 테이블을 v9로 이전합니다(`PRAGMA user_version = 9`).
+기존 DB는 최초 실행 때 라이브러리 테이블을 v10으로 이전합니다(`PRAGMA user_version = 10`).
 영상 ID와 다른 기능 테이블은 그대로 유지하며, 이전 위치는 첫 검사에서 캐시 정보를 채웁니다.
 이전 직전에는 원래 버전 DB의 자동 백업을 남깁니다. v3은 가로·세로 및 해상도 확인 상태 열을,
 v4는 번역 작업의 용어집과 최근 사용 순서를 저장하는 테이블을 추가합니다.
@@ -949,7 +949,19 @@ v9는 `translation_glossary`를 작업 ID에서 영상 ID 단위로 옮기고 `o
 `AppCore.onscreen_translation_skip_reason(video_id)`는 모든 영역의 읽기가 끝났고 줄 합이 0이면
 `no_onscreen_text`를 반환합니다. 영구 제외 기록을 남기지 않아 영역을 다시 읽으면 다시 등록됩니다.
 `edit_onscreen_translation_line(line_id, text)`는 사용자 수정본을 저장하고 진행 중 응답과 재번역으로부터 보호합니다.
-`onscreen_translation_reviewed_lines(video_id)`는 보호된 줄 ID를 반환합니다. 편집 화면은 후속 #285 범위입니다.
+`onscreen_translation_reviewed_lines(video_id)`는 보호된 줄 ID를 반환합니다.
+v10은 `onscreen_translation_reviews`에 `original_reviewed`(화면 자막 원문 검수됨) 열을, 화면 자막 구간 요청
+`onscreen_subtitle_review_ranges(region_id, generation_id, start, end)`를 더합니다. 보호는 계속 `translation_reviewed=1`만입니다.
+`edit_onscreen_subtitle_line(line_id, text, overwrite_reviewed=False)`는 원문을 화면 자막 읽기와 같은 정규화로 고쳐 원문 검수됨으로
+남기고 그 줄의 화면 번역만 다시 요청합니다. 직접 고친 화면 번역이 있으면 `ReviewConfirmationRequired`로 확인을 받고,
+확인하면 보호를 풀어 다시 번역합니다. 읽지 못한(실패한) 영역이 남아 있으면 화면 번역을 요청할 수 없어 거부합니다.
+`request_onscreen_subtitle_range(region_id, start, end)`·`onscreen_subtitle_range_bounds`는 그 영역의 줄 경계까지 넓힌 구간만
+다시 읽습니다. 구간 기록은 대기열 항목이 아니라 영역과 그 세대에 붙어 영역을 더하거나 다른 영역을 지워도 남고, 세대가 바뀌거나 그 영역이 지워지면 함께 지워집니다.
+대기열 항목을 남길지는 "세대가 없는 영역이나 현재 세대의 구간 요청이 있는가" 한 판정으로 정하고, 사용자가 대기열에서 빼면 그 영상의 구간 요청도 버립니다.
+처리 한 번은 세대가 없는 영역 전체와 구간을 함께 읽고(`region_frames(..., start=, end=)`, 시각은 영상 기준), 구간 안의 줄만 새 줄로 바꿔
+새 줄만 번역합니다. 그 영상의 화면 자막 읽기가 대기·읽는 중이면 원문 줄 수정과 구간 요청을 막습니다(화면 번역 줄 수정은 코어에서 막지 않고
+검수 화면이 함께 막습니다). `onscreen_review_lines(region_id)`는 영역의 검수 줄을, `onscreen_subtitle_region_reviewed_line_count`는
+원문·번역을 고친 줄을 한 줄에 한 번 셉니다. 검수 화면은 읽기를 마친 영역이 있을 때만 받아쓰기 자막과 영역(번호·읽을 언어)을 고르게 합니다.
 새 등록과 파일 변경 검사 때 ffprobe의 첫 일반 영상 스트림 크기를 저장하며 display matrix와
 구형 rotate 태그의 90/270도 회전을 반영합니다. 해상도 미확인 기존 영상은 유휴 시간에
 한 번에 한 개씩 약 1초 간격으로 읽습니다. 재생·받아쓰기·검사가 시작되면 채우기를 취소하고,

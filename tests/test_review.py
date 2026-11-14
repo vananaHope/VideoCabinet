@@ -1001,3 +1001,16 @@ def test_missing_onscreen_exports_are_rejected_and_not_offered(screen):
     read_screen(core, media, a.id, captions=((40, 42, "New caption"),))  # 다시 만든 화면 자막은 번역 전이다.
     assert core.onscreen_export_available(a.id)
     rejected(a.id, True, "내보낼 자막 줄이 없습니다")
+
+
+def test_review_jump_accepts_onscreen_lines_of_that_video_only(screen):
+    core, media, *_ = screen
+    video, other = (v.id for v in core.videos())
+    lines = read_screen(core, media, video)
+    assert core.review_line_position(video, lines[1].id) == 20
+    for video_id, line_id in ((other, lines[1].id), (video, 'unknown')):
+        with pytest.raises(ValueError):
+            core.review_line_position(video_id, line_id)
+    target = core.play_review_line(video, lines[2].id)
+    assert (target.video_id, target.start, target.action) == (video, 30, 'play')
+    assert core.play_review_line(video, lines[0].id).action == 'seek'

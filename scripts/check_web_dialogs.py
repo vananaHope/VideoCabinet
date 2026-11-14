@@ -72,8 +72,8 @@ class Media:
     def read(self, path):
         return MediaInfo(100, 'matroska')
 
-    def region_frames(self, path, region, *, fps, cancellation):
-        for index in range(round(100 * fps)):
+    def region_frames(self, path, region, *, fps, cancellation, start=None, end=None):
+        for index in range(round((start or 0) * fps), round((100 if end is None else end) * fps)):
             seconds = index / fps
             yield seconds, region_image(next((t for start, end, t in self.captions if start <= seconds < end), ''))
 
@@ -355,6 +355,133 @@ def onscreen_region_edits():
     metrics['checks'].append('화면 자막 영역 고치기·지우기(검수로 고친 줄 0·3·9,999·긴 제목/언어) 컨테이너 촬영, 지우기 취소 무변경')
 
 
+def onscreen_review():
+    """#285 검수 화면의 화면 자막. 자막 종류·영역 고르기, 화면 자막 줄 목록, 원문·화면 번역 줄 수정, 덮어쓰기 확인 창,
+    화면 자막 구간 다시 생성을 화면 자막 없음(none)·적음(few: 영역 하나 두 줄, 원어 자막 없음)·
+    최대와 긴 텍스트(max: 영역 둘, 긴 줄 30개씩, 모두 직접 고친 화면 번역)로 찍는다. 끝 단추가 틀 밖으로 넘치지 않는다."""
+    proxy = window.web_host.view.focusProxy()
+    # 읽기 대기 중 잠금을 찍는 동안 화면 자막 작업자가 먼저 처리하지 않게 멈추고, 처리는 직접 부른다.
+    window.onscreen_subtitles.timer.stop()
+
+    def frame_overflow():
+        return json.loads(js("""(() => {
+          const content = Array.from(document.querySelectorAll('[role=dialog], [role=alertdialog]')).filter(e => e.getClientRects().length).at(-1)
+          const frame = content.getBoundingClientRect()
+          const outside = Array.from(content.querySelectorAll('button, [role=combobox]')).filter(e => e.getClientRects().length).some(e => {
+            const box = e.getBoundingClientRect(); return box.left < frame.left || box.right > frame.right || box.bottom > frame.bottom })
+          return JSON.stringify(content.scrollWidth > content.clientWidth || outside)
+        })()"""))
+
+    def dialog_text():
+        return js("Array.from(document.querySelectorAll('[role=dialog], [role=alertdialog]')).filter(e => e.getClientRects().length).at(-1).innerText")
+
+    def confirm_cancel():
+        js("Array.from(document.querySelectorAll('[role=alertdialog] button')).find(b => b.textContent === '취소').click()")
+        wait(lambda: not current()['confirmation'] and not js("!!document.querySelector('[role=alertdialog]')"))
+        settle()
+
+    def choose(steps, name):
+        """검수할 자막 고르기를 키보드로 열어 찍고, 지금 항목에서 steps칸 아래 항목을 Enter로 고른다."""
+        js("document.querySelector('[aria-label=\"검수할 자막\"]').focus()")
+        QTest.keyClick(proxy, Qt.Key.Key_Down)
+        wait(lambda: js("document.querySelectorAll('[data-slot=select-item]').length") == len(current()['choices']))
+        settle(200)
+        capture(f'review-onscreen-choices-{name}')
+        before = current()['values']['choice']
+        # offscreen 문서는 창 포커스가 없어 :focus가 맞지 않는다. 키를 받는 activeElement로 커서를 본다.
+        focused = "document.activeElement?.closest('[data-slot=select-item]')?.dataset.value ?? null"
+        # Radix Select는 ↓로 열면 지금 값에 커서를 둔다. 키마다 커서가 옮겨진 뒤 다음 키를 보낸다.
+        wait(lambda: js(focused) == before)
+        choices = [c['id'] for c in current()['choices']]
+        for step in range(1, steps + 1):
+            QTest.keyClick(proxy, Qt.Key.Key_Down)
+            wait(lambda: js(focused) == choices[choices.index(before) + step])
+        QTest.keyClick(proxy, Qt.Key.Key_Return)
+        wait(lambda: not js("!!document.querySelector('[data-slot=select-content]')") and current()['values']['choice'] != before)
+        settle()
+
+    def none_check():
+        assert current()['choices'] == [] and not js("!!document.querySelector('[aria-label=\"검수할 자막\"]')")
+        assert '원어 SRT 저장' in dialog_text()
+        capture('review-onscreen-choices-none')
+    web_modal('review', dict(video_id=video.id, jump=window.review_jump, changed=window.review_changed), none_check)
+
+    def few_check():
+        data = current()
+        assert [c['title'] for c in data['choices']] == ['받아쓰기 자막 · 원어 · 번역 자막', '화면 자막 영역 1 · 영어(en) · 2줄']
+        assert data['rows'] == []
+        choose(1, 'few')
+        data = current()
+        assert data['task_kind'] == 'onscreen_translation' and [r['title'] for r in data['rows']] == ['Corner title', 'Next scene']
+        text = dialog_text()
+        assert '원문 · 화면 번역 자막 · 2' in text and '전체 다시 생성' not in text and '원어 SRT 저장' not in text
+        assert not frame_overflow()
+        footer_layout('review-onscreen-lines-few')
+        capture('review-onscreen-lines-few')
+        click('원문 줄 수정')
+        assert current()['title'] == '원문 줄 수정' and current()['values']['text'] == 'Corner title'
+        capture('onscreen-line-original-few')
+        click('취소')
+        click('화면 번역 줄 수정')
+        assert current()['title'] == '화면 번역 줄 수정'
+        capture('onscreen-line-translation-few')
+        click('취소')
+        click('구간 다시 생성')
+        assert current()['title'] == '구간 화면 자막 다시 생성'
+        assert '실제로 다시 읽을 범위: 5.000–8.000초' in dialog_text()
+        capture('onscreen-range-few')
+        click('다시 생성')
+        wait(lambda: current()['kind'] == 'review' and current()['locked'])
+        assert '화면 자막 읽기 대기·진행 중' in dialog_text()
+        assert js("Array.from(document.querySelectorAll('[role=dialog] button')).filter(b => ['원문 줄 수정', '화면 번역 줄 수정', '구간 다시 생성'].includes(b.textContent)).every(b => b.disabled)")
+        capture('review-onscreen-locked-few')
+        assert core.process_next_onscreen_subtitle().state == 'completed'
+        wait(lambda: not current()['locked'])
+    web_modal('review', dict(video_id=onscreen_few.id, jump=window.review_jump, changed=window.review_changed), few_check)
+
+    def max_check():
+        data = current()
+        assert [c['title'] for c in data['choices']] == [
+            f'받아쓰기 자막 · 원어 · 다듬은 자막', '화면 자막 영역 1 · 영어(en) · 30줄', '화면 자막 영역 2 · 영어(en) · 30줄']
+        choose(2, 'max')
+        data = current()
+        assert data['values']['choice'] == data['choices'][2]['id'] and len(data['rows']) == 30
+        assert all(r['status'] == '직접 수정' for r in data['rows'])
+        assert not frame_overflow()
+        footer_layout('review-onscreen-lines-max')
+        capture('review-onscreen-lines-max')
+        js("document.querySelector('[data-dialog-list]').scrollTop = 100000")
+        capture('review-onscreen-lines-max-end')
+        click('원문 줄 수정')
+        assert current()['values']['text'].startswith('00 Long on-screen caption')
+        capture('onscreen-line-original-max')
+        js("""(() => { const e = document.querySelector('[role=dialog] textarea');
+          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(e, '고친 원문 ' + e.value);
+          e.dispatchEvent(new Event('input', {bubbles: true})); })()""")
+        settle()
+        click('저장')
+        wait(lambda: bool(current()['confirmation']))
+        assert '직접 고친 번역이 덮어써집니다' in current()['confirmation'] and not current()['keep_reviewed']
+        assert js("!!document.querySelector('[role=alertdialog]')")
+        capture('onscreen-overwrite-confirm-max')
+        confirm_cancel()
+        click('취소')
+        click('화면 번역 줄 수정')
+        assert current()['values']['text'].startswith('화면 번역 00 Long')
+        capture('onscreen-line-translation-max')
+        click('취소')
+        click('구간 다시 생성')
+        capture('onscreen-range-max')
+        click('취소')
+        assert not current()['locked'] and current()['kind'] == 'review'
+    before = core.onscreen_subtitles(onscreen_max.id)
+    web_modal('review', dict(video_id=onscreen_max.id, jump=window.review_jump, changed=window.review_changed), max_check)
+    assert core.onscreen_subtitles(onscreen_max.id) == before  # 취소는 아무것도 바꾸지 않는다
+    window.onscreen_subtitles.timer.start(500)
+    metrics['checks'].append('검수 화면 자막: 자막 고르기·영역 줄 목록·원문/화면 번역 줄 수정·덮어쓰기 확인·구간 다시 생성·'
+                             '읽기 중 잠금(없음·적음·최대/긴 텍스트) 촬영, 끝 단추 넘침 검사, 취소 무변경')
+
+
 def native_save_cancel():
     """QFileDialog가 만든 Windows 기본 창을 확인하고 취소한다. 파일은 쓰지 않는다."""
     found = []
@@ -536,6 +663,7 @@ try:
         context = dict(video_id=target.id, jump=window.review_jump, changed=window.review_changed)
         web_modal('review', context, onscreen_exports)
     metrics['checks'].append('검수 화면 자막·화면 번역 SRT 저장 단추(0개·적음·최대) 촬영과 끝 단추 넘침 검사')
+    onscreen_review()
     core.request_subtitle_range(video.id, 0, .5)
     def locked_check():
         capture('review-locked')

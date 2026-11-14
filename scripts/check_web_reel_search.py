@@ -74,8 +74,8 @@ class OnScreenMedia(Media):
     def read(self, path):
         return MediaInfo(120, 'mp4')
 
-    def region_frames(self, path, region, *, fps, cancellation):
-        for index in range(round(120 * fps)):
+    def region_frames(self, path, region, *, fps, cancellation, start=None, end=None):
+        for index in range(round((start or 0) * fps), round((120 if end is None else end) * fps)):
             seconds = index / fps
             text = next((t for start, end, t in self.captions if start <= seconds < end), '')
             pixels = hashlib.shake_256(text.encode()).digest(64) if text else bytes(64)

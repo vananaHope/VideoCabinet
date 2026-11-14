@@ -32,7 +32,10 @@ def frozen_database(database, version, *, copy_from=None):
             columns = ', '.join('"' + row[1] + '"' for row in db.execute(f'PRAGMA main.table_info("{name}")'))
             if kind == 'virtual':
                 columns = 'rowid, ' + columns
-            if name == 'translation_glossary' and any(
+            # v9부터 고정 DDL에도 화면 번역 출처와 영상 단위 용어집이 있어 그대로 옮긴다.
+            if version >= 9:
+                db.execute(f'INSERT INTO main."{name}" ({columns}) SELECT {columns} FROM original."{name}"')
+            elif name == 'translation_glossary' and any(
                     row[1] == 'video_id' for row in db.execute('PRAGMA original.table_info(translation_glossary)')):
                 db.execute('INSERT INTO main.translation_glossary SELECT q.id, g.source, g.target, g.ordinal '
                            "FROM original.translation_glossary g JOIN original.translation_queue q ON q.video_id=g.video_id WHERE q.source='transcript'")

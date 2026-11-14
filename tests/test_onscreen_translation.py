@@ -1,7 +1,9 @@
 """실제 임시 DB와 가짜 OCR·번역 주체로 화면 번역의 공개 동작을 검증한다."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import timedelta
 import json
+import sqlite3
 from threading import Event
 
 import pytest
@@ -10,7 +12,8 @@ from legacy_schema import replace_with_frozen
 from my_video_manager.core import AppCore
 from my_video_manager.library import LIBRARY_DB_VERSION
 from my_video_manager.onscreen_translation import onscreen_generation_token
-from my_video_manager.onscreen_subtitles import RegionRect
+from my_video_manager.onscreen_subtitles import OnScreenRegionChanged, RegionRect
+from my_video_manager.review import ReviewConfirmationRequired
 from my_video_manager.secret_store import SecretStore
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION
@@ -502,7 +505,7 @@ def test_v9_migration_failure_rolls_back_and_preserves_backup(screen):
     assert restored.translation_queue()[0].source == ONSCREEN
 
 
-@pytest.mark.parametrize('version', [7, 8, 9])
+@pytest.mark.parametrize('version', [7, 8, 9, 10])
 def test_upgrade_backup_restore_keeps_onscreen_results_protection_progress_and_video_glossary(screen, tmp_path, version):
     core, media, adapter, _, _, _, _, reopen = screen
     a, b = core.videos()
@@ -514,16 +517,16 @@ def test_upgrade_backup_restore_keeps_onscreen_results_protection_progress_and_v
     core.edit_onscreen_translation_line(first, '보호된 번역')
     read_screen(core, media, b.id)
     core.process_next_translation()
-    if version < 9:
-        # 고정된 이전 버전 DDL에는 화면 번역·보호·영상 용어집이 아직 없다.
+    if version < LIBRARY_DB_VERSION:
+        # 고정된 이전 버전 DDL에는 화면 번역·보호·영상 용어집(v9), 원문 검수·구간 요청(v10)이 아직 없다.
         replace_with_frozen(core.database, version)
     archive = core.create_backup(tmp_path / f'v{version}.zip')
     assert archive.metadata.db_version == version
     upgraded = reopen()
-    assert upgraded.create_backup(tmp_path / 'upgraded.zip').metadata.db_version == LIBRARY_DB_VERSION == 9
-    if version < 9:
+    assert upgraded.create_backup(tmp_path / 'upgraded.zip').metadata.db_version == LIBRARY_DB_VERSION == 10
+    if version < LIBRARY_DB_VERSION:
         assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == version
-    else:
+    if version >= 9:
         assert upgraded.translation(a.id, source=ONSCREEN).lines[0].text == '보호된 번역'
         assert upgraded.onscreen_translation_reviewed_lines(a.id) == {first}
         assert upgraded.translation_queue()[0].completed_lines == 2
@@ -534,7 +537,7 @@ def test_upgrade_backup_restore_keeps_onscreen_results_protection_progress_and_v
     restored = reopen()
     assert (restored.translation(a.id), restored.onscreen_subtitles(a.id),
             restored.translation(a.id, source=ONSCREEN), restored.translation_line_providers(a.id, source=ONSCREEN)) == expected
-    if version == 9:
+    if version >= 9:
         finish(restored)
         assert adapter.calls[-1][2]['glossary'] == (GlossaryEntry('Jon', '존'),)
 
@@ -644,3 +647,381 @@ def test_deleting_a_region_mid_translation_finishes_only_the_remaining_lines(scr
     sent = {line.text for call in adapter.calls for line in call[0]}
     assert 'Corner' not in sent
     assert set(translated(core, video)) == {line.id for line in bottom.lines}
+
+
+# #285 검수: 화면 자막 원문 줄 고치기. 원문 검수됨으로 남고 그 줄의 화면 번역만 다시 번역한다.
+def review_flags(core, video):
+    """줄 ID → (원문, 화면 번역, 원문 검수됨, 직접 수정). 영역마다 검수 화면이 보는 줄."""
+    return {line.original.id: (line.original.text, line.translation, line.original_reviewed, line.translation_reviewed)
+            for subtitle in core.onscreen_subtitles(video) for line in core.onscreen_review_lines(subtitle.region.id)}
+
+
+def test_editing_an_onscreen_line_retranslates_only_that_line_and_survives_restart(screen):
+    core, media, adapter, *_, reopen = screen
+    video, other = (v.id for v in core.videos())
+    bottom, top = read_two_regions(core, media, video)
+    elsewhere = read_two_regions(core, media, other)
+    finish(core)
+    core.edit_onscreen_translation_line(top.lines[0].id, '고친 코너')
+    before, untouched = review_flags(core, video), review_flags(core, other)
+    adapter.calls.clear()
+    edited = bottom.lines[1]
+    core.edit_onscreen_subtitle_line(edited.id, '  Next   scene \r\n\n second ')
+    # 원문은 화면 자막 읽기와 같은 정규화로 저장된다. 줄 ID와 시각은 그대로다.
+    changed = {**before, edited.id: ('Next scene\nsecond', '번역 Next', True, False)}
+    assert review_flags(core, video) == changed
+    new_bottom, new_top = core.onscreen_subtitles(video)
+    assert new_top == top and [(l.id, l.start, l.end) for l in new_bottom.lines] == [
+        (l.id, l.start, l.end) for l in bottom.lines]
+    finish(core)
+    assert [[line.text for line in call[0]] for call in adapter.calls] == [['Next scene\nsecond']]
+    changed[edited.id] = ('Next scene\nsecond', '번역 Next scene\nsecond', True, False)
+    assert review_flags(core, video) == changed
+    assert core.onscreen_translation_reviewed_lines(video) == {top.lines[0].id}
+    assert review_flags(core, other) == untouched and core.onscreen_subtitles(other) == elsewhere
+    reopened = reopen()
+    assert review_flags(reopened, video) == changed
+    assert reopened.onscreen_subtitles(video)[0].lines[1].text == 'Next scene\nsecond'
+
+
+def test_unchanged_or_invalid_onscreen_line_edit_changes_nothing(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, _ = read_two_regions(core, media, video)
+    finish(core)
+    before, calls = review_flags(core, video), len(adapter.calls)
+    core.edit_onscreen_subtitle_line(bottom.lines[0].id, ' Jon   show ')  # 정규화하면 같은 글자
+    for line_id, text in ((bottom.lines[0].id, ' \n '), ('없는 줄', '글자')):
+        with pytest.raises(ValueError):
+            core.edit_onscreen_subtitle_line(line_id, text)
+    assert review_flags(core, video) == before
+    assert core.translation_queue() == () and len(adapter.calls) == calls
+
+
+def test_onscreen_line_edit_is_locked_while_that_video_is_read(screen):
+    core, media, adapter, *_ = screen
+    video, other = (v.id for v in core.videos())
+    bottom, _ = read_two_regions(core, media, video)
+    read_two_regions(core, media, other)
+    finish(core)
+    core.add_onscreen_subtitle_region(video, RegionRect(0, 0.4, 0.5, 0.2), 'en')  # 그 영상의 화면 자막 읽기 대기
+    before = review_flags(core, video)
+    with pytest.raises(ValueError, match='읽기가 끝난 뒤 검수'):
+        core.edit_onscreen_subtitle_line(bottom.lines[0].id, 'Locked')
+    assert review_flags(core, video) == before
+    # 다른 영상은 잠기지 않고, 화면 번역 줄 수정은 코어에서 지금처럼 잠그지 않는다.
+    core.edit_onscreen_subtitle_line(core.onscreen_subtitles(other)[0].lines[0].id, 'Free')
+    core.edit_onscreen_translation_line(bottom.lines[0].id, '고친 번역')
+    assert core.onscreen_translation_reviewed_lines(video) == {bottom.lines[0].id}
+
+
+def test_onscreen_line_edit_is_refused_while_another_region_failed_to_read(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, _ = read_two_regions(core, media, video)
+    finish(core)
+    media.error_at = 0
+    core.add_onscreen_subtitle_region(video, RegionRect(0, 0.4, 0.5, 0.2), 'en')
+    assert core.process_next_onscreen_subtitle().state == 'failed'
+    before = review_flags(core, video)
+    # 실패한 영역의 읽기가 끝나기 전에는 화면 번역을 요청할 수 없어 고친 줄이 다시 번역되지 못한다.
+    with pytest.raises(ValueError, match='다시 시도'):
+        core.edit_onscreen_subtitle_line(bottom.lines[0].id, 'Waiting')
+    assert review_flags(core, video) == before
+
+
+def test_region_reviewed_count_counts_original_and_translation_edits_once_per_line(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    core.edit_onscreen_subtitle_line(bottom.lines[0].id, 'Jon shows')
+    core.edit_onscreen_translation_line(bottom.lines[0].id, '존 쇼')
+    core.edit_onscreen_subtitle_line(bottom.lines[1].id, 'Next one')
+    core.edit_onscreen_subtitle_line(top.lines[0].id, 'Corner!')
+    count = core.onscreen_subtitle_region_reviewed_line_count
+    assert [count(bottom.region.id), count(top.region.id)] == [2, 1]
+    # 원문만 고친 줄은 보호된 번역이 아니다. 다시 번역되어 새 원문의 번역이 된다.
+    assert core.onscreen_translation_reviewed_lines(video) == {bottom.lines[0].id}
+    finish(core)
+    assert translated(core, video) == {bottom.lines[0].id: '존 쇼', bottom.lines[1].id: '번역 Next one',
+                                       top.lines[0].id: '번역 Corner!'}
+    with pytest.raises(OnScreenRegionChanged):
+        core.delete_onscreen_subtitle_region(top.region.id, expected_reviewed_line_count=0)
+    core.delete_onscreen_subtitle_region(top.region.id, expected_reviewed_line_count=1)
+
+
+def test_v9_library_upgrades_keeping_onscreen_lines_translations_and_reviews(screen):
+    core, media, adapter, *_, reopen = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    core.edit_onscreen_translation_line(top.lines[0].id, '고친 코너')
+    expected = (core.onscreen_subtitles(video), core.translation(video, source=ONSCREEN),
+                core.translation_line_providers(video, source=ONSCREEN), core.onscreen_translation_reviewed_lines(video))
+    replace_with_frozen(core.database, 9)
+    upgraded = reopen()
+    with closing(sqlite3.connect(core.database)) as db:
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION == 10
+    assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == 9
+    assert (upgraded.onscreen_subtitles(video), upgraded.translation(video, source=ONSCREEN),
+            upgraded.translation_line_providers(video, source=ONSCREEN),
+            upgraded.onscreen_translation_reviewed_lines(video)) == expected
+    assert [upgraded.onscreen_subtitle_region_reviewed_line_count(s.region.id) for s in expected[0]] == [0, 1]
+    assert not any(flags[2] for flags in review_flags(upgraded, video).values())
+    upgraded.edit_onscreen_subtitle_line(bottom.lines[0].id, 'Jon shows')
+    assert review_flags(upgraded, video)[bottom.lines[0].id][2]
+
+
+def test_editing_original_of_a_hand_fixed_translation_asks_and_cancel_changes_nothing(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, _ = read_two_regions(core, media, video)
+    assert core.process_next_translation().completed_lines == 2  # 세 줄 중 한 줄은 아직 번역 대기
+    line = bottom.lines[0]
+    core.edit_onscreen_translation_line(line.id, '직접 고친 번역')
+    before = (review_flags(core, video), core.translation_queue(), core.onscreen_translation_reviewed_lines(video),
+              core.translation_line_providers(video, source=ONSCREEN))
+    with pytest.raises(ReviewConfirmationRequired, match='덮어'):
+        core.edit_onscreen_subtitle_line(line.id, 'Jon shows')
+    assert (review_flags(core, video), core.translation_queue(), core.onscreen_translation_reviewed_lines(video),
+            core.translation_line_providers(video, source=ONSCREEN)) == before
+    # 확인하면 그 줄의 보호가 풀리고 새 원문으로 다시 번역된다.
+    core.edit_onscreen_subtitle_line(line.id, 'Jon shows', overwrite_reviewed=True)
+    assert core.onscreen_translation_reviewed_lines(video) == frozenset()
+    assert review_flags(core, video)[line.id] == ('Jon shows', '직접 고친 번역', True, False)
+    adapter.calls.clear()
+    finish(core)
+    assert sorted(line.text for call in adapter.calls for line in call[0]) == ['Jon shows', 'Next']
+    assert review_flags(core, video)[line.id] == ('Jon shows', '번역 Jon shows', True, False)
+
+
+def test_hand_fixed_onscreen_translation_survives_every_retranslation(screen):
+    core, media, adapter, *_, reopen = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    kept = bottom.lines[0]
+    core.edit_onscreen_translation_line(kept.id, '고친 번역')
+    assert core.request_translation(video, source=ONSCREEN) is None  # 그 영상 화면 번역 재요청
+    assert core.request_translation(video, [kept.id], source=ONSCREEN) is None
+    core.edit_onscreen_subtitle_line(bottom.lines[1].id, 'Next one')  # 다른 줄 원문 수정
+    core.edit_onscreen_subtitle_line(top.lines[0].id, 'Corner!')
+    adapter.calls.clear()
+    finish(core)
+    assert sorted(line.text for call in adapter.calls for line in call[0]) == ['Corner!', 'Next one']
+    assert translated(core, video) == {kept.id: '고친 번역', bottom.lines[1].id: '번역 Next one',
+                                       top.lines[0].id: '번역 Corner!'}
+    assert reopen().onscreen_translation_reviewed_lines(video) == {kept.id}
+
+
+def three_line_regions(core, media, video):
+    """아래 영역 두 줄(Jon show 10–12, Next 20–22), 위 영역 한 줄(Corner 5–7). 번역까지 끝낸다."""
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    return bottom, top
+
+
+def test_range_regeneration_rereads_only_the_widened_interval_and_translates_only_new_lines(screen):
+    core, media, adapter, *_, reopen = screen
+    video = core.videos()[0].id
+    media.captions_by_region = {BAND: ((10, 12, 'Jon show'), (20, 22, 'Next'), (30, 32, 'End')),
+                                TOP: ((5, 7, 'Corner'), (21, 23, 'Top next'))}
+    core.add_onscreen_subtitle_region(video, BAND, 'en')
+    core.add_onscreen_subtitle_region(video, TOP, 'ja')
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    finish(core)
+    bottom, top = core.onscreen_subtitles(video)
+    first, inside, last = bottom.lines
+    core.edit_onscreen_translation_line(first.id, '고친 첫 줄')  # 구간 밖 직접 수정
+    core.edit_onscreen_subtitle_line(last.id, 'The End')  # 구간 밖 원문 수정
+    core.edit_onscreen_translation_line(inside.id, '사라질 수정')  # 구간 안의 검수 기록은 줄과 함께 사라진다
+    finish(core)
+    kept = {line_id: flags for line_id, flags in review_flags(core, video).items() if line_id != inside.id}
+    assert core.onscreen_subtitle_region_reviewed_line_count(bottom.region.id) == 3
+    media.captions_by_region[BAND] = ((10, 12, 'Jon show'), (20, 21, 'New one'), (21, 22, 'New two'), (30, 32, 'End'))
+    media.captions_by_region[TOP] = ((5, 7, 'Changed corner'),)  # 다른 영역은 다시 읽지 않는다
+    media.intervals.clear()
+    entry = core.request_onscreen_subtitle_range(bottom.region.id, 20.5, 21.5)
+    assert (entry.state, entry.queue_kind) == ('queued', ONSCREEN_SUBTITLE)
+    adapter.calls.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(BAND, 20, 22)]
+    new_bottom, new_top = core.onscreen_subtitles(video)
+    assert new_top == top and new_bottom.id == bottom.id
+    assert [(l.start, l.end, l.text) for l in new_bottom.lines] == [
+        (10, 12, 'Jon show'), (20, 21, 'New one'), (21, 22, 'New two'), (30, 32, 'The End')]
+    assert (new_bottom.lines[0].id, new_bottom.lines[3].id) == (first.id, last.id)
+    new_ids = {new_bottom.lines[1].id, new_bottom.lines[2].id}
+    assert not new_ids & {line.id for line in bottom.lines}
+    assert core.onscreen_subtitle_region_reviewed_line_count(bottom.region.id) == 2
+    finish(core)
+    assert sorted(line.text for call in adapter.calls for line in call[0]) == ['New one', 'New two']
+    expected = {**kept, **{line.id: (line.text, '번역 ' + line.text, False, False) for line in new_bottom.lines[1:3]}}
+    assert review_flags(core, video) == expected
+    assert core.onscreen_translation_reviewed_lines(video) == {first.id}
+    assert core.translation(video, source=ONSCREEN) is not None
+    reopened = reopen()
+    assert reopened.onscreen_subtitles(video) == (new_bottom, new_top)
+    assert review_flags(reopened, video) == expected
+    assert sorted(r.text for r in core.search('next').results) == ['Top next', '번역 Top next']
+
+
+@pytest.mark.parametrize('stop', ['failure', 'cancel'])
+def test_failed_or_cancelled_range_reading_keeps_the_original_lines(screen, stop):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    before = review_flags(core, video)
+    media.captions_by_region[BAND] = ((20, 22, 'Replaced'),)
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    if stop == 'failure':
+        media.error_at = 82
+        assert core.process_next_onscreen_subtitle().state == 'failed'
+        assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE)[0].state == 'failed'
+    else:
+        media.hook = lambda index: core.stop_onscreen_subtitle_processing() if index == 82 else None
+        assert core.process_next_onscreen_subtitle().state == 'queued'
+        assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE)[0].state == 'queued'
+    assert core.onscreen_subtitles(video) == (bottom, top) and review_flags(core, video) == before
+    # 다시 시도하면 같은 구간을 다시 읽는다.
+    media.error_at = media.hook = None
+    if stop == 'failure':
+        core.retry_failed_subtitles(kind=ONSCREEN_SUBTITLE)
+    else:
+        core.resume_subtitle_processing()
+    media.intervals.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(BAND, 20, 22)]
+    assert [l.text for l in core.onscreen_subtitles(video)[0].lines] == ['Jon show', 'Replaced']
+
+
+def test_range_regeneration_is_locked_while_that_video_is_read(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    queued = core.subtitle_queue(kind=ONSCREEN_SUBTITLE)
+    for call in (lambda: core.request_onscreen_subtitle_range(top.region.id, 5, 7),
+                 lambda: core.edit_onscreen_subtitle_line(top.lines[0].id, 'Locked')):
+        with pytest.raises(ValueError, match='읽기가 끝난 뒤 검수'):
+            call()
+    assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == queued
+    assert core.onscreen_subtitles(video) == (bottom, top)
+
+
+def test_range_request_survives_adding_a_region_and_is_dropped_when_its_region_changes(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    extra = RegionRect(0, 0.4, 0.5, 0.2)
+    media.captions_by_region[extra] = ((50, 52, 'Extra'),)
+    media.captions_by_region[BAND] = ((20, 22, 'Replaced'),)
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    # 영역을 더하면 대기열 항목이 새로 바뀌어도 구간 요청은 남아 한 번에 함께 읽는다.
+    core.add_onscreen_subtitle_region(video, extra, 'en')
+    media.intervals.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(BAND, 20, 22), (extra, None, None)]
+    assert [l.text for l in core.onscreen_subtitles(video)[0].lines] == ['Jon show', 'Replaced']
+    finish(core)
+    # 영역을 고치면 그 세대의 구간 요청은 버리고 영역 전체를 읽는다.
+    core.request_onscreen_subtitle_range(top.region.id, 5, 7)
+    moved = RegionRect(0.1, 0.4, 0.8, 0.2)
+    media.captions_by_region[moved] = ((40, 42, 'Moved'),)
+    core.update_onscreen_subtitle_region(top.region.id, moved, 'en')
+    media.intervals.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(moved, None, None)]
+    # 지운 영역의 구간 요청도 남지 않는다.
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    core.delete_onscreen_subtitle_region(bottom.region.id)
+    assert core.process_next_onscreen_subtitle() is None
+
+
+def test_failed_region_is_read_again_together_with_a_range_request(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    extra = RegionRect(0, 0.4, 0.5, 0.2)
+    media.captions_by_region[extra] = ((50, 52, 'Extra'),)
+    media.error_at = 0
+    core.add_onscreen_subtitle_region(video, extra, 'en')
+    assert core.process_next_onscreen_subtitle().state == 'failed'
+    media.error_at = None
+    media.captions_by_region[BAND] = ((20, 22, 'Replaced'),)
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    media.intervals.clear()
+    adapter.calls.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(BAND, 20, 22), (extra, None, None)]
+    finish(core)
+    assert sorted(line.text for call in adapter.calls for line in call[0]) == ['Extra', 'Replaced']
+
+
+# R1: 구간 요청은 다른 영역을 지우거나 대기열에서 빼는 경로에서도 같은 규칙으로 남거나 사라진다.
+def test_deleting_another_region_keeps_the_requested_range(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    media.captions_by_region[BAND] = ((10, 12, 'Jon show'), (20, 22, 'Replaced'))
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    core.delete_onscreen_subtitle_region(top.region.id)
+    assert [e.state for e in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == ['queued']
+    media.intervals.clear()
+    adapter.calls.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(BAND, 20, 22)]
+    new_bottom, = core.onscreen_subtitles(video)
+    assert [l.text for l in new_bottom.lines] == ['Jon show', 'Replaced'] and new_bottom.lines[0] == bottom.lines[0]
+    finish(core)
+    assert [line.text for call in adapter.calls for line in call[0]] == ['Replaced']
+    assert translated(core, video) == {bottom.lines[0].id: '번역 Jon show', new_bottom.lines[1].id: '번역 Replaced'}
+
+
+def test_deleting_another_region_while_it_is_read_keeps_the_requested_range(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    extra = RegionRect(0, 0.4, 0.5, 0.2)
+    media.captions_by_region[extra] = ((50, 52, 'Extra'),)
+    media.captions_by_region[BAND] = ((10, 12, 'Jon show'), (20, 22, 'Replaced'))
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    core.add_onscreen_subtitle_region(video, extra, 'en')
+    added = core.onscreen_subtitle_regions(video)[2]
+
+    def delete_extra(index):
+        if index == 200:  # 구간을 읽은 뒤, 더한 영역을 읽는 도중(50초)
+            media.hook = None
+            core.delete_onscreen_subtitle_region(added.id)
+    media.hook = delete_extra
+    media.intervals.clear()
+    core.process_next_onscreen_subtitle()
+    assert media.intervals == [(BAND, 20, 22), (extra, None, None)]
+    assert core.onscreen_subtitles(video) == (bottom, top)  # 지우기 전 읽던 결과는 저장하지 않는다
+    assert [e.state for e in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == ['queued']
+    media.intervals.clear()
+    adapter.calls.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(BAND, 20, 22)]
+    assert [l.text for l in core.onscreen_subtitles(video)[0].lines] == ['Jon show', 'Replaced']
+    finish(core)
+    assert [line.text for call in adapter.calls for line in call[0]] == ['Replaced']
+
+
+def test_removing_the_queue_item_drops_the_range_request(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    media.captions_by_region[BAND] = ((20, 22, 'Replaced'),)
+    core.request_onscreen_subtitle_range(bottom.region.id, 20, 22)
+    core.remove_from_subtitle_queue(video, kind=ONSCREEN_SUBTITLE)
+    assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+    # 나중에 다른 이유로 화면 자막을 다시 요청해도 버린 구간 요청은 되살아나지 않는다.
+    extra = RegionRect(0, 0.4, 0.5, 0.2)
+    media.captions_by_region[extra] = ((50, 52, 'Extra'),)
+    core.add_onscreen_subtitle_region(video, extra, 'en')
+    media.intervals.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(extra, None, None)]
+    assert core.onscreen_subtitles(video)[:2] == (bottom, top)

@@ -17,6 +17,20 @@ class ReviewConfirmationRequired(ValueError):
     pass
 
 
+def widen_range(start, end, spans, duration):
+    """고른 구간을 검사하고, 경계에 걸친 줄 전체(그 줄에 이어 걸친 줄까지)를 포함하도록 넓힌다."""
+    if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= duration):
+        raise ValueError("구간은 0 이상 영상 길이 이하이며 끝이 시작보다 뒤여야 합니다.")
+    while True:
+        previous = start, end
+        for line_start, line_end in spans:
+            if line_start < end and line_end > start:
+                start = max(0, min(start, line_start))
+                end = min(duration, max(end, line_end))
+        if previous == (start, end):
+            return start, end
+
+
 @dataclass(frozen=True)
 class ReviewLine:
     original: TranscriptLine
@@ -157,19 +171,9 @@ class Review:
             duration = db.execute("SELECT duration FROM videos WHERE id = ?", (video_id,)).fetchone()
             if duration is None:
                 raise ValueError("영상을 찾을 수 없습니다.")
-            duration = duration[0]
-            if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= duration):
-                raise ValueError("구간은 0 이상 영상 길이 이하이며 끝이 시작보다 뒤여야 합니다.")
             lines = db.execute("SELECT l.start, l.end FROM transcript_lines l JOIN transcripts t "
                                "ON t.id = l.transcript_id WHERE t.video_id = ?", (video_id,)).fetchall()
-        while True:
-            previous = start, end
-            for line in lines:
-                if line["start"] < end and line["end"] > start:
-                    start = max(0, min(start, line["start"]))
-                    end = min(duration, max(end, line["end"]))
-            if previous == (start, end):
-                return start, end
+        return widen_range(start, end, lines, duration[0])
 
     def request_range(self, video_id, start, end):
         self._playback_location(video_id)

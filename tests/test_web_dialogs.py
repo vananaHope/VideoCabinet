@@ -477,6 +477,7 @@ def screen_window(screen):
     window = MainWindow(core)
     window.subtitles.timer.stop()
     window.translations.timer.stop()
+    window.onscreen_subtitles.timer.stop()  # 화면 자막 읽기는 시험이 직접 처리한다(읽기 중 잠금을 본다)
     window.show()
     yield window, screen
     window.tray.quit()
@@ -576,3 +577,174 @@ def test_onscreen_region_delete_closes_when_the_region_is_already_gone(screen_wi
         assert '영역이 바뀌었습니다' in window.statusBar().currentMessage()
     within(lambda: OnScreenRegionDeleteDialog(core, video.id, region.id, window).exec(), dialogs, check)
     assert core.onscreen_subtitle_regions(video.id) == (other,)
+
+
+# #285 검수 화면의 화면 자막: 받아쓰기 자막과 구별해 영역마다 열고 원문·화면 번역 줄을 고친다.
+TOP = RegionRect(0.6, 0.02, 0.38, 0.1)
+
+
+def onscreen_review_video(core, media, video, *, failed=False):
+    """받아쓰기 원어 자막과, 읽기를 마친 영역 둘(아래 en 두 줄, 위 ja 한 줄). failed면 읽기에 실패한 영역 하나를 더한다."""
+    from test_translation import source
+    source(core, video)
+    media.captions_by_region = {BAND: ((10, 12, 'Jon show'), (20, 22, 'Next')), TOP: ((5, 7, 'Corner'),)}
+    core.add_onscreen_subtitle_region(video, BAND, 'en')
+    core.add_onscreen_subtitle_region(video, TOP, 'ja')
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    finish(core)
+    if failed:
+        media.error_at = 0
+        core.add_onscreen_subtitle_region(video, RegionRect(0, 0.4, 0.5, 0.2), 'en')
+        assert core.process_next_onscreen_subtitle().state == 'failed'
+        media.error_at = None
+    return core.onscreen_subtitles(video)
+
+
+def rows(data):
+    return [(r['title'], r['detail'], r['status']) for r in data['rows']]
+
+
+def test_review_opens_transcript_or_each_read_onscreen_region_and_edits_its_lines(screen_window):
+    window, (core, media, *_) = screen_window
+    a, b = core.videos()
+    bottom, top = onscreen_review_video(core, media, a.id, failed=True)
+    failed = core.onscreen_subtitle_regions(a.id)[2]
+    core.edit_onscreen_translation_line(top.lines[0].id, '고친 코너')
+    transcript_rows = [(line.original.text, line.translation) for line in core.review_lines(a.id)]
+    dialogs = window.web_host.dialogs
+    jumps = []
+
+    def check():
+        data = state(dialogs)
+        # 읽기를 마친 영역만 고를 수 있다. 영역 번호는 영상의 영역 순서이고 읽을 언어가 함께 보인다.
+        assert [(c['id'], c['title']) for c in data['choices']] == [
+            ('transcript', '받아쓰기 자막 · 원어 · 번역 자막'),
+            (str(bottom.region.id), '화면 자막 영역 1 · 영어(en) · 2줄'),
+            (str(top.region.id), '화면 자막 영역 2 · 일본어(ja) · 1줄')]
+        assert data['values']['choice'] == 'transcript' and data['task_kind'] == 'translation'
+        assert [(r['title'], r['detail']) for r in data['rows']] == transcript_rows
+        # 읽지 못한 영역이 남아 있으면 고친 원문을 다시 번역할 수 없어 원문 수정을 거부한다. 그 영역을 지운다.
+        core.delete_onscreen_subtitle_region(failed.id)
+        data = act(dialogs, 'view', choice=str(bottom.region.id))
+        assert (data['values']['choice'], data['task_kind'], data['short_label'], data['subtitle_label']) == (
+            str(bottom.region.id), 'onscreen_translation', '화면 번역', '화면 번역 자막')
+        assert rows(data) == [('Jon show', '번역 Jon show', 'Codex (CLI)'), ('Next', '번역 Next', 'Codex (CLI)')]
+        assert [(r['start'], r['end']) for r in data['rows']] == [(10, 12), (20, 22)]
+        act(dialogs, 'jump', selected=bottom.lines[1].id)
+        assert jumps == [(a.id, bottom.lines[1].id)]
+        # 원문 줄 수정: 원문 검수됨으로 남고 그 줄만 다시 번역을 기다린다.
+        line = act(dialogs, 'edit-original', selected=bottom.lines[1].id)
+        assert (line['kind'], line['title'], line['values']['text']) == ('line', '원문 줄 수정', 'Next')
+        data = act(dialogs, 'save', text='Next scene')
+        # 다시 번역하기 전에는 이전 번역과 그 번역의 방식이 보인다(번역 자막 검수와 같다).
+        assert data['kind'] == 'review' and rows(data)[1] == ('Next scene', '번역 Next', '원문 검수됨 · Codex (CLI)')
+        finish(core)
+        assert rows(state(dialogs))[1] == ('Next scene', '번역 Next scene', '원문 검수됨 · Codex (CLI)')
+        line = act(dialogs, 'edit-translation', selected=bottom.lines[0].id)
+        assert (line['title'], line['values']['text']) == ('화면 번역 줄 수정', '번역 Jon show')
+        assert rows(act(dialogs, 'save', text='존 쇼'))[0] == ('Jon show', '존 쇼', '직접 수정')
+        # 직접 고친 번역이 있는 줄의 원문을 고치면 확인을 받는다. 취소하면 아무것도 바뀌지 않는다.
+        data = act(dialogs, 'view', choice=str(top.region.id))
+        assert rows(data) == [('Corner', '고친 코너', '직접 수정')]
+        act(dialogs, 'edit-original', selected=top.lines[0].id)
+        warning = act(dialogs, 'save', text='Corner title')
+        assert '덮어써집니다' in warning['confirmation'] and warning['confirm_destructive']
+        assert not warning['keep_reviewed']
+        act(dialogs, 'cancel-confirm')
+        assert core.onscreen_review_lines(top.region.id)[0].original.text == 'Corner'
+        assert core.onscreen_translation_reviewed_lines(a.id) == {top.lines[0].id, bottom.lines[0].id}
+        act(dialogs, 'save', text='Corner title')
+        assert rows(act(dialogs, 'confirm')) == [('Corner title', '고친 코너', '원문 검수됨')]
+        assert core.onscreen_translation_reviewed_lines(a.id) == {bottom.lines[0].id}
+        # 받아쓰기 자막으로 돌아오면 원래 줄 목록이다.
+        assert [(r['title'], r['detail']) for r in act(dialogs, 'view', choice='transcript')['rows']] == transcript_rows
+
+    within(lambda: ReviewDialog(core, a.id, lambda *args: jumps.append(args), window.review_changed, window).exec(),
+           dialogs, check)
+
+    def check_without_onscreen():
+        data = state(dialogs)
+        assert data['choices'] == [] and data['task_kind'] == 'translation'
+    within(lambda: ReviewDialog(core, b.id, window.review_jump, window.review_changed, window).exec(),
+           dialogs, check_without_onscreen)
+
+
+def test_review_regenerates_an_onscreen_range_and_locks_while_reading(screen_window):
+    window, (core, media, *_) = screen_window
+    a = core.videos()[0]
+    bottom, top = onscreen_review_video(core, media, a.id)
+    dialogs = window.web_host.dialogs
+
+    def check():
+        act(dialogs, 'view', choice=str(bottom.region.id))
+        data = act(dialogs, 'range', selected=bottom.lines[1].id)
+        assert (data['kind'], data['title'], data['values']['start'], data['values']['end']) == (
+            'range', '구간 화면 자막 다시 생성', 20, 22)
+        assert '20.000–22.000' in act(dialogs, 'bounds', start=21, end=21.5)['description']
+        assert act(dialogs, 'bounds', start=21, end=200)['warning']
+        data = act(dialogs, 'save', start=21, end=21.5)
+        assert data['kind'] == 'review' and data['locked'] and '화면 자막 읽기' in data['warning']
+        # 화면 자막 읽기 중에는 원문·화면 번역 줄 수정과 구간 다시 생성을 모두 막는다.
+        before = core.onscreen_review_lines(bottom.region.id)
+        for action in ('edit-original', 'edit-translation'):
+            act(dialogs, action, selected=bottom.lines[0].id)
+            error = json.loads(dialogs.bridge.act(state(dialogs)['id'], 'save', json.dumps({'text': '금지'})))
+            assert '화면 자막' in error['error']
+            act(dialogs, 'close')
+        assert core.onscreen_review_lines(bottom.region.id) == before
+        assert state(dialogs)['locked']
+        # 받아쓰기 자막은 화면 자막 읽기와 무관하게 고칠 수 있다.
+        assert not act(dialogs, 'view', choice='transcript')['locked']
+        media.captions_by_region[BAND] = ((20, 22, 'Replaced'),)
+        assert core.process_next_onscreen_subtitle().state == 'completed'
+        data = act(dialogs, 'view', choice=str(bottom.region.id))
+        assert not data['locked'] and [r['title'] for r in data['rows']] == ['Jon show', 'Replaced']
+        assert rows(data)[1][1] == '미번역'
+
+    within(lambda: ReviewDialog(core, a.id, window.review_jump, window.review_changed, window).exec(), dialogs, check)
+    assert core.onscreen_subtitles(a.id)[1] == top
+
+
+def test_review_of_a_no_text_region_shows_guidance_and_falls_back_when_the_region_changes(screen_window):
+    window, (core, media, *_) = screen_window
+    a = core.videos()[0]
+    media.captions_by_region = {BAND: ()}
+    core.add_onscreen_subtitle_region(a.id, BAND, 'en')
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    empty, = core.onscreen_subtitles(a.id)
+    dialogs = window.web_host.dialogs
+
+    def check():
+        data = state(dialogs)
+        assert data['choices'][1]['title'] == '화면 자막 영역 1 · 영어(en) · 읽은 글자 없음'
+        assert data['rows'] == []  # 받아쓰기 원어 자막이 없어도 검수 화면은 열린다
+        data = act(dialogs, 'view', choice=str(empty.region.id))
+        assert data['rows'] == [] and '읽은 글자가 없습니다' in data['information']
+        assert act(dialogs, 'range', selected='')['title'] == '구간 화면 자막 다시 생성'
+        act(dialogs, 'close')
+        core.delete_onscreen_subtitle_region(empty.region.id)
+        data = state(dialogs)
+        assert (data['choices'], data['values']['choice']) == ([], 'transcript')
+        assert '받아쓰기 자막' in data['information']
+        error = json.loads(dialogs.bridge.act(data['id'], 'view', json.dumps({'choice': str(empty.region.id)})))
+        assert '영역이 바뀌었습니다' in error['error']
+
+    within(lambda: ReviewDialog(core, a.id, window.review_jump, window.review_changed, window).exec(), dialogs, check)
+
+
+def test_region_delete_confirmation_counts_original_edits_as_reviewed_lines(screen_window):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDeleteDialog
+    window, (core, media, *_) = screen_window
+    video = core.videos()[0]
+    bottom, top = onscreen_review_video(core, media, video.id)
+    core.edit_onscreen_subtitle_line(bottom.lines[0].id, 'Jon shows')
+    core.edit_onscreen_subtitle_line(bottom.lines[1].id, 'Next one')
+    core.edit_onscreen_translation_line(bottom.lines[1].id, '다음')
+    dialogs = window.web_host.dialogs
+    core.playback.start(video.id, 0)
+
+    def check():
+        assert '검수로 고친 줄 2개의 수정이 사라집니다' in state(dialogs)['confirmation']
+        act(dialogs, 'cancel-confirm')
+    within(lambda: OnScreenRegionDeleteDialog(core, video.id, bottom.region.id, window).exec(), dialogs, check)
+    core.playback.end()

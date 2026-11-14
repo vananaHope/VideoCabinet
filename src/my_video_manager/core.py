@@ -33,7 +33,7 @@ from .onscreen_subtitles import (OcrEngine, OnScreenRegionChanged, OnScreenSubti
 from .translation_source import ONSCREEN, TRANSCRIPT, TranslationSources
 from .onscreen_translation import OnScreenTranslationSource
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
-from .review import Review, ReviewPlayback, SubtitleExport
+from .review import Review, ReviewLine, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
 from .statistics import StatisticsReader, VideoViewingStatistics, ViewingStatistics
 from .statistics import StatisticsDashboard
@@ -448,11 +448,16 @@ class AppCore:
         Path(path).write_text(export.text, encoding="utf-8-sig")
 
     def review_line_position(self, video_id, line_id):
-        line = next((line for line in self.review_lines(video_id) if line.original.id == line_id), None)
-        if line is None:
+        """검수 줄(받아쓰기 원어 줄, 없으면 그 영상의 화면 자막 줄)의 시작 시각."""
+        start = next((line.original.start for line in self.review_lines(video_id) if line.original.id == line_id),
+                     None)
+        if start is None:
+            start = next((line.start for subtitle in self.onscreen_subtitles(video_id) for line in subtitle.lines
+                          if line.id == line_id), None)
+        if start is None:
             raise ValueError("자막 줄이 바뀌었습니다. 목록을 새로 확인하세요.")
         self.playback_location(video_id)
-        return line.original.start
+        return start
 
     def play_review_line(self, video_id, line_id, *,
                          playback_video_ids: Iterable[int] | None = None,
@@ -802,6 +807,26 @@ class AppCore:
 
     def onscreen_translation_reviewed_lines(self, video_id: int) -> frozenset[str]:
         return self._onscreen_translation.reviewed_lines(video_id)
+
+    def request_onscreen_subtitle_range(self, region_id: int, start: float, end: float) -> OnScreenSubtitleQueueEntry:
+        """화면 자막 영역 하나의 구간(영상 시각 초)을 그 영역의 줄 경계까지 넓혀 다시 읽도록 직접 요청한다.
+        읽기가 끝나면 구간 안의 줄만 새 줄로 바뀌고 새 줄만 번역한다. 읽기가 실패하거나 취소되면 원래 줄이 남는다."""
+        return self._onscreen.request_range(region_id, start, end)
+
+    def onscreen_subtitle_range_bounds(self, region_id: int, start: float, end: float) -> tuple[float, float]:
+        """request_onscreen_subtitle_range가 실제로 다시 읽을 구간. 잘못된 구간은 ValueError다."""
+        return self._onscreen.range_bounds(region_id, start, end)
+
+    def onscreen_review_lines(self, region_id: int) -> tuple[ReviewLine, ...]:
+        """영역 하나의 화면 자막 줄과 화면 번역, 원문 검수됨·직접 수정 상태. 아직 읽지 않은 영역은 빈 목록이다."""
+        return self._onscreen_translation.review_lines(region_id)
+
+    def edit_onscreen_subtitle_line(self, line_id: str, text: str, *, overwrite_reviewed=False) -> None:
+        """화면 자막 원문 한 줄을 고치고 그 줄의 화면 번역만 다시 번역한다. 그 영상의 화면 자막 읽기가
+        대기·읽는 중이면 막는다. 직접 고친 화면 번역이 있으면 overwrite_reviewed 없이는
+        ReviewConfirmationRequired를 던진다."""
+        self._onscreen_translation.edit_original(line_id, text, self._translations,
+                                                 overwrite_reviewed=overwrite_reviewed)
 
     def process_next_onscreen_subtitle(self) -> OnScreenSubtitleQueueEntry | None:
         """작업자 스레드용. 받아쓰기 작업자와 따로 돌아 서로를 기다리지 않는다."""

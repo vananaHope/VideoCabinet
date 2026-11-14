@@ -6,6 +6,7 @@ from .highlight_editing import initial_time_input, resolve_time_input, time_inpu
 from .onscreen_subtitles import (ONSCREEN_LANGUAGES, OcrLanguageUnavailable, OnScreenRegionChanged,
                                  default_onscreen_language, onscreen_language_name)
 from .review import ReviewConfirmationRequired
+from .subtitle_queue_kind import ONSCREEN_SUBTITLE
 from .translation_kind import ONSCREEN_TRANSLATION
 from .translation_source import ONSCREEN, TRANSCRIPT
 from .web_dialogs_data import row, values
@@ -29,6 +30,25 @@ EXPORT_ACTIONS = {'export-original': (False, TRANSCRIPT), 'export-translation': 
 # 저장된 줄이 있을 때만 검수 화면이 더 보여 주는 화면 자막 SRT 저장.
 ONSCREEN_EXPORTS = (('export-onscreen', '화면 자막 SRT 저장'),
                     ('export-onscreen-translation', f'{ONSCREEN_TRANSLATION.short_label} SRT 저장'))
+
+
+# 검수 화면의 자막 고르기에서 받아쓰기 자막(원어·번역)을 가리키는 값. 화면 자막은 영역 ID다.
+TRANSCRIPT_VIEW = 'transcript'
+ONSCREEN_LOCKED = '화면 자막 읽기 대기·진행 중에는 화면 자막 줄 수정과 구간 재생성을 할 수 없습니다.'
+ONSCREEN_NO_TEXT = '이 영역에서 읽은 글자가 없습니다. 구간 다시 생성으로 다시 읽거나 영역과 읽을 언어를 확인하세요.'
+
+
+def review_row(line, task, providers, original_label):
+    """검수 줄 한 행. 받아쓰기 자막과 화면 자막이 같은 상태 규칙(원어·원문 검수됨, 직접 수정, 줄별 번역 방식)을 쓴다."""
+    from .translation_models import TRANSLATION_CHOICES
+    provider = not line.translation_reviewed and providers.get(line.original.id)
+    status = ' · '.join(label for flag, label in (
+        (line.original_reviewed, original_label),
+        (line.translation_reviewed, '사용자가 고친 줄' if task.kind == 'refinement' else '직접 수정'),
+        (provider, dict(TRANSLATION_CHOICES).get(provider, ''))) if flag)
+    missing = '미번역' if task.kind == ONSCREEN_TRANSLATION.kind else f'미{task.label}'
+    return row(line.original.id, line.original.text, line.translation if line.translation is not None else missing,
+               status, line.original.start, line.original.end)
 
 
 def region_place(rect):
@@ -62,6 +82,8 @@ class DialogModel:
         self.tag_usage = None
         # 범위 고르기의 범위별 후보 수와 태그별 후보. 창을 열 때 한 번 세고, 확인할 때 코어가 다시 센다.
         self.scope_candidates = None
+        # 검수 화면이 지금 보는 자막: None이면 받아쓰기 자막(원어·번역), 아니면 그 화면 자막 영역의 ID.
+        self.region_id = None
         if kind == 'highlight':
             h, duration = context['highlight'], context['duration']
             self.values = values(start=initial_time_input(h.start, duration),
@@ -162,6 +184,18 @@ class DialogModel:
             return session is None or session.video_id != self.context['video_id']
         return self.kind == 'random-scope' and not self.core.random_continuous_enabled
 
+    def onscreen_views(self):
+        """검수 화면에서 고를 수 있는 화면 자막: 읽기를 마친(세대가 있는) 영역마다 (영역 번호, 화면 자막).
+        영역 번호는 읽기를 기다리거나 실패한 영역도 포함한 영상의 영역 순서다."""
+        video_id = self.context['video_id']
+        numbers = {region.id: number for number, region in enumerate(self.core.onscreen_subtitle_regions(video_id), 1)}
+        return [(numbers[subtitle.region.id], subtitle) for subtitle in self.core.onscreen_subtitles(video_id)]
+
+    def onscreen_locked(self):
+        video_id = self.context['video_id']
+        return any(e.video_id == video_id and e.state in ('queued', 'reading')
+                   for e in self.core.subtitle_queue(kind=ONSCREEN_SUBTITLE))
+
     def usage(self):
         if self.tag_usage is None:
             self.tag_usage = tag_usage_data(self.core.tag_usage())
@@ -181,7 +215,15 @@ class DialogModel:
         c, ctx, kind = self.core, self.context, self.kind
         if kind in ('onscreen-region', 'onscreen-region-delete') and ctx.get('region_id') is not None:
             self.refresh_region_warning()
-        task = c.subtitle_task(ctx['video_id']) if 'video_id' in ctx else None
+        views = self.onscreen_views() if kind == 'review' else []
+        viewed = next((subtitle for _, subtitle in views if subtitle.region.id == self.region_id), None)
+        if kind == 'review' and self.region_id is not None and viewed is None:
+            # 보던 영역을 고치거나 지웠다(세대가 사라짐). 받아쓰기 자막으로 돌아간다.
+            self.region_id, self.information = None, '보던 화면 자막 영역이 바뀌어 받아쓰기 자막을 보입니다.'
+        # 줄 수정·구간 다시 생성 창은 검수 화면이 보던 화면 자막 영역을 문맥으로 받는다.
+        region_id = self.region_id if kind == 'review' else ctx.get('region_id')
+        source = TRANSCRIPT if region_id is None else ONSCREEN
+        task = c.subtitle_task(ctx['video_id'], source=source) if 'video_id' in ctx else None
         data = dict(task_kind=task.kind if task else '', task_label=task.label if task else '',
                     subtitle_label=task.subtitle_label if task else '', short_label=task.short_label if task else '',
                     keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], tags=[], tag_candidates=[], available=[], exports=[],
@@ -253,33 +295,52 @@ class DialogModel:
                     f"'{title}'의 이 영역만 화면 자막과 화면 번역 자막을 다시 만듭니다. 검수로 고친 줄 "
                     f'{self.reviewed:,}개의 수정이 사라집니다. 다른 영역은 그대로입니다.')
         elif kind == 'review':
-            from .translation_models import TRANSLATION_CHOICES
-            names = dict(TRANSLATION_CHOICES)
-            provenance = c.translation_line_providers(ctx['video_id'])
-            data.update(description='클릭 또는 Enter로 장면 이동 · 방향키로 줄 선택 · Tab으로 버튼 이동 · Esc로 닫기', rows=[
-                row(line.original.id, line.original.text, line.translation if line.translation is not None else f'미{task.label}',
-                    ' · '.join(label for flag, label in ((line.original_reviewed, '원어 검수됨'),
-                                                       (line.translation_reviewed, '사용자가 고친 줄' if task.kind == 'refinement' else '직접 수정'),
-                                                       (not line.translation_reviewed and provenance.get(line.original.id), names.get(not line.translation_reviewed and provenance.get(line.original.id), ''))) if flag),
-                    line.original.start, line.original.end) for line in c.review_lines(ctx['video_id'])])
+            providers = c.translation_line_providers(ctx['video_id'], source=source)
+            lines = c.review_lines(ctx['video_id']) if region_id is None else c.onscreen_review_lines(region_id)
+            data.update(description='클릭 또는 Enter로 장면 이동 · 방향키로 줄 선택 · Tab으로 버튼 이동 · Esc로 닫기',
+                        rows=[review_row(line, task, providers, '원어 검수됨' if region_id is None else '원문 검수됨')
+                              for line in lines])
             data['exports'] = [row(action, title) for action, title in ONSCREEN_EXPORTS
                                if c.onscreen_export_available(ctx['video_id'], translated=EXPORT_ACTIONS[action][0])]
+            # 읽기를 마친 화면 자막 영역이 있을 때만 검수할 자막을 고른다. 없으면 지금 검수 화면과 같다.
+            if views:
+                transcript = c.subtitle_task(ctx['video_id'])
+                data['choices'] = [row(TRANSCRIPT_VIEW, f'받아쓰기 자막 · 원어 · {transcript.subtitle_label}'), *[
+                    row(subtitle.region.id, f'화면 자막 영역 {number} · {region_language(subtitle.region.language)} · '
+                        + (f'{len(subtitle.lines):,}줄' if subtitle.lines else '읽은 글자 없음'))
+                    for number, subtitle in views]]
+            data['values']['choice'] = TRANSCRIPT_VIEW if region_id is None else str(region_id)
+            if viewed is not None and viewed.no_text:
+                data['information'] = self.information or ONSCREEN_NO_TEXT
         elif kind == 'range':
             data['maximum'] = c.video(ctx['video_id']).duration
             try:
-                start, end = c.subtitle_range_bounds(ctx['video_id'], self.values['start'], self.values['end'])
-                data['description'] = f'실제로 받아쓸 범위: {start:.3f}–{end:.3f}초. 경계에 걸친 줄 전체를 포함하도록 넓혀 원어와 {task.subtitle_label}을 교체합니다.'
+                if region_id is None:
+                    start, end = c.subtitle_range_bounds(ctx['video_id'], self.values['start'], self.values['end'])
+                    data['description'] = f'실제로 받아쓸 범위: {start:.3f}–{end:.3f}초. 경계에 걸친 줄 전체를 포함하도록 넓혀 원어와 {task.subtitle_label}을 교체합니다.'
+                else:
+                    start, end = c.onscreen_subtitle_range_bounds(region_id, self.values['start'], self.values['end'])
+                    data['description'] = (f'실제로 다시 읽을 범위: {start:.3f}–{end:.3f}초. 이 영역에서 경계에 걸친 줄 전체를 '
+                                           f'포함하도록 넓혀 화면 자막과 {task.subtitle_label}을 교체합니다. 다른 영역은 그대로입니다.')
             except ValueError as error:
                 data['warning'] = str(error)
+            if region_id is not None:
+                data['title'] = '구간 화면 자막 다시 생성'
         elif kind == 'line':
-            data['title'] = f'{task.short_label} 줄 수정' if ctx['translated'] else '원어 줄 수정'
+            data['title'] = (f'{task.short_label} 줄 수정' if ctx['translated']
+                             else '원어 줄 수정' if region_id is None else '원문 줄 수정')
         elif kind == 'translation':
             data.update(choices=[row(p['id'], p['label']) for p in self.translation['providers']],
                         translation=self.translation, network_busy=self.network_busy,
                         description='한국어 번역 방식과 모델을 고르세요. 한국어 영상의 다듬기도 같은 방식을 씁니다. 키·설정 변경은 확인할 때 저장됩니다.')
             if self.waiting:
                 data['description'] += f' 확인하면 실패·보류 중인 번역·다듬기·화면 번역 {len(self.waiting)}건을 저장한 묶음부터 재시도합니다. 선택한 방식의 사용량 한도 보류 시간이 남았으면 그 시각까지 기다립니다.'
-        if kind in ('review', 'line', 'range'):
+        if kind in ('review', 'line', 'range') and region_id is not None:
+            # 화면 자막 잠금은 그 영상의 화면 자막 읽기 대기·진행이다. 화면 번역 줄 수정도 함께 막는다.
+            data['locked'] = self.onscreen_locked()
+            if data['locked']:
+                data['warning'] = ONSCREEN_LOCKED
+        elif kind in ('review', 'line', 'range'):
             data['locked'] = any(e.video_id == ctx['video_id'] and e.state in ('queued', 'transcribing') for e in c.subtitle_queue())
             if data['locked']:
                 data['warning'] = '자막 재생성 대기·진행 중에는 줄 수정과 구간 재생성을 할 수 없습니다.'
@@ -446,7 +507,15 @@ class DialogModel:
                 self.changed()
                 self.information = '다듬기를 요청했습니다.'
                 return
-            lines = c.review_lines(ctx['video_id'])
+            if action == 'view':
+                choice = data.get('choice')
+                region = next((s.region.id for _, s in self.onscreen_views() if str(s.region.id) == choice), None)
+                if choice != TRANSCRIPT_VIEW and region is None:
+                    raise ValueError('화면 자막 영역이 바뀌었습니다. 목록을 새로 확인하세요.')
+                self.region_id, self.information = region, ''
+                return
+            region_id = self.region_id
+            lines = c.review_lines(ctx['video_id']) if region_id is None else c.onscreen_review_lines(region_id)
             line = next((line for line in lines if line.original.id == data.get('selected')), None)
             if action in ('jump', 'edit-original', 'edit-translation'):
                 if line is None:
@@ -454,9 +523,9 @@ class DialogModel:
                 if action == 'jump':
                     ctx['jump'](ctx['video_id'], line.original.id)
                 else:
-                    self.push('line', **ctx, line=line, translated=action == 'edit-translation')
+                    self.push('line', **ctx, line=line, translated=action == 'edit-translation', region_id=region_id)
             elif action == 'range':
-                self.push('range', **ctx, line=line)
+                self.push('range', **ctx, line=line, region_id=region_id)
             elif action == 'regenerate':
                 def regenerate():
                     transcript = c.transcript(ctx['video_id'])
@@ -473,24 +542,39 @@ class DialogModel:
             else:
                 raise ValueError('지원하지 않는 검수 작업입니다.')
         elif kind == 'line' and action == 'save':
+            region_id = ctx.get('region_id')
             def edit(overwrite=False, keep=False):
-                if ctx['translated']:
-                    c.edit_translation_line(ctx['video_id'], ctx['line'].original.id, data['text'])
+                line_id = ctx['line'].original.id
+                if region_id is not None:
+                    # 코어는 화면 번역 줄 수정을 잠그지 않는다. 검수 화면은 화면 자막 읽기 중 세 동작을 모두 막는다.
+                    if self.onscreen_locked():
+                        raise ValueError(ONSCREEN_LOCKED)
+                    if ctx['translated']:
+                        c.edit_onscreen_translation_line(line_id, data['text'])
+                    else:
+                        c.edit_onscreen_subtitle_line(line_id, data['text'], overwrite_reviewed=overwrite)
+                elif ctx['translated']:
+                    c.edit_translation_line(ctx['video_id'], line_id, data['text'])
                 else:
-                    c.edit_transcript_line(ctx['video_id'], ctx['line'].original.id, data['text'], overwrite_reviewed=overwrite, keep_reviewed=keep)
+                    c.edit_transcript_line(ctx['video_id'], line_id, data['text'], overwrite_reviewed=overwrite, keep_reviewed=keep)
                 self.changed()
                 self.owner.pop(accepted=True)
             try:
                 edit()
             except ReviewConfirmationRequired as warning:
                 self.confirm(str(warning), lambda: edit(True), destructive=True)
-                if c.subtitle_task(ctx["video_id"]).kind == "refinement":
+                # 다듬기의 "수정본 유지" 갈래는 받아쓰기 자막에만 있다.
+                if region_id is None and c.subtitle_task(ctx["video_id"]).kind == "refinement":
                     self.keep_pending = lambda: edit(keep=True)
         elif kind == 'range':
             if action == 'bounds':
                 self.values.update(start=self.time_value(data['start']), end=self.time_value(data['end']))
             elif action == 'save':
-                c.request_subtitle_range(ctx['video_id'], self.time_value(data['start']), self.time_value(data['end']))
+                start, end = self.time_value(data['start']), self.time_value(data['end'])
+                if ctx.get('region_id') is None:
+                    c.request_subtitle_range(ctx['video_id'], start, end)
+                else:
+                    c.request_onscreen_subtitle_range(ctx['region_id'], start, end)
                 self.owner.pop(accepted=True)
             else:
                 raise ValueError('지원하지 않는 구간 작업입니다.')
