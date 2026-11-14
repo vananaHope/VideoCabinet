@@ -75,8 +75,9 @@
   html, body, #root { height: 100%; overflow: hidden; }
   :focus-visible { @apply outline-2 outline-offset-2 outline-ring; }
   /* 누름: 누르는 동안 모든 조작 요소(단추·탭·카드·목록 행·메뉴 항목)가 열리는 층과 같은 크기 토큰만큼 작아진다.
-     색·면은 올림과 같고 transform만 바뀐다. 비활성 요소는 작아지지 않는다. */
-  :is(button, [role=option], [role=row][aria-selected], [role=treeitem], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio]):active:not(:disabled, [aria-disabled=true], [data-disabled]) {
+     색·면은 올림과 같고 transform만 바뀐다. 비활성 요소는 작아지지 않는다.
+     :active는 조상에도 걸리므로, 안에 눌린 조작 요소가 있으면 바깥은 그대로 두어 겹쳐 줄어들지 않는다(눌린 안쪽만 작아진다). */
+  :is(button, [role=option], [role=row][aria-selected], [role=treeitem], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio]):active:not(:disabled, [aria-disabled=true], [data-disabled]):not(:has(:is(button, [role=option], [role=row][aria-selected], [role=treeitem], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio]):active:not(:disabled, [aria-disabled=true], [data-disabled]))) {
     transform: scale(var(--motion-enter-scale));
   }
   ::-webkit-scrollbar { @apply w-2 h-2; }
