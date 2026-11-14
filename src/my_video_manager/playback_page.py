@@ -887,9 +887,10 @@ class PlaybackPage(QWidget):
             episode = f" · {series.video_ids.index(video.id) + 1}/{len(series.video_ids)}" if series else ""
             self.title_label.setText(video.title + episode)
             self.title_label.setToolTip(video.title + episode)
-            # 숨은 창(긴급 탈출 중 자동 전환)에서도 새 영상의 화면 번역 자막을 읽는다.
-            self.refresh_onscreen_translation()
+            # 보이는 화면이면 refresh_details가 화면 번역 자막도 읽는다. 숨은 창이면 그것만 읽어 옛 영상의 줄을 그리지 않는다.
             self.refresh_details()
+            if not self.isVisible():
+                self.refresh_onscreen_translation()
         self.progress.duration = duration
         self.progress.position = position
         self.progress.open_start = open_start
