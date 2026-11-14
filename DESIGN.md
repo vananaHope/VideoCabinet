@@ -321,7 +321,7 @@ components:
 - **Secondary / Outline / Ghost:** 보조 동작은 `secondary` 면(호버에 `accent`로 한 단계), 윤곽선 단추는 `input` 테두리 + `input` 30% 면(호버 50%), 고스트는 호버에만 `muted` 면이 생긴다.
 - **Destructive:** 되돌릴 수 없는 동작은 `destructive` 면, 덜 강한 경우는 `destructive` 윤곽선.
 - **Link:** `primary-text` 글자, 호버에 밑줄.
-- **Focus:** `ring` 색 2px 링. 비활성은 50% 불투명도.
+- **Focus:** 키보드 초점은 `ring` 색 2px 윤곽선을 2px 띄워 두른다(위험 단추 포함, `box-shadow` 링 없음). `index.css`의 전역 `:focus-visible` 규칙 하나가 모든 조작 요소에 같은 모양을 주므로 부품은 초점 규칙을 따로 적지 않는다. 비활성은 50% 불투명도.
 
 ### Navigation (Tabs)
 - **Navigation:** 머리글의 페이지 탭. 비선택은 `muted-foreground` 글자, 호버에 `muted` 면, 선택은 그보다 밝은 `accent` 면 + `accent-foreground` 글자. 강조색을 쓰지 않아 영상보다 튀지 않는다. 마지막 탭(설정)은 오른쪽 끝으로 민다. 툴팁에 단축키(`Ctrl+1`~`Ctrl+8`)가 보인다.
@@ -337,7 +337,7 @@ components:
 
 ### Inputs / Fields
 - **Style:** `input` 테두리, 투명에 가까운 면(`input` 30%), `md` 둥글기, 높이 2.25rem.
-- **Focus:** 테두리와 2px 링이 `ring`으로 바뀐다.
+- **Focus:** 단추와 같은 전역 초점 윤곽선(`ring` 2px, 2px 간격)이다. 테두리 색은 바뀌지 않는다.
 - **Error / Disabled:** 오류는 `destructive` 테두리와 옅은 링, 비활성은 50% 불투명도.
 
 ### Chips (Status Badge)
@@ -364,6 +364,7 @@ components:
 - **Quick** (`motion-duration-quick`, 100ms): 단추·탭·카드·입력란의 hover 색 전환(`transition-colors`)과 탭 내용 전환(`animate-tab-enter`).
 - **Enter** (`motion-duration-enter`, 150ms): 떠 있는 층과 안내가 열릴 때. 대화상자·경고 대화상자·키 안내·덮개와 안내(Notice)는 투명도만(`animate-fade-enter`), 메뉴·우클릭 메뉴·선택 목록·필터 팝오버는 투명도와 트리거 쪽에서 커지는 작은 크기 변화(`animate-layer-enter`, `motion-enter-scale` 0.97).
 - **곡선** (`motion-ease`): `cubic-bezier(0.23, 1, 0.32, 1)`. 처음에 빨리 다가와 바로 반응한 느낌을 준다.
+- **Press** (`motion-enter-scale`, 0.97): 누르는 동안(`:active`) 모든 조작 요소(단추·탭·설정 분류·카드·목록 행·메뉴 항목)가 이 크기로 작아진다. `index.css`의 전역 규칙 하나가 맡고, 색·면은 올림과 같으며 비활성 요소는 작아지지 않는다. 전환 없이 바로 바뀐다. 줄어드는 기준점은 누르고 있는 동안의 포인터 자리(`lib/press-origin.ts`, 키보드로 누르면 가운데)라, 누른 채 원래 영역 안 어디로 옮겨 놓아도 그 요소가 click을 받고 영역 밖에서 놓으면 취소된다. 끄는 동안 면이 포인터 쪽으로 최대 1.5%까지 따라 움직인다.
 
 **The Instant Close Rule.** 열 때만 전환하고 닫힘은 즉시다. 닫히는 층이 초점 가두기·포인터 차단으로 다음 입력을 막지 않는다. 열리는 도중에도 키·클릭은 바로 새 화면이 받는다.
 
@@ -377,6 +378,7 @@ components:
 - **Do** 색·간격·둥글기·글자 크기를 바꿀 때는 `src/my_video_manager/web_tokens.json`을 고치고 `scripts/generate_web_types.py`로 `tokens.css`를 다시 만든다(**The Token Source Rule**).
 - **Do** 모든 색을 테마 토큰 유틸리티(`bg-card`, `text-muted-foreground`, `border-ring` 등)로 쓴다.
 - **Do** 특별한 모양이 필요하면 쓰는 곳에서 덮어쓰지 말고, `cva` variant를 가진 전용 컴포넌트를 만든다.
+- **Do** 누름은 전역 규칙의 `motion-enter-scale` 축소 하나로 보인다. 부품마다 누름 색을 따로 칠하지 않는다.
 - **Do** 선택과 키보드 초점은 `ring`(#818cf8)으로, 호버는 면 한 단계(목록 행 `muted`, 안에 `muted` 면(배지·태그 칩·썸네일 자리)이 있는 카드·행 `popover`)로 구별한다. 선택 면은 `accent`다.
 - **Do** 썸네일·카드·패널의 크기를 내용이 오기 전에 확보한다.
 - **Do** 1100×720 offscreen 스크린샷(`scripts/check_web_*.py --offscreen`)으로 결과를 확인한다.

@@ -73,7 +73,7 @@ export function DialogList({ label, rows, selected, onSelect, onActivate, review
 }
 
 export function TextArea({ value, onChange }: { value: string; onChange: (text: string) => void }) {
-  return <textarea aria-label="텍스트" className="min-h-28 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring"
+  return <textarea aria-label="텍스트" className="min-h-28 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-body"
     value={value} onChange={event => onChange(event.target.value)} />
 }
 

@@ -1,6 +1,10 @@
 import { createRoot } from "react-dom/client"
 import App from "./App"
 import "./index.css"
+import { trackPressOrigin } from "./lib/press-origin"
+
+// 누름 축소의 기준점을 누른 자리로 둔다(가장자리 클릭 보존).
+trackPressOrigin(document)
 
 // 번들 글꼴(토큰 font-sans의 첫 이름) 중 첫 렌더용(font-display: block) 파일을 읽은 뒤 렌더해
 // 대체 글꼴로 그렸다가 바뀌는 깜박임과 줄 높이 변화를 막는다. 그 밖의 글자용 전체 파일(swap)은 기다리지 않는다.

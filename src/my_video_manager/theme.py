@@ -84,6 +84,8 @@ def playback_stylesheet():
     QToolButton[playbackRole="symbol"] {{ font-family: "Segoe UI Symbol";
         font-size: {playback_pixels('typography', 'text-base')}px; }}
     QPushButton:checked, QToolButton:checked {{ background: {c['accent']}; color: {c['primary-text']}; }}
+    /* 누르는 동안은 선택 면(accent)이다. 올림(테두리)·초점(ring 테두리)과 구별된다. */
+    QPushButton:pressed, QToolButton:pressed {{ background: {c['accent']}; }}
     QPushButton:focus, QToolButton:focus, QAbstractItemView:focus {{ border: 2px solid {c['ring']}; }}
     QListWidget {{ background: {c['card']}; border: 2px solid transparent; outline: none; }}
     QMenu {{ background: {c['popover']}; color: {c['popover-foreground']}; border: 1px solid {c['border']}; }}

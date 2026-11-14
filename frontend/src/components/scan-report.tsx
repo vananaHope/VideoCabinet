@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { NoticeStack, type NoticeItem } from "@/components/ui/notice"
 
 // 수백 줄이어도 안내 안에서만 스크롤해 폴더 목록을 밀어내지 않는다.
-const issueList = cva("space-y-0.5 overflow-y-auto rounded-md text-label outline-none focus-visible:ring-2 focus-visible:ring-ring", {
+const issueList = cva("space-y-0.5 overflow-y-auto rounded-md text-label", {
   variants: { size: { default: "max-h-16", tall: "max-h-32" } },
   defaultVariants: { size: "default" },
 })
