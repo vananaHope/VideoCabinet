@@ -64,7 +64,7 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
             value={current.effort} onChange={effort => update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, effort } : s) })} />}
           {/* 기본값 버튼은 제공자와 관계없이 묶음 머리 행 오른쪽 끝에 보인다. Tab은 입력 칸 다음에 오도록 DOM에서는 맨 뒤에 둔다. */}
           <Button variant="outline" size="xs" className="col-start-2 row-start-1 self-center justify-self-end" onClick={() => { setNotice(''); update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, model: selected.default_model, effort: '' } : s) }) }}>
-            <RotateCcw aria-hidden="true" />이 방식의 모델·강도 기본값</Button>
+            <RotateCcw aria-hidden="true" />모델·강도 기본값</Button>
         </div>
         {model.policy && <Notice tone={model.warning ? 'warning' : 'info'} role="note" aria-label="모델 정책" clamp={false}
           title={(model.training_warning || model.expired_warning) && <>
