@@ -293,6 +293,27 @@ def create_onscreen_tables(db) -> None:
         db.execute(statement)
 
 
+def migrate_onscreen_review(db) -> None:
+    """v10: 화면 자막 원문 검수 상태와 구간 다시 생성 요청. 이전과 최초 생성이 공유한다.
+
+    구간 요청은 대기열 항목이 아니라 영역과 그 영역의 세대에 붙는다. 영역을 더해 대기열 항목이 바뀌어도
+    남고, 영역을 고치거나 지워 세대가 사라지면 함께 사라진다.
+    """
+    db.execute("ALTER TABLE onscreen_translation_reviews ADD COLUMN original_reviewed INTEGER NOT NULL DEFAULT 0")
+    db.execute("""CREATE TABLE onscreen_subtitle_review_ranges (
+        region_id INTEGER PRIMARY KEY REFERENCES onscreen_subtitle_regions(id) ON DELETE CASCADE,
+        generation_id TEXT NOT NULL REFERENCES onscreen_subtitles(id) ON DELETE CASCADE,
+        start REAL NOT NULL,
+        end REAL NOT NULL)""")
+
+
+def ensure_onscreen_reviewable(db, video_id) -> None:
+    """그 영상의 화면 자막 읽기가 대기·읽는 중이면 화면 자막 줄 수정과 구간 다시 생성을 막는다."""
+    if db.execute("SELECT 1 FROM subtitle_queue WHERE video_id = ? AND kind = ? AND state IN ('queued', 'reading')",
+                  (video_id, ONSCREEN_SUBTITLE)).fetchone():
+        raise ValueError("화면 자막 읽기가 끝난 뒤 검수하세요.")
+
+
 class _Cancelled(Exception):
     """취소는 실패가 아니다. 요청은 대기로 돌아간다."""
 

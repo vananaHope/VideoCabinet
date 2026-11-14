@@ -470,3 +470,20 @@ def test_deleted_or_updated_region_lines_leave_search_and_other_regions_stay(scr
     reopened = AppCore(media=media, clock=lambda: datetime.now(timezone.utc), database=core.database)
     assert [(r.source, r.text, r.start) for r in reopened.search("caption").results] == [
         ("onscreen", "Moved caption", 40), ("onscreen_translation", "번역 Moved caption", 40)]
+
+
+def test_edited_onscreen_line_is_found_by_its_new_text_only(screen):
+    core, media, *_ = screen
+    video = core.videos()[0]
+    original = read_screen(core, media, video.id, captions=((10, 12, "Jon show"), (20, 22, "Corner title")))
+    finish(core)
+    core.edit_onscreen_subtitle_line(original[1].id, "Fixed corner")
+    assert [r.source for r in core.search("corner title").results] == ["onscreen_translation"]  # 다시 번역 전 번역
+    edited, = core.search("fixed corner").results
+    assert (edited.video_id, edited.source, edited.text, edited.start) == (video.id, "onscreen", "Fixed corner", 20)
+    finish(core)
+    assert core.search("corner title").results == ()
+    assert [(r.source, r.text) for r in core.search("fixed corner").results] == [
+        ("onscreen", "Fixed corner"), ("onscreen_translation", "번역 Fixed corner")]
+    reopened = AppCore(media=media, clock=lambda: datetime.now(timezone.utc), database=core.database)
+    assert reopened.search("fixed corner").results == core.search("fixed corner").results

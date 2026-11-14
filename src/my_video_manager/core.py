@@ -33,7 +33,7 @@ from .onscreen_subtitles import (OcrEngine, OnScreenRegionChanged, OnScreenSubti
 from .translation_source import ONSCREEN, TRANSCRIPT, TranslationSources
 from .onscreen_translation import OnScreenTranslationSource
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
-from .review import Review, ReviewPlayback, SubtitleExport
+from .review import Review, ReviewLine, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
 from .statistics import StatisticsReader, VideoViewingStatistics, ViewingStatistics
 from .statistics import StatisticsDashboard
@@ -802,6 +802,17 @@ class AppCore:
 
     def onscreen_translation_reviewed_lines(self, video_id: int) -> frozenset[str]:
         return self._onscreen_translation.reviewed_lines(video_id)
+
+    def onscreen_review_lines(self, region_id: int) -> tuple[ReviewLine, ...]:
+        """영역 하나의 화면 자막 줄과 화면 번역, 원문 검수됨·직접 수정 상태. 아직 읽지 않은 영역은 빈 목록이다."""
+        return self._onscreen_translation.review_lines(region_id)
+
+    def edit_onscreen_subtitle_line(self, line_id: str, text: str, *, overwrite_reviewed=False) -> None:
+        """화면 자막 원문 한 줄을 고치고 그 줄의 화면 번역만 다시 번역한다. 그 영상의 화면 자막 읽기가
+        대기·읽는 중이면 막는다. 직접 고친 화면 번역이 있으면 overwrite_reviewed 없이는
+        ReviewConfirmationRequired를 던진다."""
+        self._onscreen_translation.edit_original(line_id, text, self._translations,
+                                                 overwrite_reviewed=overwrite_reviewed)
 
     def process_next_onscreen_subtitle(self) -> OnScreenSubtitleQueueEntry | None:
         """작업자 스레드용. 받아쓰기 작업자와 따로 돌아 서로를 기다리지 않는다."""
