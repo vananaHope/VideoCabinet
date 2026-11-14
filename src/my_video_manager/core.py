@@ -1048,7 +1048,7 @@ class AppCore:
     def remove_watched_folder(self, path: Path) -> None:
         self._library.remove_watched_folder(path)
         self._update_folder_watch()
-        self._series.regroup(self.videos() + self.excluded_videos())
+        self._regroup()
 
     def create_folder_watch(self, on_batch_ready, *, watcher=None, **options):
         """감시 컨트롤러를 한 번 만든다. start/stop과 콜백 스레드 연결은 호출자 소유.
@@ -1092,7 +1092,7 @@ class AppCore:
     def add_file(self, path: Path) -> ScanResult:
         result = self._library.add_file(path)
         self._thumbnail_backfill.retry_unavailable()
-        self._series.regroup(self.videos() + self.excluded_videos())
+        self._regroup()
         return result
 
     def external_subtitles(self, video_id: int) -> tuple[ExternalSubtitleFile, ...]:
@@ -1106,7 +1106,7 @@ class AppCore:
     def reconnect_video(self, video_id: int, path: Path) -> None:
         self._library.reconnect_video(video_id, path)
         self._thumbnail_backfill.retry_unavailable()
-        self._series.regroup(self.videos() + self.excluded_videos())
+        self._regroup()
 
     def rename_video(self, video_id: int, title: str) -> None:
         self._library.rename_video(video_id, title)
@@ -1146,8 +1146,17 @@ class AppCore:
         excluded = {video.id for video in self.excluded_videos()}
         if excluded.intersection(video_ids):
             raise ValueError("제외된 영상은 되돌린 뒤 시리즈를 편집하세요.")
+        before = self._onscreen_series.memberships()
         edited = self._series.edit(series_id, name, video_ids, preserved_video_ids=excluded)
+        self._onscreen_series.follow_membership(before)
         return next(series for series in self.series() if series.id == edited.id)
+
+    def _regroup(self):
+        """자동 묶기. 소속이 바뀌면 화면 자막 영역을 맞춘다: 시리즈에서 빠진 화는 직접 정함이 되고, 새로 들어온 화
+        가운데 영역이 없는 화는 시리즈 영역을 받는다."""
+        before = self._onscreen_series.memberships()
+        self._series.regroup(self.videos() + self.excluded_videos())
+        self._onscreen_series.follow_membership(before)
 
     def adjacent_video(self, video_id: int, visible_video_ids: tuple[int, ...], *, forward: bool) -> int | None:
         """시리즈 순서를 우선하고, 시리즈 밖에서는 재생을 시작한 목록 순서를 쓴다."""
@@ -1271,7 +1280,7 @@ class AppCore:
                 folders=folders, on_registered=lambda video_id: self._auto_subtitle_rules.apply(video_id, rules=rules))
             if folders is None or result.reconnected:
                 self._thumbnail_backfill.retry_unavailable()
-            self._series.regroup(self.videos() + self.excluded_videos())
+            self._regroup()
             return result
 
 

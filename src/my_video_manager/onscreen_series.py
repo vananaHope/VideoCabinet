@@ -224,6 +224,38 @@ class OnScreenSeriesRegions:
                 self._store.settle_reading(connection, video, now, automatic=video != video_id)
             connection.execute("DELETE FROM series_onscreen_regions WHERE id = ?", (series_region,))
 
+    # 시리즈 소속이 바뀐 뒤
+
+    def memberships(self) -> frozenset[tuple[int, int]]:
+        """지금 시리즈 소속 (시리즈 ID, 영상 ID). 소속을 바꿀 수 있는 동작 전에 읽어 follow_membership에 넘긴다."""
+        with self._connect() as db:
+            return frozenset((row[0], row[1]) for row in db.execute("SELECT series_id, video_id FROM series_videos"))
+
+    def follow_membership(self, before: frozenset[tuple[int, int]]) -> None:
+        """시리즈 소속이 바뀐 뒤 화면 자막 영역을 맞춘다. 지금 상태만 보고 맞추므로 몇 번 불러도 결과가 같다.
+
+        1. 시리즈에서 온 영역 가운데 그 화가 지금 그 시리즈에 속하지 않는 것은 직접 정함이 된다(줄·검수는 그대로).
+           소속 변경과 다른 트랜잭션이라 그 사이 앱이 끝났어도 다음 맞추기가 다시 맞춘다.
+        2. 이번 동작으로 시리즈에 새로 들어온 화(before에 없던 소속) 가운데 영역이 없는 화는 시리즈 영역을 받아 자동
+           대상으로 들어간다. 이미 시리즈에 있던 화는 영역이 없어도 채우지 않는다(사용자가 지웠을 수 있다).
+        """
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("UPDATE onscreen_subtitle_regions SET series_region_id = NULL WHERE series_region_id IS NOT NULL "
+                       "AND NOT EXISTS (SELECT 1 FROM series_onscreen_regions sr JOIN series_videos sv "
+                       "ON sv.series_id = sr.series_id WHERE sr.id = onscreen_subtitle_regions.series_region_id "
+                       "AND sv.video_id = onscreen_subtitle_regions.video_id)")
+            joined = [(row[0], row[1]) for row in db.execute(
+                "SELECT sv.series_id, sv.video_id FROM series_videos sv JOIN videos v ON v.id = sv.video_id "
+                "WHERE v.excluded = 0 AND EXISTS (SELECT 1 FROM series_onscreen_regions sr WHERE sr.series_id = sv.series_id) "
+                "AND NOT EXISTS (SELECT 1 FROM onscreen_subtitle_regions r WHERE r.video_id = sv.video_id) "
+                "ORDER BY sv.series_id, sv.position")
+                if (row[0], row[1]) not in before]
+            now = self._clock().isoformat() if joined else None
+            for series_id, video_id in joined:
+                self._copy_all(db, series_id, video_id, now)
+                self._store.request_reading(db, video_id, now, automatic=True)
+
     def _new_series_region(self, db, series_id, rect, language, now) -> int:
         return db.execute("INSERT INTO series_onscreen_regions(series_id, x, y, width, height, language, created_at) "
                           "VALUES (?, ?, ?, ?, ?, ?, ?)", (series_id, *_values(rect), language, now)).lastrowid

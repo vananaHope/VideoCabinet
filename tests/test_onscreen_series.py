@@ -123,3 +123,142 @@ def test_series_option_is_refused_outside_a_series_and_changes_nothing(series):
     with pytest.raises(ValueError, match="시리즈"):
         core.add_onscreen_subtitle_region(other, BAND, "en", series=True)
     assert regions(core, other) == [] and queue(core) == []
+
+
+# 나중에 시리즈에 들어온 화와 시리즈에서 빠진 화(AC-2, AC-4)
+
+
+def apply_and_read(core, first):
+    core.add_onscreen_subtitle_region(first, BAND, "en", series=True)
+    core.add_onscreen_subtitle_region(first, TOP, "ja", series=True)
+    read_all(core)
+    return [(BAND, "en", SERIES), (TOP, "ja", SERIES)]
+
+
+def join_by_scan(core, folder, tmp_path):
+    (folder / "드라마 04화.mkv").write_bytes(b"episode 4")
+    core.scan()
+    return next(v.id for v in core.videos() if v.title == "드라마 04화")
+
+
+def join_by_add_file(core, folder, tmp_path):
+    path = folder / "드라마 04화.mkv"
+    path.write_bytes(b"episode 4")
+    core.add_file(path)
+    return next(v.id for v in core.videos() if v.title == "드라마 04화")
+
+
+def join_by_reconnect(core, folder, tmp_path):
+    # 시리즈 밖에서 등록했던 영상의 파일이 사라졌다가, 시리즈 폴더의 같은 내용 파일로 다시 연결된다.
+    outside = tmp_path / "밖" / "에피소드.mkv"
+    outside.parent.mkdir()
+    outside.write_bytes(b"episode 4")
+    core.add_file(outside)
+    video = next(v.id for v in core.videos() if v.title == "에피소드")
+    outside.unlink()
+    core.scan()
+    assert core.series_for_video(video) is None
+    (folder / "드라마 04화.mkv").write_bytes(b"episode 4")
+    core.reconnect_video(video, folder / "드라마 04화.mkv")
+    return video
+
+
+def join_by_series_edit(core, folder, tmp_path):
+    other = next(v.id for v in core.videos() if v.title == "따로")
+    series = core.series_for_video(next(v.id for v in core.videos() if v.title == "드라마 01화"))
+    core.update_series(series.id, name=series.name, video_ids=(*series.video_ids, other))
+    return other
+
+
+@pytest.mark.parametrize("join", [join_by_scan, join_by_add_file, join_by_reconnect, join_by_series_edit])
+def test_episode_joining_the_series_later_gets_the_series_regions_once_as_automatic(series, tmp_path, join):
+    core, media, folder, (first, second, third), _ = series
+    expected = apply_and_read(core, first)
+    assert queue(core) == []
+    core.add_onscreen_subtitle_region(third, CORNER, "en")  # 직접 요청 하나가 대기 중이다
+
+    joined = join(core, folder, tmp_path)
+
+    assert joined in core.series_for_video(first).video_ids
+    assert regions(core, joined) == expected
+    assert queue(core) == [(third, "queued"), (joined, "queued")]
+    before = (core.onscreen_subtitle_regions(joined), queue(core))
+    # 같은 맞추기를 다시 불러도 아무것도 바뀌지 않는다.
+    core.scan()
+    series_now = core.series_for_video(first)
+    core.update_series(series_now.id, name=series_now.name, video_ids=series_now.video_ids)
+    assert (core.onscreen_subtitle_regions(joined), queue(core)) == before
+    read_all(core)
+    assert [line.text for s in core.onscreen_subtitles(joined) for line in s.lines] == ["Hello", "World"] * 2
+
+
+def test_joining_episode_with_its_own_regions_and_members_left_without_regions_are_not_filled(series):
+    core, _, folder, (first, second, third), other = series
+    core.add_onscreen_subtitle_region(other, CORNER, "en")
+    core.add_onscreen_subtitle_region(third, TOP, "ja")
+    core.delete_onscreen_subtitle_region(core.onscreen_subtitle_regions(third)[0].id)  # 3화는 영역을 모두 지웠다
+    apply_and_read(core, first)
+    assert regions(core, third) == regions(core, second)  # 사용자가 고른 적용은 영역이 없는 화를 채운다
+    band = core.onscreen_subtitle_regions(third)[0]
+    core.update_onscreen_subtitle_region(band.id, band.rect, band.language)  # 3화만 고쳐 직접 정함이 된다
+    for region in core.onscreen_subtitle_regions(third):
+        core.delete_onscreen_subtitle_region(region.id)
+    assert regions(core, third) == []
+    series_now = core.series_for_video(first)
+    core.update_series(series_now.id, name=series_now.name, video_ids=(*series_now.video_ids, other))
+    core.scan()
+    # 이미 시리즈에 있던 화는 영역이 없어도 다시 채우지 않고, 영역이 있는 새 화는 그대로 직접 정함이다.
+    assert regions(core, third) == []
+    assert regions(core, other) == [(CORNER, "en", DIRECT)]
+
+
+def test_episode_leaving_the_series_keeps_its_regions_lines_and_reviews_as_directly_set(series):
+    core, _, _, (first, second, third), _ = series
+    apply_and_read(core, first)
+    review(core, second)
+    kept = (core.onscreen_subtitles(second), core.onscreen_translation_reviewed_lines(second))
+    series_now = core.series_for_video(first)
+
+    core.update_series(series_now.id, name=series_now.name, video_ids=(first, third))
+
+    assert [origin for *_, origin in regions(core, second)] == [DIRECT, DIRECT]
+    assert [s.lines for s in core.onscreen_subtitles(second)] == [s.lines for s in kept[0]]
+    assert core.onscreen_translation_reviewed_lines(second) == kept[1]
+    # 이후 시리즈 영역 변경을 따르지 않는다.
+    band = core.onscreen_subtitle_regions(first)[0]
+    core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True)
+    assert [s.lines for s in core.onscreen_subtitles(second)] == [s.lines for s in kept[0]]
+    assert regions(core, second)[0][0] == BAND
+
+
+def test_series_removed_by_regrouping_leaves_its_episodes_directly_set(series, tmp_path):
+    core, _, folder, (first, second, third), _ = series
+    apply_and_read(core, first)
+    kept = core.onscreen_subtitles(second)
+    # 파일 이름이 바뀌어 자동 묶기가 시리즈를 없앤다. 영상은 같은 내용이라 그대로 이어진다.
+    for number, video in ((1, first), (2, second), (3, third)):
+        (folder / f"드라마 0{number}화.mkv").rename(folder / f"장면 {chr(64 + number)}.mkv")
+    core.scan()
+    assert core.series_for_video(first) is None
+    assert {origin for video in (first, second, third) for *_, origin in regions(core, video)} == {DIRECT}
+    assert [(s.region.id, s.lines) for s in core.onscreen_subtitles(second)] == [(s.region.id, s.lines) for s in kept]
+
+
+def test_membership_change_left_unreconciled_converges_on_the_next_regrouping(series):
+    """시리즈 소속 변경과 출처 맞추기는 다른 트랜잭션이다. 그 사이 앱이 끝나도 다음 맞추기가 상태를 보고 다시 맞춘다."""
+    import sqlite3
+    from contextlib import closing
+    core, media, _, (first, second, third), _ = series
+    apply_and_read(core, first)
+    series_id = core.series_for_video(first).id
+    with closing(sqlite3.connect(core.database)) as db, db:
+        # 시리즈 편집이 2화를 뺀 직후 앱이 끝난 상태: 소속만 바뀌고 출처는 아직 맞추지 않았다.
+        db.execute("UPDATE series SET edited = 1 WHERE id = ?", (series_id,))
+        db.execute("INSERT OR IGNORE INTO series_overrides VALUES (?)", (second,))
+        db.execute("DELETE FROM series_videos WHERE video_id = ?", (second,))
+    reopened = AppCore(media=media, clock=lambda: NOW, ocr_engine=FakeOcr(("en", "ja")), database=core.database)
+    reopened.scan()
+    assert [origin for *_, origin in regions(reopened, second)] == [DIRECT, DIRECT]
+    before = regions(reopened, second), queue(reopened)
+    reopened.scan()
+    assert (regions(reopened, second), queue(reopened)) == before
