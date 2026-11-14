@@ -312,3 +312,30 @@ def test_pressing_an_edge_and_releasing_in_place_runs_that_element(window):
                 wait_for(lambda: js(window, "!document.querySelector('[role=dialog]')") and not window.web_host.dialogs.blocks_shell_actions)
     assert cases == [], f'가장자리 클릭이 그 요소에 가지 않음: {cases}'
 
+
+def test_tag_picker_option_shows_its_keyboard_focus(window):
+    """태그 고르기 목록은 입력란이 초점을 갖고 방향키로 옵션을 고른다(aria-activedescendant).
+    입력란은 P-2 윤곽선을, 키보드로 고른 옵션은 그 목록이 정한 초점 표시(ring 2px 안쪽 링)를 보인다."""
+    from my_video_manager.web_dialogs_entries import TagEditor
+    from test_web_dialogs import within
+    core = window.core
+    video, other = core.videos()[:2]
+    core.add_video_tag(other.id, '배움')
+    core.add_video_tag(other.id, '휴식')
+    ready(window)
+    dialogs = window.web_host.dialogs
+    field = '[role=dialog] [role=combobox]'
+    option = '[role=dialog] [role=option][data-active]'
+
+    def check():
+        wait_for(lambda: js(window, f"!!{shown(field)}"))
+        focused = tab_to(window, field)
+        assert_focus_outline(focused)
+        QTest.keyClick(view(window), Qt.Key.Key_Down)
+        wait_for(lambda: js(window, f"!!{shown(option)}"))
+        still(window, option)
+        active = state(window, option)
+        assert js(window, f"{shown(field)}.getAttribute('aria-activedescendant') === {shown(option)}.id")
+        assert re.search(rf'{re.escape(RING_CSS)} 0px 0px 0px 2px inset', active['shadow']), active
+        assert state(window, field)['focusVisible']
+    within(lambda: TagEditor(core, video_id=video.id, parent=window).exec(), dialogs, check)
