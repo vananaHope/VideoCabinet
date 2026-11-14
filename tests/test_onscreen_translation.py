@@ -706,7 +706,7 @@ def test_onscreen_line_edit_is_locked_while_that_video_is_read(screen):
     finish(core)
     core.add_onscreen_subtitle_region(video, RegionRect(0, 0.4, 0.5, 0.2), 'en')  # 그 영상의 화면 자막 읽기 대기
     before = review_flags(core, video)
-    with pytest.raises(ValueError, match='화면 자막'):
+    with pytest.raises(ValueError, match='읽기가 끝난 뒤 검수'):
         core.edit_onscreen_subtitle_line(bottom.lines[0].id, 'Locked')
     assert review_flags(core, video) == before
     # 다른 영상은 잠기지 않고, 화면 번역 줄 수정은 코어에서 지금처럼 잠그지 않는다.
@@ -904,7 +904,7 @@ def test_range_regeneration_is_locked_while_that_video_is_read(screen):
     queued = core.subtitle_queue(kind=ONSCREEN_SUBTITLE)
     for call in (lambda: core.request_onscreen_subtitle_range(top.region.id, 5, 7),
                  lambda: core.edit_onscreen_subtitle_line(top.lines[0].id, 'Locked')):
-        with pytest.raises(ValueError, match='화면 자막'):
+        with pytest.raises(ValueError, match='읽기가 끝난 뒤 검수'):
             call()
     assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == queued
     assert core.onscreen_subtitles(video) == (bottom, top)
