@@ -13,6 +13,7 @@ from my_video_manager.core import AppCore
 from my_video_manager.library import LIBRARY_DB_VERSION
 from my_video_manager.onscreen_translation import onscreen_generation_token
 from my_video_manager.onscreen_subtitles import OnScreenRegionChanged, RegionRect
+from my_video_manager.review import ReviewConfirmationRequired
 from my_video_manager.secret_store import SecretStore
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
 from my_video_manager.subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION
@@ -770,3 +771,45 @@ def test_v9_library_upgrades_keeping_onscreen_lines_translations_and_reviews(scr
     assert not any(flags[2] for flags in review_flags(upgraded, video).values())
     upgraded.edit_onscreen_subtitle_line(bottom.lines[0].id, 'Jon shows')
     assert review_flags(upgraded, video)[bottom.lines[0].id][2]
+
+
+def test_editing_original_of_a_hand_fixed_translation_asks_and_cancel_changes_nothing(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, _ = read_two_regions(core, media, video)
+    assert core.process_next_translation().completed_lines == 2  # 세 줄 중 한 줄은 아직 번역 대기
+    line = bottom.lines[0]
+    core.edit_onscreen_translation_line(line.id, '직접 고친 번역')
+    before = (review_flags(core, video), core.translation_queue(), core.onscreen_translation_reviewed_lines(video),
+              core.translation_line_providers(video, source=ONSCREEN))
+    with pytest.raises(ReviewConfirmationRequired, match='덮어'):
+        core.edit_onscreen_subtitle_line(line.id, 'Jon shows')
+    assert (review_flags(core, video), core.translation_queue(), core.onscreen_translation_reviewed_lines(video),
+            core.translation_line_providers(video, source=ONSCREEN)) == before
+    # 확인하면 그 줄의 보호가 풀리고 새 원문으로 다시 번역된다.
+    core.edit_onscreen_subtitle_line(line.id, 'Jon shows', overwrite_reviewed=True)
+    assert core.onscreen_translation_reviewed_lines(video) == frozenset()
+    assert review_flags(core, video)[line.id] == ('Jon shows', '직접 고친 번역', True, False)
+    adapter.calls.clear()
+    finish(core)
+    assert sorted(line.text for call in adapter.calls for line in call[0]) == ['Jon shows', 'Next']
+    assert review_flags(core, video)[line.id] == ('Jon shows', '번역 Jon shows', True, False)
+
+
+def test_hand_fixed_onscreen_translation_survives_every_retranslation(screen):
+    core, media, adapter, *_, reopen = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    kept = bottom.lines[0]
+    core.edit_onscreen_translation_line(kept.id, '고친 번역')
+    assert core.request_translation(video, source=ONSCREEN) is None  # 그 영상 화면 번역 재요청
+    assert core.request_translation(video, [kept.id], source=ONSCREEN) is None
+    core.edit_onscreen_subtitle_line(bottom.lines[1].id, 'Next one')  # 다른 줄 원문 수정
+    core.edit_onscreen_subtitle_line(top.lines[0].id, 'Corner!')
+    adapter.calls.clear()
+    finish(core)
+    assert sorted(line.text for call in adapter.calls for line in call[0]) == ['Corner!', 'Next one']
+    assert translated(core, video) == {kept.id: '고친 번역', bottom.lines[1].id: '번역 Next one',
+                                       top.lines[0].id: '번역 Corner!'}
+    assert reopen().onscreen_translation_reviewed_lines(video) == {kept.id}
