@@ -82,6 +82,8 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     <Button key={action} variant={variant} disabled={busy || disabled} onClick={() => void act(action, action === 'close' ? { accepted: !editable } : {})}>{label}</Button>
   const editable = ['series', 'tag-rename', 'highlight', 'subtitles', 'line', 'range', 'translation', 'video-rename', 'random-scope', 'onscreen-region'].includes(kind)
   const disabledEdit = data.locked || !currentSelected
+  // 검수 화면이 지금 보는 자막의 작업이 화면 번역이면 화면 자막 영역 하나의 줄을 보고 있다.
+  const onscreen = data.task_kind === 'onscreen_translation'
   const members = form.members.map(id => data.available.find(row => row.id === id)).filter(row => row !== undefined)
   const others = data.available.filter(row => !form.members.includes(row.id))
   function move(offset: number) {
@@ -104,7 +106,8 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {kind === 'tags' && <TagPicker mode="immediate" label="태그" tags={data.tags} exclude={data.rows.map(row => Number(row.id))} listAll
         emptyText={data.tags.length ? '등록한 태그가 모두 붙어 있습니다. 새 이름을 입력해 붙이세요.' : '등록한 태그가 없습니다. 이름을 입력하고 Enter로 새 태그를 만드세요.'}
         onPick={tag => act('add', { name: tag.name })} onCreate={name => act('add', { name })} />}
-      {['tags', 'tag-manager', 'highlights', 'review'].includes(kind) && <DialogList label={kind === 'review' ? `원어 · ${data.subtitle_label}` : kind === 'tags' ? '붙은 태그' : '목록'} rows={data.rows} selected={currentSelected} onSelect={setSelected}
+      {kind === 'review' && data.choices.length > 0 && <Choice label="검수할 자막" rows={data.choices} value={data.values.choice} onChange={choice => void act('view', { choice })} />}
+      {['tags', 'tag-manager', 'highlights', 'review'].includes(kind) && <DialogList key={kind === 'review' ? data.values.choice : kind} label={kind === 'review' ? `${onscreen ? '원문' : '원어'} · ${data.subtitle_label}` : kind === 'tags' ? '붙은 태그' : '목록'} rows={data.rows} selected={currentSelected} onSelect={setSelected}
         review={kind === 'review'} highlights={kind === 'highlights'} clickActivates={kind === 'review'}
         onActivate={kind === 'review' || kind === 'highlights' ? id => void act(kind === 'review' ? 'jump' : 'edit', { selected: id }) : undefined} />}
       {kind === 'series' && <>
@@ -145,6 +148,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     <DialogFooter start={kind === 'tags' ? <>{button('선택한 태그 떼기', 'remove', !currentSelected)}{button('모든 태그 관리', 'manage')}</>
       : kind === 'tag-manager' ? <>{button('이름 변경', 'rename', !currentSelected, 'default')}{button('태그 삭제', 'delete', !currentSelected, 'destructive')}</>
       : kind === 'highlights' ? <>{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</>
+      : kind === 'review' && onscreen ? <>{button('원문 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{data.exports.map(row => button(row.title, row.id))}</>
       : kind === 'review' ? <>{data.task_kind === 'refinement' && button(data.task_label, 'refine', data.locked)}{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button(`${data.short_label} SRT 저장`, 'export-translation', !data.rows.length)}{data.exports.map(row => button(row.title, row.id))}</>
       : undefined}>
       {button(editable ? '취소' : '닫기', 'close')}
