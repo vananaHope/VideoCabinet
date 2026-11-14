@@ -477,6 +477,7 @@ def screen_window(screen):
     window = MainWindow(core)
     window.subtitles.timer.stop()
     window.translations.timer.stop()
+    window.onscreen_subtitles.timer.stop()  # 화면 자막 읽기는 시험이 직접 처리한다(읽기 중 잠금을 본다)
     window.show()
     yield window, screen
     window.tray.quit()
