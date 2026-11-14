@@ -12,7 +12,8 @@ from my_video_manager.core import Command, CommandType
 from my_video_manager.key_guide import app_key_guide
 from my_video_manager.web_contract import TABS
 from test_emergency_hide_ui import app, window, key, emergency_key
-from test_emergency_hide_dialogs_ui import js, view, focus_field, field_value, rename_dialog, settle, type_text
+from test_emergency_hide_dialogs_ui import (active_label, js, view, focus_field, field_value, rename_dialog, settle,
+                                            type_text)
 from test_web_dialogs import within
 from qt_wait import wait_for
 
@@ -197,6 +198,8 @@ def test_closing_returns_focus_to_the_search_field_and_typing_continues(window):
     wait_guide(window)
     QTest.keyClick(view(window), Qt.Key.Key_Escape)
     wait_closed(window)
+    # Radix는 DOM 제거 뒤 별도 작업에서 초점을 복원한다. 복원 전에 치면 글자가 body로 간다.
+    wait_for(lambda: active_label(window) == "영상 제목 빠른 검색")
     type_text(window, "ab")
     assert field_value(window, "영상 제목 빠른 검색") == "ab"
 
@@ -304,3 +307,16 @@ def test_tray_hide_label_follows_emergency_key(window):
     assert hide_action(window).text() == "창 숨기기 · Ctrl+Alt+H / Ctrl+Alt+J"
     rebind(window, Command(CommandType.EMERGENCY_HIDE), ())
     assert hide_action(window).text() == "창 숨기기"
+
+
+def test_playback_key_help_lists_onscreen_translation_toggle_with_current_key(window):
+    window.play_video(window.core.videos()[0].id)
+    page = window.playback_page
+    page.toggle_help()
+    text = page.help_panel.text.text()
+    assert "<b>] (닫는 대괄호)</b></td><td style='padding-right:16px'>화면 번역 자막 켜기 / 끄기" in text
+    rebind(window, Command(CommandType.TOGGLE_ONSCREEN_TRANSLATION), ("K",))
+    window.refresh_key_help()
+    assert "<b>K</b></td><td style='padding-right:16px'>화면 번역 자막 켜기 / 끄기" in page.help_panel.text.text()
+    assert page.onscreen_button.toolTip().endswith("· K")
+    page.close_help()

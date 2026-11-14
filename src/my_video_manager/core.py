@@ -32,6 +32,7 @@ from .onscreen_subtitles import (OcrEngine, OnScreenRegionChanged, OnScreenSubti
                                  OnScreenSubtitleRegion, OnScreenSubtitles, RegionRect)
 from .translation_source import ONSCREEN, TRANSCRIPT, TranslationSources
 from .onscreen_translation import OnScreenTranslationSource
+from .onscreen_playback import OnScreenTranslationRegion
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewLine, ReviewPlayback, SubtitleExport
 from .library_details import LibraryDetails
@@ -63,6 +64,8 @@ class CommandType(str, Enum):
     RANDOM_PLAY = "random_play"
     # 재생 화면 🔀 단추와 같은 명령. 기본 키는 없고 키 배치에서 지정할 수 있다.
     TOGGLE_RANDOM_CONTINUOUS = "toggle_random_continuous"
+    # 재생 화면 '화면 번역' 단추와 같은 명령. 받아쓰기 쪽 자막 켜기/끄기와 따로 켜고 끈다.
+    TOGGLE_ONSCREEN_TRANSLATION = "toggle_onscreen_translation"
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,7 @@ DEFAULT_KEY_BINDINGS = {
     "PgUp": Command(CommandType.PREVIOUS_VIDEO),
     "PgDn": Command(CommandType.NEXT_VIDEO),
     ".": Command(CommandType.TOGGLE_SUBTITLE_LANGUAGE),
+    "]": Command(CommandType.TOGGLE_ONSCREEN_TRANSLATION),
     "\\": Command(CommandType.TOGGLE_REEL_REPEAT),
     ";": Command(CommandType.TOGGLE_HIGHLIGHT_LIST),
     "'": Command(CommandType.TOGGLE_FULLSCREEN),
@@ -796,6 +800,19 @@ class AppCore:
 
     def onscreen_subtitles(self, video_id: int) -> tuple[OnScreenSubtitle, ...]:
         return self._onscreen.subtitles(video_id)
+
+    def onscreen_translation_regions(self, video_id: int) -> tuple[OnScreenTranslationRegion, ...] | None:
+        """재생할 화면 번역 자막: 화면 자막 영역마다 그 영역의 화면 번역 줄. 화면 번역이 완성되지 않았으면 None.
+
+        화면 번역 줄 id는 화면 자막 줄 id와 같아 영역 줄로 잇는다. 줄이 없는 영역도 영역 목록에 남는다.
+        """
+        translation = self.translation(video_id, source=ONSCREEN)
+        if translation is None:
+            return None
+        translated = {line.id: line for line in translation.lines}
+        return tuple(OnScreenTranslationRegion(subtitle.region.rect, tuple(
+            translated[line.id] for line in subtitle.lines if line.id in translated))
+            for subtitle in self.onscreen_subtitles(video_id))
 
     def onscreen_translation_skip_reason(self, video_id: int) -> str | None:
         """모든 영역의 읽기가 끝났는데 영상 전체에 줄이 없을 때의 번역 미등록 사유."""

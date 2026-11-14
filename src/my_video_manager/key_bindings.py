@@ -69,6 +69,7 @@ def command_label(command: Command) -> str:
         "emergency_hide": "긴급 탈출(창 숨기기)",
         "random_play": "무작위 재생",
         "toggle_random_continuous": "무작위 이어 재생 켜기 / 끄기",
+        "toggle_onscreen_translation": "화면 번역 자막 켜기 / 끄기",
     }.get(kind, kind)
 
 

@@ -571,3 +571,35 @@ def test_random_play_stored_unmodified_key_is_unassigned(tmp_path):
     reopened = open_core(tmp_path)
     assert draft(reopened)[Command(CommandType.RANDOM_PLAY)] == ()
     assert reopened.command_for_key("R") is None
+
+
+def test_onscreen_translation_toggle_default_label_rebinding_and_reset(tmp_path):
+    core = open_core(tmp_path)
+    command = Command(CommandType.TOGGLE_ONSCREEN_TRANSLATION)
+    row = next(row for row in core.key_bindings() if row.command == command)
+    assert row.label == "화면 번역 자막 켜기 / 끄기"
+    assert row.keys == row.default_keys == ("]",)
+    assert core.command_for_key("]") == command
+    # 받아쓰기 쪽 자막 명령 바로 뒤에 온다.
+    kinds = [row.command.kind for row in core.key_bindings()]
+    assert kinds.index(CommandType.TOGGLE_ONSCREEN_TRANSLATION) == kinds.index(CommandType.TOGGLE_SUBTITLE_LANGUAGE) + 1
+    bindings = draft(core)
+    bindings[command] = ("K",)
+    core.save_key_bindings(bindings)
+    for app in (core, open_core(tmp_path)):
+        assert app.command_for_key("K") == command
+        assert app.command_for_key("]") is None
+    core.reset_key_bindings(command)
+    assert open_core(tmp_path).command_for_key("]") == command
+
+
+def test_onscreen_translation_default_collision_keeps_existing_user_key(tmp_path):
+    core = open_core(tmp_path)
+    core.settings.set("keys.bindings", {"toggle_pause:0": ["]"]})
+    reopened = open_core(tmp_path)
+    command = Command(CommandType.TOGGLE_ONSCREEN_TRANSLATION)
+    assert reopened.command_for_key("]") == Command(CommandType.TOGGLE_PAUSE)
+    assert draft(reopened)[command] == ()
+    with pytest.raises(ValueError, match="화면 번역 자막"):
+        reopened.reset_key_bindings(command)
+    assert draft(open_core(tmp_path))[command] == ()
