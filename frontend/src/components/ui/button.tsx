@@ -21,9 +21,9 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-muted hover:text-foreground",
         link: "text-primary-text underline-offset-4 hover:underline",
-        // 고를 수 있는 목록 항목으로 쓰는 단추(설정 분류). 면은 selectableItem과 같다.
-        item: selectableItem({ selected: false }),
-        "item-selected": selectableItem({ selected: true }),
+        // 고를 수 있는 목록 항목으로 쓰는 단추(설정 분류). 면은 selectableItem과 같고, 글자는 다른 목록처럼 왼쪽에서 시작한다.
+        item: ["justify-start", selectableItem({ selected: false })],
+        "item-selected": ["justify-start", selectableItem({ selected: true })],
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",
