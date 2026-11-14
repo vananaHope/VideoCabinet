@@ -355,6 +355,141 @@ def onscreen_region_edits():
     metrics['checks'].append('화면 자막 영역 고치기·지우기(검수로 고친 줄 0·3·9,999·긴 제목/언어) 컨테이너 촬영, 지우기 취소 무변경')
 
 
+def onscreen_series_regions():
+    """#284 시리즈 전체에 적용. 선택지가 있는 읽을 언어 대화상자(새 영역: 꺼짐·켜짐, 고치기: 켜짐)와 시리즈 영역
+    고치기·지우기·바꾸기 확인 창을 영향받는 다른 화 0 / 적음(3) / 최대(9,999), 검수로 고친 줄 0 / 적음(4) / 최대(99,999),
+    긴 시리즈 이름·영상 제목으로 재생 중 컨테이너에서 찍는다. 확인 창을 취소하면 아무것도 바뀌지 않는다."""
+    from my_video_manager.onscreen_series import OnScreenSeriesImpact
+    dialogs = window.web_host.dialogs
+    media.captions = ((5, 8, 'Corner title'), (20, 24, 'Next scene'), (30, 33, 'Third caption'))
+    band, top = RegionRect(0.08, 0.78, 0.84, 0.17), RegionRect(0.05, 0.02, 0.4, 0.12)
+    episodes = [v.id for v in core.videos()[8:16]]
+    core.rename_video(episodes[6], '아주 긴 영상 제목이 이어지는 시리즈 특집 ' * 3 + '공백없는긴제목' * 6)
+    alone, direct = episodes[0:2]  # 시리즈에서 온 화가 지금 화뿐이다(다른 화 0, 검수 0)
+    few = episodes[2:6]  # 네 화가 모두 시리즈에서 왔고 화마다 한 줄씩 검수했다
+    long_first, long_second = episodes[6:8]
+    # 검사 영상은 이름 번호로 한 시리즈에 묶여 있다. 촬영할 화들을 빼서 시리즈 셋으로 나눈다.
+    grouped = core.series_for_video(alone)
+    core.update_series(grouped.id, name=grouped.name, video_ids=tuple(v for v in grouped.video_ids if v not in episodes))
+    core.create_series('주말 예능', (alone, direct))
+    core.create_series('평일 드라마', tuple(few))
+    core.create_series('아주 긴 시리즈 이름이 이어지는 주말 예능 특집 ' * 3 + '공백없는긴시리즈이름' * 5,
+                       (long_first, long_second))
+    core.add_onscreen_subtitle_region(direct, top, 'en')
+    for first in (alone, few[0], long_first):
+        core.add_onscreen_subtitle_region(first, band, 'en', series=True)
+    while core.process_next_onscreen_subtitle():
+        pass
+    while core.process_next_translation():
+        pass
+    for episode in (*few, long_first, long_second):
+        line = core.onscreen_subtitles(episode)[0].lines[0]
+        core.edit_onscreen_translation_line(line.id, '화면 번역 ' + line.text)
+
+    def saved():
+        return [(core.onscreen_subtitle_regions(v), core.onscreen_subtitles(v),
+                 core.onscreen_translation_reviewed_lines(v)) for v in episodes], core.subtitle_queue(kind='onscreen_subtitle')
+
+    def cancel_confirmation():
+        # 읽을 언어 대화상자 위에 뜬 확인 창의 취소다. 대화상자 자체의 취소 단추와 구별한다.
+        wait(lambda: js("(() => { const e = Array.from(document.querySelectorAll('[role=alertdialog] button'))"
+                        ".find(e => e.textContent === '취소'); if (!e || e.disabled) return false; e.click(); return true; })()"))
+        settle()
+
+    def opened(name):
+        wait(lambda: dialogs.container is not None)
+        settle(300)
+        container = dialogs.container
+        assert container.width() <= window.width() and container.height() <= window.height()
+        return container
+
+    # 새 영역: 직접 정한 화(꺼짐·켜면 안내), 시리즈에서 온 화(켜짐·끄면 안내), 긴 시리즈 이름.
+    for name, target, checked in (('new-direct', direct, False), ('new-series', few[1], True),
+                                  ('new-long', long_second, True)):
+        core.playback.start(target, 0)
+        try:
+            def new_check(name=name, checked=checked):
+                container = opened(name)
+                data = current()
+                assert data['series_label'].startswith('시리즈 전체에 적용 · ') and data['values']['series'] is checked
+                assert data['series_note'].startswith('끄면' if checked else '켜면')
+                footer_layout(f'onscreen-series-{name}')
+                capture(f'container-onscreen-series-{name}', container)
+            web_modal('onscreen-region', {'video_id': target, 'region': RegionRect(0.6, 0.3, 0.35, 0.1)}, new_check)
+        finally:
+            core.playback.end()
+
+    # 바꾸기: 직접 정한 화에서 켜고 저장하면, 시리즈에서 온 다른 화 하나가 이전 시리즈 영역을 잃는다.
+    core.playback.start(direct, 0)
+    try:
+        def replace_check():
+            opened('replace')
+            before = saved()
+            result = json.loads(dialogs.bridge.act(current()['id'], 'save', json.dumps({'choice': 'en', 'series': True})))
+            data = result['dialog']
+            assert data['confirm_title'] == '시리즈 화면 자막 영역 바꾸기', data
+            assert '이 화와 다른 화 1개의 화면 자막 영역이 바뀝니다' in data['confirmation']
+            settle(300)
+            footer_layout('onscreen-series-replace-confirm')
+            capture('container-onscreen-series-replace-confirm', dialogs.container)
+            cancel_confirmation()
+            assert dialogs.active and not current()['confirmation'] and saved() == before
+        web_modal('onscreen-region', {'video_id': direct, 'region': RegionRect(0.6, 0.3, 0.35, 0.1)}, replace_check)
+    finally:
+        core.playback.end()
+
+    # 시리즈 영역 고치기·지우기 확인 창.
+    impact = core.onscreen_subtitle_region_series_impact
+    for name, target, others, reviewed in (('zero', alone, 0, 0), ('few', few[0], 3, 4), ('max', few[0], 9999, 99999),
+                                           ('long', long_first, 1, 2)):
+        region = core.onscreen_subtitle_regions(target)[0]
+        if name == 'max':
+            # 다른 화 9,999개를 실제로 만들지 않고 자릿수가 큰 수의 배치만 본다. 수 세기 자체는 pytest가 본다.
+            core.onscreen_subtitle_region_series_impact = lambda *a, **k: OnScreenSeriesImpact(9999, 99999, True)
+        else:
+            assert impact(target, region.id) == OnScreenSeriesImpact(others, reviewed, True)
+        core.playback.start(target, 0)
+        try:
+            def edit_check(name=name, others=others, reviewed=reviewed):
+                container = opened(name)
+                data = current()
+                assert data['values']['series'] is True
+                footer_layout(f'onscreen-series-edit-{name}')
+                capture(f'container-onscreen-series-edit-{name}', container)
+                before = saved()
+                result = json.loads(dialogs.bridge.act(data['id'], 'save', json.dumps({'choice': 'en', 'series': True})))
+                data = result['dialog']
+                assert data['confirm_title'] == '시리즈 화면 자막 영역 고치기', data
+                episodes_text = f'다른 화 {others:,}개' if others else '시리즈 영역을 받은 다른 화는 없습니다'
+                assert episodes_text in data['confirmation'] and f'검수로 고친 줄 {reviewed:,}개' in data['confirmation']
+                settle(300)
+                footer_layout(f'onscreen-series-edit-confirm-{name}')
+                capture(f'container-onscreen-series-edit-confirm-{name}', dialogs.container)
+                cancel_confirmation()
+                assert dialogs.active and not current()['confirmation'] and saved() == before
+            web_modal('onscreen-region', {'video_id': target, 'region': band, 'region_id': region.id}, edit_check)
+
+            def delete_check(name=name, others=others, reviewed=reviewed):
+                container = opened(name)
+                data = current()
+                assert data['confirm_title'] == '시리즈 화면 자막 영역 지우기', data
+                episodes_text = f'다른 화 {others:,}개' if others else '시리즈 영역을 받은 다른 화는 없습니다'
+                assert episodes_text in data['confirmation'] and f'검수로 고친 줄 {reviewed:,}개' in data['confirmation']
+                before = saved()
+                footer_layout(f'onscreen-series-delete-{name}')
+                capture(f'container-onscreen-series-delete-{name}', container)
+                click('취소')
+                assert not dialogs.active and saved() == before
+            web_modal('onscreen-region-delete', {'video_id': target, 'region_id': region.id}, delete_check)
+        finally:
+            core.playback.end()
+            if name == 'max':
+                del core.onscreen_subtitle_region_series_impact
+    metrics['checks'].append('시리즈 전체에 적용: 선택지 있는 읽을 언어 대화상자(꺼짐·켜짐·긴 시리즈 이름), 시리즈 영역 '
+                             '고치기·지우기 확인 창(다른 화 0·3·9,999, 검수 줄 0·4·99,999, 긴 이름·제목)과 바꾸기 확인 창 '
+                             '컨테이너 촬영, 확인 창 취소 무변경')
+
+
 def onscreen_review():
     """#285 검수 화면의 화면 자막. 자막 종류·영역 고르기, 화면 자막 줄 목록, 원문·화면 번역 줄 수정, 덮어쓰기 확인 창,
     화면 자막 구간 다시 생성을 화면 자막 없음(none)·적음(few: 영역 하나 두 줄, 원어 자막 없음)·
@@ -759,6 +894,7 @@ try:
             core.playback.end()
         metrics['checks'].append('화면 자막 읽을 언어(직접 고르기·원어 기본값·언어 팩 없음 경고) 컨테이너 촬영')
         onscreen_region_edits()
+        onscreen_series_regions()
         metrics['checks'].append('무작위 이어 재생 범위(재생 중 컨테이너)·태그 이름 변경 촬영과 끝 단추 배치 기록')
         window.pages.setCurrentWidget(host)
         settle(300)
