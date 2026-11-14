@@ -233,6 +233,10 @@ def real(app, directory, result):
     shots = iter(range(1, 100))
 
     def press(vk):
+        """Windows 키 입력. 앱 창이 활성 창이고 초점이 영상(또는 조작 줄)에 있어야 재생 키가 된다."""
+        assert window.isActiveWindow(), f'키 {vk:#x}: 앱 창이 활성 창이 아님({QApplication.activeWindow()!r})'
+        if QApplication.focusWidget() is None:
+            window.surface.setFocus()
         user32.keybd_event(vk, 0, 0, 0)
         user32.keybd_event(vk, 0, 0x2, 0)
         settle(300)
@@ -299,7 +303,7 @@ def real(app, directory, result):
     # 일시정지한 장면에서 비교한다(줄이 바뀌지 않게 10초 자리).
     window.player.seek_to(10)
     wait(lambda: abs(core.playback.position - 10) < 0.5, '10초로 이동')
-    press(0x0D)  # Enter: 일시정지
+    window.player.pause()  # 줄이 바뀌지 않게 멈춘다(일시정지 키는 이 검사 대상이 아니다)
     wait(lambda: window.player.paused, '일시정지')
     expect(screenshot('start-on'), 'start-on', bottom='band', top='band')
     press(0xDD)  # ]: 화면 번역 자막 끄기
@@ -340,7 +344,7 @@ def real(app, directory, result):
     assert page.onscreen_button.isChecked(), '목록 왕복 뒤 켬으로 시작'
     window.player.seek_to(10)
     wait(lambda: abs(core.playback.position - 10) < 0.5, '10초로 이동')
-    press(0x0D)
+    window.player.pause()
     wait(lambda: window.player.paused, '일시정지')
     expect(screenshot('after-list-round-trip'), 'after-list-round-trip', bottom='band', top='band')
     press(0xDD)
