@@ -12,9 +12,11 @@ import subprocess
 import sys
 import time
 from threading import Event, Lock, Thread
+import unicodedata
 
 from .core import Command, CommandType, MediaInfo, playback_speed
 from .media import parse_ffprobe_result
+from .onscreen_playback import OnScreenBand
 from .onscreen_subtitles import RegionImage, RegionRect
 
 
@@ -228,6 +230,50 @@ def _prepare_mpv_runtime():
 
 
 OSD_FONT = "Malgun Gothic"
+# 화면 번역 자막을 그리는 osd-overlay의 id. 영역 목록 전체를 이 오버레이 하나에 그린다.
+ONSCREEN_OVERLAY_ID = 1
+# 글자 크기: 한 줄 높이(맑은 고딕은 글자 크기의 약 1.33배)가 띠 높이 안에 들고, 줄 폭이 띠 폭 안에 들게 한다.
+# 폭은 글꼴을 재지 않고 넓은 글자(한글·한자·가나) 1, 나머지 0.6 글자 크기로 넉넉히 어림한다.
+TEXT_HEIGHT_RATIO, TEXT_WIDTH_RATIO = 0.7, 0.92
+WIDE_ADVANCE, NARROW_ADVANCE = 1.0, 0.6
+
+
+def _ass_text(text: str) -> str:
+    """ASS 태그로 읽히지 않게 글자를 그대로 보이도록 바꾼다(mpv의 OSD 글자 처리와 같은 방식)."""
+    return (text.replace("\\", "\\⁠").replace("{", "\\{").replace("}", "\\}")
+            .replace("\r\n", "\n").replace("\n", "\\N"))
+
+
+def _text_size(text: str, width: float, height: float) -> int:
+    lines = text.split("\n")
+    advance = max(sum(WIDE_ADVANCE if unicodedata.east_asian_width(char) in "WF" else NARROW_ADVANCE
+                      for char in line) for line in lines)
+    size = min(height * TEXT_HEIGHT_RATIO / len(lines), width * TEXT_WIDTH_RATIO / max(advance, 1))
+    return max(1, int(size))
+
+
+def onscreen_overlay_events(bands: tuple[OnScreenBand, ...], dimensions: dict) -> str | None:
+    """화면 번역 띠를 ASS 이벤트로 만든다. 좌표계는 창 픽셀(osd-dimensions의 w·h)이다.
+
+    영역 비율은 mpv가 영상을 그리는 자리(창에서 여백 ml·mr·mt·mb를 뺀 곳)로 옮긴다. 영상 자리를 모르면 None.
+    띠마다 영역을 덮는 불투명한 검은 사각형과, 그 가운데에 영역 안으로 잘라 쓰는 흰 글자 두 이벤트다.
+    """
+    left, top = dimensions.get("ml", 0), dimensions.get("mt", 0)
+    width = dimensions.get("w", 0) - left - dimensions.get("mr", 0)
+    height = dimensions.get("h", 0) - top - dimensions.get("mb", 0)
+    if width <= 0 or height <= 0:
+        return None
+    events = []
+    for band in bands:
+        x0, y0 = round(left + band.rect.x * width), round(top + band.rect.y * height)
+        x1 = round(left + (band.rect.x + band.rect.width) * width)
+        y1 = round(top + (band.rect.y + band.rect.height) * height)
+        events.append(rf"{{\an7\pos(0,0)\bord0\shad0\1c&H000000&\1a&H00&\p1}}"
+                      rf"m {x0} {y0} l {x1} {y0} {x1} {y1} {x0} {y1}{{\p0}}")
+        size = _text_size(band.text, x1 - x0, y1 - y0)
+        events.append(rf"{{\an5\pos({(x0 + x1) // 2},{(y0 + y1) // 2})\q2\fn{OSD_FONT}\fs{size}\bord0\shad0"
+                      rf"\1c&HFFFFFF&\1a&H00&\clip({x0},{y0},{x1},{y1})}}" + _ass_text(band.text))
+    return "\n".join(events)
 
 
 class MpvPlayer:
@@ -242,6 +288,18 @@ class MpvPlayer:
         self._subtitle_path = None
         self._closing = False
         self._callback_lock = Lock()
+        # 화면 번역 띠와 mpv가 영상을 그리는 자리. 창 크기가 바뀌면 같은 띠를 새 자리에 다시 그린다.
+        self._bands = ()
+        self._osd_dimensions = None
+
+        @self._player.property_observer("osd-dimensions")
+        def dimensions_changed(_name, dimensions):
+            with self._callback_lock:
+                if self._closing or not dimensions or dimensions == self._osd_dimensions:
+                    return
+                self._osd_dimensions = dict(dimensions)
+                if self._bands:
+                    self._draw_onscreen_translation()
 
         @self._player.event_callback("file-loaded")
         def select_app_subtitle(_event):
@@ -350,6 +408,36 @@ class MpvPlayer:
         with self._callback_lock:
             if not self._closing:
                 self._player.command("show-text", text, round(duration * 1000))
+
+    def show_onscreen_translation(self, bands: tuple[OnScreenBand, ...]) -> None:
+        """화면 번역 띠 묶음을 오버레이 하나로 그린다. 창 크기가 바뀌면 같은 묶음을 다시 그린다."""
+        with self._callback_lock:
+            if self._closing:
+                return
+            self._bands = tuple(bands)
+            self._draw_onscreen_translation()
+
+    def clear_onscreen_translation(self) -> None:
+        with self._callback_lock:
+            if self._closing:
+                return
+            self._bands = ()
+            self._player.command("osd-overlay", ONSCREEN_OVERLAY_ID, "none", "")
+
+    def _draw_onscreen_translation(self) -> None:
+        """_callback_lock 안에서 부른다. 영상 자리를 아직 모르면 osd-dimensions 보고 때 그린다."""
+        if self._osd_dimensions is None:
+            return
+        data = onscreen_overlay_events(self._bands, self._osd_dimensions)
+        if data is not None:
+            self._player.command("osd-overlay", ONSCREEN_OVERLAY_ID, "ass-events", data,
+                                 self._osd_dimensions["w"], self._osd_dimensions["h"], 0, "no", "no")
+
+    def set_subtitles_raised(self, raised: bool) -> None:
+        """받아쓰기 자막을 화면 위로 비켜 두거나(top) 기본 자리(bottom)로 돌린다."""
+        with self._callback_lock:
+            if not self._closing:
+                self._player.sub_align_y = "top" if raised else "bottom"
 
     def pause(self) -> None:
         """토글과 달리 이미 멈춘 재생은 그대로 둔다."""
