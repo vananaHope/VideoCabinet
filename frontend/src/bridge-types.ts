@@ -714,6 +714,7 @@ export interface DialogValues {
   fallback: boolean
   key_action: string
   key: string
+  series: boolean
 }
 
 export interface DialogData {
@@ -742,6 +743,8 @@ export interface DialogData {
   subtitle_label: string
   short_label: string
   keep_reviewed: boolean
+  series_label: string
+  series_note: string
 }
 
 export interface DialogSnapshot {

@@ -327,6 +327,7 @@ def test_selector_shows_saved_regions_and_a_new_drag_adds_only_that_region(windo
     drag(selector, (0.6, 0.05), (0.95, 0.15))  # 빈 곳(위 모서리)
     with_dialog(window, add)
     assert seen["title"] == "화면 자막 영역 · 읽을 언어" and seen["information"] == ""
+    assert seen["series_label"] == "" and seen["series_note"] == ""  # 시리즈에 속하지 않은 화에는 선택지가 없다
     bottom, top = window.core.onscreen_subtitle_regions(video.id)
     assert (bottom, top.language) == (subtitle.region, "de")
     assert top.rect.x == pytest.approx(0.6, abs=0.01) and top.rect.height == pytest.approx(0.1, abs=0.01)
@@ -525,3 +526,30 @@ def test_confirming_before_seeing_the_new_warning_changes_nothing_and_asks_again
         assert core.onscreen_subtitles(video.id) == ()
         region_now, = core.onscreen_subtitle_regions(video.id)
         assert region_now.id == region.id
+
+
+# #284 시리즈 전체에 적용: 시리즈에 속한 화의 읽을 언어 대화상자에만 선택지가 있다.
+
+
+def test_series_episode_dialog_offers_series_apply_and_other_episodes_follow_as_automatic(window, tmp_path):
+    core = window.core
+    second = tmp_path / "예능 02화.mkv"
+    second.write_bytes(b"episode 2")
+    core.add_file(second)
+    first_id, second_id = (v.id for v in sorted(core.videos(), key=lambda v: v.title))
+    assert core.series_for_video(first_id).video_ids == (first_id, second_id)
+    video, selector = start(window)
+    assert video.id == first_id
+    seen = {}
+
+    def save(dialogs):
+        seen.update(state(dialogs))
+        assert "error" not in act(dialogs, "save", choice="en", series=True)
+    drag(selector, (0.1, 0.75), (0.9, 0.95))
+    with_dialog(window, save)
+    assert seen["series_label"].startswith("시리즈 전체에 적용 · ") and seen["values"]["series"] is False
+    assert "켜면" in seen["series_note"]
+    regions = [core.onscreen_subtitle_regions(v) for v in (first_id, second_id)]
+    assert [(r.rect, r.origin.value) for r in regions[0]] == [(r.rect, "series") for r in regions[1]]
+    # 지금 화는 직접 요청, 다른 화는 자동 대상이다.
+    assert [e.video_id for e in core.subtitle_queue(kind=ONSCREEN_SUBTITLE)] == [first_id, second_id]

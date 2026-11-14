@@ -579,6 +579,163 @@ def test_onscreen_region_delete_closes_when_the_region_is_already_gone(screen_wi
     assert core.onscreen_subtitle_regions(video.id) == (other,)
 
 
+# #284 화면 자막 영역 시리즈 전체에 적용: 시리즈에 속한 화에만 선택지가 있고, 시리즈 영역 고치기·지우기·바꾸기는 확인 창이
+# 영향받는 다른 화 수와 사라질 검수 줄 수의 합을 보인다.
+CORNER = RegionRect(0.6, 0.02, 0.38, 0.1)
+
+
+def series_episodes(core, media):
+    """두 화를 시리즈로 묶고 첫 화에서 시리즈 전체에 적용해 둘 다 읽은 뒤, 화마다 영역의 첫 줄을 검수로 고친다."""
+    a, b = (v.id for v in core.videos())
+    core.create_series('주말 예능 ' + '아주 긴 시리즈 이름 ' * 6, (a, b))
+    media.captions = ((10, 12, 'Jon show'), (20, 22, 'Next'))
+    core.add_onscreen_subtitle_region(a, BAND, 'en', series=True)
+    while core.process_next_onscreen_subtitle():
+        pass
+    for video in (a, b):
+        core.edit_onscreen_translation_line(core.onscreen_subtitles(video)[0].lines[0].id, '고친 번역')
+    return a, b
+
+
+def onscreen_saved(core, videos):
+    return [(core.onscreen_subtitle_regions(v), core.onscreen_subtitles(v), core.onscreen_translation_reviewed_lines(v))
+            for v in videos], core.subtitle_queue(kind='onscreen_subtitle')
+
+
+def test_onscreen_region_dialog_offers_the_series_option_only_inside_a_series(screen_window):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, b = (v.id for v in core.videos())
+    dialogs, seen = window.web_host.dialogs, []
+    core.playback.start(a, 0)
+    within(lambda: OnScreenRegionDialog(core, a, BAND, window).exec(), dialogs, lambda: seen.append(state(dialogs)))
+    assert (seen[0]['series_label'], seen[0]['series_note'], seen[0]['values']['series']) == ('', '', False)
+    core.create_series('예능', (a, b))
+    core.add_onscreen_subtitle_region(a, BAND, 'en')  # 직접 정한 화: 꺼진 채 열린다
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window).exec(), dialogs, lambda: seen.append(state(dialogs)))
+    assert (seen[1]['series_label'], seen[1]['values']['series']) == ('시리즈 전체에 적용 · 예능', False)
+    assert '켜면 이 화의 영역 묶음이 시리즈 영역이 되어' in seen[1]['series_note']
+    core.add_onscreen_subtitle_region(b, BAND, 'en', series=True)  # 시리즈에서 온 화: 켜진 채 열린다
+    region, = core.onscreen_subtitle_regions(b)
+    core.playback.start(b, 0)
+    for context in ({}, {'region_id': region.id}):
+        within(lambda: OnScreenRegionDialog(core, b, CORNER, window, **context).exec(), dialogs,
+               lambda: seen.append(state(dialogs)))
+        assert seen[-1]['values']['series'] is True
+        assert seen[-1]['series_note'] == '끄면 이 화는 앞으로 시리즈 영역 변경을 따르지 않습니다.'
+
+
+def test_series_apply_without_existing_series_regions_saves_without_a_confirmation(screen_window):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, b = (v.id for v in core.videos())
+    core.create_series('예능', (a, b))
+    dialogs = window.web_host.dialogs
+    core.playback.start(a, 0)
+
+    def check():
+        result = act(dialogs, 'save', choice='en', series=True)
+        assert result is None or not result['confirmation']
+        assert not dialogs.active
+    within(lambda: OnScreenRegionDialog(core, a, BAND, window).exec(), dialogs, check)
+    assert [r.origin.value for v in (a, b) for r in core.onscreen_subtitle_regions(v)] == ['series', 'series']
+    assert [e.video_id for e in core.subtitle_queue(kind='onscreen_subtitle')] == [a, b]
+
+
+@pytest.mark.parametrize('answer', ['cancel-confirm', 'confirm'])
+def test_series_region_edit_confirms_other_episodes_and_reviewed_lines_and_cancel_changes_nothing(screen_window, answer):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, b = series_episodes(core, media)
+    region, = core.onscreen_subtitle_regions(a)
+    before = onscreen_saved(core, (a, b))
+    dialogs, seen = window.web_host.dialogs, {}
+    core.playback.start(a, 0)
+
+    def check():
+        data = act(dialogs, 'save', choice='ja', series=True)
+        seen.update(data)
+        assert data['confirm_title'] == '시리즈 화면 자막 영역 고치기' and data['confirm_destructive']
+        assert '이 화와 시리즈 영역을 받은 다른 화 1개에서' in data['confirmation']
+        assert '검수로 고친 줄 2개의 수정이 사라집니다' in data['confirmation']
+        act(dialogs, answer)
+        if answer == 'cancel-confirm':
+            assert dialogs.active and not state(dialogs)['confirmation']  # 고르던 창으로 돌아간다
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window, region_id=region.id).exec(), dialogs, check)
+    if answer == 'cancel-confirm':
+        assert onscreen_saved(core, (a, b)) == before
+    else:
+        assert [(r.rect, r.language, r.origin.value) for v in (a, b) for r in core.onscreen_subtitle_regions(v)] == [
+            (CORNER, 'ja', 'series')] * 2
+        assert [e.video_id for e in core.subtitle_queue(kind='onscreen_subtitle')] == [a, b]
+
+
+def test_series_confirmation_follows_changes_while_open_and_asks_again_when_confirmed_on_a_stale_count(screen_window):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDeleteDialog
+    window, (core, media, *_) = screen_window
+    a, b = series_episodes(core, media)
+    region, = core.onscreen_subtitle_regions(a)
+    dialogs = window.web_host.dialogs
+    core.playback.start(a, 0)
+
+    def check():
+        data = state(dialogs)
+        assert (data['kind'], data['confirm_title']) == ('onscreen-region-delete', '시리즈 화면 자막 영역 지우기')
+        assert '이 화와 시리즈 영역을 받은 다른 화 1개에서' in data['confirmation']
+        assert '검수로 고친 줄 2개의 수정이 사라집니다' in data['confirmation']
+        # 창이 열린 동안 다른 화의 검수가 늘면 안내가 지금 수로 바뀐다.
+        core.edit_onscreen_translation_line(core.onscreen_subtitles(b)[0].lines[1].id, '또 고친 번역')
+        assert '검수로 고친 줄 3개의 수정이 사라집니다' in state(dialogs)['confirmation']
+        # 안내를 다시 보기 전에 확인하면 지우지 않고 다시 묻는다.
+        identifier = state(dialogs)['id']
+        core.edit_onscreen_subtitle_line(core.onscreen_subtitles(a)[0].lines[1].id, 'Next one')
+        before = onscreen_saved(core, (a, b))
+        result = json.loads(dialogs.bridge.act(identifier, 'confirm', '{}'))['dialog']
+        assert dialogs.active and onscreen_saved(core, (a, b)) == before
+        assert '그 사이 시리즈의 화면 자막 영역이 바뀌었습니다' in result['confirmation']
+        assert '검수로 고친 줄 4개의 수정이 사라집니다' in result['confirmation']
+        act(dialogs, 'confirm')
+        assert not dialogs.active
+    within(lambda: OnScreenRegionDeleteDialog(core, a, region.id, window).exec(), dialogs, check)
+    assert core.onscreen_subtitle_regions(a) == core.onscreen_subtitle_regions(b) == ()
+    assert '시리즈 화면 자막 영역을 지웠습니다' in window.statusBar().currentMessage()
+
+
+def test_series_region_delete_cancel_keeps_every_episode(screen_window):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDeleteDialog
+    window, (core, media, *_) = screen_window
+    a, b = series_episodes(core, media)
+    region, = core.onscreen_subtitle_regions(b)
+    before = onscreen_saved(core, (a, b))
+    dialogs = window.web_host.dialogs
+    core.playback.start(b, 0)
+
+    def check():
+        act(dialogs, 'cancel-confirm')
+        assert not dialogs.active
+    within(lambda: OnScreenRegionDeleteDialog(core, b, region.id, window).exec(), dialogs, check)
+    assert onscreen_saved(core, (a, b)) == before
+
+
+def test_series_apply_from_a_directly_set_episode_confirms_the_replacement(screen_window):
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, b = series_episodes(core, media)
+    region, = core.onscreen_subtitle_regions(b)
+    core.update_onscreen_subtitle_region(region.id, region.rect, region.language)  # 2화만 고쳐 직접 정한 화가 됐다
+    dialogs, seen = window.web_host.dialogs, {}
+    core.playback.start(b, 0)
+
+    def check():
+        seen.update(act(dialogs, 'save', choice='en', series=True))
+        act(dialogs, 'confirm')
+    within(lambda: OnScreenRegionDialog(core, b, CORNER, window).exec(), dialogs, check)
+    assert seen['confirm_title'] == '시리즈 화면 자막 영역 바꾸기'
+    assert '이 화와 다른 화 1개의 화면 자막 영역이 바뀝니다' in seen['confirmation']
+    assert '검수로 고친 줄 1개의 수정이 사라집니다' in seen['confirmation']
+    assert [(r.rect, r.origin.value) for r in core.onscreen_subtitle_regions(a)] == [(BAND, 'series'), (CORNER, 'series')]
+
+
 # #285 검수 화면의 화면 자막: 받아쓰기 자막과 구별해 영역마다 열고 원문·화면 번역 줄을 고친다.
 TOP = RegionRect(0.6, 0.02, 0.38, 0.1)
 

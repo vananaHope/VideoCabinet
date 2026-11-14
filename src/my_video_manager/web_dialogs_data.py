@@ -25,6 +25,8 @@ class DialogValues(TypedDict):
     fallback: bool
     key_action: str
     key: str
+    # 화면 자막 영역의 "시리즈 전체에 적용" 선택지.
+    series: bool
 
 
 class DialogData(TypedDict):
@@ -56,6 +58,10 @@ class DialogData(TypedDict):
     subtitle_label: str
     short_label: str
     keep_reviewed: bool
+    # 화면 자막 영역의 "시리즈 전체에 적용" 선택지 이름(시리즈에 속하지 않은 영상이면 빈 문자열이라 보이지 않는다)과
+    # 선택지 아래 한 줄 안내.
+    series_label: str
+    series_note: str
 
 
 class DialogSnapshot(TypedDict):
@@ -67,4 +73,4 @@ def row(identifier, title, detail='', status='', start=0, end=None):
 
 
 def values(**updates):
-    return {**dict(name='', text='', start=0.0, end=0.0, range=False, choice='', members=[], selections=[], fallback=False, key_action="keep", key=""), **updates}
+    return {**dict(name='', text='', start=0.0, end=0.0, range=False, choice='', members=[], selections=[], fallback=False, key_action="keep", key="", series=False), **updates}
