@@ -321,7 +321,7 @@ components:
 - **Secondary / Outline / Ghost:** 보조 동작은 `secondary` 면(호버에 `accent`로 한 단계), 윤곽선 단추는 `input` 테두리 + `input` 30% 면(호버 50%), 고스트는 호버에만 `muted` 면이 생긴다.
 - **Destructive:** 되돌릴 수 없는 동작은 `destructive` 면, 덜 강한 경우는 `destructive` 윤곽선.
 - **Link:** `primary-text` 글자, 호버에 밑줄.
-- **Focus:** `ring` 색 2px 링. 비활성은 50% 불투명도.
+- **Focus:** 키보드 초점은 `ring` 색 2px 윤곽선을 2px 띄워 두른다(위험 단추 포함, `box-shadow` 링 없음). `index.css`의 전역 `:focus-visible` 규칙 하나가 모든 조작 요소에 같은 모양을 주므로 부품은 초점 규칙을 따로 적지 않는다. 비활성은 50% 불투명도.
 
 ### Navigation (Tabs)
 - **Navigation:** 머리글의 페이지 탭. 비선택은 `muted-foreground` 글자, 호버에 `muted` 면, 선택은 그보다 밝은 `accent` 면 + `accent-foreground` 글자. 강조색을 쓰지 않아 영상보다 튀지 않는다. 마지막 탭(설정)은 오른쪽 끝으로 민다. 툴팁에 단축키(`Ctrl+1`~`Ctrl+8`)가 보인다.
@@ -337,7 +337,7 @@ components:
 
 ### Inputs / Fields
 - **Style:** `input` 테두리, 투명에 가까운 면(`input` 30%), `md` 둥글기, 높이 2.25rem.
-- **Focus:** 테두리와 2px 링이 `ring`으로 바뀐다.
+- **Focus:** 단추와 같은 전역 초점 윤곽선(`ring` 2px, 2px 간격)이다. 테두리 색은 바뀌지 않는다.
 - **Error / Disabled:** 오류는 `destructive` 테두리와 옅은 링, 비활성은 50% 불투명도.
 
 ### Chips (Status Badge)
