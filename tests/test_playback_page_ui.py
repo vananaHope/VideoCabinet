@@ -751,6 +751,8 @@ def test_control_bar_shortens_labels_only_while_narrow(window):
     window.resize(window.width() - (page.controls.width() - full), 720)
     QApplication.processEvents()
     assert not any(button.compact for button in page.compact_order)
+    # 위치 보고(0.1초)의 조작 줄 갱신이 바로 아래에서 바꾼 글자를 되돌리지 않게 멈춘다.
+    window.position_timer.stop()
     page.subtitle_language_button.set_label("다듬은 자막", "다듬은")
     QApplication.processEvents()
     assert page.subtitle_language_button.text() == "다듬은 자막"
