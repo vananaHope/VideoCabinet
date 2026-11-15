@@ -11,7 +11,7 @@ FILENAME = 'update-manifest.json'
 SCHEMA_VERSION = 1
 # Ed25519 public key of the release signing key (scripts/generate_update_key.py).
 # The private key stays outside the repository; replacing this breaks updates for installed apps.
-UPDATE_PUBLIC_KEY = bytes.fromhex('a0f950dd440c69a105fe1d64361ae86012687ab8c09010e2b0d0312fd5d0fece')
+UPDATE_PUBLIC_KEY = bytes.fromhex('dab3990e35b9fbb3eb78245d95d137d19e255ca71102747bd50b001fb6f30934')
 
 
 class ManifestError(ValueError):
