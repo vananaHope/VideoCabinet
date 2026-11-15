@@ -144,7 +144,7 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 10
+LIBRARY_DB_VERSION = 11
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
@@ -248,6 +248,11 @@ def migrate_library(db, *, before_upgrade=None) -> None:
             from .onscreen_subtitles import migrate_onscreen_review
             migrate_onscreen_review(db)
             db.execute("PRAGMA user_version = 10")
+        if version < 11:
+            # 시리즈 영역과 화면 자막 영역의 출처. 기존 영역은 모두 직접 정함이다.
+            from .onscreen_series import migrate_onscreen_series
+            migrate_onscreen_series(db)
+            db.execute("PRAGMA user_version = 11")
         db.commit()
     except BaseException:
         db.rollback()

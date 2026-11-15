@@ -913,7 +913,7 @@ GIF·정지 이미지 형식과 단일 프레임, 첨부 그림은 새 영상으
 전체 검사 때 정리합니다. `reconnected` 안내는 검사 시작 때 이미 파일 없음이던 영상에만 적용됩니다.
 인자 없는 `scan()`은 감시 폴더 전체와 직접 추가한 위치를 지금처럼 검사합니다.
 전체/지정 폴더 검사는 자동 자막 규칙 조회부터 후처리까지 앱 코어의 잠금으로 직렬 실행합니다.
-기존 DB는 최초 실행 때 라이브러리 테이블을 v10으로 이전합니다(`PRAGMA user_version = 10`).
+기존 DB는 최초 실행 때 라이브러리 테이블을 v11로 이전합니다(`PRAGMA user_version = 11`).
 영상 ID와 다른 기능 테이블은 그대로 유지하며, 이전 위치는 첫 검사에서 캐시 정보를 채웁니다.
 이전 직전에는 원래 버전 DB의 자동 백업을 남깁니다. v3은 가로·세로 및 해상도 확인 상태 열을,
 v4는 번역 작업의 용어집과 최근 사용 순서를 저장하는 테이블을 추가합니다.
@@ -962,6 +962,23 @@ v10은 `onscreen_translation_reviews`에 `original_reviewed`(화면 자막 원�
 새 줄만 번역합니다. 그 영상의 화면 자막 읽기가 대기·읽는 중이면 원문 줄 수정과 구간 요청을 막습니다(화면 번역 줄 수정은 코어에서 막지 않고
 검수 화면이 함께 막습니다). `onscreen_review_lines(region_id)`는 영역의 검수 줄을, `onscreen_subtitle_region_reviewed_line_count`는
 원문·번역을 고친 줄을 한 줄에 한 번 셉니다. 검수 화면은 읽기를 마친 영역이 있을 때만 받아쓰기 자막과 영역(번호·읽을 언어)을 고르게 합니다.
+v11은 시리즈 영역 `series_onscreen_regions(id, series_id, x, y, width, height, language, created_at)`과
+`onscreen_subtitle_regions.series_region_id`(없으면 직접 정함)를 더합니다. 기존 영역은 모두 직접 정함입니다.
+시리즈가 지워지면 시리즈 영역도 지워지고, 시리즈 영역이 지워지면 복사본은 직접 정함으로 남습니다(외래 키). 시리즈 표는
+`SeriesStore`가 이전 단계 밖에서 만들지만 외래 키는 쓸 때 검사하므로 최초 생성에서도 v11 단계를 그대로 씁니다.
+화(영상)의 영역 출처는 `RegionOrigin`(`direct` 직접 정함 / `series` 시리즈에서 옴) 하나이고 `OnScreenSubtitleRegion.origin`으로
+영역마다 드러냅니다. `onscreen_series.py`의 `OnScreenSeriesRegions`가 시리즈 영역의 적용·고치기·지우기와 소속 맞추기를 맡습니다.
+`add_onscreen_subtitle_region(..., series=True)`는 시리즈에서 온 화면 시리즈 영역에 영역 하나를 더하고, 아니면 이 화의 영역 묶음
+전체를 시리즈 영역으로 삼습니다(이전 시리즈 영역은 통째로 바뀜). 시리즈에서 온 화와 영역이 없는 화가 같은 영역을 받아 자동 대상으로
+들어가고, 지금 화는 직접 요청입니다. `update_onscreen_subtitle_region(..., series=True)`는 시리즈 영역을 고쳐 시리즈에서 온 화마다
+그 영역만 다시 읽고, `delete_onscreen_subtitle_region`은 시리즈에서 온 영역이면 시리즈에서 온 모든 화에서 지웁니다. `series=False`로
+고치거나 더하면 그 화만 직접 정함이 됩니다. 여러 화의 영역·줄은 한 트랜잭션에서 바꿉니다.
+`onscreen_subtitle_region_series_impact(video_id, region_id=None, delete=False)`는 확인 창의 범위
+`OnScreenSeriesImpact(other_videos, reviewed_line_count, replaces_existing)`를 돌려주고, `expected_series_impact`가 바꾸는 순간의
+범위와 다르면 `OnScreenSeriesChanged`(`OnScreenRegionChanged`의 하위)로 아무것도 바꾸지 않습니다. 스캔·파일 추가·다시 연결·
+시리즈 만들기·편집·자동 묶기 뒤에는 소속을 견줘, 그 동작으로 새로 들어온 화 가운데 영역이 없는 화만 시리즈 영역을 받고,
+지금 그 시리즈에 속하지 않는 화의 시리즈에서 온 영역은 직접 정함이 됩니다. 이 맞추기는 상태만 보므로 몇 번 불러도 결과가 같습니다.
+화면 자막 대기열 요청의 자동 대상은 그 영상의 지금 순번(직접 요청 포함)을 그대로 둡니다.
 새 등록과 파일 변경 검사 때 ffprobe의 첫 일반 영상 스트림 크기를 저장하며 display matrix와
 구형 rotate 태그의 90/270도 회전을 반영합니다. 해상도 미확인 기존 영상은 유휴 시간에
 한 번에 한 개씩 약 1초 간격으로 읽습니다. 재생·받아쓰기·검사가 시작되면 채우기를 취소하고,

@@ -9,6 +9,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
+from enum import Enum
 import json
 import math
 from pathlib import Path
@@ -86,12 +87,19 @@ class RegionRect:
             raise ValueError("화면 자막 영역은 영상 화면 안에서 가로·세로 1% 이상으로 정하세요.")
 
 
+class RegionOrigin(str, Enum):
+    """화(영상)의 영역 묶음이 어디서 왔는지. 한 화의 영역은 모두 같은 출처다."""
+    DIRECT = "direct"  # 직접 정함: 시리즈 영역을 더하거나 고치거나 지워도 바뀌지 않는다.
+    SERIES = "series"  # 시리즈에서 옴: 시리즈 영역의 복사본이라 시리즈 영역 변경을 따른다.
+
+
 @dataclass(frozen=True)
 class OnScreenSubtitleRegion:
     id: int
     video_id: int
     rect: RegionRect
     language: str
+    origin: RegionOrigin = RegionOrigin.DIRECT
 
 
 @dataclass(frozen=True)
@@ -362,7 +370,7 @@ class OnScreenSubtitles:
             return tuple(_region(row) for row in db.execute(
                 "SELECT * FROM onscreen_subtitle_regions WHERE video_id = ? ORDER BY id", (video_id,)))
 
-    def _check_region(self, rect, language):
+    def check_region(self, rect, language):
         if not isinstance(rect, RegionRect):
             raise ValueError("화면 자막 영역이 올바르지 않습니다.")
         self._check_language(language)
@@ -374,18 +382,19 @@ class OnScreenSubtitles:
             raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
         return _region(row)
 
-    def _cancel_reading(self, video_id):
+    def cancel_reading(self, video_id):
         """그 영상을 읽던 결과는 저장하지 않는다. 쓰기 트랜잭션 전에 부른다(처리 쪽은 _activity 안에서 DB를 쓴다)."""
         with self._activity:
             if self._active_video == video_id and self._active_cancellation:
                 self._active_cancellation.set()
 
-    def _request(self, db, video_id, now) -> OnScreenSubtitleQueueEntry:
-        """화면 자막 만들기를 직접 요청으로 새로 넣는다. 처리는 아직 세대가 없는 영역만 읽는다.
+    def request_reading(self, db, video_id, now, *, automatic=False) -> OnScreenSubtitleQueueEntry:
+        """화면 자막 만들기를 직접 요청(automatic이면 자동 대상)으로 새로 넣는다. 처리는 아직 세대가 없는 영역만 읽는다.
 
-        항목을 새 ID로 바꾸므로, 바꾸기 전 항목으로 읽던 결과는 저장되지 않는다.
+        항목을 새 ID로 바꾸므로, 바꾸기 전 항목으로 읽던 결과는 저장되지 않는다. 자동 대상은 그 영상의 지금 순번
+        (직접 요청이면 직접 요청)을 그대로 두고, 순번이 없을 때만 자동 대상 순번을 받는다.
         """
-        self._order.request(db, video_id, kind=ONSCREEN_SUBTITLE, renew=True)
+        self._order.request(db, video_id, kind=ONSCREEN_SUBTITLE, automatic=automatic, renew=not automatic)
         db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, ONSCREEN_SUBTITLE))
         cursor = db.execute("INSERT INTO subtitle_queue(video_id, spoken_language, requested_at, kind) "
                             "VALUES (?, NULL, ?, ?)", (video_id, now, ONSCREEN_SUBTITLE))
@@ -400,8 +409,8 @@ class OnScreenSubtitles:
         if not regions:
             raise ValueError("화면 자막 영역을 하나 이상 정하세요.")
         for rect, language in regions:
-            self._check_region(rect, language)
-        self._cancel_reading(video_id)  # 이전 영역으로 읽던 결과는 저장하지 않는다.
+            self.check_region(rect, language)
+        self.cancel_reading(video_id)  # 이전 영역으로 읽던 결과는 저장하지 않는다.
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone():
@@ -411,41 +420,40 @@ class OnScreenSubtitles:
             db.executemany("INSERT INTO onscreen_subtitle_regions(video_id, x, y, width, height, language, created_at) "
                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
                            [(video_id, *_rect_values(rect), language, now) for rect, language in regions])
-            return self._request(db, video_id, now)
+            return self.request_reading(db, video_id, now)
 
     def add_region(self, video_id: int, rect: RegionRect, language: str) -> OnScreenSubtitleQueueEntry:
-        """영역 하나를 더하고 그 영역만 읽도록 대기열에 넣는다. 다른 영역과 그 화면 자막은 그대로다."""
-        self._check_region(rect, language)
-        self._cancel_reading(video_id)
+        """영역 하나를 더하고 그 영역만 읽도록 대기열에 넣는다. 다른 영역과 그 화면 자막은 그대로다.
+        시리즈에서 온 화였으면 이 화만 직접 정함이 되어 이후 시리즈 영역 변경을 따르지 않는다."""
+        self.check_region(rect, language)
+        self.cancel_reading(video_id)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,)).fetchone():
                 raise ValueError("영상을 찾을 수 없습니다.")
             now = self._clock().isoformat()
-            db.execute("INSERT INTO onscreen_subtitle_regions(video_id, x, y, width, height, language, created_at) "
-                       "VALUES (?, ?, ?, ?, ?, ?, ?)", (video_id, *_rect_values(rect), language, now))
-            return self._request(db, video_id, now)
+            make_direct(db, video_id)
+            insert_region(db, video_id, rect, language, now)
+            return self.request_reading(db, video_id, now)
 
     def update_region(self, region_id: int, rect: RegionRect, language: str, *,
                       guard=None) -> OnScreenSubtitleQueueEntry:
         """영역 하나의 자리·크기·읽을 언어를 그 자리에서 고친다. 그 영역의 화면 자막·화면 번역 자막·검수 기록을
-        지우고 그 영역만 다시 읽도록 대기열에 넣는다. 다른 영역은 그대로다.
+        지우고 그 영역만 다시 읽도록 대기열에 넣는다. 다른 영역은 그대로다. 시리즈에서 온 화였으면 이 화만 직접 정함이
+        된다.
 
         guard(db)는 쓰기 트랜잭션 안에서 바꾸기 전에 부른다. 예외를 던지면 아무것도 바꾸지 않는다.
         """
-        self._check_region(rect, language)
+        self.check_region(rect, language)
         video_id = self.region(region_id).video_id
-        self._cancel_reading(video_id)
+        self.cancel_reading(video_id)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if guard is not None:
                 guard(db)
-            if not db.execute("UPDATE onscreen_subtitle_regions SET x = ?, y = ?, width = ?, height = ?, language = ? "
-                              "WHERE id = ?", (*_rect_values(rect), language, region_id)).rowcount:
-                raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
-            # 세대를 지우면 줄이 지워지고, 줄에 걸린 화면 번역 자막과 검수 기록도 함께 지워진다.
-            db.execute("DELETE FROM onscreen_subtitles WHERE region_id = ?", (region_id,))
-            return self._request(db, video_id, self._clock().isoformat())
+            reread_region(db, region_id, rect, language)
+            make_direct(db, video_id)
+            return self.request_reading(db, video_id, self._clock().isoformat())
 
     def delete_region(self, region_id: int, *, guard=None) -> None:
         """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다.
@@ -454,20 +462,23 @@ class OnScreenSubtitles:
         화면 번역 작업은 번역 작업자가 바뀐 세대를 보고 남은 줄에 맞춘다(낡은 응답은 버린다).
         """
         video_id = self.region(region_id).video_id
-        self._cancel_reading(video_id)
+        self.cancel_reading(video_id)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if guard is not None:
                 guard(db)
             if not db.execute("DELETE FROM onscreen_subtitle_regions WHERE id = ?", (region_id,)).rowcount:
                 raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
-            # 남은 영역의 읽기(세대 없는 영역, 구간 요청)가 있으면 처리 기회를 남긴다. 지운 영역의 구간 요청은
-            # 그 영역과 함께 사라졌다.
-            if _pending_reads(db, video_id):
-                self._request(db, video_id, self._clock().isoformat())
-            else:
-                db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, ONSCREEN_SUBTITLE))
-            self._order.finish(db, video_id, kind=ONSCREEN_SUBTITLE)
+            self.settle_reading(db, video_id, self._clock().isoformat())
+
+    def settle_reading(self, db, video_id, now, *, automatic=False) -> None:
+        """영역을 지운 뒤의 대기열: 남은 영역의 읽기(세대 없는 영역, 구간 요청)가 있으면 처리 기회를 남기고, 없으면
+        대기열에서 뺀다. 지운 영역의 구간 요청은 그 영역과 함께 사라졌다."""
+        if _pending_reads(db, video_id):
+            self.request_reading(db, video_id, now, automatic=automatic)
+        else:
+            db.execute("DELETE FROM subtitle_queue WHERE video_id = ? AND kind = ?", (video_id, ONSCREEN_SUBTITLE))
+        self._order.finish(db, video_id, kind=ONSCREEN_SUBTITLE)
 
     def range_bounds(self, region_id: int, start: float, end: float, *, connection=None) -> tuple[float, float]:
         """영역 하나의 구간을 검사하고 그 영역의 줄 경계까지 넓힌다. 다른 영역의 줄은 보지 않는다."""
@@ -497,7 +508,7 @@ class OnScreenSubtitles:
             generation = db.execute("SELECT id FROM onscreen_subtitles WHERE region_id = ?", (region_id,)).fetchone()
             if generation is None:
                 raise ValueError("먼저 이 영역의 화면 자막을 만드세요.")
-            entry = self._request(db, video_id, self._clock().isoformat())
+            entry = self.request_reading(db, video_id, self._clock().isoformat())
             db.execute("INSERT OR REPLACE INTO onscreen_subtitle_review_ranges VALUES (?, ?, ?, ?)",
                        (region_id, generation[0], start, end))
             return entry
@@ -733,10 +744,32 @@ def _replace_range(db, interval, lines) -> list[str]:
     return [id_ for id_, _ in new]
 
 
+def insert_region(db, video_id, rect: RegionRect, language: str, now: str, series_region_id=None) -> int:
+    """영상에 영역 하나를 더한다(아직 읽지 않음). series_region_id가 있으면 그 시리즈 영역의 복사본이다."""
+    return db.execute("INSERT INTO onscreen_subtitle_regions(video_id, x, y, width, height, language, created_at, "
+                      "series_region_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                      (video_id, *_rect_values(rect), language, now, series_region_id)).lastrowid
+
+
+def reread_region(db, region_id, rect: RegionRect, language: str) -> None:
+    """영역의 자리·크기·읽을 언어를 그 자리에서 고치고 그 영역의 화면 자막을 지운다(다시 읽을 차례가 된다)."""
+    if not db.execute("UPDATE onscreen_subtitle_regions SET x = ?, y = ?, width = ?, height = ?, language = ? "
+                      "WHERE id = ?", (*_rect_values(rect), language, region_id)).rowcount:
+        raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
+    # 세대를 지우면 줄이 지워지고, 줄에 걸린 화면 번역 자막과 검수 기록도 함께 지워진다.
+    db.execute("DELETE FROM onscreen_subtitles WHERE region_id = ?", (region_id,))
+
+
+def make_direct(db, video_id) -> None:
+    """그 화의 영역 묶음을 직접 정함으로 바꾼다. 영역·줄·검수는 그대로다."""
+    db.execute("UPDATE onscreen_subtitle_regions SET series_region_id = NULL WHERE video_id = ?", (video_id,))
+
+
 def _rect_values(rect: RegionRect) -> tuple[float, float, float, float]:
     return round(rect.x, 6), round(rect.y, 6), round(rect.width, 6), round(rect.height, 6)
 
 
 def _region(row) -> OnScreenSubtitleRegion:
     return OnScreenSubtitleRegion(row["id"], row["video_id"], RegionRect(row["x"], row["y"], row["width"], row["height"]),
-                                  row["language"])
+                                  row["language"],
+                                  RegionOrigin.DIRECT if row["series_region_id"] is None else RegionOrigin.SERIES)

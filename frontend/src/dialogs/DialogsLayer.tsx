@@ -132,6 +132,12 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       {(kind === 'highlight' || kind === 'line') && <label className="block space-y-2 text-body">{kind === 'highlight' ? '메모' : '자막 텍스트'}<TextArea value={form.text} onChange={text => update({ text })} /></label>}
       {kind === 'subtitles' && <label className="block space-y-2 text-body">원어<Input aria-label="원어" list="spoken-languages" value={form.choice} onChange={event => update({ choice: event.target.value })} /><datalist id="spoken-languages">{data.choices.map(row => <option key={row.id} value={row.title} />)}</datalist></label>}
       {kind === 'onscreen-region' && <Choice label="읽을 언어" rows={data.choices} value={form.choice} onChange={choice => update({ choice })} />}
+      {/* 시리즈에 속한 화에만 있는 선택지. 긴 시리즈 이름은 줄을 바꿔 다 보이고, 안내는 선택지 바로 아래 한 줄이다. */}
+      {kind === 'onscreen-region' && data.series_label && <div className="space-y-1">
+        <label className="flex min-w-0 items-start gap-2 text-body"><input type="checkbox" className="mt-1 shrink-0" checked={form.series} onChange={event => update({ series: event.target.checked })} />
+          <span className="min-w-0 break-words">{data.series_label}</span></label>
+        {data.series_note && <p className="break-words pl-6 text-label text-muted-foreground">{data.series_note}</p>}
+      </div>}
       {kind === 'translation' && data.translation && <TranslationForm data={data.translation} form={form} update={update} act={act} busy={busy}
         request={{ pending: data.network_busy, information: data.information, warning: data.warning }} />}
       {kind === 'random-scope' && <RandomScopeForm data={data} values={form} update={update} />}
