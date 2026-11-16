@@ -797,9 +797,21 @@ def test_summary_matches_files_without_loading_cue_text(library):
         core.external_subtitle_summaries(-1)
 
 
+def _html_parser_rejects(content):
+    from html.parser import HTMLParser
+    parser = HTMLParser()
+    try:
+        parser.feed(content.decode()); parser.close()
+    except Exception:
+        return True
+    return False
+
+
 @pytest.mark.parametrize('content,message', [
     (b'\xff\xfeX', '문자 인코딩이 올바르지 않습니다'),
-    (b'<![x <SYNC Start=1000><P>bad', '자막 형식을 해석하지 못했습니다'),
+    pytest.param(b'<![x <SYNC Start=1000><P>bad', '자막 형식을 해석하지 못했습니다',
+                 marks=pytest.mark.skipif(not _html_parser_rejects(b'<![x <SYNC Start=1000><P>bad'),
+                                          reason="이 Python의 html.parser는 '<![x'에서 예외를 내지 않는다")),
     (b'<SYNC Start=' + b'9' * 312 + b'><P>bad', '자막 형식을 해석하지 못했습니다'),
 ])
 def test_parser_exception_warning_is_readable_korean(library, content, message):

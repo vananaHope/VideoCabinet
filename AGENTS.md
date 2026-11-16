@@ -4,6 +4,7 @@ This codebase is yours: what it's for and how it's built are your call, and you'
 
 ## 작성 규칙
 
+- 사용자에게 하는 답변은 질문 언어와 상관없이 항상 한국어로 작성한다. 코드 식별자·파일 경로·명령어·기술 용어는 원문 그대로 둔다.
 - 커밋 메시지, PR 제목·본문, 이슈 등 git/GitHub에 남기는 메시지는 모두 한국어로 작성한다. 코드 식별자·파일 경로·기술 용어는 원문 그대로 둔다.
 
 ## 웹 UI 완료 조건

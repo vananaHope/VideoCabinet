@@ -275,6 +275,11 @@ FFmpeg 원본 `LICENSE`·`README.txt`도 함께 추출합니다. 번들은 불�
 `release.ps1`은 의존성을 설치하지 않고 `build.ps1`을 호출합니다. `main`에서만 실행하며 작업 트리가 깨끗하고 `main`,
 `origin/main`, 실제 원격 main이 모두 같아야 합니다. 기존 로컬/원격 태그나 GitHub Release가 있으면 멈춥니다.
 
+실제 발행과 `-DryRun -Build`는 버전 커밋·빌드 전에 `scripts/run_tests.ps1`(전체 `pytest -n auto`)을 실행합니다.
+테스트가 실패하거나 작업 트리를 바꾸면 버전·커밋·태그·원격을 바꾸지 않고 멈춥니다. `-DryRun`만 주면 실행하지 않고 계획만 표시합니다.
+급할 때는 `-SkipTests`로 건너뛸 수 있지만, Linux 클라우드 세션은 Windows 전용 테스트(웹 셸·트레이·DPAPI 등)를 건너뛰므로
+이 단계를 생략하면 그 테스트는 어디에서도 실행되지 않습니다. `run_tests.ps1`은 단독으로도 실행할 수 있으며 추가 인자는 pytest에 넘깁니다.
+
 소스 저장소(`origin`, `vananaHope/my-video-manager`)는 비공개이므로 토큰 없이 요청하는 앱은 그 Release를 볼 수 없습니다.
 그래서 설치 파일·체크섬·매니페스트·서명은 공개 **배포 저장소** `vananaHope/my-video-manager-releases`에만 발행합니다.
 `origin`에는 지금처럼 버전 커밋과 `v<version>` 태그만 push하고, 이전 Release 조회·같은 태그의 Release 확인·
@@ -296,8 +301,10 @@ FFmpeg 원본 `LICENSE`·`README.txt`도 함께 추출합니다. 번들은 불�
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.4.2 -DryRun
 # 위 동작에 빌드 추가: pyproject.toml 수정 없이 -Version을 build.ps1에 전달
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.4.2 -DryRun -Build
-# 실제 릴리스
+# 실제 릴리스(빌드 전에 전체 테스트 실행)
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.4.2
+# 전체 테스트만 단독 실행
+powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1
 ```
 
 실제 실행은 먼저 개인 키를 읽고 앱에 내장된 공개 키와 일치하는지 검사합니다.

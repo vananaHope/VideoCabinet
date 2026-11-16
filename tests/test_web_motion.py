@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
@@ -153,10 +155,13 @@ def run_motion_child(request):
     """움직임 줄이기를 끈 Chromium에서 지정한 시험 하나를 실행한다."""
     flags = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '--disable-gpu')
     test = f'{Path(__file__).resolve()}::{request.node.name}'
-    result = subprocess.run([sys.executable, '-m', 'pytest', test, '-q', '-p', 'no:cacheprovider', '-p', 'no:randomly'],
+    result = subprocess.run([sys.executable, '-m', 'pytest', test, '-q', '-p', 'no:cacheprovider', '-p', 'no:randomly', '-rs'],
                             cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=CHILD_READY_TIMEOUT * 2,
                             env={**os.environ, 'MVM_MOTION_CHILD': '1', 'QT_QPA_PLATFORM': 'offscreen',
                                  'QTWEBENGINE_CHROMIUM_FLAGS': f'{flags} --force-prefers-no-reduced-motion'})
+    skipped = re.search(r'^SKIPPED \[1\] [^\n]*?:\d+: (.+)$', result.stdout, re.MULTILINE)
+    if result.returncode == 0 and skipped:
+        pytest.skip(skipped.group(1))
     assert result.returncode == 0 and re.search(r'\b1 passed\b', result.stdout), result.stdout[-4000:] + result.stderr[-2000:]
 
 

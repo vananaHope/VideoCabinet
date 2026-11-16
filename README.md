@@ -89,7 +89,7 @@ powershell -ExecutionPolicy Bypass -File scripts/setup.ps1 -Worktree
 | 웹 검사 | `npm --prefix frontend run lint` · `typecheck` · `build` |
 | 브리지 타입 생성 | `.venv/Scripts/python scripts/generate_web_types.py`(검사만: `--check`) |
 | 설치 파일 빌드 | `powershell -ExecutionPolicy Bypass -File scripts/build.ps1` |
-| Release 발행 | `powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version x.y.z`(먼저 `-DryRun`) |
+| Release 발행 | `powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version x.y.z`(먼저 `-DryRun`, 빌드 전에 전체 테스트 실행) |
 
 ### 완료 조건
 
