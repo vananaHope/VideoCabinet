@@ -2,6 +2,8 @@
     [Parameter(Mandatory = $true)][string]$Version,
     [switch]$DryRun,
     [switch]$Build,
+    # 급할 때만: 발행 전 전체 테스트를 건너뛴다.
+    [switch]$SkipTests,
     [string]$PrivateKey = '',
     # 기본값은 src/my_video_manager/app_version.py의 RELEASE_REPOSITORY와 같아야 한다(테스트가 검사).
     [string]$ReleaseRepository = 'vananaHope/my-video-manager-releases'
@@ -146,6 +148,21 @@ try {
     # 이를 쓰는 DryRun·노트 분기, tests/test_release_script.py의 이름 안내 단언, docs/development.md의 이 문서 문단을 함께 지운다.
     $RenameNote = '이번 버전부터 앱 이름이 My Video Manager에서 **VideoCabinet**으로 바뀌었습니다. 라이브러리·설정 데이터와 설치 위치는 그대로이므로 다시 설정하거나 옮길 필요가 없습니다.'
     $IncludeRenameNote = $true
+
+    # 발행 전 전체 테스트. 아직 아무것도 바꾸지 않았으므로 실패해도 복구할 상태가 없다.
+    # -DryRun만 주면 계획 확인이라 건너뛰고, -DryRun -Build 리허설은 실제 발행처럼 실행한다.
+    if ($SkipTests) {
+        Write-Warning '-SkipTests: 전체 테스트를 건너뜁니다. Windows 전용 테스트는 다른 곳에서 실행되지 않습니다.'
+    } elseif ($DryRun -and -not $Build) {
+        Write-Host '계획: 실제 발행과 -DryRun -Build에서는 빌드 전에 전체 테스트(scripts/run_tests.ps1)를 실행'
+    } else {
+        Write-Host '전체 테스트 실행: scripts/run_tests.ps1'
+        & "$PSScriptRoot/run_tests.ps1"
+        if ($LASTEXITCODE -ne 0) { throw "테스트가 실패했습니다($LASTEXITCODE). 버전·커밋·태그·원격은 바꾸지 않았습니다." }
+        if (Get-Git @('status', '--porcelain', '--untracked-files=all')) {
+            throw '테스트가 작업 트리를 바꿨습니다. 변경을 정리한 뒤 다시 실행하세요. 버전·커밋·태그·원격은 바꾸지 않았습니다.'
+        }
+    }
 
     if ($DryRun) {
         Write-Host "계획: pyproject.toml 버전 $CurrentVersion -> $Version, 커밋: $CommitMessage"

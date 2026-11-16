@@ -130,6 +130,14 @@ if ($PatchOnly) {
 }
 $global:LASTEXITCODE = 0
 ''', encoding="utf-8-sig")
+    (repo / "scripts/run_tests.ps1").write_text(r'''if ($env:MVM_UPDATE_SIGNING_PASSWORD) { throw '테스트에 암호가 유출됨' }
+New-Item -ItemType Directory -Force dist | Out-Null
+$Version = [regex]::Match([IO.File]::ReadAllText((Join-Path (Get-Location) 'pyproject.toml')), 'version = "([^"\r\n]+)"').Groups[1].Value
+[IO.File]::AppendAllText((Join-Path (Get-Location) 'dist/tests-ran.txt'), "$Version`n")
+if ($env:RELEASE_TEST_TESTS_DIRTY -eq '1') { [IO.File]::WriteAllText((Join-Path (Get-Location) 'tests-change.txt'), 'leftover') }
+if ($env:RELEASE_TEST_TESTS_FAIL -eq '1') { exit 1 }
+exit 0
+''', encoding="utf-8-sig")
     git(repo, "add", ".")
     git(repo, "commit", "-m", "첫 구현")
     remote = tmp_path / "remote.git"
@@ -145,7 +153,7 @@ $global:LASTEXITCODE = 0
 
 def run_release(repository, *, build=False, status="404", build_fail=False, dry_run=True, dirty_build=False,
                 head_build=False, redirect=False, previous='first', key_state='matching', publish=False,
-                version='0.2.0'):
+                version='0.2.0', skip_tests=False, tests_fail=False, tests_dirty=False):
     repo, _ = repository
     env = {**os.environ, "RELEASE_TEST_SCRIPT": str(repo / "scripts/release.ps1"),
            "RELEASE_TEST_STATUS": status, "RELEASE_TEST_BUILD": str(int(build)),
@@ -154,7 +162,9 @@ def run_release(repository, *, build=False, status="404", build_fail=False, dry_
            "RELEASE_TEST_DIRTY_BUILD": str(int(dirty_build)),
            "RELEASE_TEST_HEAD_BUILD": str(int(head_build)), "RELEASE_TEST_REDIRECT": str(int(redirect)),
            'RELEASE_TEST_PREVIOUS': previous, 'RELEASE_TEST_PUBLISH': str(int(publish)),
-           'RELEASE_TEST_VERSION': version, 'RELEASE_TEST_RELEASE_REPOSITORY': RELEASE_REPOSITORY}
+           'RELEASE_TEST_VERSION': version, 'RELEASE_TEST_RELEASE_REPOSITORY': RELEASE_REPOSITORY,
+           'RELEASE_TEST_SKIP_TESTS': str(int(skip_tests)), 'RELEASE_TEST_TESTS_FAIL': str(int(tests_fail)),
+           'RELEASE_TEST_TESTS_DIRTY': str(int(tests_dirty))}
     env['RELEASE_TEST_PREVIOUS_KEY'] = env['RELEASE_TEST_KEY']
     if key_state == 'missing':
         env['RELEASE_TEST_KEY'] += '.missing'
@@ -193,9 +203,9 @@ function global:gh {
 }
 try {
     if ($env:RELEASE_TEST_REDIRECT -eq '1') {
-        & $env:RELEASE_TEST_SCRIPT -Version $env:RELEASE_TEST_VERSION -PrivateKey $env:RELEASE_TEST_KEY -DryRun:($env:RELEASE_TEST_DRY_RUN -eq '1') -Build:($env:RELEASE_TEST_BUILD -eq '1') *>&1 | ForEach-Object { Write-Output $_ }
+        & $env:RELEASE_TEST_SCRIPT -Version $env:RELEASE_TEST_VERSION -PrivateKey $env:RELEASE_TEST_KEY -DryRun:($env:RELEASE_TEST_DRY_RUN -eq '1') -Build:($env:RELEASE_TEST_BUILD -eq '1') -SkipTests:($env:RELEASE_TEST_SKIP_TESTS -eq '1') *>&1 | ForEach-Object { Write-Output $_ }
     } else {
-        & $env:RELEASE_TEST_SCRIPT -Version $env:RELEASE_TEST_VERSION -PrivateKey $env:RELEASE_TEST_KEY -DryRun:($env:RELEASE_TEST_DRY_RUN -eq '1') -Build:($env:RELEASE_TEST_BUILD -eq '1')
+        & $env:RELEASE_TEST_SCRIPT -Version $env:RELEASE_TEST_VERSION -PrivateKey $env:RELEASE_TEST_KEY -DryRun:($env:RELEASE_TEST_DRY_RUN -eq '1') -Build:($env:RELEASE_TEST_BUILD -eq '1') -SkipTests:($env:RELEASE_TEST_SKIP_TESTS -eq '1')
     }
     $ResultCode = 0
 } catch { Write-Output $_; $ResultCode = 1 }
@@ -471,6 +481,47 @@ def test_publication_uploads_only_eligible_assets_with_verified_manifest(reposit
     options = arguments[arguments.index('--repo'):]
     assert options[:4] == ['--repo', f'github.com/{RELEASE_REPOSITORY}', '--target', 'main']
     assert '--verify-tag' not in arguments
+
+
+@pytest.mark.parametrize('dry_run,build,ran', [(True, False, False), (True, True, True), (False, False, True)])
+def test_full_tests_run_before_version_commit_except_plan_only_dry_run(repository, dry_run, build, ran):
+    repo, _ = repository
+    result = run_release(repository, dry_run=dry_run, build=build, publish=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    marker = repo / 'dist/tests-ran.txt'
+    assert marker.exists() == ran
+    if ran:
+        # 버전 커밋 전(pyproject.toml이 아직 이전 버전)에 한 번만 실행한다.
+        assert marker.read_text(encoding='utf-8').splitlines() == ['0.1.0']
+    else:
+        assert '빌드 전에 전체 테스트(scripts/run_tests.ps1)를 실행' in result.stdout
+
+
+@pytest.mark.parametrize('kind,message', [('fail', '테스트가 실패했습니다(1)'), ('dirty', '테스트가 작업 트리를 바꿨습니다')])
+def test_failed_or_dirty_tests_stop_before_version_commit_build_or_publish(repository, kind, message):
+    repo, _ = repository
+    before = snapshot(repository)
+    result = run_release(repository, dry_run=False, publish=True,
+                         tests_fail=kind == 'fail', tests_dirty=kind == 'dirty')
+    assert result.returncode != 0
+    assert message in result.stdout + result.stderr
+    assert snapshot(repository) == before
+    assert not (repo / 'dist/installer').exists()
+    assert not (repo / 'dist/upload-arguments.json').exists()
+    if kind == 'dirty':
+        assert (repo / 'tests-change.txt').read_text() == 'leftover'
+    else:
+        assert git(repo, 'status', '--porcelain') == ''
+    assert "RESTORED_ENCODING=949" in result.stdout
+
+
+def test_skip_tests_warns_and_still_publishes(repository):
+    repo, _ = repository
+    result = run_release(repository, dry_run=False, publish=True, skip_tests=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / 'dist/tests-ran.txt').exists()
+    assert '-SkipTests: 전체 테스트를 건너뜁니다' in result.stdout + result.stderr
+    assert (repo / 'dist/upload-arguments.json').exists()
 
 
 def test_patch_assets_are_in_failure_recovery_instructions(repository):
