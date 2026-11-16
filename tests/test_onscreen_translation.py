@@ -4,6 +4,7 @@ from contextlib import closing
 from datetime import timedelta
 import json
 import sqlite3
+import sys
 from threading import Event
 
 import pytest
@@ -28,6 +29,14 @@ from test_translation import Transcriber, source, finish
 from test_translation_connection import HTTP, save
 
 
+class _ReversibleProtector:
+    def protect(self, data):
+        return bytes(reversed(data))
+
+    def unprotect(self, data):
+        return bytes(reversed(data))
+
+
 class Translator:
     def __init__(self):
         self.calls = []
@@ -46,7 +55,9 @@ class Translator:
 @pytest.fixture
 def screen(tmp_path):
     media, ocr, adapter, transcriber = FakeMedia(), FakeOcr(('en', 'ja')), Translator(), Transcriber()
-    http, store, clock = HTTP(), SecretStore(tmp_path / 'data'), [NOW]
+    # 키 저장소 자체는 test_secret_store가 검사한다. Windows 밖에서는 DPAPI 대신 가역 가짜 암호화를 쓴다.
+    store = SecretStore(tmp_path / 'data', protector=None if sys.platform == 'win32' else _ReversibleProtector())
+    http, clock = HTTP(), [NOW]
 
     def reopen(*, batch_size=2, translator=adapter):
         return AppCore(media=media, clock=lambda: clock[0], ocr_engine=ocr,

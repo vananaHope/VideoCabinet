@@ -6,6 +6,7 @@
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -298,6 +299,7 @@ def unregistered_font(app, monkeypatch):
     app.setStyleSheet(sheet)
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='대체 글꼴 맑은 고딕을 Windows 글꼴 폴더(%WINDIR%\\Fonts)에서 읽는다')
 @pytest.mark.parametrize('damage', ['missing', 'corrupt'])
 def test_failed_bundled_font_registration_falls_back_to_malgun_gothic_and_is_logged(
         unregistered_font, damage, tmp_path, app, monkeypatch, caplog):
