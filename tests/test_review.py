@@ -1014,3 +1014,140 @@ def test_review_jump_accepts_onscreen_lines_of_that_video_only(screen):
     target = core.play_review_line(video, lines[2].id)
     assert (target.video_id, target.start, target.action) == (video, 30, 'play')
     assert core.play_review_line(video, lines[0].id).action == 'seek'
+
+
+# #286 검수 전 원어 자막 원문: 처음 바뀌기 직전의 줄을 한 번만 남긴다(분석용, 화면에 보이지 않음).
+
+
+def originals(core, vid):
+    """(글자, 시작, 끝, 모델, 지운 까닭) 목록."""
+    return [(o.text, o.start, o.end, o.model, o.removed_by) for o in core.transcript_line_originals(vid)]
+
+
+def test_first_review_edit_keeps_the_line_before_it_once(setup):
+    core, vid, _, _, time, reopen = setup
+    finish(core)
+    first, second = core.transcript(vid).lines[:2]
+    core.edit_translation_line(vid, first.id, "직접 고친 번역")  # 번역만 고치면 원어 원문은 바뀌지 않는다
+    core.edit_transcript_line(vid, second.id, second.text)  # 같은 글자는 고친 것이 아니다
+    assert core.transcript_line_originals(vid) == ()
+
+    core.edit_transcript_line(vid, first.id, "fixed 0", overwrite_reviewed=True)
+    time[0] += timedelta(minutes=5)
+    core.edit_transcript_line(vid, first.id, "fixed again", overwrite_reviewed=True)
+
+    original, = reopen().transcript_line_originals(vid)
+    assert (original.line_id, original.video_id, original.transcript_id) == (first.id, vid, core.transcript(vid).id)
+    assert (original.text, original.start, original.end) == ("source 0", 0, 2)
+    assert (original.model, original.spoken_language) == ("large-v3", "en")
+    assert original.recorded_at == datetime(2026, 10, 14, tzinfo=timezone.utc)
+    assert (original.removed_at, original.removed_by) == (None, None)
+    assert core.transcript(vid).lines[0].text == "fixed again"
+
+
+def test_range_regeneration_keeps_removed_lines_and_the_model_of_new_lines(setup):
+    core, vid, transcriber, _, time, _ = setup
+    finish(core)
+    before = core.transcript(vid).lines
+    core.edit_transcript_line(vid, before[1].id, "edited 10")  # 지워질 줄을 먼저 고쳤다
+    time[0] += timedelta(hours=1)
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 1, "new 10"), TranscriptSegment(10, 11, "new 20")),
+                                           model="range-model")
+    core.request_subtitle_range(vid, 10, 22)
+    assert core.process_next_subtitle().state == "completed"
+
+    removed = {o.line_id: o for o in core.transcript_line_originals(vid)}
+    assert set(removed) == {before[1].id, before[2].id}
+    # 고친 줄은 처음 고치기 전 글자를 지킨 채 지워졌다고 적힌다. 고치지 않은 줄은 지우기 직전 모습으로 남는다.
+    assert (removed[before[1].id].text, removed[before[1].id].recorded_at) == ("source 10", datetime(2026, 10, 14, tzinfo=timezone.utc))
+    assert (removed[before[2].id].text, removed[before[2].id].start, removed[before[2].id].end) == ("source 20", 20, 22)
+    assert {(o.removed_by, o.removed_at) for o in removed.values()} == {("range", time[0])}
+    # 구간에서 새로 만든 줄은 바꾸기 전까지 기록이 없고, 고치면 그 줄을 만든 모델로 남는다.
+    new = next(line for line in core.transcript(vid).lines if line.text == "new 10")
+    core.edit_transcript_line(vid, new.id, "new ten")
+    record = next(o for o in core.transcript_line_originals(vid) if o.line_id == new.id)
+    assert (record.text, record.start, record.end, record.model, record.removed_by) == ("new 10", 10, 11, "range-model", None)
+    assert core.transcript(vid).model == "large-v3"  # 원어 자막의 모델 기록은 그대로다
+
+
+def test_whole_regeneration_marks_kept_records_without_copying_untouched_lines(setup):
+    core, vid, transcriber, _, time, _ = setup
+    finish(core)
+    old = core.transcript(vid)
+    core.edit_transcript_line(vid, old.lines[0].id, "fixed 0")
+    time[0] += timedelta(days=1)
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "whole 0"),), model="large-v3-turbo")
+    core.request_subtitles(vid)
+    assert core.process_next_subtitle().state == "completed"
+
+    record, = core.transcript_line_originals(vid)
+    assert (record.transcript_id, record.text, record.model) == (old.id, "source 0", "large-v3")
+    assert (record.removed_by, record.removed_at) == ("whole", time[0])
+    new = core.transcript(vid).lines[0]
+    core.edit_transcript_line(vid, new.id, "whole zero")
+    assert originals(core, vid)[-1] == ("whole 0", 0, 2, "large-v3-turbo", None)
+
+
+def test_originals_survive_backup_restore(setup, tmp_path):
+    from test_backup import apply
+    core, vid, transcriber, _, time, reopen = setup
+    finish(core)
+    lines = core.transcript(vid).lines
+    core.edit_transcript_line(vid, lines[0].id, "fixed 0")
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 1, "new 30"),), model="range-model")
+    core.request_subtitle_range(vid, 30, 32)
+    assert core.process_next_subtitle().state == "completed"
+    expected = core.transcript_line_originals(vid)
+    archive = core.create_backup(tmp_path / "originals.zip").path
+    core.edit_transcript_line(vid, lines[1].id, "fixed 10")
+    assert len(core.transcript_line_originals(vid)) == 3
+
+    core.request_backup_restore(archive)
+    assert apply(core.database).status == "applied"
+    assert reopen().transcript_line_originals(vid) == expected
+
+
+def test_v11_library_upgrades_keeping_review_and_starts_recording(setup):
+    import sqlite3
+    from contextlib import closing
+    from legacy_schema import replace_with_frozen
+    from my_video_manager.library import LIBRARY_DB_VERSION
+    core, vid, _, _, _, reopen = setup
+    finish(core)
+    first = core.transcript(vid).lines[0]
+    core.edit_transcript_line(vid, first.id, "fixed before upgrade")
+    expected = (core.transcript(vid), core.translation(vid), core.review_lines(vid))
+    replace_with_frozen(core.database, 11)
+
+    upgraded = reopen()
+
+    with closing(sqlite3.connect(core.database)) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == LIBRARY_DB_VERSION == 12
+    assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == 11
+    assert (upgraded.transcript(vid), upgraded.translation(vid), upgraded.review_lines(vid)) == expected
+    # 이전 전에 덮어쓴 원문은 알 수 없다. 이전 뒤 처음 고친 줄부터 남는다.
+    assert upgraded.transcript_line_originals(vid) == ()
+    upgraded.edit_transcript_line(vid, first.id, "fixed after upgrade")
+    assert originals(upgraded, vid) == [("fixed before upgrade", 0, 2, "large-v3", None)]
+
+
+def test_v12_migration_failure_rolls_back_to_v11(setup):
+    import sqlite3
+    from contextlib import closing
+    from legacy_schema import replace_with_frozen
+    from my_video_manager.library import migrate_library
+    core, vid, _, _, _, reopen = setup
+    expected = core.transcript(vid)
+    replace_with_frozen(core.database, 11)
+    before = core.database.read_bytes()
+    with closing(sqlite3.connect(core.database)) as db:
+        db.set_authorizer(lambda action, name, *_: sqlite3.SQLITE_DENY
+                          if action == sqlite3.SQLITE_CREATE_TABLE and name == "transcript_line_models"
+                          else sqlite3.SQLITE_OK)
+        with pytest.raises(sqlite3.DatabaseError):
+            migrate_library(db, before_upgrade=lambda *_: None)
+        db.set_authorizer(lambda *_: sqlite3.SQLITE_OK)
+        assert not db.in_transaction and db.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert not db.execute("SELECT 1 FROM sqlite_master WHERE name = 'transcript_line_originals'").fetchone()
+    assert core.database.read_bytes() == before
+    assert reopen().transcript(vid) == expected

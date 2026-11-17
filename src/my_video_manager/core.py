@@ -36,6 +36,7 @@ from .onscreen_series import OnScreenSeriesImpact, OnScreenSeriesRegions
 from .onscreen_playback import OnScreenTranslationRegion
 from .subtitle_queue import AutoSubtitleRules, QueueOrder, SubtitleQueue, SubtitleRetryResult, SubtitleRetrySkipped
 from .review import Review, ReviewLine, ReviewPlayback, SubtitleExport
+from .transcript_originals import OriginalTranscriptLine, originals as transcript_originals
 from .library_details import LibraryDetails
 from .statistics import StatisticsReader, VideoViewingStatistics, ViewingStatistics
 from .statistics import StatisticsDashboard
@@ -433,6 +434,12 @@ class AppCore:
 
     def subtitle_regeneration_warning(self, video_id):
         return self._review.regeneration_warning(video_id)
+
+    def transcript_line_originals(self, video_id) -> tuple[OriginalTranscriptLine, ...]:
+        """검수 전 원어 자막 원문(분석용): 받아쓰기가 만든 줄이 처음 바뀌기 직전의 모습. 검수로 처음 고친 줄과 구간
+        다시 만들기로 지워진 줄이 있다. transcript_originals 참고."""
+        with self._connect() as db:
+            return transcript_originals(db, video_id)
 
     def edit_transcript_line(self, video_id, line_id, text, *, overwrite_reviewed=False, keep_reviewed=False):
         self._review.edit(video_id, line_id, text, overwrite_reviewed=overwrite_reviewed, keep_reviewed=keep_reviewed)

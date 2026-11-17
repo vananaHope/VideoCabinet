@@ -144,7 +144,7 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 11
+LIBRARY_DB_VERSION = 12
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
@@ -253,6 +253,11 @@ def migrate_library(db, *, before_upgrade=None) -> None:
             from .onscreen_series import migrate_onscreen_series
             migrate_onscreen_series(db)
             db.execute("PRAGMA user_version = 11")
+        if version < 12:
+            # 검수 전 원어 자막 원문(분석용). 기존 라이브러리에는 기록이 없다.
+            from .transcript_originals import migrate_transcript_originals
+            migrate_transcript_originals(db)
+            db.execute("PRAGMA user_version = 12")
         db.commit()
     except BaseException:
         db.rollback()
