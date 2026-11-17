@@ -745,6 +745,7 @@ export interface DialogData {
   keep_reviewed: boolean
   series_label: string
   series_note: string
+  series_information: string
 }
 
 export interface DialogSnapshot {

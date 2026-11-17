@@ -974,15 +974,20 @@ v11은 시리즈 영역 `series_onscreen_regions(id, series_id, x, y, width, hei
 시리즈가 지워지면 시리즈 영역도 지워지고, 시리즈 영역이 지워지면 복사본은 직접 정함으로 남습니다(외래 키). 시리즈 표는
 `SeriesStore`가 이전 단계 밖에서 만들지만 외래 키는 쓸 때 검사하므로 최초 생성에서도 v11 단계를 그대로 씁니다.
 화(영상)의 영역 출처는 `RegionOrigin`(`direct` 직접 정함 / `series` 시리즈에서 옴) 하나이고 `OnScreenSubtitleRegion.origin`으로
-영역마다 드러냅니다. `onscreen_series.py`의 `OnScreenSeriesRegions`가 시리즈 영역의 적용·고치기·지우기와 소속 맞추기를 맡습니다.
+영역마다 드러냅니다. `series`는 그 화가 지금 시리즈 영역의 시리즈에 속할 때만이라, 소속 맞추기 전에 끊긴 화의 영역은 `direct`로
+보이고 고치기·지우기가 그 화만 바꿉니다. `onscreen_series.py`의 `OnScreenSeriesRegions`가 시리즈 영역의 적용·고치기·지우기와 소속 맞추기를 맡습니다.
 `add_onscreen_subtitle_region(..., series=True)`는 시리즈에서 온 화면 시리즈 영역에 영역 하나를 더하고, 아니면 이 화의 영역 묶음
 전체를 시리즈 영역으로 삼습니다(이전 시리즈 영역은 통째로 바뀜). 시리즈에서 온 화와 영역이 없는 화가 같은 영역을 받아 자동 대상으로
 들어가고, 지금 화는 직접 요청입니다. `update_onscreen_subtitle_region(..., series=True)`는 시리즈 영역을 고쳐 시리즈에서 온 화마다
 그 영역만 다시 읽고, `delete_onscreen_subtitle_region`은 시리즈에서 온 영역이면 시리즈에서 온 모든 화에서 지웁니다. `series=False`로
-고치거나 더하면 그 화만 직접 정함이 됩니다. 여러 화의 영역·줄은 한 트랜잭션에서 바꿉니다.
+고치거나 더하면 그 화만 직접 정함이 됩니다. 여러 화의 영역·줄은 한 트랜잭션에서 바꿉니다. 제외 영상은 시리즈 영역 변경에서
+빠집니다(채우거나 바꾸지 않고, 대기열에 넣지 않고, 범위에 세지 않음). 시리즈에서 온 제외 영상은 시리즈 영역을 바꾸는 순간 영역·줄·검수를
+지킨 채 직접 정함이 됩니다.
 `onscreen_subtitle_region_series_impact(video_id, region_id=None, delete=False)`는 확인 창의 범위
-`OnScreenSeriesImpact(other_videos, reviewed_line_count, replaces_existing)`를 돌려주고, `expected_series_impact`가 바꾸는 순간의
-범위와 다르면 `OnScreenSeriesChanged`(`OnScreenRegionChanged`의 하위)로 아무것도 바꾸지 않습니다. 스캔·파일 추가·다시 연결·
+`OnScreenSeriesImpact(other_videos, reviewed_line_count, replaces_existing, change)`를 돌려주고(`change`는 `add`·`update`·
+`delete`·`replace`이며 확인 창 문구가 씁니다), `expected_series_impact`가 바꾸는 순간의 범위나 변경 종류와 다르면
+`OnScreenSeriesChanged`(`OnScreenRegionChanged`의 하위)로 아무것도 바꾸지 않습니다. 이 대조와 단일 화 고치기·지우기의 검수 수 대조는
+진행 중 읽기를 멈추기 전에 먼저 하므로, 어긋나면 읽던 결과도 버리지 않습니다. 스캔·파일 추가·다시 연결·
 시리즈 만들기·편집·자동 묶기 뒤에는 소속을 견줘, 그 동작으로 새로 들어온 화 가운데 영역이 없는 화만 시리즈 영역을 받고,
 지금 그 시리즈에 속하지 않는 화의 시리즈에서 온 영역은 직접 정함이 됩니다. 이 맞추기는 상태만 보므로 몇 번 불러도 결과가 같습니다.
 화면 자막 대기열 요청의 자동 대상은 그 영상의 지금 순번(직접 요청 포함)을 그대로 둡니다.

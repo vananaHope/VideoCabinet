@@ -61,6 +61,8 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   const composing = useRef(false)
   const currentSelected = data.rows.some(row => row.id === selected) ? selected : data.rows[0]?.id ?? ''
   const kind = data.kind
+  // 화면 자막 영역 고치기에서 "시리즈 전체에 적용"을 켜면 정보 줄은 이 화가 아니라 시리즈 범위(확인 창과 같은 숫자)를 말한다.
+  const information = kind === 'onscreen-region' && form.series && data.series_information ? data.series_information : data.information
   useEffect(() => {
     if (kind !== 'range') return
     const timer = setTimeout(() => {
@@ -147,7 +149,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       <NoticeStack className="shrink-0" clamp={false} items={[
         error && { tone: 'error', message: error, onDismiss: () => setError('') },
         kind !== 'translation' && data.warning && { tone: 'warning', message: data.warning },
-        kind !== 'translation' && data.information && { tone: 'info', message: data.information },
+        kind !== 'translation' && information && { tone: 'info', message: information },
       ]} />
     </div>
     {/* 선택한 행에 대한 작업은 왼쪽, 대화상자를 끝내는 닫기·취소 → 주 작업은 오른쪽 끝에 둔다. 순서는 그대로다. */}

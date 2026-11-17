@@ -445,7 +445,8 @@ def onscreen_series_regions():
         region = core.onscreen_subtitle_regions(target)[0]
         if name == 'max':
             # 다른 화 9,999개를 실제로 만들지 않고 자릿수가 큰 수의 배치만 본다. 수 세기 자체는 pytest가 본다.
-            core.onscreen_subtitle_region_series_impact = lambda *a, **k: OnScreenSeriesImpact(9999, 99999, True)
+            core.onscreen_subtitle_region_series_impact = lambda *a, delete=False, **k: OnScreenSeriesImpact(
+                9999, 99999, True, 'delete' if delete else 'update')
         else:
             assert impact(target, region.id) == OnScreenSeriesImpact(others, reviewed, True)
         core.playback.start(target, 0)
@@ -454,6 +455,8 @@ def onscreen_series_regions():
                 container = opened(name)
                 data = current()
                 assert data['values']['series'] is True
+                # 선택지가 켜져 있으면 정보 줄은 이 화만이 아니라 확인 창과 같은 시리즈 범위의 숫자를 말한다(#365).
+                assert f'검수로 고친 줄 {reviewed:,}개' in data['series_information'], data
                 footer_layout(f'onscreen-series-edit-{name}')
                 capture(f'container-onscreen-series-edit-{name}', container)
                 before = saved()
@@ -485,8 +488,38 @@ def onscreen_series_regions():
             core.playback.end()
             if name == 'max':
                 del core.onscreen_subtitle_region_series_impact
+    # 바꾸기 확인 창의 최대 자릿수와 긴 영상 제목·시리즈 이름(#365). 긴 제목 화를 직접 정한 화로 만든 뒤 그 화에서 켠다.
+    region = core.onscreen_subtitle_regions(long_first)[0]
+    core.update_onscreen_subtitle_region(region.id, region.rect, region.language)
+    for name, target, others, reviewed in (('max', direct, 9999, 99999), ('long', long_first, 1, 1)):
+        if name == 'max':
+            core.onscreen_subtitle_region_series_impact = lambda *a, **k: OnScreenSeriesImpact(9999, 99999, True,
+                                                                                               'replace')
+        else:
+            assert impact(target) == OnScreenSeriesImpact(others, reviewed, True, 'replace')
+        core.playback.start(target, 0)
+        try:
+            def replace_check(name=name, others=others, reviewed=reviewed):
+                opened(f'replace-{name}')
+                before = saved()
+                result = json.loads(dialogs.bridge.act(current()['id'], 'save', json.dumps({'choice': 'en', 'series': True})))
+                data = result['dialog']
+                assert data['confirm_title'] == '시리즈 화면 자막 영역 바꾸기', data
+                assert f'이 화와 다른 화 {others:,}개의 화면 자막 영역이 바뀝니다' in data['confirmation']
+                assert f'검수로 고친 줄 {reviewed:,}개' in data['confirmation']
+                settle(300)
+                footer_layout(f'onscreen-series-replace-confirm-{name}')
+                capture(f'container-onscreen-series-replace-confirm-{name}', dialogs.container)
+                cancel_confirmation()
+                assert dialogs.active and not current()['confirmation'] and saved() == before
+            web_modal('onscreen-region', {'video_id': target, 'region': RegionRect(0.6, 0.3, 0.35, 0.1)}, replace_check)
+        finally:
+            core.playback.end()
+            if name == 'max':
+                del core.onscreen_subtitle_region_series_impact
     metrics['checks'].append('시리즈 전체에 적용: 선택지 있는 읽을 언어 대화상자(꺼짐·켜짐·긴 시리즈 이름), 시리즈 영역 '
-                             '고치기·지우기 확인 창(다른 화 0·3·9,999, 검수 줄 0·4·99,999, 긴 이름·제목)과 바꾸기 확인 창 '
+                             '고치기·지우기 확인 창(다른 화 0·3·9,999, 검수 줄 0·4·99,999, 긴 이름·제목)과 바꾸기 확인 창'
+                             '(다른 화 1·9,999, 검수 줄 0·1·99,999, 긴 이름·제목), 고치기 창의 시리즈 범위 정보 줄 '
                              '컨테이너 촬영, 확인 창 취소 무변경')
 
 

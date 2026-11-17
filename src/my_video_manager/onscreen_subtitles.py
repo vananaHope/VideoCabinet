@@ -368,7 +368,8 @@ class OnScreenSubtitles:
     def regions(self, video_id: int, *, connection=None) -> tuple[OnScreenSubtitleRegion, ...]:
         with (nullcontext(connection) if connection is not None else self._connect()) as db:
             return tuple(_region(row) for row in db.execute(
-                "SELECT * FROM onscreen_subtitle_regions WHERE video_id = ? ORDER BY id", (video_id,)))
+                f"SELECT {_REGION_COLUMNS} FROM onscreen_subtitle_regions r WHERE r.video_id = ? ORDER BY r.id",
+                (video_id,)))
 
     def check_region(self, rect, language):
         if not isinstance(rect, RegionRect):
@@ -377,7 +378,8 @@ class OnScreenSubtitles:
 
     def region(self, region_id: int) -> OnScreenSubtitleRegion:
         with self._connect() as db:
-            row = db.execute("SELECT * FROM onscreen_subtitle_regions WHERE id = ?", (region_id,)).fetchone()
+            row = db.execute(f"SELECT {_REGION_COLUMNS} FROM onscreen_subtitle_regions r WHERE r.id = ?",
+                             (region_id,)).fetchone()
         if row is None:
             raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
         return _region(row)
@@ -442,10 +444,12 @@ class OnScreenSubtitles:
         지우고 그 영역만 다시 읽도록 대기열에 넣는다. 다른 영역은 그대로다. 시리즈에서 온 화였으면 이 화만 직접 정함이
         된다.
 
-        guard(db)는 쓰기 트랜잭션 안에서 바꾸기 전에 부른다. 예외를 던지면 아무것도 바꾸지 않는다.
+        guard(db)는 읽기를 멈추기 전과 쓰기 트랜잭션 안에서 바꾸기 전에 부른다. 예외를 던지면 아무것도 바꾸지 않고, 읽기를
+        멈추기 전에 던지면 읽던 결과도 그대로다.
         """
         self.check_region(rect, language)
         video_id = self.region(region_id).video_id
+        self._precheck(guard)
         self.cancel_reading(video_id)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -462,6 +466,7 @@ class OnScreenSubtitles:
         화면 번역 작업은 번역 작업자가 바뀐 세대를 보고 남은 줄에 맞춘다(낡은 응답은 버린다).
         """
         video_id = self.region(region_id).video_id
+        self._precheck(guard)
         self.cancel_reading(video_id)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -470,6 +475,12 @@ class OnScreenSubtitles:
             if not db.execute("DELETE FROM onscreen_subtitle_regions WHERE id = ?", (region_id,)).rowcount:
                 raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
             self.settle_reading(db, video_id, self._clock().isoformat())
+
+    def _precheck(self, guard) -> None:
+        """읽기를 멈추기 전에 guard를 한 번 불러, 확인 창이 본 것과 어긋나면 읽던 결과를 버리기 전에 멈춘다."""
+        if guard is not None:
+            with self._connect() as db:
+                guard(db)
 
     def settle_reading(self, db, video_id, now, *, automatic=False) -> None:
         """영역을 지운 뒤의 대기열: 남은 영역의 읽기(세대 없는 영역, 구간 요청)가 있으면 처리 기회를 남기고, 없으면
@@ -769,7 +780,15 @@ def _rect_values(rect: RegionRect) -> tuple[float, float, float, float]:
     return round(rect.x, 6), round(rect.y, 6), round(rect.width, 6), round(rect.height, 6)
 
 
+# 영역의 출처는 그 화가 지금 시리즈 영역의 시리즈에 속할 때만 시리즈에서 옴이다. 소속이 바뀐 뒤 출처 맞추기 전에
+# 앱이 끝났거나 맞추기가 실패해 시리즈 영역 ID가 남아 있어도, 시리즈에서 빠진 화의 영역은 직접 정함으로 보인다.
+# 그래서 그 화의 영역을 고치거나 지우는 일은 그 화만 바꾼다. 남은 ID는 다음 맞추기(follow_membership)가 지운다.
+_REGION_COLUMNS = ("r.id, r.video_id, r.x, r.y, r.width, r.height, r.language, "
+                   "EXISTS (SELECT 1 FROM series_onscreen_regions sr JOIN series_videos sv ON sv.series_id = sr.series_id "
+                   "WHERE sr.id = r.series_region_id AND sv.video_id = r.video_id) AS from_series")
+
+
 def _region(row) -> OnScreenSubtitleRegion:
     return OnScreenSubtitleRegion(row["id"], row["video_id"], RegionRect(row["x"], row["y"], row["width"], row["height"]),
                                   row["language"],
-                                  RegionOrigin.DIRECT if row["series_region_id"] is None else RegionOrigin.SERIES)
+                                  RegionOrigin.SERIES if row["from_series"] else RegionOrigin.DIRECT)
