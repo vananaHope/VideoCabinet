@@ -736,6 +736,55 @@ def test_series_apply_from_a_directly_set_episode_confirms_the_replacement(scree
     assert [(r.rect, r.origin.value) for r in core.onscreen_subtitle_regions(a)] == [(BAND, 'series'), (CORNER, 'series')]
 
 
+def test_series_region_edit_information_follows_the_series_option(screen_window):
+    """#365: 시리즈에서 온 영역을 고칠 때 선택지를 켜면 정보 줄이 확인 창과 같은 시리즈 범위의 숫자를 말한다."""
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, b = series_episodes(core, media)
+    region, = core.onscreen_subtitle_regions(a)
+    dialogs, seen = window.web_host.dialogs, {}
+    core.playback.start(a, 0)
+
+    def check():
+        data = state(dialogs)
+        assert '이 영역만 화면 자막과 화면 번역 자막을 다시 만듭니다. 검수로 고친 줄 1개' in data['information']
+        assert '이 화와 시리즈 영역을 받은 다른 화 1개에서' in data['series_information']
+        assert '검수로 고친 줄 2개의 수정이 사라집니다' in data['series_information']
+        seen['information'] = data['series_information']
+        seen['confirmation'] = act(dialogs, 'save', choice='ja', series=True)['confirmation']
+        act(dialogs, 'cancel-confirm')
+        act(dialogs, 'close')
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window, region_id=region.id).exec(), dialogs, check)
+    # 이어지는 확인 창과 같은 문구·숫자다(확인 창은 두 줄로 나눠 보인다).
+    assert seen['confirmation'].replace('\n', ' ') == seen['information']
+
+
+def test_series_add_whose_range_changed_at_the_last_moment_saves_without_a_replace_confirmation(screen_window, monkeypatch):
+    """#365: 시리즈에서 온 화에 새 영역을 더하는 일은 확인 창이 없다. 막판에 범위만 바뀌어도 바꾸기 확인 창을 띄우지 않는다."""
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, b = series_episodes(core, media)
+    series = core.series_for_video(a)
+    measure = core.onscreen_subtitle_region_series_impact
+
+    def measure_then_leave(*args, **kwargs):
+        impact = measure(*args, **kwargs)
+        if core.series_for_video(b) is not None:
+            core.update_series(series.id, name=series.name, video_ids=(a,))  # 잰 직후 2화가 시리즈에서 빠진다
+        return impact
+    monkeypatch.setattr(core, 'onscreen_subtitle_region_series_impact', measure_then_leave)
+    dialogs = window.web_host.dialogs
+    core.playback.start(a, 0)
+
+    def check():
+        result = act(dialogs, 'save', choice='en', series=True)
+        assert result is None or not result['confirmation']
+        assert not dialogs.active
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window).exec(), dialogs, check)
+    assert [(r.rect, r.origin.value) for r in core.onscreen_subtitle_regions(a)] == [(BAND, 'series'), (CORNER, 'series')]
+    assert [(r.rect, r.origin.value) for r in core.onscreen_subtitle_regions(b)] == [(BAND, 'direct')]
+
+
 # #285 검수 화면의 화면 자막: 받아쓰기 자막과 구별해 영역마다 열고 원문·화면 번역 줄을 고친다.
 TOP = RegionRect(0.6, 0.02, 0.38, 0.1)
 

@@ -484,3 +484,178 @@ def test_automatic_targets_never_demote_an_episode_already_requested_directly(se
     assert queue(core) == [(second, "queued"), (first, "queued"), (third, "queued")]
     read_all(core)
     assert [len(s.lines) for s in core.onscreen_subtitles(second)] == [2, 2, 2]
+
+
+# 제외 영상(#365): 시리즈 영역 변경에서 빠진다
+
+
+def test_excluded_episode_without_regions_is_neither_filled_nor_counted(series):
+    core, _, _, (first, second, third), _ = series
+    core.exclude_video(second)
+    assert core.onscreen_subtitle_region_series_impact(first) == OnScreenSeriesImpact(1, 0, False)
+
+    core.add_onscreen_subtitle_region(first, BAND, "en", series=True)
+
+    assert regions(core, second) == []
+    assert queue(core) == [(first, "queued"), (third, "queued")]
+
+
+def excluded_change(core, change, first, third, region):
+    if change == "update":
+        core.update_onscreen_subtitle_region(region.id, CORNER, "en", series=True)
+    elif change == "delete":
+        core.delete_onscreen_subtitle_region(region.id)
+    elif change == "add":
+        core.add_onscreen_subtitle_region(first, CORNER, "en", series=True)
+    else:
+        core.add_onscreen_subtitle_region(third, TOP, "en", series=True)
+
+
+@pytest.mark.parametrize("change, impact", [
+    ("update", OnScreenSeriesImpact(0, 1, True, "update")), ("delete", OnScreenSeriesImpact(0, 1, True, "delete")),
+    ("add", OnScreenSeriesImpact(0, 0, False, "add")), ("replace", OnScreenSeriesImpact(1, 2, True, "replace"))])
+def test_excluded_episode_from_the_series_keeps_its_regions_as_directly_set(series, change, impact):
+    """시리즈에서 온 제외 영상은 세지 않고, 대기열에 넣지 않고, 영역·줄·검수를 지킨 채 직접 정함이 된다."""
+    core, _, _, (first, second, third), _ = series
+    series_with_direct_episode(core, first, third)
+    kept = (regions(core, second), state(core, second))
+    core.exclude_video(second)
+    region = core.onscreen_subtitle_regions(first)[0]
+    seen = impact_of(core, change, first, third, region) if change != "add" else \
+        core.onscreen_subtitle_region_series_impact(first)
+    # 2화의 검수 줄은 사라질 수에 들어가지 않는다. 남은 화는 1화(지금 화이거나 다른 화)와 직접 정한 3화뿐이다.
+    assert (seen, seen.change) == (impact, impact.change)
+
+    excluded_change(core, change, first, third, region)
+
+    assert [(rect, language) for rect, language, _ in regions(core, second)] == [
+        (rect, language) for rect, language, _ in kept[0]]
+    assert {origin for *_, origin in regions(core, second)} == {DIRECT}
+    assert state(core, second) == kept[1]
+    assert second not in [video for video, _ in queue(core)]
+    # 되돌려도 직접 정한 화로 남아, 이후 시리즈 영역 변경을 따르지 않는다.
+    core.restore_video(second)
+    core.scan()
+    assert state(core, second) == kept[1]
+    band = core.onscreen_subtitle_regions(third)[0] if change == "replace" else core.onscreen_subtitle_regions(first)[0]
+    core.update_onscreen_subtitle_region(band.id, RegionRect(0.2, 0.2, 0.3, 0.3), "en", series=True)
+    assert state(core, second) == kept[1]
+
+
+# 소속이 바뀐 뒤 출처를 맞추기 전에 끊긴 상태(#365)
+
+
+def leave_without_reconcile(core, video_id):
+    """시리즈 편집이 그 화를 뺀 직후 앱이 끝난 상태: 소속만 바뀌고 출처는 아직 맞추지 않았다."""
+    import sqlite3
+    from contextlib import closing
+    series_id = core.series_for_video(video_id).id
+    with closing(sqlite3.connect(core.database)) as db, db:
+        db.execute("UPDATE series SET edited = 1 WHERE id = ?", (series_id,))
+        db.execute("INSERT OR IGNORE INTO series_overrides VALUES (?)", (video_id,))
+        db.execute("DELETE FROM series_videos WHERE video_id = ?", (video_id,))
+
+
+@pytest.mark.parametrize("change", ["delete", "update"])
+def test_episode_left_unreconciled_changes_only_itself(series, change):
+    core, _, _, (first, second, third), _ = series
+    apply_and_read(core, first)
+    review(core, second)
+    leave_without_reconcile(core, second)
+    others = everything(core, (first, third))
+    # 시리즈에서 빠진 화의 영역은 직접 정함으로 보여, 확인 창은 그 화만의 검수 수를 묻는다.
+    assert {origin for *_, origin in regions(core, second)} == {DIRECT}
+    band = core.onscreen_subtitle_regions(second)[0]
+    reviewed = core.onscreen_subtitle_region_reviewed_line_count(band.id)
+    assert reviewed == 1
+
+    if change == "delete":
+        core.delete_onscreen_subtitle_region(band.id, expected_reviewed_line_count=reviewed)
+        assert regions(core, second) == [(TOP, "ja", DIRECT)]
+    else:
+        core.update_onscreen_subtitle_region(band.id, CORNER, "en", expected_reviewed_line_count=reviewed)
+        assert regions(core, second) == [(CORNER, "en", DIRECT), (TOP, "ja", DIRECT)]
+    assert everything(core, (first, third))[0] == others[0]
+    assert regions(core, first) == [(BAND, "en", SERIES), (TOP, "ja", SERIES)]
+
+
+# 확인 가드와 변경 종류(#365)
+
+
+def test_an_outdated_series_change_does_not_discard_a_reading_in_progress(series):
+    core, media, _, (first, second, third), _ = series
+    series_with_direct_episode(core, first, third)
+    core.add_onscreen_subtitle_region(first, CORNER, "ja", series=True)  # 1화(직접 요청)와 2화가 새 영역을 읽는다
+    region = core.onscreen_subtitle_regions(first)[0]
+    seen = core.onscreen_subtitle_region_series_impact(first, region.id)
+    core.edit_onscreen_translation_line(core.onscreen_subtitles(second)[0].lines[1].id, "또 고친 줄")
+    refused = []  # 1화가 읽는 중일 때 낡은 범위로 1화에서 시리즈 영역을 고친다
+
+    def change_while_reading(index):
+        if index == 5 and not refused:
+            with pytest.raises(OnScreenSeriesChanged) as changed:
+                core.update_onscreen_subtitle_region(region.id, CORNER, "en", series=True,
+                                                     expected_series_impact=seen)
+            refused.append(changed.value)
+    media.hook = change_while_reading
+
+    result = core.process_next_onscreen_subtitle()
+
+    assert refused and (result.video_id, result.state) == (first, "completed")
+    assert [len(s.lines) for s in core.onscreen_subtitles(first)] == [2, 2, 2]
+
+
+def test_an_outdated_single_episode_change_does_not_discard_a_reading_in_progress(setup_single):
+    core, media, video = setup_single
+    refused = []
+
+    def delete_while_reading(index):
+        if index == 5 and not refused:
+            band = core.onscreen_subtitle_regions(video)[0]
+            with pytest.raises(OnScreenRegionChanged) as changed:
+                core.delete_onscreen_subtitle_region(band.id, expected_reviewed_line_count=0)
+            refused.append(changed.value)
+    media.hook = delete_while_reading
+
+    result = core.process_next_onscreen_subtitle()
+
+    assert refused and result.state == "completed"
+    assert [len(s.lines) for s in core.onscreen_subtitles(video)] == [2, 2]
+
+
+@pytest.fixture
+def setup_single(series):
+    """시리즈 밖 영상 하나: 아래 띠는 읽고 한 줄 검수했고, 위 모서리는 새로 더해 읽기를 기다린다."""
+    core, media, _, _, other = series
+    core.add_onscreen_subtitle_region(other, BAND, "en")
+    read_all(core)
+    review(core, other)
+    core.add_onscreen_subtitle_region(other, CORNER, "en")
+    return core, media, other
+
+
+def test_impact_names_the_change_it_will_make(series):
+    core, _, _, (first, second, third), _ = series
+    core.add_onscreen_subtitle_region(third, CORNER, "en")
+    assert core.onscreen_subtitle_region_series_impact(first).change == "replace"
+    apply_and_read(core, first)
+    region = core.onscreen_subtitle_regions(first)[0]
+    assert core.onscreen_subtitle_region_series_impact(first).change == "add"
+    assert core.onscreen_subtitle_region_series_impact(first, region.id).change == "update"
+    assert core.onscreen_subtitle_region_series_impact(first, region.id, delete=True).change == "delete"
+    assert core.onscreen_subtitle_region_series_impact(third).change == "replace"
+
+
+def test_a_series_change_whose_kind_changed_is_refused(series):
+    """확인 창이 본 뒤 시리즈에서 온 화가 직접 정함이 되면, 더하기가 바꾸기로 바뀌어 다시 확인받는다."""
+    core, _, _, (first, second, third), _ = series
+    apply_and_read(core, first)
+    seen = core.onscreen_subtitle_region_series_impact(second)
+    assert seen.change == "add"
+    band = core.onscreen_subtitle_regions(second)[0]
+    core.update_onscreen_subtitle_region(band.id, band.rect, band.language)  # 2화만 고쳐 직접 정함이 된다
+    before = everything(core, (first, second, third))
+    with pytest.raises(OnScreenSeriesChanged) as changed:
+        core.add_onscreen_subtitle_region(second, CORNER, "en", series=True, expected_series_impact=seen)
+    assert changed.value.impact.change == "replace"
+    assert everything(core, (first, second, third)) == before

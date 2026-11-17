@@ -62,6 +62,8 @@ class DialogData(TypedDict):
     # 선택지 아래 한 줄 안내.
     series_label: str
     series_note: str
+    # 화면 자막 영역 고치기에서 선택지를 켰을 때 information 대신 보이는 시리즈 범위 안내(확인 창과 같은 문구·숫자).
+    series_information: str
 
 
 class DialogSnapshot(TypedDict):
