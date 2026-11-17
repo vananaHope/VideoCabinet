@@ -126,6 +126,10 @@ def _elapsed_days(now, then):
     return max(0, (now - then).days)
 
 
+def _added_reason(days):
+    return "오늘 추가했어요" if days == 0 else f"{days}일 전에 추가했어요"
+
+
 def because_watched_title(title):
     """『제목』 뒤의 목적격 조사를 마지막 글자의 받침에 맞춘다.
 
@@ -234,7 +238,7 @@ def select_recommendations(videos, statuses, tags, series, dismissed, revisit_ti
                     video, "자주 본 태그 · " + ", ".join(tag.name for tag in top_tags), top_tags)))
         if vid in allowed and unwatched and now - video.registered_at <= new_arrivals_period:
             ranked["new_arrivals"].append(((-video.registered_at.timestamp(), vid), Recommendation(
-                video, f"{_elapsed_days(now, video.registered_at)}일 전에 추가했어요")))
+                video, _added_reason(_elapsed_days(now, video.registered_at)))))
         if (vid in allowed and status.favorite and status.last_viewed_at is not None
                 and now - status.last_viewed_at > rewatch_period):
             ranked["rewatch"].append(((status.last_viewed_at.timestamp(), vid), Recommendation(

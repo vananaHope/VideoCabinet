@@ -282,6 +282,17 @@ def test_new_arrivals_boundary_includes_exact_period(days, present):
         assert rows[0].items[0].reason == f"{days}일 전에 추가했어요"
 
 
+@pytest.mark.parametrize("hours, reason", [(0, "오늘 추가했어요"), (23, "오늘 추가했어요"),
+                                           (24, "1일 전에 추가했어요")])
+def test_new_arrivals_reason_says_today_until_one_full_day(library, hours, reason):
+    core, clock, add = library
+    video = add("새 영상")
+    clock.now += timedelta(hours=hours)
+    rows = core.recommendations()
+    assert placed(rows) == [("new_arrivals", [video.id])]
+    assert rows[0].items[0].reason == reason
+
+
 def test_new_arrivals_sort_newest_first_and_include_only_unwatched():
     videos = [replace(series_video(video_id), registered_at=NOW - timedelta(days=days))
               for video_id, days in ((1, 10), (2, 1), (3, 5), (4, 2))]
