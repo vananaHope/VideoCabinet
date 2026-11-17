@@ -208,9 +208,8 @@ class Review:
                          if max(0, s.start) < min(end - start, s.end))
         removed = [row[0] for row in db.execute("SELECT id FROM transcript_lines WHERE transcript_id = ? "
                                                 "AND start < ? AND end > ?", (transcript_id, end, start))]
-        record_removed(db, removed, self._clock().isoformat(), RANGE)  # 지우기 전 줄을 남긴다
-        db.execute("DELETE FROM transcript_lines WHERE transcript_id = ? AND start < ? AND end > ?",
-                   (transcript_id, end, start))
+        record_removed(db, removed, self._clock().isoformat(), RANGE)  # 지우기 전 줄을 남기고, 남긴 그 줄만 지운다
+        db.executemany("DELETE FROM transcript_lines WHERE id = ?", [(line_id,) for line_id in removed])
         retained = db.execute("SELECT id, start FROM transcript_lines WHERE transcript_id = ? ORDER BY ordinal",
                               (transcript_id,)).fetchall()
         # UNIQUE는 행마다 검사된다. 모든 기존 순서를 먼저 충돌하지 않는 음수로 이동한다.

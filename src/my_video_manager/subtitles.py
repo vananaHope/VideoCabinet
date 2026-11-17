@@ -12,7 +12,7 @@ from typing import Callable, Protocol, Sequence
 from uuid import uuid4
 
 from .subtitle_queue_kind import TRANSCRIPTION
-from .transcript_originals import record_transcript_replaced
+from .transcript_originals import LINE_MODELS_TRACKED, record_transcript_replaced
 
 
 @dataclass(frozen=True)
@@ -155,7 +155,8 @@ class Subtitles:
                     spoken_language TEXT NOT NULL,
                     language_specified INTEGER NOT NULL,
                     created_at TEXT NOT NULL,
-                    model TEXT NOT NULL
+                    model TEXT NOT NULL,
+                    {LINE_MODELS_TRACKED}
                 );
                 CREATE TABLE IF NOT EXISTS transcript_lines (
                     id TEXT PRIMARY KEY,

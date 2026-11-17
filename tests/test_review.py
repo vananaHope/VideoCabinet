@@ -1039,7 +1039,7 @@ def test_first_review_edit_keeps_the_line_before_it_once(setup):
     original, = reopen().transcript_line_originals(vid)
     assert (original.line_id, original.video_id, original.transcript_id) == (first.id, vid, core.transcript(vid).id)
     assert (original.text, original.start, original.end) == ("source 0", 0, 2)
-    assert (original.model, original.spoken_language) == ("large-v3", "en")
+    assert (original.model, original.model_inferred, original.spoken_language) == ("large-v3", False, "en")
     assert original.recorded_at == datetime(2026, 10, 14, tzinfo=timezone.utc)
     assert (original.removed_at, original.removed_by) == (None, None)
     assert core.transcript(vid).lines[0].text == "fixed again"
@@ -1067,6 +1067,7 @@ def test_range_regeneration_keeps_removed_lines_and_the_model_of_new_lines(setup
     core.edit_transcript_line(vid, new.id, "new ten")
     record = next(o for o in core.transcript_line_originals(vid) if o.line_id == new.id)
     assert (record.text, record.start, record.end, record.model, record.removed_by) == ("new 10", 10, 11, "range-model", None)
+    assert not record.model_inferred
     assert core.transcript(vid).model == "large-v3"  # 원어 자막의 모델 기록은 그대로다
 
 
@@ -1112,7 +1113,7 @@ def test_v11_library_upgrades_keeping_review_and_starts_recording(setup):
     from contextlib import closing
     from legacy_schema import replace_with_frozen
     from my_video_manager.library import LIBRARY_DB_VERSION
-    core, vid, _, _, _, reopen = setup
+    core, vid, transcriber, _, _, reopen = setup
     finish(core)
     first = core.transcript(vid).lines[0]
     core.edit_transcript_line(vid, first.id, "fixed before upgrade")
@@ -1129,6 +1130,24 @@ def test_v11_library_upgrades_keeping_review_and_starts_recording(setup):
     assert upgraded.transcript_line_originals(vid) == ()
     upgraded.edit_transcript_line(vid, first.id, "fixed after upgrade")
     assert originals(upgraded, vid) == [("fixed before upgrade", 0, 2, "large-v3", None)]
+    # 이전 전 원어 자막의 줄은 그 전 구간 다시 만들기가 쓴 모델을 알 수 없어 추정으로 표시한다.
+    assert [o.model_inferred for o in upgraded.transcript_line_originals(vid)] == [True]
+    # 이전 뒤 구간 다시 만들기로 만든 줄은 같은 원어 자막 안이어도 그 줄을 만든 모델을 안다.
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 1, "after 30"),), model="large-v3-turbo")
+    upgraded.request_subtitle_range(vid, 30, 32)
+    assert upgraded.process_next_subtitle().state == "completed"
+    made = next(line for line in upgraded.transcript(vid).lines if line.text == "after 30")
+    upgraded.edit_transcript_line(vid, made.id, "after thirty")
+    record = next(o for o in upgraded.transcript_line_originals(vid) if o.line_id == made.id)
+    assert (record.model, record.model_inferred) == ("large-v3-turbo", False)
+    # 전체 다시 생성한 새 원어 자막은 줄별 모델을 처음부터 안다.
+    transcriber.result = TranscriberResult("en", (TranscriptSegment(0, 2, "whole 0"),), model="large-v3-turbo")
+    upgraded.request_subtitles(vid)
+    assert upgraded.process_next_subtitle().state == "completed"
+    fresh = upgraded.transcript(vid).lines[0]
+    upgraded.edit_transcript_line(vid, fresh.id, "whole zero")
+    record = next(o for o in upgraded.transcript_line_originals(vid) if o.line_id == fresh.id)
+    assert (record.model, record.model_inferred) == ("large-v3-turbo", False)
 
 
 def test_v12_migration_failure_rolls_back_to_v11(setup):
@@ -1149,5 +1168,6 @@ def test_v12_migration_failure_rolls_back_to_v11(setup):
         db.set_authorizer(lambda *_: sqlite3.SQLITE_OK)
         assert not db.in_transaction and db.execute("PRAGMA user_version").fetchone()[0] == 11
         assert not db.execute("SELECT 1 FROM sqlite_master WHERE name = 'transcript_line_originals'").fetchone()
+        assert "line_models_tracked" not in [row[1] for row in db.execute("PRAGMA table_info(transcripts)")]
     assert core.database.read_bytes() == before
     assert reopen().transcript(vid) == expected
