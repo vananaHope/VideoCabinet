@@ -529,12 +529,12 @@ def test_upgrade_backup_restore_keeps_onscreen_results_protection_progress_and_v
     read_screen(core, media, b.id)
     core.process_next_translation()
     if version < LIBRARY_DB_VERSION:
-        # 고정된 이전 버전 DDL에는 화면 번역·보호·영상 용어집(v9), 원문 검수·구간 요청(v10), 시리즈 영역(v11)이 아직 없다.
+        # 고정된 이전 버전 DDL에는 화면 번역·보호·영상 용어집(v9), 원문 검수·구간 요청(v10), 시리즈 영역(v11), 검수 전 원어 원문(v12)이 아직 없다.
         replace_with_frozen(core.database, version)
     archive = core.create_backup(tmp_path / f'v{version}.zip')
     assert archive.metadata.db_version == version
     upgraded = reopen()
-    assert upgraded.create_backup(tmp_path / 'upgraded.zip').metadata.db_version == LIBRARY_DB_VERSION == 11
+    assert upgraded.create_backup(tmp_path / 'upgraded.zip').metadata.db_version == LIBRARY_DB_VERSION
     if version < LIBRARY_DB_VERSION:
         assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == version
     if version >= 9:
@@ -773,7 +773,7 @@ def test_v9_library_upgrades_keeping_onscreen_lines_translations_and_reviews(scr
     replace_with_frozen(core.database, 9)
     upgraded = reopen()
     with closing(sqlite3.connect(core.database)) as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION == 11
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION
     assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == 9
     assert (upgraded.onscreen_subtitles(video), upgraded.translation(video, source=ONSCREEN),
             upgraded.translation_line_providers(video, source=ONSCREEN),
@@ -800,7 +800,7 @@ def test_v10_library_upgrades_with_every_region_directly_set_and_series_apply_ke
     replace_with_frozen(core.database, 10)
     upgraded = reopen()
     with closing(sqlite3.connect(core.database)) as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION == 11
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION
     assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == 10
     assert [r.origin.value for r in upgraded.onscreen_subtitle_regions(video)] == ['direct', 'direct']
     assert (upgraded.onscreen_subtitles(video), upgraded.translation(video, source=ONSCREEN),

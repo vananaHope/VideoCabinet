@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from .subtitles import TranscriptLine, subtitle_srt, transcript_srt, normalize_subtitle_text
 from .subtitle_queue_kind import TRANSCRIPTION
+from .transcript_originals import RANGE, record_before_change, record_line_models, record_removed
 from .translation_kind import translation_task
 from .translation_source import ONSCREEN, TRANSCRIPT
 
@@ -160,6 +161,7 @@ class Review:
                            "(SELECT id FROM translation_queue WHERE video_id=? AND source=?)", (line_id, video_id, TRANSCRIPT))
                 self.translations.finish_ready(db, video_id)
             else:
+                record_before_change(db, [line_id], self._clock().isoformat())  # 처음 고칠 때만 고치기 전 줄을 남긴다
                 db.execute("UPDATE transcript_lines SET text = ? WHERE id = ?", (text, line_id))
                 db.execute("UPDATE subtitle_reviews SET original_reviewed = 1, translation_reviewed = ? "
                            "WHERE line_id = ?", (bool(keep_reviewed and reviewed and reviewed[0]), line_id))
@@ -197,14 +199,17 @@ class Review:
         with self._connect() as db:
             return db.execute("SELECT * FROM subtitle_review_ranges WHERE queue_id = ?", (queue_id,)).fetchone()
 
-    def replace_range(self, db, pending, interval, segments):
-        """겹치는 줄 전체를 덮는 확장 범위로 결과를 자른 뒤 원자적으로 교체한다."""
+    def replace_range(self, db, pending, interval, segments, model):
+        """겹치는 줄 전체를 덮는 확장 범위로 결과를 자른 뒤 원자적으로 교체한다. model은 새 줄을 만든 받아쓰기 모델이다
+        (원어 자막의 모델 기록은 그대로 둔다)."""
         start, end = interval["start"], interval["end"]
         transcript_id = interval["transcript_id"]
         segments = tuple(replace(s, start=max(0, s.start), end=min(end - start, s.end)) for s in segments
                          if max(0, s.start) < min(end - start, s.end))
-        db.execute("DELETE FROM transcript_lines WHERE transcript_id = ? AND start < ? AND end > ?",
-                   (transcript_id, end, start))
+        removed = [row[0] for row in db.execute("SELECT id FROM transcript_lines WHERE transcript_id = ? "
+                                                "AND start < ? AND end > ?", (transcript_id, end, start))]
+        record_removed(db, removed, self._clock().isoformat(), RANGE)  # 지우기 전 줄을 남기고, 남긴 그 줄만 지운다
+        db.executemany("DELETE FROM transcript_lines WHERE id = ?", [(line_id,) for line_id in removed])
         retained = db.execute("SELECT id, start FROM transcript_lines WHERE transcript_id = ? ORDER BY ordinal",
                               (transcript_id,)).fetchall()
         # UNIQUE는 행마다 검사된다. 모든 기존 순서를 먼저 충돌하지 않는 음수로 이동한다.
@@ -218,6 +223,7 @@ class Review:
         db.executemany("INSERT INTO transcript_lines VALUES (?, ?, ?, ?, ?, ?)",
                        [(id_, transcript_id, ordinals[id_], start + s.start, min(end, start + s.end), s.text.strip())
                         for id_, s in new])
+        record_line_models(db, [id_ for id_, _ in new], model)
         language = db.execute("SELECT spoken_language FROM transcripts WHERE id = ?", (transcript_id,)).fetchone()[0]
         if new and language not in (None, "und"):
             self.translations.request(pending.video_id, [id_ for id_, _ in new], connection=db,

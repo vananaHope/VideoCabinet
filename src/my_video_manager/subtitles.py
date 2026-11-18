@@ -12,6 +12,7 @@ from typing import Callable, Protocol, Sequence
 from uuid import uuid4
 
 from .subtitle_queue_kind import TRANSCRIPTION
+from .transcript_originals import LINE_MODELS_TRACKED, record_transcript_replaced
 
 
 @dataclass(frozen=True)
@@ -154,7 +155,8 @@ class Subtitles:
                     spoken_language TEXT NOT NULL,
                     language_specified INTEGER NOT NULL,
                     created_at TEXT NOT NULL,
-                    model TEXT NOT NULL
+                    model TEXT NOT NULL,
+                    {LINE_MODELS_TRACKED}
                 );
                 CREATE TABLE IF NOT EXISTS transcript_lines (
                     id TEXT PRIMARY KEY,
@@ -337,11 +339,13 @@ class Subtitles:
                     if not db.execute("SELECT 1 FROM subtitle_queue WHERE id = ?", (pending.id,)).fetchone():
                         return pending
                     if interval:
-                        self.review.replace_range(db, pending, interval, result.segments)
+                        self.review.replace_range(db, pending, interval, result.segments, result.model)
                         db.execute("DELETE FROM subtitle_queue WHERE id = ?", (pending.id,))
                         return SubtitleQueueEntry(pending.id, pending.video_id, pending.spoken_language,
                                                   pending.requested_at, "completed", None)
                     transcript_id = uuid4().hex
+                    # 검수 전 원문 기록은 남기고, 지워지는 원어 자막의 줄이었다고 적는다.
+                    record_transcript_replaced(db, pending.video_id, self._clock().isoformat())
                     db.execute("DELETE FROM transcripts WHERE video_id = ?", (pending.video_id,))
                     db.execute("""INSERT INTO transcripts
                                (video_id, id, spoken_language, language_specified, created_at, model)
