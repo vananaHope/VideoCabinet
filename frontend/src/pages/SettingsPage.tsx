@@ -69,7 +69,7 @@ export default function SettingsPage() {
   if (!data || !bridge || !shell) return error ? <Notice tone="error" className="m-4">{error}</Notice> : <p role="status" className="p-6">설정을 불러오는 중…</p>
   const translationProvider = data.translation.providers.find(p => p.id === data.translation.provider)!
   const translationSelection = data.translation.selections.find(s => s.provider === data.translation.provider)!
-  return <main className="flex h-full min-h-0 flex-col gap-3 p-4" aria-label="설정">
+  return <main className="flex h-full min-h-0 max-w-content flex-col gap-3 p-4" aria-label="설정">
     <PageHeader title="설정" description="키 배치와 라이브러리 설정을 한곳에서 관리합니다. Alt+S 또는 Ctrl+8로 엽니다." />
     <NoticeStack items={[error && { tone: 'error', message: error, onDismiss: () => setError('') }]} />
     <div className="flex min-h-0 flex-1 gap-6">

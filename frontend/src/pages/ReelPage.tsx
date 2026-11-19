@@ -69,7 +69,7 @@ export default function ReelPage() {
     setError(""); setHiddenStatus(""); setData(current => current?.status ? { ...current, status: "" } : current)
     request(reply => bridge.play(id, reply)).catch(showError)
   }
-  return <main aria-label="하이라이트 모아보기" onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) { event.preventDefault(); goHome.current() } }} className="flex h-full flex-col gap-3 p-4">
+  return <main aria-label="하이라이트 모아보기" onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) { event.preventDefault(); goHome.current() } }} className="flex h-full max-w-content flex-col gap-3 p-4">
     <PageHeader title="하이라이트 모아보기" description="모든 영상의 하이라이트를 이어서 봅니다. 시청 기록과 별도로 복습을 기록합니다." />
     <div className="flex items-center gap-3">
       <label className="flex min-w-0 flex-1 items-center gap-3 text-body">하이라이트 태그

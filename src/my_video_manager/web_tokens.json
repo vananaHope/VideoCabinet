@@ -40,7 +40,9 @@
     "library-card-small": "12rem",
     "library-card-medium": "16rem",
     "library-card-large": "22rem",
-    "library-card-info-height": "10rem"
+    "library-card-info-height": "10rem",
+    "content-max-width": "68.75rem",
+    "recommendation-card-width": "12.65rem"
   },
   "motion": {
     "motion-duration-quick": "100ms",

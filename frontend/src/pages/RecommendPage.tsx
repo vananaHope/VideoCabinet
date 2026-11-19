@@ -55,7 +55,7 @@ function reveal(videoId: number) {
   list.scrollTop += top < 0 ? top : bottom > 0 ? Math.min(bottom, top) : 0
 }
 
-// 첫 추천이 오기 전의 줄 자리. 실제 줄과 같은 머리글 높이(본문 한 줄, 실제 제목은 한 줄 말줄임)·카드 줄(다섯 장 폭)로 첫 화면을 채운다.
+// 첫 추천이 오기 전의 줄 자리. 실제 줄과 같은 머리글 높이(본문 한 줄, 실제 제목은 한 줄 말줄임)·카드 줄(고정 폭 카드 다섯 장)로 첫 화면을 채운다.
 function RecommendationsPlaceholder() {
   return <div data-recommend-list className="min-h-0 flex-1 overflow-hidden scroll-stable rounded-lg p-1">
     <Placeholder label="추천을 불러오는 중"><div className="space-y-3">
