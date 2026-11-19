@@ -112,7 +112,7 @@ export default function SearchPage() {
   // 흐린 이전 결과(최대 500개)를 둔 채 글자를 칠 때마다 다시 그리지 않도록 결과·선택·흐림이 바뀔 때만 만든다.
   const rows = useMemo(() => results.map((result, index) => <ResultRow key={index} id={`search-result-${index}`} selected={index === selectedIndex} stale={pending} onClick={() => { if (pending) return; select(index); document.getElementById("search-results")?.focus({ preventScroll: true }); play(index) }}>
     <div className="min-w-0 flex-1 space-y-1"><p className="wrap-anywhere text-body-strong"><MatchedText parts={result.title} /></p>
-      <div className="flex flex-wrap items-center gap-3"><StatusBadge variant={result.languageLabel !== null ? "outline" : undefined}>{result.source}</StatusBadge>{result.languageLabel !== null && <StatusBadge variant="outline">{result.languageLabel}</StatusBadge>}{result.start !== null && <span className="text-label text-highlight tabular-nums">{timestamp(result.start)}</span>}{result.missing && <span className="text-label text-muted-foreground">파일 없음</span>}</div>
+      <div className="flex flex-wrap items-center gap-3"><StatusBadge variant={result.languageLabel !== null ? "outline" : undefined}>{result.source}</StatusBadge>{result.languageLabel !== null && <StatusBadge variant="outline">{result.languageLabel}</StatusBadge>}{result.start !== null && <span className="text-label-strong text-foreground tabular-nums">{timestamp(result.start)}</span>}{result.missing && <span className="text-label text-muted-foreground">파일 없음</span>}</div>
       <p className="whitespace-pre-wrap wrap-anywhere text-body"><MatchedText parts={result.text} /></p></div>
   </ResultRow>), [results, selectedIndex, pending, select, play])
   const state = data?.state ?? "empty"
