@@ -1,7 +1,9 @@
 """전환 토큰과 움직임 줄이기: 실제 웹 셸에서 대화상자·메뉴·선택 목록·탭 내용·안내의 전환 유무와 전환 중 입력을 본다.
 
-offscreen QtWebEngine은 기본이 `prefers-reduced-motion: reduce`다. 움직임 줄이기를 끈 상태는
-Chromium 플래그를 준 자식 pytest 프로세스에서 같은 테스트를 다시 돌려 확인한다.
+움직임 줄이기 상태는 OS 설정(Windows "애니메이션 효과")에 기대지 않는다. Chromium은 Windows에서 이 미디어 쿼리를
+OS의 클라이언트 영역 애니메이션 설정에서 읽기 때문이다. 줄임 켬·끔 모두 Chromium 플래그
+(`--force-prefers-reduced-motion`·`--force-prefers-no-reduced-motion`)를 준 자식 pytest 프로세스에서 같은 테스트를 다시 돌려
+확인한다.
 """
 import json
 import re
@@ -21,7 +23,8 @@ from test_emergency_hide_dialogs_ui import activated, js, press_emergency, resto
 from test_emergency_hide_ui import app, window
 from wait_helpers import CHILD_READY_TIMEOUT
 
-MOTION_CHILD = os.environ.get('MVM_MOTION_CHILD') == '1'
+# 자식 프로세스의 움직임 줄이기 상태: 'reduce'(켬) 또는 'no-preference'(끔). 부모 프로세스에서는 None이다.
+MOTION_CHILD = os.environ.get('MVM_MOTION_CHILD')
 MOTION = web_tokens()['motion']
 CTRL = Qt.KeyboardModifier.ControlModifier
 
@@ -100,7 +103,11 @@ GUIDE = '[role=dialog]'
 NOTICE = '[aria-label="앱 안내"] [data-slot=notice]'
 
 
-def test_reduced_motion_draws_every_layer_instantly(window):
+def test_reduced_motion_draws_every_layer_instantly(request):
+    if MOTION_CHILD is None:
+        run_motion_child(request, 'reduce')
+        return
+    window = request.getfixturevalue('window')
     ready(window)
     assert js(window, "matchMedia('(prefers-reduced-motion: reduce)').matches") is True
     js(window, HOLD)
@@ -151,14 +158,16 @@ def test_hidden_key_guide_keeps_shell_actions_blocked_during_status_updates(wind
     wait_for(lambda: not present(window, GUIDE) and not window.web_host.dialogs.blocks_shell_actions)
 
 
-def run_motion_child(request):
-    """움직임 줄이기를 끈 Chromium에서 지정한 시험 하나를 실행한다."""
+def run_motion_child(request, mode):
+    """움직임 줄이기를 켠(reduce) 또는 끈(no-preference) Chromium에서 지정한 시험 하나를 실행한다.
+    OS 설정과 상관없이 플래그가 상태를 정한다."""
     flags = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '--disable-gpu')
+    flag = {'reduce': '--force-prefers-reduced-motion', 'no-preference': '--force-prefers-no-reduced-motion'}[mode]
     test = f'{Path(__file__).resolve()}::{request.node.name}'
     result = subprocess.run([sys.executable, '-m', 'pytest', test, '-q', '-p', 'no:cacheprovider', '-p', 'no:randomly', '-rs'],
                             cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=CHILD_READY_TIMEOUT * 2,
-                            env={**os.environ, 'MVM_MOTION_CHILD': '1', 'QT_QPA_PLATFORM': 'offscreen',
-                                 'QTWEBENGINE_CHROMIUM_FLAGS': f'{flags} --force-prefers-no-reduced-motion'})
+                            env={**os.environ, 'MVM_MOTION_CHILD': mode, 'QT_QPA_PLATFORM': 'offscreen',
+                                 'QTWEBENGINE_CHROMIUM_FLAGS': f'{flags} {flag}'})
     skipped = re.search(r'^SKIPPED \[1\] [^\n]*?:\d+: (.+)$', result.stdout, re.MULTILINE)
     if result.returncode == 0 and skipped:
         pytest.skip(skipped.group(1))
@@ -166,8 +175,8 @@ def run_motion_child(request):
 
 
 def test_transitions_run_without_reduced_motion_and_never_block_input(request):
-    if not MOTION_CHILD:
-        run_motion_child(request)
+    if MOTION_CHILD is None:
+        run_motion_child(request, 'no-preference')
         return
     window = request.getfixturevalue('window')
     host = window.web_host
@@ -296,8 +305,8 @@ def open_guide_and_hide_immediately(window):
 
 
 def test_key_guide_closes_after_emergency_hide_immediately_after_opening(request):
-    if not MOTION_CHILD:
-        run_motion_child(request)
+    if MOTION_CHILD is None:
+        run_motion_child(request, 'no-preference')
         return
     window = request.getfixturevalue('window')
     open_guide_and_hide_immediately(window)
@@ -306,8 +315,8 @@ def test_key_guide_closes_after_emergency_hide_immediately_after_opening(request
 
 
 def test_key_guide_restores_modal_shortcut_blocking_after_immediate_hide(request):
-    if not MOTION_CHILD:
-        run_motion_child(request)
+    if MOTION_CHILD is None:
+        run_motion_child(request, 'no-preference')
         return
     window = request.getfixturevalue('window')
     open_guide_and_hide_immediately(window)
