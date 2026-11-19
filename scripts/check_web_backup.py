@@ -236,7 +236,9 @@ try:
         path.write_bytes(b'backup UI sample')
         core.add_file(path)
         archive = workspace / '선택한 백업.zip'
-        assert button('썸네일 포함: 꺼짐')
+        # 썸네일 포함은 스위치(role=switch)다. 꺼진 상태에서 눌러 켠다.
+        assert js('(() => { const e = document.getElementById("backup-thumbnails"); if (e?.getAttribute("aria-checked") !== "false") return false; e.click(); return true })()')
+        wait(lambda: js('document.getElementById("backup-thumbnails").getAttribute("aria-checked") === "true"'))
         entered, release = threading.Event(), threading.Event()
         real_create = core.create_backup
         def slow_create(*args, **kwargs):

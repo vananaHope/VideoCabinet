@@ -12,9 +12,11 @@ export function PageHeader({ title, description, actions, variant = "page" }: { 
 }
 export function SectionTitle(props: Omit<Parameters<typeof PageHeader>[0], "variant">) { return <PageHeader {...props} variant="section" /> }
 
-const empty = cva("flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center", { variants: { variant: { page: "min-h-0 flex-1 p-12", section: "p-6" } }, defaultVariants: { variant: "section" } })
+// page: 화면·목록 전체가 비었을 때. 틀 없이 그 영역 가운데에 둔다. section: 패널·카드 안의 한 구역이 비었을 때. 점선 상자로 자리를 보인다.
+// 다음 동작(action)은 이미 있는 기능으로 가는 단추만 둔다.
+const empty = cva("flex flex-col items-center justify-center gap-2 text-center", { variants: { variant: { page: "h-full min-h-0 flex-1 p-6", section: "rounded-xl border border-dashed p-6" } }, defaultVariants: { variant: "section" } })
 export function EmptyState({ title, description, action, variant }: { title: string; description: string; action?: ReactNode } & VariantProps<typeof empty>) {
-  return <section className={empty({ variant })}><h2 className="text-section-title">{title}</h2><p className="text-body text-muted-foreground">{description}</p>{action}</section>
+  return <section data-slot="empty-state" className={empty({ variant })}><h2 className="text-section-title">{title}</h2><p className="max-w-prose text-body text-muted-foreground">{description}</p>{action && <div className="mt-2 flex flex-wrap justify-center gap-2">{action}</div>}</section>
 }
 const number = cva("rounded-xl border bg-card p-6", { variants: { variant: { default: "text-card-foreground", accent: "text-primary-text" } }, defaultVariants: { variant: "default" } })
 export function NumberCard({ label, value, description, variant }: { label: string; value: ReactNode; description?: string } & VariantProps<typeof number>) {
@@ -23,7 +25,7 @@ export function NumberCard({ label, value, description, variant }: { label: stri
 const status = cva("inline-flex w-fit items-center rounded-md px-2 py-0.5 text-label-strong", { variants: { variant: { success: "bg-status-success text-status-success-foreground", info: "bg-status-info text-status-info-foreground", highlight: "bg-highlight text-highlight-foreground", destructive: "bg-destructive text-destructive-foreground", muted: "bg-muted text-muted-foreground", selectedMuted: "bg-muted-foreground text-background", outline: "bg-transparent text-muted-foreground ring-1 ring-inset ring-input" } }, defaultVariants: { variant: "muted" } })
 export function StatusBadge({ children, variant }: { children: ReactNode } & VariantProps<typeof status>) { return <span data-slot="status-badge" className={status({ variant })}>{children}</span> }
 
-const tabList = cva("flex min-w-0 items-center gap-1", { variants: { variant: { navigation: "flex-1", section: "rounded-lg bg-muted p-1", panel: "shrink-0 rounded-lg border p-1" } }, defaultVariants: { variant: "section" } })
+const tabList = cva("flex min-w-0 items-center gap-1", { variants: { variant: { navigation: "flex-1", section: "w-fit max-w-full rounded-lg bg-muted p-1", panel: "shrink-0 rounded-lg border p-1" } }, defaultVariants: { variant: "section" } })
 const tabButton = cva("shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring", { variants: { variant: { navigation: "", section: "", panel: "" }, selected: { true: "", false: "" }, last: { true: "ml-auto", false: "" } }, compoundVariants: [
   // 머리글·패널 탭은 고를 수 있는 목록 항목(호버 muted, 선택 accent)이다. 구역 탭은 묶음 면이 muted라 호버가 한 단계 밝은 accent, 선택은 primary다.
   { variant: ["navigation", "panel"], selected: true, class: selectableItem({ selected: true }) },

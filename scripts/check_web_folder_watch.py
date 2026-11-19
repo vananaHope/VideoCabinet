@@ -126,10 +126,10 @@ def main():
 
             window.navigate_web_tab('settings')
             toggle = 'document.getElementById("settings-automatic-detection-toggle")'
-            wait(lambda: js(window, f'{toggle}?.getAttribute("aria-pressed") === "true"'))
+            wait(lambda: js(window, f'{toggle}?.getAttribute("aria-checked") === "true"'))
             capture(window, 'settings-detection-on')
             js(window, f'{toggle}.click()')
-            wait(lambda: js(window, f'{toggle}.getAttribute("aria-pressed") === "false"'))
+            wait(lambda: js(window, f'{toggle}.getAttribute("aria-checked") === "false"'))
             assert not core.automatic_detection_enabled()
             capture(window, 'settings-detection-off')
 
@@ -142,7 +142,7 @@ def main():
             capture(window, 'folders-detection-off')
 
             window.navigate_web_tab('settings')
-            wait(lambda: js(window, f'{toggle}?.getAttribute("aria-pressed") === "false"'))
+            wait(lambda: js(window, f'{toggle}?.getAttribute("aria-checked") === "false"'))
             js(window, f'{toggle}.click()')
             started = time.monotonic()
             wait(lambda: 'episode-03' in titles(core) and window.worker is None)

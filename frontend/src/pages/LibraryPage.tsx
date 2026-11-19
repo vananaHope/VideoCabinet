@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { LibraryChoice, LibraryFilters, LibraryFilterChips } from "@/components/library-filters"
+import { LibraryChoice, LibraryFilters, LibraryFilterChips, clearLibraryFilters } from "@/components/library-filters"
 import { LibraryFolders, folderKeyRows } from "@/components/library-folders"
 import { Button } from "@/components/ui/button"
 import { NoticeStack } from "@/components/ui/notice"
@@ -314,6 +314,16 @@ export default function LibraryPage() {
   const foldersOpen = options.mode === 'folders'
   const resultScope = useMemo(() => data?.visibleIds.join(",") ?? "", [data?.visibleIds])
 
+  // 빈 상태의 다음 동작. 폴더 관리 탭으로 가거나(영상 0개), 걸린 조건을 모두 지운다(결과 0개).
+  // 조건을 지우면 단추가 사라지므로 초점을 격자로 옮긴다.
+  function openFolders() {
+    connectBridge().then(({ shell }) => request(reply => shell.navigate("folders", reply))).catch(showError)
+  }
+  function clearFilters() {
+    if (!optionsRef.current) return
+    filter(clearLibraryFilters(optionsRef.current))
+    document.getElementById("library-grid")?.focus({ preventScroll: true })
+  }
   // 요청에는 늘 입력란 초안을 담는다. 칩의 X나 모두 지우기처럼 검색어를 바꾸는 조건은 입력란 초안도 함께 바꾼다.
   function filter(patch: Partial<LibraryViewOptions>) {
     if (!bridge || !optionsRef.current) return
@@ -445,7 +455,9 @@ export default function LibraryPage() {
       {foldersOpen && <LibraryFolders collapsedIds={options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data?.folders ?? []} selected={options.folder} onSelect={folder => filter({ folder })} />}
       {/* 페이지 안내는 격자 위쪽에 떠 있는 띠라 생기고 사라져도 격자의 자리·열 수·스크롤이 그대로다. 툴바·칩 줄·상세 패널은 덮지 않는다. */}
       <div className="relative flex min-w-0 flex-1">
-        <LibraryGrid cardSize={options.card_size} load={firstLoad} ids={data?.visibleIds ?? []} cards={cards} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videoCount ?? 0} onSelect={select} onAction={action} onRange={rangeChanged} layoutPaused={layoutPaused} revealRequest={revealRequest} keepPlace={keepPlace} />
+        <LibraryGrid cardSize={options.card_size} load={firstLoad} ids={data?.visibleIds ?? []} cards={cards} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videoCount ?? 0} onSelect={select} onAction={action} onRange={rangeChanged} layoutPaused={layoutPaused} revealRequest={revealRequest} keepPlace={keepPlace}
+          emptyAction={!data ? undefined : data.videoCount === 0 ? <Button variant="outline" onClick={openFolders}>폴더 관리 열기</Button>
+            : data.chips.length > 0 ? <Button variant="outline" onClick={clearFilters}>조건 모두 지우기</Button> : undefined} />
         <NoticeStack layout="band" aria-label="라이브러리 안내" items={[
           error && { tone: "error", message: error, onDismiss: () => setError("") },
           randomNotice?.scope === resultScope && { tone: "info", message: randomNotice.message, onDismiss: () => setRandomNotice(null) },
