@@ -119,8 +119,9 @@ components:
     rounded: "{rounded.md}"
     padding: "0.5rem 0.75rem"
   tab-section-selected:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.primary-foreground}"
+    backgroundColor: "{colors.background}"
+    textColor: "{colors.foreground}"
+    borderColor: "{colors.input}"
     rounded: "{rounded.md}"
     padding: "0.5rem 0.75rem"
   video-card:
@@ -179,7 +180,7 @@ components:
 어두운 상영실 같은 무채색 바탕에 인디고 빛줄기 하나, 그리고 의미 전용 상태 색이 있다.
 
 ### Primary
-- **Projector Indigo** (`primary`): 주 동작 단추, 구역 탭의 선택 상태처럼 "지금 이것"을 가리키는 곳에만 쓴다. 위에 오는 글자는 `primary-foreground`.
+- **Projector Indigo** (`primary`): 주 동작 단추, 켜진 스위치, 진행 중인 진행 막대처럼 "지금 이것"을 가리키는 곳에만 쓴다. 위에 오는 글자는 `primary-foreground`. 탭의 선택(머리글·구역·패널)은 무채색 면으로 보이고 인디고를 쓰지 않는다.
 - **Focus Beam** (`ring`): 키보드 초점 윤곽과 선택된 카드의 테두리·링. 마우스 호버와 구별되는 유일한 신호다.
 - **Soft Indigo Text** (`primary-text`): 어두운 바탕 위 인디고 글자(링크 단추, 강조 숫자 카드). 진한 `primary`를 글자에 쓰면 대비가 모자라서 따로 둔다.
 
@@ -210,9 +211,9 @@ components:
 - 각 상태 색에는 짝이 되는 진한 `-foreground`가 있다. 배지는 색 면 + 진한 글자, 안내(Notice)는 10% 면 + 40~60% 테두리 + 색 아이콘으로 쓴다.
 
 ### Named Rules
-**The One Beam Rule.** 강조색은 인디고 하나다. 선택·초점·주 동작이 아닌 곳에 인디고를 칠하지 않는다.
+**The One Beam Rule.** 강조색은 인디고 하나다. 선택·초점·주 동작이 아닌 곳에 인디고를 칠하지 않는다. 추천 이유·검색 일치·목록의 시각 같은 정보 글자에도 쓰지 않는다. 검색 일치는 본문색 굵은 글자 + 밑줄로 보이고, 한 화면의 주 단추는 하나다.
 
-**The Meaning-Only Color Rule.** 하이라이트 색과 상태 색은 그 의미에만 쓴다. 장식이나 구역 구분에 빌려 쓰지 않는다.
+**The Meaning-Only Color Rule.** 하이라이트 색과 상태 색은 그 의미에만 쓴다. 장식이나 구역 구분에 빌려 쓰지 않는다. 하이라이트 시각은 어디서나(대화상자·상세 패널·모아보기) 지점이 `highlight`, 구간이 `highlight-range`다. 하이라이트가 아닌 시각(대사 검색 결과)은 `foreground`다. 자막 대기열 진행 막대의 채움은 진행 중 `primary`, 완료 `status-success`, 실패 `destructive`, 보류 `status-warning`이다.
 
 **The Lit Ladder Rule.** 면 단계는 `background` → `card` → `popover`이고, 놓인 면 위의 호버는 `muted`, 선택은 `accent`다. 같은 역할은 같은 토큰을 쓰고, 호버와 선택은 같은 면을 쓰지 않는다. 고를 수 있는 목록 항목(설정 분류·머리글·패널 탭·폴더·대화상자 목록·태그 고르기·대기열 행·검색 결과·영상 카드)은 공용 `selectableItem` variant 하나로 이 둘을 칠한다. 안에 `muted` 면이 있는 항목은 호버만 한 칸 위 `popover`다. 바탕·카드·떠 있는 층 위에서 본문·보조 글자는 4.5:1, 조작 경계(`input`)와 초점·선택 윤곽(`ring`)은 3:1 이상이다. 색을 바꾸면 `tests/test_web_contrast.py`와 `tests/test_theme.py`가 이 기준을 다시 잰다.
 
@@ -325,7 +326,7 @@ components:
 
 ### Navigation (Tabs)
 - **Navigation:** 머리글의 페이지 탭. 비선택은 `muted-foreground` 글자, 호버에 `muted` 면, 선택은 그보다 밝은 `accent` 면 + `accent-foreground` 글자. 강조색을 쓰지 않아 영상보다 튀지 않는다. 마지막 탭(설정)은 오른쪽 끝으로 민다. 툴팁에 단축키(`Ctrl+1`~`Ctrl+8`)가 보인다.
-- **Section:** 페이지 안 구역 전환. 묶음은 탭 내용만큼의 폭이다(페이지 폭으로 늘이지 않는다). `muted` 묶음 면 안에서 선택 탭만 `primary` 면이고, 비선택 탭 호버는 묶음보다 한 단계 밝은 `accent` 면이다.
+- **Section:** 페이지 안 구역 전환. 묶음은 탭 내용만큼의 폭이다(페이지 폭으로 늘이지 않는다). `muted` 묶음 면 안에서 선택 탭은 묶음에서 파낸 `background` 면 + `foreground` 글자 + 조작 경계 `input` 한 겹(안쪽 1px)이고, 비선택 탭 호버는 묶음보다 한 단계 밝은 `accent` 면이다. 선택에 강조색을 쓰지 않아, 한 화면에 묶음이 여럿이어도(통계의 기간·구역·차트 기준) 인디고는 주 동작과 초점 윤곽선에만 남는다. 선택 경계는 묶음 면과 3.17:1, 선택 글자는 19.06:1, 초점 윤곽선(`ring`)은 묶음 면과 4.4:1이다.
 - **Panel:** 테두리 묶음 안에서 호버는 `muted`, 선택 탭은 `accent` 면이다.
 - **Selectable Item:** 설정 분류(`Button`의 `item`·`item-selected` variant), 머리글·패널 탭, 폴더 트리, 대화상자 목록, 태그 고르기 행, 대기열 행·규칙, 대사 검색·모아보기 결과, 통계의 많이 본 영상 행, 영상·추천 카드는 `components/ui/selectable-item.ts`의 `selectableItem`으로 호버 `muted`·선택 `accent`를 칠한다. 안에 `muted` 배지·태그 칩·썸네일 자리가 있는 항목(영상·추천 카드, 검색·모아보기 결과, 대기열 행)은 `inner: "muted"`로 호버를 `popover`로 올린다. 쓰는 곳은 배치만 더하고 색을 덮어쓰지 않는다.
 
