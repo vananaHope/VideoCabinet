@@ -80,7 +80,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     } catch (error) { setError(String(error)); return false }
     finally { busyRef.current = false; setBusy(false) }
   }
-  const button = (label: string, action: string, disabled = false, variant: 'default' | 'outline' | 'destructive' = 'outline') =>
+  const button = (label: string, action: string, disabled = false, variant: 'default' | 'outline' | 'destructive' | 'destructive-outline' = 'outline') =>
     <Button key={action} variant={variant} disabled={busy || disabled} onClick={() => void act(action, action === 'close' ? { accepted: !editable } : {})}>{label}</Button>
   const editable = ['series', 'tag-rename', 'highlight', 'subtitles', 'line', 'range', 'translation', 'video-rename', 'random-scope', 'onscreen-region'].includes(kind)
   const disabledEdit = data.locked || !currentSelected
@@ -154,8 +154,8 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     </div>
     {/* 선택한 행에 대한 작업은 왼쪽, 대화상자를 끝내는 닫기·취소 → 주 작업은 오른쪽 끝에 둔다. 순서는 그대로다. */}
     <DialogFooter start={kind === 'tags' ? <>{button('선택한 태그 떼기', 'remove', !currentSelected)}{button('모든 태그 관리', 'manage')}</>
-      : kind === 'tag-manager' ? <>{button('이름 변경', 'rename', !currentSelected, 'default')}{button('태그 삭제', 'delete', !currentSelected, 'destructive')}</>
-      : kind === 'highlights' ? <>{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive')}</>
+      : kind === 'tag-manager' ? <>{button('이름 변경', 'rename', !currentSelected, 'default')}{button('태그 삭제', 'delete', !currentSelected, 'destructive-outline')}</>
+      : kind === 'highlights' ? <>{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive-outline')}</>
       : kind === 'review' && onscreen ? <>{button('원문 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{data.exports.map(row => button(row.title, row.id))}</>
       : kind === 'review' ? <>{data.task_kind === 'refinement' && button(data.task_label, 'refine', data.locked)}{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button(`${data.short_label} SRT 저장`, 'export-translation', !data.rows.length)}{data.exports.map(row => button(row.title, row.id))}</>
       : undefined}>

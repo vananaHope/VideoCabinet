@@ -11,7 +11,7 @@ import { QueueRules, queueRuleKeyRows } from "@/components/queue-rules"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
-import { focusPage } from "@/lib/page-focus"
+import { focusAfterRender, focusPage } from "@/lib/page-focus"
 import { firstData } from "@/lib/entry"
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
@@ -89,6 +89,15 @@ export default function QueuePage() {
     setTab(value)
     if (value === "rules" && bridge) request<QueueRulesData>(reply => bridge.rulesSnapshot(reply)).then(setRules).catch(showError)
   }
+  // 빈 상태의 다음 동작. 필터를 풀면 단추가 사라지므로 초점을 목록으로 옮긴다.
+  function openRules() {
+    changeTab("rules")
+    focusAfterRender(() => document.getElementById("queue-rules"))
+  }
+  function showAllStates() {
+    setFilter("")
+    document.getElementById("queue-list")?.focus({ preventScroll: true })
+  }
   return <main className="flex h-full min-h-0 flex-col gap-3 p-4">
     <ConfirmDialog open={!!confirmation} onOpenChange={open => { if (!open) setConfirmation("") }} title="기존 한국어 자막 모두 다듬기" description={confirmation} confirmLabel="다듬기 요청" onConfirm={() => void action("refineExisting")} />
     <PageHeader title="자막 대기열" />
@@ -102,7 +111,8 @@ export default function QueuePage() {
         모자라면 위 안내 묶음이 줄어 스크롤한다. 자동 최소 높이는 목록 전체 높이를 따르므로 값을 정해 둔다. */}
     <section hidden={tab !== "status"} className="flex min-h-64 flex-1 flex-col gap-3">
       <div className="flex items-center justify-between gap-4"><SelectField aria-label="대기열 상태 필터" value={filter} options={[["", "모든 상태"], ...queueStates]} onValueChange={setFilter} className="max-w-48" /><p className="text-label text-muted-foreground">↑ / ↓ 선택 · Tab 버튼 이동 · Space 실행</p></div>
-      <QueueList store={store} ids={ids} selected={active} onSelect={select} emptyState={<EmptyState variant="page" title={meta.order.length ? "이 상태의 항목이 없습니다" : "자막 대기열이 비어 있습니다"} description={meta.order.length ? "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다." : "라이브러리 상세 패널의 '자막 만들기'나 재생 작업 메뉴의 '화면 자막 영역 정하기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요."} />} />
+      <QueueList store={store} ids={ids} selected={active} onSelect={select} emptyState={<EmptyState variant="page" title={meta.order.length ? "이 상태의 항목이 없습니다" : "자막 대기열이 비어 있습니다"} description={meta.order.length ? "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다." : "라이브러리 상세 패널의 '자막 만들기'나 재생 작업 메뉴의 '화면 자막 영역 정하기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요."}
+        action={meta.order.length ? <Button variant="outline" onClick={showAllStates}>모든 상태 보기</Button> : <Button variant="outline" onClick={openRules}>자동 자막 규칙 열기</Button>} />} />
       <p aria-label="상태별 개수" className="text-label text-muted-foreground">{meta.counts.map(item => `${item.label} ${item.count}개`).join(" · ")}</p>
       <div className="flex flex-wrap gap-2"><Button disabled={!bridge || busy} onClick={() => action("previewRefineExisting")}>기존 한국어 자막 모두 다듬기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("promote")}>앞당기기</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("remove")}>빼기</Button><Button disabled={!bridge || busy || !meta.canRetryFailed} onClick={() => action("retryFailed")}>실패 항목 모두 재시도</Button><Button variant="outline" disabled={active === null || busy} onClick={() => action("retryHeld")}>선택한 보류 재시도</Button></div>
     </section>

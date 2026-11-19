@@ -95,7 +95,8 @@
 /* 스크롤바 자리를 늘 예약해 줄 수가 바뀌어도(자리 표시 → 실제 목록, 적음 → 많음) 열 폭이 같다. */
 @utility scroll-stable { overflow-anchor: none; scrollbar-gutter: stable; }
 /* 추천 줄은 다섯 장 폭을 유지하고 그 줄 안에서만 가로로 이동한다.
-   얇은 스크롤바 공간을 항상 예약해 5/6개 경계에서도 줄 높이가 같다. */
+   스크롤바 공간(위 ::-webkit-scrollbar 높이)을 항상 예약해 5/6개 경계에서도 줄 높이가 같다.
+   표준 scrollbar-width를 쓰면 시스템 스크롤바가 되어 양 끝에 화살표 단추가 남으므로 앱 공통 스크롤바를 그대로 쓴다. */
 @utility recommendation-row {
   display: grid;
   grid-auto-flow: column;
@@ -103,8 +104,6 @@
   grid-template-rows: auto;
   gap: calc(2 * var(--spacing));
   overflow-x: scroll;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 @utility virtual-row { position: absolute; inset-inline: 0; top: var(--virtual-top); height: var(--grid-row-height); display: grid; grid-template-columns: repeat(var(--virtual-columns), minmax(0, 1fr)); }
 

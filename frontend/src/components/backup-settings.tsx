@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { request } from "@/bridge"
 import type { BackupAction, BackupData, SettingsBridge } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { InlineNotice, Notice, NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, StatusBadge } from "@/components/page-parts"
 import { formatDateTime } from "@/lib/dates"
@@ -85,7 +86,7 @@ export function BackupSettings({ bridge, active }: { bridge: SettingsBridge; act
     </section>}
     <div className="grid grid-cols-2 gap-4">
       <section className="space-y-3 rounded-xl border bg-card p-4"><h3 className="text-body-strong">백업 만들기</h3><p className="text-body text-muted-foreground">저장할 위치를 선택해 .zip 파일 하나로 보관합니다.</p>
-        <Button variant={thumbnails ? 'secondary' : 'outline'} aria-pressed={thumbnails} disabled={busy} onClick={() => setThumbnails(!thumbnails)}>썸네일 포함: {thumbnails ? '켜짐' : '꺼짐'}</Button>
+        <div className="flex items-center gap-2"><Switch id="backup-thumbnails" checked={thumbnails} disabled={busy} onCheckedChange={setThumbnails} /><label htmlFor="backup-thumbnails" className="text-body">썸네일 포함</label><span aria-hidden="true" className="text-body text-muted-foreground">{thumbnails ? '켜짐' : '꺼짐'}</span></div>
         <p className="text-label text-muted-foreground">썸네일은 다시 만들 수 있으며 포함하면 파일이 커집니다.</p>
         <Button data-backup-create disabled={busy} onClick={() => void action('create')}>백업 만들기</Button>
       </section>
@@ -95,7 +96,7 @@ export function BackupSettings({ bridge, active }: { bridge: SettingsBridge; act
       <h3 tabIndex={-1} data-backup-preview className="text-body-strong">백업 미리보기</h3><p className="break-all text-label text-muted-foreground">{data.previewPath}</p>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-body"><div><dt className="text-muted-foreground">만든 시각</dt><dd>{formatDateTime(data.preview.created_at)}</dd></div><div><dt className="text-muted-foreground">영상 수</dt><dd>{data.preview.video_count.toLocaleString()}개</dd></div><div><dt className="text-muted-foreground">앱 / DB 버전</dt><dd>{data.preview.app_version} / {data.preview.db_version}</dd></div><div><dt className="text-muted-foreground">썸네일</dt><dd>{data.preview.includes_thumbnails ? '포함' : '제외'}</dd></div></dl>
       <Notice tone="info">{data.preview.version_message}</Notice>
-      <div className="flex gap-2"><Button variant="destructive" disabled={busy} onClick={() => setConfirm(true)}>이 백업으로 복원 예약</Button><Button variant="outline" disabled={busy} onClick={() => void action('discard')}>선택 취소</Button></div>
+      <div className="flex gap-2"><Button variant="destructive-outline" disabled={busy} onClick={() => setConfirm(true)}>이 백업으로 복원 예약</Button><Button variant="outline" disabled={busy} onClick={() => void action('discard')}>선택 취소</Button></div>
     </section>}
     <section className="space-y-3 rounded-xl border bg-card p-4" aria-label="자동 백업">
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-body-strong">자동 백업 <span className="text-body text-muted-foreground">최근 {data.keep}개 보관</span></h3><div className="flex gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => void action('refresh')}>새로고침</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void action('openFolder')}>폴더 열기</Button></div></div>

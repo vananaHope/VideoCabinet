@@ -168,6 +168,7 @@ TanStack Virtual은 행 단위 가상화·overscan·scrollToIndex를 제공하�
 `--profile-search`는 빠른 검색에 글자를 일정 간격(40·80·150ms)으로 연속 입력해 키마다 입력란 반영 시간과
 마지막 키부터 결과·칩 반영 시간, 보기 요청 수, 그 사이 도착한 전체 목록 수를 `quick_search`에 남깁니다.
 offscreen은 소프트웨어 그리기(약 20fps)라 프레임 시간이 부풀므로 비교는 데스크톱 잠금 안의 실창에서 합니다.
+Linux 클라우드 세션에서는 웹 셸이 세그폴트하므로 `python scripts/linux_offscreen_check.py scripts/check_web_<이름>.py --offscreen --output <폴더>`로 스크린샷만 얻습니다(Linux 전용 우회, 초점·키 단언은 믿을 수 없음. 머리말 참고).
 실제 Windows 한국어 IME의 조합·후보 선택은 사람이 별도로 확인해야 합니다.
 `--verify-library --count 24 --long-content`는 테스트 복사본으로 하이라이트 0·32개,
 시각 재생·Esc 복귀·기존 편집 저장을 확인합니다. 이 검사는 `.local/issue46/`의 데모

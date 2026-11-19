@@ -1,9 +1,10 @@
 import { cva } from "class-variance-authority"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react"
 import { flushSync } from "react-dom"
 import { VideoCard, VideoCardPlaceholder } from "@/components/video-card"
 import { VideoMenu } from "@/components/video-menu"
+import { EmptyState } from "@/components/page-parts"
 import type { VideoData } from "@/bridge-types"
 import type { Action } from "@/bridge"
 import { menuKeyRow, type KeyGuideRow } from "@/lib/key-guide"
@@ -56,14 +57,9 @@ function placeOf(ids: readonly number[], selectedId: number | null, { columns, r
   return { cards, top }
 }
 
-function GridMessage({ title, description }: { title: string; description: string }) {
-  return <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
-    <h2 className="text-section-title text-foreground">{title}</h2>
-    <p>{description}</p>
-  </div>
-}
-
-export function LibraryGrid({ cardSize, ids, cards, selectedId, scanning, total, onSelect, onAction, onRange, layoutPaused, revealRequest = 0, load = "ready", keepPlace = false }: {
+export function LibraryGrid({ cardSize, ids, cards, selectedId, scanning, total, onSelect, onAction, onRange, layoutPaused, revealRequest = 0, load = "ready", keepPlace = false, emptyAction }: {
+  /** 결과가 없을 때 빈 상태에 보일 다음 동작 단추. */
+  emptyAction?: ReactNode
   /** 결과의 영상 ID 순서. 줄 수와 스크롤 높이는 이것으로 정한다. */
   ids: readonly number[];
   /** 받은 카드. 결과에 들었지만 아직 받지 못한 영상은 같은 크기의 자리 표시로 그리고, 고르고 이동할 수 있다(#267). */
@@ -181,9 +177,9 @@ export function LibraryGrid({ cardSize, ids, cards, selectedId, scanning, total,
       {Array.from({ length: visibleRows }, (_, row) => <div key={row} className="virtual-row gap-3 pb-3" style={{ "--virtual-top": `${row * rowHeight}px`, "--virtual-columns": columns } as CSSProperties}>
         {Array.from({ length: columns }, (_, column) => <VideoCardPlaceholder key={column} />)}
       </div>)}
-    </div> : load === "failed" ? <GridMessage title="영상 목록을 읽지 못했습니다" description="앱을 다시 시작하면 목록을 다시 읽습니다." />
-    : !ids.length ? <GridMessage title={total ? "조건에 맞는 영상이 없습니다" : "라이브러리가 비어 있습니다"}
-      description={total ? "검색 조건이나 선택한 폴더를 바꿔 보세요." : "폴더 관리(Ctrl+7)에서 감시 폴더나 영상 파일을 추가하세요."} />
+    </div> : load === "failed" ? <EmptyState variant="page" title="영상 목록을 읽지 못했습니다" description="앱을 다시 시작하면 목록을 다시 읽습니다." />
+    : !ids.length ? <EmptyState variant="page" title={total ? "조건에 맞는 영상이 없습니다" : "라이브러리가 비어 있습니다"}
+      description={total ? "검색 조건이나 선택한 폴더를 바꿔 보세요." : "폴더 관리(Ctrl+7)에서 감시 폴더나 영상 파일을 추가하세요."} action={emptyAction} />
     // 줄 높이가 고정이라 전체 높이는 줄 수 × 줄 높이다. 가상화 캐시는 measure 뒤에야 바뀌므로 직접 계산해, 새 열 수를 그린 커밋에서 바로 보던 자리로 스크롤할 수 있게 한다.
     : <div className="virtual-canvas" style={{ "--virtual-height": `${Math.ceil(ids.length / columns) * rowHeight}px` } as CSSProperties}>
       {rows.map(row => <div key={row.key} role="row" aria-rowindex={row.index + 1} className="virtual-row gap-3 pb-3" style={{ "--virtual-top": `${row.start}px`, "--virtual-columns": columns } as CSSProperties}>

@@ -1,4 +1,5 @@
 import { cva } from "class-variance-authority"
+import { Input } from "@/components/ui/input"
 import { selectableItem } from "@/components/ui/selectable-item"
 import type { ComponentProps, KeyboardEvent } from "react"
 import type { SearchTextData } from "@/bridge-types"
@@ -15,7 +16,7 @@ export function ResultRow({ selected, stale = false, ...props }: ComponentProps<
 }
 
 export function SearchInput(props: ComponentProps<"input">) {
-  return <input {...props} className="h-12 w-full min-w-0 rounded-lg border border-input bg-card px-4 text-lg placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring" />
+  return <Input {...props} variant="search" />
 }
 
 export function MatchedText({ parts }: { parts: SearchTextData[] }) {
