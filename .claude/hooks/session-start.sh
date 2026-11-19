@@ -8,6 +8,22 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 
+# stdout은 hook 결과 JSON 전용으로 남기고, 나머지 출력은 stderr로 보낸다.
+exec 3>&1 1>&2
+
+# 클라우드 전용 스킬(.claude/cloud-skills)을 개인 스킬 위치로 복사한다.
+# 로컬 클론에서는 .claude/cloud-skills가 스킬 탐색 경로가 아니라서 보이지 않는다.
+SKILLS_SRC="$CLAUDE_PROJECT_DIR/.claude/cloud-skills"
+SKILLS_DEST="$HOME/.claude/skills"
+mkdir -p "$SKILLS_DEST"
+for skill in "$SKILLS_SRC"/*/; do
+  name="$(basename "$skill")"
+  rm -rf "${SKILLS_DEST:?}/$name"
+  cp -r "$skill" "$SKILLS_DEST/$name"
+done
+# 스킬 탐색은 보통 SessionStart hook보다 먼저 끝나므로, 이후 단계가 실패해도 다시 읽게 한다.
+trap 'echo "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"reloadSkills\":true}}" >&3' EXIT
+
 # PySide6(QtWebEngine)가 offscreen에서도 요구하는 시스템 라이브러리.
 QT_LIBS="libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libnss3"
 if ! dpkg -s $QT_LIBS >/dev/null 2>&1; then
