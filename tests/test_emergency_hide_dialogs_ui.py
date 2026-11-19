@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QSystemTra
 
 from test_emergency_hide_ui import app, window, key, emergency_key, play_to_twenty_seconds
 from test_web_dialogs import state, within
+import qt_wait
 from qt_wait import wait_for
 from my_video_manager.app_version import DISPLAY_NAME
 
@@ -444,23 +445,7 @@ def open_playback_menu(window, menu):
 
 def while_button_menu_open(button, menu, during):
     """단추의 InstantPopup 메뉴는 exec 안에서 열린다. 열린 동안 during(menu)를 하고, 남아 있으면 닫는다."""
-    timer = QTimer()
-    timer.setInterval(10)
-
-    def run():
-        if not menu.isVisible():
-            return
-        timer.stop()
-        try:
-            during(menu)
-        finally:
-            if menu.isVisible():
-                menu.close()
-
-    timer.timeout.connect(run)
-    timer.start()
-    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
-    timer.stop()
+    qt_wait.while_button_menu_open(button, menu, lambda: during(menu))
     QApplication.processEvents()
 
 

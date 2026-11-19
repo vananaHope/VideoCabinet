@@ -32,16 +32,20 @@ export function BackupSettings({ bridge, active }: { bridge: SettingsBridge; act
   useLayoutChange(active, data, error, dismissed)
   useEffect(() => {
     let disposed = false
-    const changed = (json: string) => { if (!disposed) setData(JSON.parse(json)) }
+    // 진행 중인 작업 이름은 스냅숏을 받은 자리에서 바로 적는다. 진행 중·완료 스냅숏이 잇달아 와 한 번의 렌더로 합쳐지면
+    // 진행 중 상태는 그려지지 않으므로, 렌더된 상태로 적으면 끝난 작업을 놓쳐 초점을 옮기지 못한다.
+    const received = (next: BackupData) => { if (disposed) return; if (next.busy) lastOperation.current = next.operation; setData(next) }
+    const changed = (json: string) => received(JSON.parse(json))
     bridge.backupChanged.connect(changed)
-    request<BackupData>(reply => bridge.backupSnapshot(reply)).then(result => { if (!disposed) setData(result) }).catch(error => { if (!disposed) setError(String(error)) })
+    request<BackupData>(reply => bridge.backupSnapshot(reply)).then(received).catch(error => { if (!disposed) setError(String(error)) })
     return () => { disposed = true; bridge.backupChanged.disconnect(changed) }
   }, [bridge])
   useEffect(() => {
     if (active) request(reply => bridge.backupAction('refresh', '', false, reply)).catch(error => setError(String(error)))
   }, [bridge, active])
   useEffect(() => {
-    if (data?.busy) { lastOperation.current = data.operation; return }
+    // 작업이 끝난 스냅숏이 그려졌을 때 그 작업의 결과 자리로 초점을 옮긴다. 작업 이름은 위 received가 적어 둔 것이다.
+    if (data?.busy) return
     const operation = lastOperation.current
     lastOperation.current = ''
     if (!active || !operation || operation === 'refresh') return
