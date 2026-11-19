@@ -428,7 +428,7 @@ export default function LibraryPage() {
   return <main aria-label="라이브러리" className="flex h-full flex-col gap-2 p-2">
     {/* 툴바는 첫 데이터 전에도 같은 자리에 그리고, 데이터가 올 때까지 누를 수 없다. */}
     <div className="flex shrink-0 items-center gap-2">
-      <div className="min-w-24 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목 검색" value={draft} disabled={!data}
+      <div className="max-w-md min-w-24 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목 검색" value={draft} disabled={!data}
         onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter({ query: event.currentTarget.value }) }}
         onChange={event => { const query = event.target.value; if (composing.current) setDraftValue(query); else filter({ query }) }} /></div>
       <LibraryChoice name="card_size" label="카드 크기" options={options} disabled={!data} onChange={filter} />
@@ -438,11 +438,12 @@ export default function LibraryPage() {
       {/* 개수 자리는 9,999개까지 들어가는 폭을 잡아 두어 첫 데이터가 와도 옆 컨트롤이 밀리지 않는다. 그 전에는 "0개" 대신 기다림 표시를 둔다. */}
       {data ? <p aria-label="라이브러리 등록·표시 개수" className="min-w-44 shrink-0 text-label text-muted-foreground tabular-nums">등록 영상 {data.videoCount}개 · 표시 {data.visibleIds.length}개</p>
         : <PendingStatus pending={firstLoad === "pending"} className="min-w-44 shrink-0" />}
-      <RandomPlayButton disabled={!data} scopes={[
+      {/* 검색 칸이 최대 폭에서 멈춘 뒤에도(넓은 창) 무작위 재생은 기본 창에서처럼 오른쪽 끝에 둔다. */}
+      <div className="ml-auto shrink-0"><RandomPlayButton disabled={!data} scopes={[
         { key: "results", label: "현재 결과에서", onSelect: () => randomPlay() },
         { key: "all", label: "영상 전체에서", onSelect: () => randomPlay("all"), shortcut: data?.keyBindings.randomPlay },
         { key: "tags", label: "태그에서…", onSelect: () => setTagDialogOpen(true), opensDialog: true },
-      ]} />
+      ]} /></div>
       {data && <RandomTagDialog open={tagDialogOpen} onOpenChange={setTagDialogOpen} tags={data.tags} load={loadTagCandidates}
         onPlay={randomPlay} />}
     </div>

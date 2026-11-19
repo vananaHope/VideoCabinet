@@ -54,6 +54,8 @@
   --spacing-badge: calc(var(--text-label--line-height) + var(--spacing));
   /* 라이브러리 카드 정보 칸. 격자 줄 높이 계산(library-grid.tsx)도 같은 토큰을 읽는다. */
   --spacing-card-info: var(--library-card-info-height);
+  /* 읽는 화면(설정·양식·모아보기·검색)의 내용 최대 폭. 기준 창 폭과 같아 기본 창에서는 그대로이고, 최대화에서만 내용이 끝없이 늘어나지 않게 한다. */
+  --container-content: var(--content-max-width);
   /* 대기열 고정 머리글 높이. 머리글 높이와 목록 scroll-padding이 같은 값을 쓴다. */
   --spacing-queue-header: calc(var(--spacing) * 7.25);
   /* 전환은 web_tokens.json의 motion 값 하나를 쓴다. transition-colors 같은 유틸리티도 이 기본 시간·곡선을 따른다.
@@ -94,13 +96,14 @@
 @utility virtual-canvas { height: var(--virtual-height); position: relative; }
 /* 스크롤바 자리를 늘 예약해 줄 수가 바뀌어도(자리 표시 → 실제 목록, 적음 → 많음) 열 폭이 같다. */
 @utility scroll-stable { overflow-anchor: none; scrollbar-gutter: stable; }
-/* 추천 줄은 다섯 장 폭을 유지하고 그 줄 안에서만 가로로 이동한다.
-   스크롤바 공간(위 ::-webkit-scrollbar 높이)을 항상 예약해 5/6개 경계에서도 줄 높이가 같다.
+/* 추천 줄의 카드 폭은 고정이다(web_tokens.json recommendation-card-width: 기본 창 1100px에서 다섯 장이 꼭 맞는 폭).
+   창이 넓어지면 카드가 커지지 않고 한 줄에 보이는 장수가 늘며, 넘치는 카드는 그 줄 안에서만 가로로 이동한다.
+   스크롤바 공간(위 ::-webkit-scrollbar 높이)을 항상 예약해 넘침 경계에서도 줄 높이가 같다.
    표준 scrollbar-width를 쓰면 시스템 스크롤바가 되어 양 끝에 화살표 단추가 남으므로 앱 공통 스크롤바를 그대로 쓴다. */
 @utility recommendation-row {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: calc((100% - 8 * var(--spacing)) / 5);
+  grid-auto-columns: var(--recommendation-card-width);
   grid-template-rows: auto;
   gap: calc(2 * var(--spacing));
   overflow-x: scroll;
