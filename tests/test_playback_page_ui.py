@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QToolTip
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo, playback_speed
 from my_video_manager.ui import MainWindow
-from qt_wait import wait_for
+from qt_wait import popup_shown, wait_for, while_button_menu_open
 
 
 class Media:
@@ -813,27 +813,15 @@ def with_menu(button, menu, action=None):
     메뉴가 열렸을 때의 활성 팝업과 체크된 항목을 돌려준다.
     """
     seen = {}
-    timer = QTimer()
-    timer.setInterval(10)
 
-    def run():
-        if not menu.isVisible():
-            return
-        timer.stop()
+    def during():
         seen['popup'] = QApplication.activePopupWidget()
         seen['checked'] = [item.text() for item in menu.actions() if item.isChecked()]
-        try:
-            if action is not None:
-                item = next(item for item in menu.actions() if item.text() == action)
-                QTest.mouseClick(menu, Qt.MouseButton.LeftButton, pos=menu.actionGeometry(item).center())
-        finally:
-            if menu.isVisible():
-                menu.close()
+        if action is not None:
+            item = next(item for item in menu.actions() if item.text() == action)
+            QTest.mouseClick(menu, Qt.MouseButton.LeftButton, pos=menu.actionGeometry(item).center())
 
-    timer.timeout.connect(run)
-    timer.start()
-    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
-    timer.stop()
+    while_button_menu_open(button, menu, during)
     QApplication.processEvents()
     assert seen['popup'] is menu
     assert not menu.isVisible()
@@ -870,7 +858,8 @@ def test_playback_menu_settings_opens_same_menu_as_alt_s(window, fullscreen):
         key(window, Qt.Key.Key_Apostrophe)
         page.reveal_bar()
     with_menu(page.menu_button, page.menu, "설정 · Alt+S")
-    wait_for(lambda: QApplication.activePopupWidget() is window.settings_menu)
+    wait_for(lambda: popup_shown(window.settings_menu))
+    assert QApplication.activePopupWidget() is window.settings_menu
     assert window.isFullScreen() is fullscreen
     QTest.keyClick(window.settings_menu, Qt.Key.Key_Escape)
     QApplication.processEvents()
@@ -1150,22 +1139,7 @@ def test_press_after_returning_to_list_and_replaying_starts_fresh(window):
 
 def while_menu_open(button, menu, action):
     """InstantPopup 단추의 메뉴가 exec 안에서 열려 있는 동안 action을 한 번 실행한다."""
-    timer = QTimer()
-    timer.setInterval(10)
-
-    def run():
-        if menu.isVisible():
-            timer.stop()
-            try:
-                action()
-            finally:
-                if menu.isVisible():
-                    menu.close()
-
-    timer.timeout.connect(run)
-    timer.start()
-    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
-    timer.stop()
+    while_button_menu_open(button, menu, action)
     QApplication.processEvents()
 
 
@@ -1188,7 +1162,8 @@ def test_video_click_only_closes_speed_list_then_next_click_works(window):
 def test_video_click_only_closes_settings_menu_from_playback_menu_then_next_click_works(window):
     page, player = window.playback_page, window.player
     with_menu(page.menu_button, page.menu, "설정 · Alt+S")
-    wait_for(lambda: QApplication.activePopupWidget() is window.settings_menu)
+    wait_for(lambda: popup_shown(window.settings_menu))
+    assert QApplication.activePopupWidget() is window.settings_menu
     click_video(window)
     assert not window.settings_menu.isVisible()
     wait_past_click_interval(window)

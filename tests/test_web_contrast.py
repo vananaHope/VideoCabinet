@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import json
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QFocusEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
@@ -85,6 +85,17 @@ def still(window, element):
     """색 전환이 끝날 때까지 기다린다."""
     settle(window)
     wait_for(lambda: js(window, f"({element}).getAnimations({{ subtree: true }}).every(a => a.playState !== 'running')"))
+
+
+def painted_still(window, element):
+    """요소의 그림에 영향을 주는 애니메이션이 모두 끝날 때까지 기다린다.
+
+    불투명도·변형 애니메이션은 조상에 걸려 있어도 요소의 픽셀을 바꾼다(대화상자를 감싼 오버레이의 fade-in).
+    still은 요소와 그 아래만 보므로 픽셀을 재는 검사는 조상까지 본다.
+    """
+    settle(window)
+    wait_for(lambda: js(window, f"""(() => {{ const e = {element}
+      return document.getAnimations().every(a => a.playState !== 'running' || !(a.effect?.target?.contains(e) || e.contains(a.effect?.target))) }})()"""))
 
 
 def hover(window, element):
@@ -400,7 +411,7 @@ def test_checkbox_boundary_meets_ui_contrast_on_floating_layer(window):
 
     def check():
         wait_for(lambda: js(window, f"!!{box}"))
-        still(window, "document.querySelector('[role=dialog]')")
+        painted_still(window, box)
         assert not js(window, f"{box}.checked")
         surface = probe(window, box)['outer']
         rect = json.loads(js(window, f"JSON.stringify(({box}).getBoundingClientRect())"))
@@ -408,11 +419,18 @@ def test_checkbox_boundary_meets_ui_contrast_on_floating_layer(window):
         frame = {}
 
         def drawn():
-            # 화면 그림은 DOM보다 늦게 온다. 체크박스 옆 빈자리가 대화상자 면으로 칠해진 그림을 기다린다.
-            frame['image'] = window.grab().toImage()
-            scale = frame['image'].devicePixelRatio()
-            gap = frame['image'].pixelColor(round((origin.x() + rect['right'] + 3) * scale), round((origin.y() + rect['y'] + rect['height'] / 2) * scale))
-            return max(abs(a - b) for a, b in zip((gap.red(), gap.green(), gap.blue()), surface)) <= 2
+            # 화면 그림은 DOM보다 늦게 온다. 체크박스 옆 빈자리가 대화상자 면으로 칠해지고,
+            # 한 프레임 뒤에도 체크박스 둘레가 그대로인(더 바뀌지 않는) 그림을 기다린다.
+            # 면 색만 보면 끝나 가는 fade-in 프레임도 허용 오차 안에 들어와 옅은 테두리를 재게 된다.
+            previous = frame.get('image')
+            settle(window)
+            frame['image'] = image = window.grab().toImage()
+            scale = image.devicePixelRatio()
+            around = QRect(round((origin.x() + rect['x'] - 4) * scale), round((origin.y() + rect['y'] - 4) * scale),
+                           round((rect['width'] + 8) * scale), round((rect['height'] + 8) * scale))
+            gap = image.pixelColor(round((origin.x() + rect['right'] + 3) * scale), round((origin.y() + rect['y'] + rect['height'] / 2) * scale))
+            return (max(abs(a - b) for a, b in zip((gap.red(), gap.green(), gap.blue()), surface)) <= 2
+                    and previous is not None and previous.copy(around) == image.copy(around))
         wait_for(drawn)
         image = frame['image']
         scale = image.devicePixelRatio()
