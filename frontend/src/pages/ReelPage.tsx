@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button"
 import { NoticeStack } from "@/components/ui/notice"
 import { SelectField } from "@/components/ui/select"
 import { EmptyState, PageHeader } from "@/components/page-parts"
-import { ResultRow, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+import { KeyHints } from "@/components/key-hints"
+import { Chip } from "@/components/ui/chip"
+import { ResultRow, highlightTime, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
 import { formatDateTime } from "@/lib/dates"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
@@ -18,6 +20,8 @@ export const keyGuide: readonly KeyGuideGroup[] = [
   { title: "하이라이트 목록", rows: listKeyRows },
   { title: "화면", rows: [{ keys: ["Esc"], label: "라이브러리로 돌아가기" }] },
 ]
+
+const reelHints = [{ keys: ["↑", "↓"], label: "선택" }, { keys: ["Enter"], label: "재생" }] as const
 
 export default function ReelPage() {
   const [bridge, setBridge] = useState<ReelBridge | null>(null)
@@ -73,6 +77,7 @@ export default function ReelPage() {
           options={[["0", "모든 하이라이트"], ...(data?.tags ?? []).map(tag => [String(tag.id), tag.name] as const)]}
           onValueChange={value => { if (bridge) { scroll.current = 0; request(reply => bridge.filter(Number(value), reply)).catch(showError) } }} />
       </label>
+      <KeyHints label="모아보기 목록 키" items={reelHints} />
       <Button variant="outline" onClick={() => { if (bridge) request(reply => bridge.refresh(reply)).catch(showError) }}>목록 갱신</Button>
     </div>
     {/* 재생 요청 실패와 모아보기 완료 안내를 목록 위 한곳에 쌓는다. 아래 줄은 늘 목록 설명을 보인다. */}
@@ -89,14 +94,14 @@ export default function ReelPage() {
         <div className="relative flex aspect-video w-32 shrink-0 items-center justify-center self-start overflow-hidden rounded-md bg-muted"><Film aria-hidden="true" className="absolute size-8 text-muted-foreground" />{entry.thumbnail && <img src={entry.thumbnail} alt="" loading="lazy" onError={event => { event.currentTarget.hidden = true }} className="relative h-full w-full object-cover" />}</div>
         <div className="min-w-0 flex-1 space-y-1">
           <p className="wrap-anywhere text-body-strong">{entry.title}</p>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-label"><span className="text-highlight tabular-nums">{timestamp(entry.start)}{entry.end === null ? " · 지점" : ` — ${timestamp(entry.end)}`}</span><span className="text-muted-foreground">마지막 복습: {entry.lastRevisitedAt ? formatDateTime(entry.lastRevisitedAt) : "아직 없음"}</span></div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-label"><span className={highlightTime({ range: entry.end !== null })}>{timestamp(entry.start)}{entry.end === null ? " · 지점" : ` — ${timestamp(entry.end)}`}</span><span className="text-muted-foreground">마지막 복습: {entry.lastRevisitedAt ? formatDateTime(entry.lastRevisitedAt) : "아직 없음"}</span></div>
           {!entry.playable && <p className="text-label text-muted-foreground">{entry.missing ? "파일 없음 — 재생 불가" : "길이 0인 지점"} · 차례 재생에서 건너뜀</p>}
           {entry.note && <p className="line-clamp-3 whitespace-pre-wrap wrap-anywhere text-body">{entry.note}</p>}
-          {!!entry.tags.length && <div aria-label="하이라이트 태그" className="flex flex-wrap items-center gap-1"><span className="text-label text-muted-foreground">태그:</span>{entry.tags.map(tag => <span key={tag.id} className="max-w-full rounded-md border border-border bg-secondary px-2 py-0.5 text-label wrap-anywhere text-secondary-foreground">{tag.name}</span>)}</div>}
+          {!!entry.tags.length && <div aria-label="하이라이트 태그" className="flex flex-wrap items-center gap-1"><span className="text-label text-muted-foreground">태그:</span>{entry.tags.map(tag => <Chip key={tag.id} title={tag.name}><span className="truncate">{tag.name}</span></Chip>)}</div>}
         </div>
       </ResultRow>)}
     </div>
-    <div className="flex flex-wrap items-center gap-3"><Button disabled={!entries.some(e => e.playable)} onClick={() => play(0)}>처음부터 차례 재생</Button><Button variant="outline" disabled={!selected?.playable} onClick={() => selected && play(selected.id)}>선택한 하이라이트부터 재생</Button><span className="text-label text-muted-foreground">↑/↓ 선택 · Enter 재생</span></div>
+    <div className="flex flex-wrap items-center gap-3"><Button disabled={!entries.some(e => e.playable)} onClick={() => play(0)}>처음부터 차례 재생</Button><Button variant="outline" disabled={!selected?.playable} onClick={() => selected && play(selected.id)}>선택한 하이라이트부터 재생</Button></div>
     <p role="status" className="text-label text-muted-foreground">{`하이라이트 ${entries.length}개 · 영상 제목 → 영상 안 시각 순 · 파일 없음·길이 0인 지점은 건너뜁니다. 새 항목은 ‘목록 갱신’으로 불러옵니다.`}</p>
   </main>
 }

@@ -6,6 +6,7 @@ import { NoticeStack } from "@/components/ui/notice"
 import { PendingStatus } from "@/components/ui/pending-status"
 import { Placeholder, Skeleton } from "@/components/ui/skeleton"
 import { EmptyState, PageHeader } from "@/components/page-parts"
+import { KeyHints } from "@/components/key-hints"
 import { RecommendationCard, RecommendationCardPlaceholder, RecommendationMenu } from "@/components/recommendation-card"
 import { openKeyboardMenu } from "@/components/library-grid"
 import { menuKeyRow, type KeyGuideGroup } from "@/lib/key-guide"
@@ -76,6 +77,11 @@ export const keyGuide: readonly KeyGuideGroup[] = [
     menuKeyRow,
   ] },
 ]
+
+const recommendHints = [
+  { keys: ["←", "→"], label: "줄 안 이동" }, { keys: ["↑", "↓"], label: "줄 사이 이동" }, { keys: ["Enter"], label: "재생" },
+  { keys: ["Backspace"], label: "관심 없음" }, { label: "우클릭 메뉴" },
+] as const
 
 export default function RecommendPage() {
   const [bridge, setBridge] = useState<RecommendBridge | null>(null)
@@ -189,8 +195,8 @@ export default function RecommendPage() {
         action: <Button size="xs" variant="outline" onClick={() => restore(dismissed.id)}>되돌리기</Button> },
     ]} />
     {/* 개수·키 안내 줄은 데이터 전에도 같은 높이로 자리를 잡고, 요청을 기다리는 동안 기다림 표시를 같은 줄에 둔다. */}
-    <div data-recommend-status className="flex h-line-label min-w-0 shrink-0 items-center gap-3 text-label text-muted-foreground">
-      {count > 0 ? <p className="min-w-0 truncate">{`추천 ${rows.length}줄 · ${count}개 · ←/→ 줄 안 이동 · ↑/↓ 줄 사이 이동 · Enter 재생 · Backspace 관심 없음 · 우클릭 메뉴`}</p>
+    <div data-recommend-status className="flex h-badge min-w-0 shrink-0 items-center gap-3 text-label text-muted-foreground">
+      {count > 0 ? <><p className="shrink-0">{`추천 ${rows.length}줄 · ${count}개`}</p><KeyHints label="추천 줄 키" items={recommendHints} /></>
         : !loaded && !error && <Skeleton shape="text" className="w-80" />}
       <PendingStatus pending={requests > 0} label="추천을 다시 계산하는 중…" className="ml-auto shrink-0" />
     </div>
