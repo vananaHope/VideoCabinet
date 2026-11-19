@@ -17,7 +17,7 @@ const skeletonVariants = cva("shrink-0 bg-muted", {
       /** 작은 단추·탭(size sm)과 같은 높이. */
       control: "h-8 rounded-md",
       /** 상태 배지와 같은 높이. */
-      badge: "h-badge rounded-md",
+      badge: "h-badge rounded-xs",
       /** 카드 안 묶음처럼 높이를 쓰는 곳에서 정한다. */
       block: "rounded-lg",
       /** 16:9 썸네일 자리. */

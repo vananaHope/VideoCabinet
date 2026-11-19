@@ -76,6 +76,7 @@ typography:
     lineHeight: "1rem"
     letterSpacing: "0em"
 rounded:
+  xs: "0.25rem"
   sm: "0.5rem"
   md: "0.625rem"
   lg: "0.75rem"
@@ -141,14 +142,16 @@ components:
     backgroundColor: "{colors.status-success}"
     textColor: "{colors.status-success-foreground}"
     typography: "{typography.label-strong}"
-    rounded: "{rounded.md}"
-    padding: "0.125rem 0.5rem"
+    rounded: "{rounded.xs}"
+    padding: "0 0.5rem"
+    height: "1.25rem"
   status-badge-highlight:
     backgroundColor: "{colors.highlight}"
     textColor: "{colors.highlight-foreground}"
     typography: "{typography.label-strong}"
-    rounded: "{rounded.md}"
-    padding: "0.125rem 0.5rem"
+    rounded: "{rounded.xs}"
+    padding: "0 0.5rem"
+    height: "1.25rem"
   number-card:
     backgroundColor: "{colors.card}"
     textColor: "{colors.card-foreground}"
@@ -158,7 +161,7 @@ components:
 
 # Design System: my-video-manager
 
-> **토큰 원본은 `src/my_video_manager/web_tokens.json`이다.** 색·간격·둥글기·글자 크기를 바꿀 때는 이 파일만 고치고 `scripts/generate_web_types.py`로 `frontend/src/tokens.css`를 다시 생성한다. `tokens.css`는 생성물이라 직접 고치면 다음 생성 때 덮어써진다. 이 문서의 frontmatter 값은 `web_tokens.json`을 옮겨 적은 것이며, 둘이 어긋나면 `web_tokens.json`이 맞다. 둥글기 단계(`sm`~`xl`)는 `frontend/src/index.css`의 `@theme inline`이 `--radius`에서 계산한다.
+> **토큰 원본은 `src/my_video_manager/web_tokens.json`이다.** 색·간격·둥글기·글자 크기를 바꿀 때는 이 파일만 고치고 `scripts/generate_web_types.py`로 `frontend/src/tokens.css`를 다시 생성한다. `tokens.css`는 생성물이라 직접 고치면 다음 생성 때 덮어써진다. 이 문서의 frontmatter 값은 `web_tokens.json`을 옮겨 적은 것이며, 둘이 어긋나면 `web_tokens.json`이 맞다. 둥글기 단계(`xs`~`xl`)는 `frontend/src/index.css`의 `@theme inline`이 `--radius`에서 계산한다.
 
 ## Overview
 
@@ -280,10 +283,11 @@ components:
 
 부드럽지만 단정한 둥글기다. 기준 `--radius`는 0.75rem이고, 크기에 따라 단계를 고른다.
 
-- 단추·입력란·탭·상태 배지·작은 썸네일: `md`(0.625rem) 또는 `sm`(0.5rem)
+- 상태 배지·키 칩(`Kbd`): `xs`(0.25rem). 높이가 1.25rem이라 `sm` 이상이면 알약으로 보이므로 따로 둔 단계다.
+- 단추·입력란·탭·작은 썸네일: `md`(0.625rem) 또는 `sm`(0.5rem)
 - 영상 카드·목록 행·안내·구역 탭 묶음: `lg`(0.75rem)
 - 대화상자·팝오버·숫자 카드·빈 상태: `xl`(1rem)
-- 알약 모양: 진행 막대, 스크롤바 손잡이, 스위치 같은 가는 막대만 `full`. 상태 배지는 알약이 아니라 `md`다.
+- 알약 모양(`full`): 진행 막대, 스크롤바 손잡이, 스위치 같은 가는 막대와 태그·조건 칩(`Chip`). 상태 배지는 알약이 아니라 `xs`다.
 - 테두리는 1px 한 겹이다. 패널·카드 안의 빈 상태(`section`)만 점선 테두리를 쓴다.
 - 재생 중 컨테이너 모드의 대화상자는 창을 채우므로 모서리가 각지다.
 
@@ -342,8 +346,10 @@ components:
 - **Focus:** 단추와 같은 전역 초점 윤곽선(`ring` 2px, 2px 간격)이다. 테두리 색은 바뀌지 않는다.
 - **Error / Disabled:** 오류는 `destructive` 테두리와 옅은 링, 비활성은 50% 불투명도.
 
-### Chips (Status Badge)
-- **Style:** `md` 둥글기, Label 글자, 상태 색 면 + 짝이 되는 진한 글자. 다 본 영상은 Mint, 보다 만 영상은 Sky, 파일 없음은 Rose, 아직 안 봄은 `muted`, 즐겨 보는은 Marker Yellow, "자막 있음"은 `input` 링만 있는 윤곽선.
+### Chips (Status Badge · Chip)
+상태는 각진 배지, 분류는 알약 칩이다. 둘은 높이(1.25rem)가 같고 모양으로 구별된다.
+- **Status Badge** (`StatusBadge`): `xs` 둥글기, Label 글자, 상태 색 면 + 짝이 되는 진한 글자. 다 본 영상은 Mint, 보다 만 영상은 Sky, 파일 없음은 Rose, 아직 안 봄은 `muted`, 즐겨 보는은 Marker Yellow, "자막 있음"은 `input` 링만 있는 윤곽선.
+- **Chip** (`components/ui/chip.tsx`): 태그와 적용한 검색 조건. 알약(`full`), `secondary` 면, Label 글자. 영상 카드·상세 패널·하이라이트 목록·모아보기의 태그와 라이브러리의 조건 칩이 모두 이 부품 하나다. 누를 수 있는 칩(태그 메뉴, 조건 지우기)은 호버에 `accent` 면이 된다. 긴 이름은 칩 안에서 말줄임하고 전체 이름은 툴팁에 둔다. 쓰는 곳은 최대 폭만 정한다.
 
 ### Notice (Signature Component)
 앱의 공용 안내다. 위계는 오류 → 경고 → 성공 → 정보 네 가지이고, 여러 개가 겹치면 이 순서로 쌓으며 같은 문구는 한 번만 보인다.
@@ -358,7 +364,9 @@ components:
 - **단추 줄:** 틀의 마지막 줄이다. 대화상자를 끝내는 동작은 오른쪽 아래 끝에 [취소·닫기 = 윤곽선][확인 = 주 단추] 순서로 두고, 위험한 확인은 위험 변형이다. 단추가 하나면(닫기·캡처 취소) 그 하나가 오른쪽 아래다. 선택한 항목에 대한 보조 동작(태그 떼기·이름 변경·검수 동작 등)과 짧은 안내는 같은 줄 왼쪽에 둔다.
 
 ### Keyboard Key (Kbd)
-- `muted` 면, `sm` 둥글기, Label 글자, `muted-foreground`. 키 안내와 툴팁에서 키를 보여 준다.
+- `muted` 면, `xs` 둥글기, Label 글자, `muted-foreground`. 키는 어디서나 이 키 칩 하나로 보인다: 키 안내, 메뉴 단축키, 설정의 키 배치 표, 목록의 키 힌트.
+- **Keys** (`ui/kbd.tsx`): 키 배치의 표시 문자열(키마다 " / "로 이은 문자열)을 키 칩으로 그린다. 문구와 순서는 Python의 `key_display`가 정한 그대로이고, " / "는 화면에서는 칩 간격으로, 글자(읽기 프로그램)로는 그대로 남는다. 키가 없으면 "키 미할당" 글자다.
+- **Key Hints** (`components/key-hints.tsx`): 목록이 받는 키를 키 칩 + 짧은 설명으로 보인다. 자리는 한 규칙이다. **그 키를 받는 목록 바로 위 줄**에 두고, 목록 아래나 단추 옆에 두지 않는다(추천 줄·자막 대기열·모아보기·검색 결과·폴더 패널·하이라이트 목록). 줄 높이는 키 칩과 같은 1.25rem이다.
 
 ### Motion
 전환 시간·곡선은 `web_tokens.json`의 `motion` 한곳에 있고(#259), `index.css`의 `@theme inline`이 Tailwind 기본 전환 값과 `animate-*` 유틸리티로 잇는다.

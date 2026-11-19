@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { connectBridge, request } from "@/bridge"
 import type { SearchBridge, SearchData } from "@/bridge-types"
 import { EmptyState, PageHeader, StatusBadge } from "@/components/page-parts"
+import { KeyHints } from "@/components/key-hints"
 import { NoticeStack } from "@/components/ui/notice"
 import { PendingStatus } from "@/components/ui/pending-status"
 import { MatchedText, ResultRow, SearchInput, focusList, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
@@ -15,6 +16,8 @@ export const keyGuide: readonly KeyGuideGroup[] = [
   { title: "검색 칸", rows: [{ keys: ["↓", "Enter"], label: "결과 목록으로 이동" }] },
   { title: "검색 결과", rows: listKeyRows },
 ]
+
+const searchHints = [{ keys: ["↓"], label: "결과 선택" }, { keys: ["Enter"], label: "또는 클릭으로 재생" }] as const
 
 export default function SearchPage() {
   const [bridge, setBridge] = useState<SearchBridge | null>(null)
@@ -136,7 +139,7 @@ export default function SearchPage() {
           else if (results.length) document.getElementById("search-results")?.focus()
         }
       }} />
-    <p className="text-label text-muted-foreground">띄어쓰기와 대소문자를 구분하지 않습니다. ↓ 결과 선택 · Enter 또는 클릭으로 재생</p>
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"><p className="text-label text-muted-foreground">띄어쓰기와 대소문자를 구분하지 않습니다.</p><KeyHints label="검색 결과 키" items={searchHints} /></div>
     {/* 재생 요청 실패와 검색 실패를 같은 자리에 쌓는다. 아래 상태 줄에는 실패 문구를 되풀이하지 않는다. */}
     <NoticeStack layout="yield" items={[
       error && { tone: "error", message: error, onDismiss: () => setError("") },

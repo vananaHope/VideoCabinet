@@ -41,6 +41,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  /* 상태 배지·키 칩처럼 높이 1.25rem인 작은 칩이 알약이 아니라 각지게 보이는 단계. */
+  --radius-xs: calc(var(--radius) - 0.5rem);
   --radius-sm: calc(var(--radius) - 0.25rem);
   --radius-md: calc(var(--radius) - 0.125rem);
   --radius-lg: var(--radius);

@@ -56,7 +56,8 @@ def test_highlights_keep_same_video_during_refresh_and_hide_other_video():
       assert(html.includes('aria-busy="false"') && !html.includes('disabled=""'));
       assert(html.includes('current-scene'));
       assert(html.includes('first-tag') && html.includes('+1'));
-      assert(html.includes('F2 편집'));
+      // 키 힌트는 키 칩(kbd) + 글자다.
+      assert(/>F2<\/kbd>/.test(html) && html.replace(/<[^>]+>/g, '').includes('F2편집'));
       assert(!html.includes('불러오는 중'));
       const buttons = html.match(/<button\b[^>]*>/g);
       assert.equal(buttons.length, 2);
