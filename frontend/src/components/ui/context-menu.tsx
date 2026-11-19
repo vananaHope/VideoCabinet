@@ -1,5 +1,6 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { Keys } from "@/components/ui/kbd"
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 import { ContextMenu as ContextMenuPrimitive } from "radix-ui"
 
@@ -214,19 +215,12 @@ function ContextMenuSeparator({
   )
 }
 
-function ContextMenuShortcut({
-  className,
-  ...props
-}: React.ComponentProps<"span">) {
+/** 메뉴 항목 오른쪽의 단축키. 키 안내와 같은 키 칩으로 보인다. children은 키 배치의 표시 문자열이다. */
+function ContextMenuShortcut({ className, children, ...props }: Omit<React.ComponentProps<"span">, "children"> & { children: string }) {
   return (
-    <span
-      data-slot="context-menu-shortcut"
-      className={cn(
-        "ml-auto text-xs tracking-widest text-muted-foreground",
-        className
-      )}
-      {...props}
-    />
+    <span data-slot="context-menu-shortcut" className={cn("ml-auto pl-4", className)} {...props}>
+      <Keys display={children} />
+    </span>
   )
 }
 

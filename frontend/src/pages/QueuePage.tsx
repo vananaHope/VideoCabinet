@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select"
 import { NoticeStack } from "@/components/ui/notice"
 import { ConfirmDialog, EmptyState, PageHeader, Tabs } from "@/components/page-parts"
+import { KeyHints } from "@/components/key-hints"
 import { QueueList, queueKeyRows } from "@/components/queue-list"
 import { QueueStore } from "@/components/queue-store"
 import { QueueRules, queueRuleKeyRows } from "@/components/queue-rules"
@@ -19,6 +20,8 @@ export const keyGuide: readonly KeyGuideGroup[] = [
   { title: "처리 상태 목록", rows: queueKeyRows },
   { title: "자동 자막 규칙 목록", rows: queueRuleKeyRows },
 ]
+
+const queueHints = [{ keys: ["↑", "↓"], label: "선택" }, { keys: ["Tab"], label: "버튼 이동" }, { keys: ["Space"], label: "실행" }] as const
 
 export default function QueuePage() {
   const [store] = useState(() => new QueueStore())
@@ -110,7 +113,7 @@ export default function QueuePage() {
     {/* 처리 상태 구역은 필터·목록 최소 높이(머리글+행 세 개)·개수·버튼이 들어갈 높이 아래로 줄지 않는다.
         모자라면 위 안내 묶음이 줄어 스크롤한다. 자동 최소 높이는 목록 전체 높이를 따르므로 값을 정해 둔다. */}
     <section hidden={tab !== "status"} className="flex min-h-64 flex-1 flex-col gap-3">
-      <div className="flex items-center justify-between gap-4"><SelectField aria-label="대기열 상태 필터" value={filter} options={[["", "모든 상태"], ...queueStates]} onValueChange={setFilter} className="max-w-48" /><p className="text-label text-muted-foreground">↑ / ↓ 선택 · Tab 버튼 이동 · Space 실행</p></div>
+      <div className="flex items-center justify-between gap-4"><SelectField aria-label="대기열 상태 필터" value={filter} options={[["", "모든 상태"], ...queueStates]} onValueChange={setFilter} className="max-w-48" /><KeyHints label="대기열 키" items={queueHints} /></div>
       <QueueList store={store} ids={ids} selected={active} onSelect={select} emptyState={<EmptyState variant="page" title={meta.order.length ? "이 상태의 항목이 없습니다" : "자막 대기열이 비어 있습니다"} description={meta.order.length ? "상태 필터를 '모든 상태'로 바꾸면 전체 대기열이 보입니다." : "라이브러리 상세 패널의 '자막 만들기'나 재생 작업 메뉴의 '화면 자막 영역 정하기'로 요청하거나, '자동 자막 규칙' 탭에서 규칙을 추가하세요."}
         action={meta.order.length ? <Button variant="outline" onClick={showAllStates}>모든 상태 보기</Button> : <Button variant="outline" onClick={openRules}>자동 자막 규칙 열기</Button>} />} />
       <p aria-label="상태별 개수" className="text-label text-muted-foreground">{meta.counts.map(item => `${item.label} ${item.count}개`).join(" · ")}</p>

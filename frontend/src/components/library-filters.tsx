@@ -1,6 +1,7 @@
 import { Popover } from "radix-ui"
 import { SlidersHorizontal, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Chip } from "@/components/ui/chip"
 import { SelectField } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { PendingStatus } from "@/components/ui/pending-status"
@@ -59,7 +60,7 @@ function chipText({ label, range }: LibraryChip) {
  */
 export function LibraryFilterChips({ chips, options, onChange, pending = false }: { chips: LibraryChip[]; options: LibraryViewOptions; onChange: Change; pending?: boolean }) {
   return <div aria-label="적용한 검색 조건" className="flex h-9 shrink-0 items-start gap-2 overflow-x-auto overflow-y-hidden px-0.5 pt-0.5">
-    {chips.map(chip => { const text = chipText(chip); return <Button key={chip.key} variant="secondary" size="xs" title={text} aria-label={`${text} 지우기`} onClick={() => onChange(chip.reset)}><span className="max-w-60 truncate">{text}</span><X /></Button> })}
+    {chips.map(chip => { const text = chipText(chip); return <Chip key={chip.key} asChild interactive><button type="button" title={text} aria-label={`${text} 지우기`} onClick={() => onChange(chip.reset)}><span className="max-w-60 truncate">{text}</span><X /></button></Chip> })}
     {chips.length > 0 && <Button variant="ghost" size="xs" onClick={() => onChange(clearLibraryFilters(options))}>모두 지우기</Button>}
     <PendingStatus pending={pending} className="ml-auto shrink-0 self-center" />
   </div>
