@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/page-parts"
 
 const highlightHints = [{ keys: ["↑", "↓"], label: "선택" }, { keys: ["Enter"], label: "재생" }, { keys: ["F2"], label: "편집" }] as const
+// 지점은 highlight, 구간은 highlight-range(대화상자·모아보기와 같은 규칙).
+const highlightMark = cva("shrink-0 text-label-strong tabular-nums", { variants: { range: { true: "text-highlight-range", false: "text-highlight" } } })
 const item = cva("flex h-8 min-w-0 items-center gap-1 rounded-md border bg-card px-1", { variants: { selected: { true: "border-ring", false: "border-border" } } })
 function timestamp(value: number) {
   const ms = Math.round(value * 1000)
@@ -45,7 +47,7 @@ export function HighlightPanel({ videoId, snapshot, revision, emptyDescription, 
     <div ref={list} id="detail-scroll" role="listbox" aria-label="영상 하이라이트" aria-busy={busy} aria-activedescendant={active == null ? undefined : `highlight-${active}`} tabIndex={0} onKeyDown={keyDown} onScroll={event => { if (highlights !== null) scrollTop.current = event.currentTarget.scrollTop }} className="min-h-0 flex-1 space-y-1 overflow-y-auto rounded-md p-1">
       {highlights === null ? <p className="text-label text-muted-foreground">하이라이트를 불러오는 중…</p> : !entries.length ? <EmptyState title="하이라이트 없음" description={emptyDescription} /> : entries.map(h => <div key={h.id} id={`highlight-${h.id}`} role="option" aria-selected={h.id === active} className={item({ selected: h.id === active })}>
         <button type="button" tabIndex={-1} disabled={busy} className="flex min-w-0 flex-1 items-center gap-1 text-left" onClick={() => { if (busy) return; setSelected(h.id); list.current?.focus({ preventScroll: true }); onAction(videoId, h.id, false) }}>
-          <span className="shrink-0 text-label-strong text-highlight tabular-nums" title={`${timestamp(h.start)}${h.end === null ? " · 지점" : ` – ${timestamp(h.end)}`}`}>{timestamp(h.start).slice(0, 8)}{h.end !== null && <span aria-label="구간">~</span>}</span>
+          <span className={highlightMark({ range: h.end !== null })} title={`${timestamp(h.start)}${h.end === null ? " · 지점" : ` – ${timestamp(h.end)}`}`}>{timestamp(h.start).slice(0, 8)}{h.end !== null && <span aria-label="구간">~</span>}</span>
           <span className="min-w-0 flex-1 truncate text-label" title={h.note}>{h.note || "메모 없음"}</span>
           <span className="flex shrink-0 items-center gap-1" title={h.tags.map(tag => tag.name).join(", ")}>
             {h.tags.slice(0, 1).map(tag => <Chip key={tag.id} className="max-w-16"><span className="truncate">{tag.name}</span></Chip>)}

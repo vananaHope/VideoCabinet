@@ -8,7 +8,7 @@ import { SelectField } from "@/components/ui/select"
 import { EmptyState, PageHeader } from "@/components/page-parts"
 import { KeyHints } from "@/components/key-hints"
 import { Chip } from "@/components/ui/chip"
-import { ResultRow, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+import { ResultRow, highlightTime, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
 import { formatDateTime } from "@/lib/dates"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
@@ -94,7 +94,7 @@ export default function ReelPage() {
         <div className="relative flex aspect-video w-32 shrink-0 items-center justify-center self-start overflow-hidden rounded-md bg-muted"><Film aria-hidden="true" className="absolute size-8 text-muted-foreground" />{entry.thumbnail && <img src={entry.thumbnail} alt="" loading="lazy" onError={event => { event.currentTarget.hidden = true }} className="relative h-full w-full object-cover" />}</div>
         <div className="min-w-0 flex-1 space-y-1">
           <p className="wrap-anywhere text-body-strong">{entry.title}</p>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-label"><span className="text-highlight tabular-nums">{timestamp(entry.start)}{entry.end === null ? " · 지점" : ` — ${timestamp(entry.end)}`}</span><span className="text-muted-foreground">마지막 복습: {entry.lastRevisitedAt ? formatDateTime(entry.lastRevisitedAt) : "아직 없음"}</span></div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-label"><span className={highlightTime({ range: entry.end !== null })}>{timestamp(entry.start)}{entry.end === null ? " · 지점" : ` — ${timestamp(entry.end)}`}</span><span className="text-muted-foreground">마지막 복습: {entry.lastRevisitedAt ? formatDateTime(entry.lastRevisitedAt) : "아직 없음"}</span></div>
           {!entry.playable && <p className="text-label text-muted-foreground">{entry.missing ? "파일 없음 — 재생 불가" : "길이 0인 지점"} · 차례 재생에서 건너뜀</p>}
           {entry.note && <p className="line-clamp-3 whitespace-pre-wrap wrap-anywhere text-body">{entry.note}</p>}
           {!!entry.tags.length && <div aria-label="하이라이트 태그" className="flex flex-wrap items-center gap-1"><span className="text-label text-muted-foreground">태그:</span>{entry.tags.map(tag => <Chip key={tag.id} title={tag.name}><span className="truncate">{tag.name}</span></Chip>)}</div>}

@@ -11,6 +11,7 @@ python ~/.agent-orchestra/bin/desktop_lock.py run --owner <이름> -- .venv/Scri
 재생 메뉴 '설정'(창 모드·전체 화면), 전체 화면 조작 줄의 '목록으로'·'전체 화면 끄기', 키 안내 마우스 닫기,
 전체 화면 모아보기의 ⇤ ⇥ ↻ 반복·⏮ ⏭ 단추 클릭을 확인한다.
 실창에서는 화면 캡처를 하지 않는다. 데이터는 worktree 밖 임시 폴더에 만들고 지운다.
+--real --trace-focus는 속도 목록 단계 앞뒤의 전경 창·Win32 초점·Qt 활성 상태를 '[probe …]' 줄로 찍는다(#359 판별용).
 """
 
 import argparse
@@ -30,11 +31,13 @@ mode = parser.add_mutually_exclusive_group(required=True)
 mode.add_argument('--offscreen', action='store_true')
 mode.add_argument('--real', action='store_true')
 parser.add_argument('--output', type=Path, default=Path('.local/playback-controls'))
+parser.add_argument('--trace-focus', action='store_true',
+                    help='--real에서 속도 목록 단계의 전경 창·초점 상태를 찍는다')
 args = parser.parse_args()
 os.environ['QT_QPA_PLATFORM'] = 'offscreen' if args.offscreen else 'windows'
 
 from PySide6.QtCore import QEventLoop, QPoint, QTimer
-from PySide6.QtGui import QCursor, QFontDatabase
+from PySide6.QtGui import QCursor, QFontDatabase, QGuiApplication
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -352,6 +355,41 @@ def real(app, directory, result):
         assert window.isActiveWindow(), f'{name}: 앱 창이 활성 창이 아님'
         result['passed'].append(name)
 
+    # 전경 창 진단은 반환형을 따로 정한 user32로 읽어, 위 입력 호출의 기본 설정을 건드리지 않는다.
+    trace_user32 = ctypes.WinDLL('user32')
+    trace_user32.GetForegroundWindow.restype = ctypes.c_void_p
+    trace_user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+    trace_user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+    trace_user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+
+    class GuiThreadInfo(ctypes.Structure):
+        _fields_ = [('cbSize', ctypes.c_ulong), ('flags', ctypes.c_ulong), ('hwndActive', ctypes.c_void_p),
+                    ('hwndFocus', ctypes.c_void_p), ('hwndCapture', ctypes.c_void_p),
+                    ('hwndMenuOwner', ctypes.c_void_p), ('hwndMoveSize', ctypes.c_void_p),
+                    ('hwndCaret', ctypes.c_void_p), ('rcCaret', ctypes.wintypes.RECT)]
+
+    def describe(hwnd):
+        """창 핸들의 (핸들, class, 제목, 자기 프로세스 여부). 창이 없으면 None."""
+        if not hwnd:
+            return None
+        kind, title, pid = ctypes.create_unicode_buffer(128), ctypes.create_unicode_buffer(128), ctypes.c_ulong()
+        trace_user32.GetClassNameW(hwnd, kind, 128)
+        trace_user32.GetWindowTextW(hwnd, title, 128)
+        trace_user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return hex(hwnd), kind.value, title.value, 'own' if pid.value == os.getpid() else f'pid {pid.value}'
+
+    def probe(label):
+        """--trace-focus일 때만 전경 창·전경 스레드의 초점/캡처·Qt 활성 상태를 한 줄로 찍는다."""
+        if not args.trace_focus:
+            return
+        info = GuiThreadInfo(cbSize=ctypes.sizeof(GuiThreadInfo))
+        trace_user32.GetGUIThreadInfo(0, ctypes.byref(info))  # 0: 전경 스레드
+        print(f'[probe {label}] main={hex(int(window.winId()))}'
+              f' fg={describe(trace_user32.GetForegroundWindow())} focus={describe(info.hwndFocus)}'
+              f' capture={describe(info.hwndCapture)} qtActive={QApplication.activeWindow()!r}'
+              f' qtFocusWindow={QGuiApplication.focusWindow()!r} qtFocusWidget={QApplication.focusWidget()!r}'
+              f' state={QGuiApplication.applicationState()}', flush=True)
+
     def choose(button, menu, text):
         """단추로 연 메뉴에서 항목을 Windows 마우스로 고른다.
 
@@ -362,6 +400,8 @@ def real(app, directory, result):
             if not menu.isVisible():
                 return
             timer.stop()
+            if menu is page.speed_menu:
+                probe('menu-open')
             item = next(action for action in menu.actions() if action.text() == text)
             ratio = menu.screen().devicePixelRatio()
             center = menu.mapToGlobal(menu.actionGeometry(item).center())
@@ -439,17 +479,31 @@ def real(app, directory, result):
     assert not page.range_button.isChecked() and page.range_button.label == '【 구간 시작'
     passed('highlight-buttons-click')
 
-    choose(page.speed_button, page.speed_menu, '1.5×')
-    wait(lambda: window.player.playback_options()[0] == 1.5, '속도 목록에서 1.5×')
-    assert page.speed_button.label == '속도 1.5×'
-    for _ in range(3):
-        press(0x26, extended=True)  # ↑: 목록 밖 2.25×까지
-    wait(lambda: window.player.playback_options()[0] == 2.25, '↑ 키로 2.25×')
-    wait(lambda: page.speed_button.label == '속도 2.25×', '목록 밖 속도 표시')
-    choose(page.speed_button, page.speed_menu, '1×')
-    wait(lambda: window.player.playback_options()[0] == 1, '속도 목록에서 1×')
-    assert window.surface.hasFocus(), '속도 목록 뒤 영상 초점'
-    passed('speed-list-choose')
+    if args.trace_focus:
+        page.speed_menu.aboutToShow.connect(lambda: probe('aboutToShow'))
+        page.speed_menu.aboutToHide.connect(lambda: probe('aboutToHide'))
+    try:
+        probe('before')
+        choose(page.speed_button, page.speed_menu, '1.5×')
+        probe('after')
+        if args.trace_focus:
+            settle(500)
+            probe('after+500')
+        wait(lambda: window.player.playback_options()[0] == 1.5, '속도 목록에서 1.5×')
+        assert page.speed_button.label == '속도 1.5×'
+        for _ in range(3):
+            press(0x26, extended=True)  # ↑: 목록 밖 2.25×까지
+        wait(lambda: window.player.playback_options()[0] == 2.25, '↑ 키로 2.25×')
+        wait(lambda: page.speed_button.label == '속도 2.25×', '목록 밖 속도 표시')
+        choose(page.speed_button, page.speed_menu, '1×')
+        wait(lambda: window.player.playback_options()[0] == 1, '속도 목록에서 1×')
+        assert window.surface.hasFocus(), '속도 목록 뒤 영상 초점'
+        passed('speed-list-choose')
+    except AssertionError:
+        # 키가 닿지 않은 까닭(#359)을 가리게, 실패한 순간의 전경 창을 남긴다. 통과하면 아무것도 찍지 않는다.
+        print(f'속도 목록 단계 실패 때 전경 창: {describe(trace_user32.GetForegroundWindow())}'
+              f' (앱 창 {hex(int(window.winId()))})', flush=True)
+        raise
 
     def settings_from_menu(name):
         choose(page.menu_button, page.menu, '설정 · Alt+S')

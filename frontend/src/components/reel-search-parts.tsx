@@ -20,8 +20,11 @@ export function SearchInput(props: ComponentProps<"input">) {
 }
 
 export function MatchedText({ parts }: { parts: SearchTextData[] }) {
-  return <>{parts.map((part, index) => part.matched ? <mark key={index} className="bg-transparent text-body-strong text-primary-text">{part.text}</mark> : part.text)}</>
+  return <>{parts.map((part, index) => part.matched ? <mark key={index} className="bg-transparent text-body-strong text-foreground underline decoration-2 underline-offset-4">{part.text}</mark> : part.text)}</>
 }
+
+// 하이라이트 시각의 색. 지점은 highlight, 구간은 highlight-range다(영상 하이라이트 대화상자·상세 패널·모아보기 공통).
+export const highlightTime = cva("tabular-nums", { variants: { range: { true: "text-highlight-range", false: "text-highlight" } } })
 
 export function timestamp(value: number) {
   const ms = Math.round(value * 1000)

@@ -17,7 +17,7 @@ export function RecommendationCard({ video, reason, variant, ...props }: Props) 
     <div className="flex w-full min-w-0 flex-col gap-1 p-2">
       <span className="truncate text-body-strong">{video.title}</span>
       <span className="truncate text-label text-muted-foreground">{duration(video.duration)} · {viewing(video)}</span>
-      <span className="line-clamp-2 min-h-lines-label-2 text-label wrap-anywhere text-primary-text">{reason}</span>
+      <span className="line-clamp-2 min-h-lines-label-2 text-label wrap-anywhere text-foreground">{reason}</span>
     </div>
   </button>
 }
