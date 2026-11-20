@@ -1,0 +1,40 @@
+app_icon|check_web_app_icon.py|
+backup|check_web_backup.py|
+dates|check_web_dates.py|
+dialogs|check_web_dialogs.py|
+display_name|check_web_display_name.py|
+external_subtitles|check_web_external_subtitles.py|
+folder_watch|check_web_folder_watch.py|
+folders_settings|check_web_folders_settings.py|
+key_gaps|check_web_key_gaps.py|
+keyguide_default|check_web_key_guide.py|--variant default
+keyguide_long|check_web_key_guide.py|--variant long
+keyguide_multi|check_web_key_guide.py|--variant multi
+loading|check_web_library_loading.py|
+loading_long|check_web_library_loading.py|--long-content
+loading_long_small|check_web_library_loading.py|--long-content --card-size small
+loading_long_large|check_web_library_loading.py|--long-content --card-size large
+loading_fail|check_web_library_loading.py|--fail-first
+loading_5000|check_web_library_loading.py|--count 5000
+library_place|check_web_library_place.py|
+library_random|check_web_library_random.py|
+library_random_tags|check_web_library_random_tags.py|
+views0|check_web_library_views.py|--count 0
+views5000|check_web_library_views.py|
+queue|check_web_queue.py|
+random_scope|check_web_random_scope.py|
+recommend|check_web_recommend.py|
+reel_search|check_web_reel_search.py|
+settings_recommend|check_web_settings_recommend.py|
+stats0|check_web_statistics.py|--count 0
+stats8|check_web_statistics.py|--count 8
+stats50000|check_web_statistics.py|--count 50000
+stats8_fail|check_web_statistics.py|--count 8 --fail-first
+stats8_pending|check_web_statistics.py|--count 8 --resolution-pending
+stats0_empty|check_web_statistics.py|--count 0 --empty-library
+tag_dialog|check_web_tag_dialog.py|
+update|check_web_update.py|
+modified_copy|@check_web_modified_date.py|
+tag_picker_copy|@check_web_tag_picker.py|
+scan_notice_copy|@check_web_scan_notice.py|
+preparation2|@check_web_preparation.py|

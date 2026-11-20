@@ -93,7 +93,6 @@ components:
   button-primary:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.primary-foreground}"
-    typography: "{typography.body}"
     rounded: "{rounded.md}"
     padding: "0.5rem 1rem"
     height: "2.25rem"
@@ -108,7 +107,6 @@ components:
     textColor: "{colors.foreground}"
     rounded: "{rounded.md}"
   input:
-    backgroundColor: "{colors.background}"
     borderColor: "{colors.input}"
     textColor: "{colors.foreground}"
     rounded: "{rounded.md}"
@@ -155,8 +153,18 @@ components:
   number-card:
     backgroundColor: "{colors.card}"
     textColor: "{colors.card-foreground}"
+    borderColor: "{colors.border}"
     rounded: "{rounded.xl}"
-    padding: "1.5rem"
+    padding: "1rem"
+  progress-track:
+    backgroundColor: "{colors.background}"
+    borderColor: "{colors.border}"
+    rounded: "{rounded.full}"
+    height: "0.5rem"
+  progress-fill:
+    backgroundColor: "{colors.primary}"
+    rounded: "{rounded.full}"
+    height: "0.5rem"
 ---
 
 # Design System: my-video-manager
@@ -183,26 +191,26 @@ components:
 어두운 상영실 같은 무채색 바탕에 인디고 빛줄기 하나, 그리고 의미 전용 상태 색이 있다.
 
 ### Primary
-- **Projector Indigo** (`primary`): 주 동작 단추, 켜진 스위치, 진행 중인 진행 막대처럼 "지금 이것"을 가리키는 곳에만 쓴다. 위에 오는 글자는 `primary-foreground`. 탭의 선택(머리글·구역·패널)은 무채색 면으로 보이고 인디고를 쓰지 않는다.
+- **Projector Indigo** (`primary`): 주 동작 단추, 켜진 스위치·체크박스, 고른 라디오, 태그 고르기의 여러 개 고르기에서 고른 태그, 진행 중인 진행 막대, 입력란의 글자 선택 영역처럼 "지금 이것"을 가리키는 곳에만 쓴다. 위에 오는 글자는 `primary-foreground`. 탭의 선택(머리글·구역·패널)은 무채색 면으로 보이고 인디고를 쓰지 않는다.
 - **Focus Beam** (`ring`): 키보드 초점 윤곽과 선택된 카드의 테두리·링. 마우스 호버와 구별되는 유일한 신호다.
-- **Soft Indigo Text** (`primary-text`): 어두운 바탕 위 인디고 글자(링크 단추, 강조 숫자 카드). 진한 `primary`를 글자에 쓰면 대비가 모자라서 따로 둔다.
+- **Soft Indigo Text** (`primary-text`): 어두운 바탕 위 인디고 글자와 선. 링크 단추, 통계 차트의 막대·선, Qt의 켜진(checked) 단추 글자. 진한 `primary`를 글자에 쓰면 대비가 모자라서 따로 둔다. 통계 숫자 카드의 큰 숫자는 `foreground`다.
 
 ### Neutral
 면은 바탕 → 카드 → 떠 있는 층 순서로 한 단계씩 밝아지고, 그 위에서 호버는 한 단계, 선택은 그보다 한 단계 더 밝다.
-- **Projection Black** (`background`): 앱 바탕과 머리글.
+- **Projection Black** (`background`): 앱 바탕과 머리글, 진행 막대 트랙.
 - **Booth Charcoal** (`card`): 카드, 목록 행, 상세 패널, 설정·통계 구역처럼 바탕 위에 쉬는 면. Qt 재생 화면의 머리글·조작 줄·하이라이트 목록.
 - **Curtain Gray** (`popover`): 떠 있는 층, 그리고 안에 `muted` 면(배지·태그 칩·썸네일 자리)이 있는 카드·행(영상·추천 카드, 대사 검색·모아보기 결과, 자막 대기열 행)의 호버 면(카드 바로 위 단계). 대화상자, 경고 대화상자, 팝오버, 메뉴, 선택 목록, 차트 툴팁, Qt 트레이 메뉴·공용 경고·재생 키 안내·툴팁. 카드와 그림자 없이도 구별된다(카드 대비 1.19:1).
 - **Aisle Graphite** (`muted`, `secondary`): 조용한 면과 호버 면. 썸네일 빈 자리, 자리 표시(`Skeleton`), 키 표시(`Kbd`), 구역 탭 묶음, 보조 단추·태그 칩, 고스트 단추·탭·목록 행·메뉴 밖 행의 호버. 떠 있는 층 위에서도 한 단계 보인다.
 - **Spot Graphite** (`accent`): 선택 면. 내비게이션·패널 탭과 설정 분류의 선택, 고른 목록 행·폴더·대기열 행, 메뉴·선택 목록의 현재 항목, 보조 단추 호버와 구역 탭 묶음 안 호버(묶음 면이 이미 `muted`라서), Qt 눌린 단추·트레이 메뉴 현재 항목·고른 하이라이트. 호버(`muted`)와 같은 면을 쓰지 않는다.
-- **Dim Rail** (`border`): 장식 구분선. 구분선, 머리글·패널·설정 구역·쉬는 카드의 테두리, 떠 있는 층 테두리, 스크롤바 손잡이. 꼭 필요한 경계가 아니므로 WCAG 1.4.11의 3:1 예외이고 어둡게 둔다.
-- **Steel Hairline** (`input`): 조작 경계. 입력란·선택 목록·윤곽선 단추·Qt 단추처럼 경계가 곧 조작 대상의 모양인 요소의 테두리와 윤곽선 배지의 링. 바탕·카드·떠 있는 층 어디서나 3:1 이상이다. 입력 요소의 면은 이 색 30%(`bg-input/30`, 호버 50%)다.
+- **Dim Rail** (`border`): 장식 구분선. 구분선, 머리글·패널·설정 구역·쉬는 카드의 테두리, 떠 있는 층 테두리, 진행 막대 트랙 테두리, 스크롤바 손잡이. 꼭 필요한 경계가 아니므로 WCAG 1.4.11의 3:1 예외이고 어둡게 둔다.
+- **Steel Hairline** (`input`): 조작 경계. 입력란·선택 목록·윤곽선 단추·체크박스·라디오·Qt 단추처럼 경계가 곧 조작 대상의 모양인 요소의 테두리, 윤곽선 배지의 링, 구역 탭 선택 링, 꺼진 스위치 면. 바탕·카드·떠 있는 층 어디서나 3:1 이상이다. 입력 요소의 면은 이 색 30%(`bg-input/30`, 호버 50%)다.
 - **Usher Gray** (`muted-foreground`): 보조 글자(설명, 길이, 시리즈 이름, 비선택 탭, 입력란 안내 글자). 선택 면(`accent`)과 입력란 면 위에서도 4.5:1 이상이다.
 - **Screen White** (`foreground`): 본문 글자.
 - **내용 카드 vs 조작 경계:** 영상·추천·대사 검색 결과 카드는 썸네일·제목으로 식별되는 내용 묶음이라 쉬는 테두리가 장식(`border`)이고 호버에도 그대로다. 호버는 면이 면 단계의 다음 칸(`card` → `popover`, 1.19:1)으로 밝아진다. `muted`가 아닌 까닭은 카드 안 `muted` 배지(아직 안 봄)·태그 칩이 호버 때 카드 면에 묻히지 않게 하려는 것이다. 출처 배지가 있는 대사 검색 결과, 태그 칩·썸네일 자리가 있는 모아보기 결과, 대기 배지·진행 막대가 있는 자막 대기열 행도 같은 이유로 호버가 `popover`다(배지 면 / 호버 면 1.14:1, 선택 면 `accent` 위 1.26:1). 안에 `muted` 면이 없는 목록 행만 호버가 `muted`다. 이 구분은 공용 `selectableItem`의 `inner: "muted"`가 맡는다. 선택·초점은 `ring`으로 바뀐다. `input` 3:1은 경계가 곧 조작 대상인 요소에만 쓴다.
 
 ### Highlight (하이라이트 전용)
 - **Marker Yellow** (`highlight`): 지점 하이라이트와 "즐겨 보는" 배지.
-- **Open Range Amber** (`highlight-open`): 시작만 찍고 끝나지 않은 구간.
+- **Open Range Amber** (`highlight-open`): 시작만 찍고 끝나지 않은 구간. Qt 재생 화면 전용(타임라인의 열린 구간과 범례, 재생 경고 글자 `playbackRole="warning"`)이고 웹 화면에는 쓰지 않는다.
 - **Range Green** (`highlight-range`): 구간 하이라이트.
 - 위 세 색 위의 글자는 `highlight-foreground`.
 
@@ -210,15 +218,17 @@ components:
 - **Mint** (`status-success`): 다 본 영상, 작업 완료.
 - **Sky** (`status-info`): 보다 만 영상, 정보 안내.
 - **Amber** (`status-warning`): 확인이 필요한 경고.
-- **Rose** (`destructive`): 오류, 파일 없음, 되돌릴 수 없는 동작. 어두운 바탕에서 읽히도록 밝은 장미색이고, 위 글자는 진한 `destructive-foreground`.
+- **Rose** (`destructive`): 오류, 파일 없음·읽기 실패, 되돌릴 수 없는 동작. 어두운 바탕에서 읽히도록 밝은 장미색이고, 위 글자는 진한 `destructive-foreground`.
 - 각 상태 색에는 짝이 되는 진한 `-foreground`가 있다. 배지는 색 면 + 진한 글자, 안내(Notice)는 10% 면 + 40~60% 테두리 + 색 아이콘으로 쓴다.
 
 ### Named Rules
-**The One Beam Rule.** 강조색은 인디고 하나다. 선택·초점·주 동작이 아닌 곳에 인디고를 칠하지 않는다. 추천 이유·검색 일치·목록의 시각 같은 정보 글자에도 쓰지 않는다. 검색 일치는 본문색 굵은 글자 + 밑줄로 보이고, 한 화면의 주 단추는 하나다.
+**The One Beam Rule.** 강조색은 인디고 하나다. 선택·초점·주 동작이 아닌 곳에 인디고를 칠하지 않는다. 추천 이유·검색 일치·목록의 시각 같은 정보 글자에도 쓰지 않는다. 예외는 통계 차트의 데이터 막대·선(`primary-text`) 하나다. 검색 일치는 본문색 굵은 글자 + 밑줄로 보이고, 한 화면의 주 단추는 하나다.
 
 **The Meaning-Only Color Rule.** 하이라이트 색과 상태 색은 그 의미에만 쓴다. 장식이나 구역 구분에 빌려 쓰지 않는다. 하이라이트 시각은 어디서나(대화상자·상세 패널·모아보기) 지점이 `highlight`, 구간이 `highlight-range`다. 하이라이트가 아닌 시각(대사 검색 결과)은 `foreground`다. 자막 대기열 진행 막대의 채움은 진행 중 `primary`, 완료 `status-success`, 실패 `destructive`, 보류 `status-warning`이다.
 
-**The Lit Ladder Rule.** 면 단계는 `background` → `card` → `popover`이고, 놓인 면 위의 호버는 `muted`, 선택은 `accent`다. 같은 역할은 같은 토큰을 쓰고, 호버와 선택은 같은 면을 쓰지 않는다. 고를 수 있는 목록 항목(설정 분류·머리글·패널 탭·폴더·대화상자 목록·태그 고르기·대기열 행·검색 결과·영상 카드)은 공용 `selectableItem` variant 하나로 이 둘을 칠한다. 안에 `muted` 면이 있는 항목은 호버만 한 칸 위 `popover`다. 바탕·카드·떠 있는 층 위에서 본문·보조 글자는 4.5:1, 조작 경계(`input`)와 초점·선택 윤곽(`ring`)은 3:1 이상이다. 색을 바꾸면 `tests/test_web_contrast.py`와 `tests/test_theme.py`가 이 기준을 다시 잰다.
+**The Token Source Rule.** 색·간격·둥글기·글자 크기는 `src/my_video_manager/web_tokens.json` 한곳에서 정하고 `scripts/generate_web_types.py`로 `tokens.css`를 다시 만든다. 이 문서의 frontmatter와 `.impeccable/design.json`은 그 값을 옮겨 적은 것이고 `tests/test_design_doc.py`가 같은지 본다.
+
+**The Lit Ladder Rule.** 면 단계는 `background` → `card` → `popover`이고, 놓인 면 위의 호버는 `muted`, 선택은 `accent`다. 같은 역할은 같은 토큰을 쓰고, 호버와 선택은 같은 면을 쓰지 않는다. 고를 수 있는 목록 항목(설정 분류·머리글·패널 탭·폴더·대화상자 목록·태그 고르기·대기열 행·검색 결과)은 공용 `selectableItem` variant 하나로 이 둘을 칠한다. 영상·추천 카드는 호버만 `selectableItem`이고 선택은 `ring` 테두리다. 안에 `muted` 면이 있는 항목은 호버만 한 칸 위 `popover`다. 바탕·카드·떠 있는 층 위에서 본문·보조 글자는 4.5:1, 조작 경계(`input`)와 초점·선택 윤곽(`ring`)은 3:1 이상이다. 색을 바꾸면 `tests/test_web_contrast.py`와 `tests/test_theme.py`가 이 기준을 다시 잰다.
 
 ## Typography
 
@@ -231,15 +241,15 @@ components:
 
 | 역할 | 크기 / 줄 높이 | 굵기 | 자간 | 쓰는 곳 |
 |---|---|---|---|---|
-| `display` 큰 숫자 | 1.875rem / 2.25rem | 600 | -0.02em | 통계 숫자 카드(`StatisticsCard`). 페이지 제목보다 한 단계 커서 화면의 주인공 숫자가 된다. `tabular-nums`와 함께 쓰고 한 줄로 둔다(1100에서 숫자 카드는 한 줄 3장). |
-| `page-title` 페이지 제목 | 1.5rem / 2rem | 600 | -0.02em | `PageHeader`의 `h1`. |
-| `section-title` 구역 제목 | 1.125rem / 1.75rem | 600 | -0.01em | 구역 제목(`SectionTitle`), 빈 상태 제목, 대화상자 제목, 통계 차트 제목, 설정 분류 제목. Qt 재생 머리글 제목·하이라이트 패널 제목. |
+| `display` 큰 숫자 | 1.875rem / 2.25rem | 600 | -0.02em | 통계 숫자 카드(`StatisticsCard`). 페이지 제목보다 한 단계 커서 화면의 주인공 숫자가 된다. `tabular-nums`와 함께 쓰고 한 줄로 둔다(1100에서 시청 활동 숫자 카드는 한 줄 3장, 현황은 4장). |
+| `page-title` 페이지 제목 | 1.5rem / 2rem | 600 | -0.02em | `PageHeader`의 `h1`. 통계는 머리글에 상태 줄이 있어 같은 역할을 직접 쓴다. |
+| `section-title` 구역 제목 | 1.125rem / 1.75rem | 600 | -0.01em | 구역 제목(`PageHeader variant="section"`, `SettingsSection` 제목, 키 배치 표 제목), 빈 상태 제목, 대화상자 제목, 통계 차트 제목, 설정 분류 제목. Qt 재생 머리글 제목·하이라이트 패널 제목. |
 | `body` 본문 | 0.875rem / 1.25rem | 400 | 0 | 앱 기본 글자(`body`). 설명·목록 글자·검색 결과 대사. Qt 재생 화면의 보조 글자. |
-| `body-strong` 본문 강조 | 0.875rem / 1.25rem | 600 | 0 | 카드·목록·검색 결과의 항목 제목, 카드 안 소제목(설정·백업의 `h3`), 입력 라벨, 표 머리글, 안내 제목, 메뉴 묶음 라벨, 앱 이름. |
-| `label` 라벨 | 0.75rem / 1rem | 400 | 0 | 길이·날짜·개수 같은 작은 메타 글자, 키 안내 설명, 컴팩트 안내, 차트 축·도움말. |
-| `label-strong` 라벨 강조 | 0.75rem / 1rem | 500 | 0 | 상태 배지(`StatusBadge`·`Badge`), 키 표시(`Kbd`), 하이라이트 시각, 카드 통계 값, 작은 묶음 제목. |
+| `body-strong` 본문 강조 | 0.875rem / 1.25rem | 600 | 0 | 카드·목록·검색 결과의 항목 제목, 카드 안 소제목(설정 카드 제목·백업의 `h3`), 표 머리글, 안내 제목, 메뉴 묶음 라벨, 앱 이름. |
+| `label` 라벨 | 0.75rem / 1rem | 400 | 0 | 길이·날짜·개수 같은 작은 메타 글자, 영상 카드 시청 통계 줄, 키 안내 설명, 컴팩트 안내, 차트 축·도움말. |
+| `label-strong` 라벨 강조 | 0.75rem / 1rem | 500 | 0 | 상태 배지(`StatusBadge`), 키 표시(`Kbd`), 상세 패널 하이라이트 시각·대사 검색 시각, 차트 툴팁 제목, 컴팩트 안내 제목, 작은 묶음 제목(키 안내·폴더 패널). |
 
-자간은 큰 글자에만 조금 줄인다. Pretendard는 큰 크기에서 글자 사이가 벌어져 보여 제목·큰 숫자만 -0.01~-0.02em으로 조이고, 본문·라벨은 글꼴 기본 자간 그대로 둔다. 단추·탭·입력란·선택 목록·메뉴 항목 같은 조작 글자는 역할이 아니라 shadcn 부품의 크기(`text-sm font-medium`, 입력란 `text-sm`)를 그대로 쓴다.
+자간은 큰 글자에만 조금 줄인다. Pretendard는 큰 크기에서 글자 사이가 벌어져 보여 제목·큰 숫자만 -0.01~-0.02em으로 조이고, 본문·라벨은 글꼴 기본 자간 그대로 둔다. 단추·탭·입력란·선택 목록·메뉴 항목 같은 조작 글자는 역할이 아니라 shadcn 부품의 크기를 그대로 쓴다(단추·탭 `text-sm font-medium`, 입력란·선택 목록·메뉴 항목 `text-sm`). 대화상자의 입력 라벨은 `body`다.
 
 **줄 높이에 묶인 높이.** 한 줄짜리 칸과 자리 표시는 역할 줄 높이를 따른다(`index.css`의 `h-line-body`·`h-line-label`·`h-line-display`, 라벨 두 줄 `lines-label-2`, 상태 배지 `h-badge` = 라벨 한 줄 + 위아래 0.125rem). 라이브러리 카드 정보 칸 높이는 `web_tokens.json` `layout.library-card-info-height`(6.5rem: 여백 0.5rem×2 + 제목 한 줄 1.25 + 배지 줄 1.25 + 통계 한 줄 1 + 분류 줄 1.25 + 줄 사이 0.25×3. 네 줄 모두 늘 내용이 있어 남는 자리가 없다)이고, 카드와 가상 격자 줄 높이 계산(`library-grid.tsx`)이 같은 토큰을 읽는다. 줄 높이를 바꾸면 이 토큰도 함께 다시 잰다(`tests/test_type_roles.py`가 작게·보통·크게에서 잘림을 확인한다).
 
@@ -262,33 +272,34 @@ components:
 - **추천 줄:** 카드 폭은 고정이다(`web_tokens.json` `layout.recommendation-card-width` 12.85rem. 기준 창 1100px에서 다섯 장이 꼭 맞는 폭). 창이 넓어지면 카드가 커지지 않고 한 줄에 보이는 장수가 늘며(1920px에서 아홉 장 가까이), 넘치는 카드는 그 줄 안에서만 가로로 이동한다. 스크롤바 자리를 늘 예약해 줄 높이가 같다. 스크롤바는 앱 공통 모양(0.5rem, 화살표 단추 없음)이고 넘칠 때만 손잡이가 보인다. 자리 표시 카드도 같은 폭이다.
 - **내용 최대 폭:** 읽는 화면(설정, 모아보기, 검색, 자막 대기열의 자동 자막 규칙)은 `layout.content-max-width`(68.75rem = 기준 창 폭)까지만 넓어지고 왼쪽에 붙는다. 기준 창에서는 그대로이고 최대화에서만 라벨과 조작이 화면 양 끝으로 갈라지지 않는다. 넓을수록 좋은 화면(라이브러리 격자, 추천, 통계, 자막 대기열 표, 폴더 목록)은 제한하지 않는다. 라이브러리 제목 검색 칸은 28rem에서 멈추고 무작위 재생은 오른쪽 끝에 남는다.
 - **대화상자:** 공용 틀(`components/ui/dialog.tsx`)의 폭은 확인·짧은 입력 512px(`compact`), 업무 대화상자 640px(`default`), 목록·키 안내 896px(`wide`)이고, 화면 가장자리에서 16px 띄우며 창보다 길면 틀 안에서 스크롤한다. 재생 중에는 컨테이너 배치로 내용 크기에 맞추고 목록 높이를 18rem으로 제한해 영상을 가리지 않는다.
-- **간격 리듬:** 기본 단위 0.25rem. 요소 사이는 0.5rem(`gap-2`)이 가장 흔하고, 묶음 사이는 0.75~1rem, 카드·행 안쪽은 1rem, 큰 카드·대화상자 안쪽은 1.5rem이다.
+- **간격 리듬:** 기본 단위 0.25rem. 요소 사이는 0.5rem(`gap-2`)이 가장 흔하고, 묶음 사이는 0.75~1rem이다. 안쪽 여백은 영상 카드 정보 칸 0.5rem, 결과 행·상세 패널 0.75rem, 설정 카드·숫자 카드 1rem, 통계 구역 카드 1.25rem, 대화상자·빈 상태 1.5rem이다.
+- **두 열 정의 목록** (`index.css` `definition-list`): 라벨 열은 가장 긴 라벨 폭이고 값 열이 나머지를 채워 줄마다 시작이 맞는다. 상세 패널 정보와 필터 팝오버 조건이 쓴다.
 
 ### Named Rules
 **The Reserved Space Rule.** 기다리는 내용(썸네일, 패널, 통계, 안내)은 도착하기 전에 자리를 확보한다. 데이터가 들어와도 배치가 튀지 않는다.
 
 ## Elevation & Depth
 
-쉬는 면은 평평하다. 깊이는 그림자가 아니라 면의 명도 단계(`background` → `card` → `popover`, 그 위 호버 `muted` → 선택 `accent`)와 얇은 테두리로 나눈다. 떠 있는 층은 그림자 없이도 카드보다 밝은 면으로 구별된다. 그림자는 바탕 위에 떠서 다른 내용을 가리는 층(대화상자, 경고 대화상자, 필터 팝오버, 메뉴)에만 쓰고, 그 뒤에는 `background` 80% 덮개를 깐다. 입력란과 윤곽선 단추의 아주 옅은 그림자(`shadow-xs`)는 shadcn 기본값을 그대로 둔 것이다.
+쉬는 면은 평평하다. 깊이는 그림자가 아니라 면의 명도 단계(`background` → `card` → `popover`, 그 위 호버 `muted` → 선택 `accent`)와 얇은 테두리로 나눈다. 떠 있는 층은 그림자 없이도 카드보다 밝은 면으로 구별된다. 그림자는 바탕 위에 떠서 다른 내용을 가리는 층(대화상자, 경고 대화상자, 필터 팝오버, 메뉴·선택 목록, 떠 있는 안내, 차트 툴팁)에만 쓴다. `background` 80% 덮개는 대화상자 뒤에만 깐다. 입력란과 윤곽선 단추의 아주 옅은 그림자(`shadow-xs`)는 shadcn 기본값을 그대로 둔 것이다.
 
 ### Shadow Vocabulary
 - **Floating layer** (`shadow-lg`): 대화상자·팝오버·키 안내·떠 있는 안내(라이브러리 띠·셸 안내 묶음).
 - **Menu** (`shadow-md`): 드롭다운·컨텍스트 메뉴·선택 목록.
-- **Hairline** (`shadow-xs`): 입력란, 윤곽선 단추.
+- **Hairline** (`shadow-xs`): 입력란, 선택 목록, 윤곽선 단추.
 - 통계 차트 툴팁만 shadcn 기본값 `shadow-xl`을 쓴다.
 
 ### Named Rules
-**The Flat-At-Rest Rule.** 카드·목록 행·패널은 호버나 선택에도 그림자를 얻지 않는다. 호버는 면 한 단계(목록 행은 `muted`, 안에 `muted` 면(배지·태그 칩·썸네일 자리)이 있는 카드·행은 면 단계의 다음 칸 `popover`)이고 쉬는 테두리는 그대로 두며, 선택은 `ring` 테두리와 링(목록 행은 `accent` 면을 더한다)으로 표시한다.
+**The Flat-At-Rest Rule.** 카드·목록 행·패널은 호버나 선택에도 그림자를 얻지 않는다. 호버는 면 한 단계(목록 행은 `muted`, 안에 `muted` 면(배지·태그 칩·썸네일 자리)이 있는 카드·행은 면 단계의 다음 칸 `popover`)이고 쉬는 테두리는 그대로 둔다. 선택은 `accent` 면이고, 목록 틀 안 행(`listRow`)은 안쪽 `ring` 1px, 결과 행은 `ring` 테두리를 더한다. 영상·추천 카드는 `card` 면 그대로 `ring` 테두리 + 1px 링이다. 폴더·대기열 행·설정 분류·탭은 면만 바뀐다.
 
 ## Shapes
 
 부드럽지만 단정한 둥글기다. 기준 `--radius`는 0.75rem이고, 크기에 따라 단계를 고른다.
 
-- 상태 배지·키 칩(`Kbd`): `xs`(0.25rem). 높이가 1.25rem이라 `sm` 이상이면 알약으로 보이므로 따로 둔 단계다.
-- 단추·입력란·탭·작은 썸네일: `md`(0.625rem) 또는 `sm`(0.5rem)
-- 영상 카드·목록 행·안내·구역 탭 묶음: `lg`(0.75rem)
-- 대화상자·팝오버·숫자 카드·빈 상태: `xl`(1rem)
-- 알약 모양(`full`): 진행 막대, 스크롤바 손잡이, 스위치 같은 가는 막대와 태그·조건 칩(`Chip`). 상태 배지는 알약이 아니라 `xs`다.
+- 상태 배지·키 칩(`Kbd`)·체크박스: `xs`(0.25rem). 높이가 1.25rem이라 `sm` 이상이면 알약으로 보이므로 따로 둔 단계다.
+- 단추·입력란·탭·목록 행(`listRow`)·메뉴·선택 목록·작은 썸네일: `md`(0.625rem). 메뉴 항목은 `sm`(0.5rem).
+- 영상 카드·목록 틀(`listFrame`)·결과 행·상세 패널·안내·구역 탭 묶음: `lg`(0.75rem). 대기열 행은 둥글기 없이 아래 구분선이다.
+- 대화상자·필터 팝오버·떠 있는 안내·설정 카드·숫자 카드·통계 구역 카드·빈 상태: `xl`(1rem)
+- 알약 모양(`full`): 진행 막대, 스크롤바 손잡이, 스위치·라디오 같은 가는 막대·원과 태그·조건 칩(`Chip`). 상태 배지는 알약이 아니라 `xs`다.
 - 테두리는 1px 한 겹이다. 패널·카드 안의 빈 상태(`section`)만 점선 테두리를 쓴다.
 - 재생 중 컨테이너 모드의 대화상자는 창을 채우므로 모서리가 각지다.
 
@@ -327,32 +338,40 @@ components:
 - **Secondary / Outline / Ghost:** 보조 동작은 `secondary` 면(호버에 `accent`로 한 단계), 윤곽선 단추는 `input` 테두리 + `input` 30% 면(호버 50%), 고스트는 호버에만 `muted` 면이 생긴다.
 - **Destructive:** 채운 `destructive` 면은 확인 대화상자의 확인 단추(실행 직전)에만 쓴다. 확인 창을 여는 단추와 보조 자리의 위험 동작(완전 종료, 복원 예약, 태그 삭제, 하이라이트 삭제, 제외)은 `destructive` 윤곽선이다. 주 단추 옆에 채운 색 단추를 하나 더 두지 않는다.
 - **Link:** `primary-text` 글자, 호버에 밑줄.
-- **Focus:** 키보드 초점은 `ring` 색 2px 윤곽선을 2px 띄워 두른다(위험 단추 포함, `box-shadow` 링 없음). `index.css`의 전역 `:focus-visible` 규칙 하나가 모든 조작 요소에 같은 모양을 주므로 부품은 초점 규칙을 따로 적지 않는다. 비활성은 50% 불투명도.
+- **Focus:** 키보드 초점은 `ring` 색 2px 윤곽선을 2px 띄워 두른다(위험 단추 포함, `box-shadow` 링 없음). 모양은 `index.css`의 전역 `:focus-visible` 규칙 하나가 정한다. 부품은 다른 초점 모양을 만들지 않는다. 비활성은 50% 불투명도.
 
 ### Navigation (Tabs)
 - **Navigation:** 머리글의 페이지 탭. 비선택은 `muted-foreground` 글자, 호버에 `muted` 면, 선택은 그보다 밝은 `accent` 면 + `accent-foreground` 글자. 강조색을 쓰지 않아 영상보다 튀지 않는다. 마지막 탭(설정)은 오른쪽 끝으로 민다. 툴팁에 단축키(`Ctrl+1`~`Ctrl+8`)가 보인다.
 - **Section:** 페이지 안 구역 전환. 묶음은 탭 내용만큼의 폭이다(페이지 폭으로 늘이지 않는다). `muted` 묶음 면 안에서 선택 탭은 묶음에서 파낸 `background` 면 + `foreground` 글자 + 조작 경계 `input` 한 겹(안쪽 1px)이고, 비선택 탭 호버는 묶음보다 한 단계 밝은 `accent` 면이다. 선택에 강조색을 쓰지 않아, 한 화면에 묶음이 여럿이어도(통계의 기간·구역·차트 기준) 인디고는 주 동작과 초점 윤곽선에만 남는다. 선택 경계는 묶음 면과 3.17:1, 선택 글자는 19.06:1, 초점 윤곽선(`ring`)은 묶음 면과 4.4:1이다.
 - **Panel:** 테두리 묶음 안에서 호버는 `muted`, 선택 탭은 `accent` 면이다.
-- **Selectable Item:** 설정 분류(`Button`의 `item`·`item-selected` variant), 머리글·패널 탭, 폴더 트리, 대화상자 목록, 태그 고르기 행, 대기열 행·규칙, 대사 검색·모아보기 결과, 통계의 많이 본 영상 행, 영상·추천 카드는 `components/ui/selectable-item.ts`의 `selectableItem`으로 호버 `muted`·선택 `accent`를 칠한다. 안에 `muted` 배지·태그 칩·썸네일 자리가 있는 항목(영상·추천 카드, 검색·모아보기 결과, 대기열 행)은 `inner: "muted"`로 호버를 `popover`로 올린다. 쓰는 곳은 배치만 더하고 색을 덮어쓰지 않는다.
+- **Selectable Item:** 설정 분류(`Button`의 `item`·`item-selected` variant), 머리글·패널 탭, 폴더 트리, 대화상자 목록, 태그 고르기 행, 대기열 행·규칙, 대사 검색·모아보기 결과, 통계의 많이 본 영상 행은 `components/ui/selectable-item.ts`의 `selectableItem`으로 호버 `muted`·선택 `accent`를 칠한다. 안에 `muted` 배지·태그 칩·썸네일 자리가 있는 항목(영상·추천 카드, 검색·모아보기 결과, 대기열 행)은 `inner: "muted"`로 호버를 `popover`로 올린다. 영상·추천 카드는 호버만 이것을 쓰고 선택은 `ring` 테두리 + 1px 링이다. 쓰는 곳은 배치만 더하고 색을 덮어쓰지 않는다.
 
 ### Cards / Containers
 - **Video Card:** `card` 면, 장식 `border` 테두리, `lg` 둥글기. 위는 16:9 썸네일(빈 자리는 `muted` 면 + 필름 아이콘)이 주인공이고, 아래는 고정 높이 정보 칸 네 줄이다: 제목 → 길이·시청 상태·자막 있음·즐겨 보는 배지 → 시청 통계 한 줄(횟수 · 시간 · 마지막 시청, 테두리·면 없는 `muted-foreground` 라벨 글자) → 분류 줄(시리즈 · 태그 칩, 둘 다 없으면 "태그 없음"). 카드 안에 테두리 상자를 또 두지 않는다. 정보 칸이 17.5rem(`--container-card-flags`)보다 좁으면 자막 있음·즐겨 보는은 둘째 줄이 넘치지 않게 제목 줄 끝의 작은 기호(자막 아이콘, 노란 별)가 되고 이름은 읽기 이름과 툴팁으로 남는다. 호버는 면이 `popover`로 한 단계 밝아지고(테두리는 장식 `border` 그대로, 안쪽 `muted` 배지·태그 칩은 계속 구별된다), 선택은 `ring` 테두리 + 1px 링이다.
 - **Detail Panel (라이브러리):** 폭 18rem, `card` 면. 제목 → 정보·하이라이트 탭 → 썸네일·정보(패널 안에서 스크롤) → 작업 단추 줄(아래 고정) 순이다. 정보는 라벨 열과 값 열이 줄마다 맞는 정의 목록(`definition-list`, 라벨 `muted-foreground`)이다. 작업 단추는 자주 쓰는 재생(주 단추)·태그 편집만 두고, 나머지(자막 만들기, 자막 검수, 시리즈 편집, 제목 변경, 파일 다시 연결, 제외)는 같은 줄 끝 "다른 작업"(…) 메뉴에 카드 오른쪽 클릭 메뉴와 같은 순서로 둔다. 제외는 메뉴 안 위험 항목이다.
 - **Filter Popover (라이브러리):** 폭 32rem, 높이는 화면에 남은 높이(가장자리 1rem)까지다. 머리 줄과 "조건 모두 지우기" 줄은 고정이고 그 사이 조건만 스크롤해 내용이 잘린 채로 보이지 않는다. 조건은 라벨 열·값 열 두 열 격자(`definition-list`)라 라벨과 선택 목록의 시작이 줄마다 맞는다. 태그 고르기만 두 열을 다 쓴다.
-- **List Item:** `card` 면, `lg` 둥글기, 안쪽 1rem. 선택은 `ring` 테두리 + `accent` 면.
-- **Number Card:** `card` 면, `xl` 둥글기, 안쪽 1.5rem. 라벨 → 큰 숫자(Display) → 설명.
+- **List Frame / List Row** (`components/ui/list.ts`): 대화상자 목록·태그 고르기·폴더 관리·자동 자막 규칙·자동 백업은 공용 `listFrame`·`listRow`를 쓴다. 틀은 장식 `border`, `lg` 둥글기, 안쪽 0.25rem이고, 바탕 위에 놓일 때만 `surface: "card"`로 `card` 면을 깐다. 행은 `md` 둥글기, 최소 높이 2.25rem이고 구분선 없이 2px 간격으로 놓인다. 선택은 `accent` 면 + 안쪽 `ring` 1px, 고르지 않는 행(`static`)은 호버 면이 없다.
+- **Settings Section / Settings Card** (`components/settings-parts.tsx`): 설정 분류는 `SettingsSection`(Section Title 제목 + `muted-foreground` 설명, 카드 사이 0.75rem)이다. 설정 하나는 `SettingsCard`(`card` 면, 장식 `border`, `xl` 둥글기, 안쪽 1rem)이고, 제목은 Body Strong, 조작은 제목 줄 오른쪽, 보조 설명은 Label이다. 제목 줄은 작은 단추 높이(1.5rem)라 배지가 생겨도 높이가 같다.
+- **Number Card:** `card` 면, 장식 `border` 테두리, `xl` 둥글기, 안쪽 1rem, 줄 사이 0.5rem. 라벨(`body`·`muted-foreground`) → 큰 숫자(Display) → 설명.
 - **Empty State:** 공용 `EmptyState` 하나로 그린다. 화면·목록 전체가 비었을 때(`page`: 라이브러리 격자, 추천, 자막 대기열, 모아보기·검색 목록)는 틀 없이 그 영역 가운데에 제목·설명·동작을 둔다. 패널·카드 안의 한 구역이 비었을 때(`section`: 상세 패널, 하이라이트 패널, 통계 카드, 자동 자막 규칙)는 점선 테두리·`xl` 둥글기 상자다. 다음 동작은 이미 있는 기능으로 가는 윤곽선 단추만 둔다(폴더 관리 열기, 조건 모두 지우기, 모든 상태 보기, 자동 자막 규칙 열기). 누르면 사라지는 단추는 초점을 목록으로 옮긴다.
 
 ### Inputs / Fields
 - **Style:** `input` 테두리, 투명에 가까운 면(`input` 30%), `md` 둥글기, 높이 2.25rem. 글자는 선택 목록·단추와 같은 0.875rem이다. 검색 탭 맨 위의 큰 검색 칸만 `Input`의 `search` variant(높이 3rem, `lg` 둥글기, 1.125rem)를 쓴다.
 - **Switch:** 켜짐·꺼짐 한 가지 설정(자동 감지, 백업의 썸네일 포함)은 `components/ui/switch.tsx`다. 높이 1.25rem·너비 2.25rem 알약, 꺼짐은 `input` 면, 켜짐은 `primary` 면, 손잡이는 `foreground`. 옆에 "켜짐"·"꺼짐" 글자를 함께 보인다. 상태를 단추 글자("…: 켜짐")로 보이지 않는다.
 - **Focus:** 단추와 같은 전역 초점 윤곽선(`ring` 2px, 2px 간격)이다. 테두리 색은 바뀌지 않는다.
-- **Error / Disabled:** 오류는 `destructive` 테두리와 옅은 링, 비활성은 50% 불투명도.
+- **Checkbox** (`ui/checkbox.tsx`): 대화상자 안에서 켜고 끄는 선택지 하나다. 1rem 정사각, `xs` 둥글기. 꺼짐은 `input` 테두리 + `input` 30% 면, 켜짐은 `primary` 면 + `primary-foreground` 체크다.
+- **Radio Group** (`ui/radio-group.tsx`): 하나만 고르는 선택지 묶음이다. 화살표로 옮기고 Tab은 고른 항목 하나에만 머문다. 항목은 1rem 원(`full`), 꺼짐은 `input` 테두리, 고른 항목은 `primary` 테두리 + 가운데 점이다.
+- **Error / Disabled:** 오류는 `destructive` 테두리, 비활성은 50% 불투명도.
 
 ### Chips (Status Badge · Chip)
 상태는 각진 배지, 분류는 알약 칩이다. 둘은 높이(1.25rem)가 같고 모양으로 구별된다.
-- **Status Badge** (`StatusBadge`): `xs` 둥글기, Label 글자, 상태 색 면 + 짝이 되는 진한 글자. 다 본 영상은 Mint, 보다 만 영상은 Sky, 파일 없음은 Rose, 아직 안 봄은 `muted`, 즐겨 보는은 Marker Yellow, "자막 있음"은 `input` 링만 있는 윤곽선.
+- **Status Badge** (`StatusBadge`): `xs` 둥글기, Label 글자, 상태 색 면 + 짝이 되는 진한 글자. 다 본 영상은 Mint, 보다 만 영상은 Sky, 파일 없음은 Rose, 아직 안 봄은 `muted`, 즐겨 보는은 Marker Yellow, "자막 있음"은 `input` 링만 있는 윤곽선. 고른 대기열 행(`accent` 면) 위의 대기 배지는 `selectedMuted`(`muted-foreground` 면 + `background` 글자)다.
 - **Chip** (`components/ui/chip.tsx`): 태그와 적용한 검색 조건. 알약(`full`), `secondary` 면, Label 글자. 영상 카드·상세 패널·하이라이트 목록·모아보기의 태그와 라이브러리의 조건 칩이 모두 이 부품 하나다. 누를 수 있는 칩(태그 메뉴, 조건 지우기)은 호버에 `accent` 면이 된다. 긴 이름은 칩 안에서 말줄임하고 전체 이름은 툴팁에 둔다. 쓰는 곳은 최대 폭만 정한다.
+
+### Progress
+- **Progress** (`ui/progress.tsx`: 업데이트 내려받기·자막 기능 준비, `components/queue-list.tsx`: 자막 대기열 행): 높이 0.5rem 알약(`full`). 트랙은 `background` 면 + `border` 테두리 1px, 채움은 진행 중 `primary`다. 채움과 트랙은 3.16:1로 UI 기준 3:1을 넘는다(이전 트랙 `muted`는 2.09:1이었다, #385).
+- 트랙은 놓인 면과 거의 같아(카드 위 1.12:1, 바탕 위 1.00:1) 막대 전체 길이는 테두리가 보인다. 대기열 선택 행(`accent` 면)도 같은 트랙이다. 대기열의 끝난 상태 채움은 상태 색이다(**The Meaning-Only Color Rule**).
+- 강조색을 밝게 바꾸지 않고 트랙을 내린 까닭: `primary`는 선택·초점·주 동작 전체에 쓰여 바꾸면 영향이 넓고, 트랙은 진행 막대에만 쓰는 중립 면이다.
 
 ### Notice (Signature Component)
 앱의 공용 안내다. 위계는 오류 → 경고 → 성공 → 정보 네 가지이고, 여러 개가 겹치면 이 순서로 쌓으며 같은 문구는 한 번만 보인다.
@@ -367,7 +386,7 @@ components:
 - **단추 줄:** 틀의 마지막 줄이다. 대화상자를 끝내는 동작은 오른쪽 아래 끝에 [취소·닫기 = 윤곽선][확인 = 주 단추] 순서로 두고, 위험한 확인은 위험 변형이다. 단추가 하나면(닫기·캡처 취소) 그 하나가 오른쪽 아래다. 선택한 항목에 대한 보조 동작(태그 떼기·이름 변경·검수 동작 등)과 짧은 안내는 같은 줄 왼쪽에 둔다.
 
 ### Keyboard Key (Kbd)
-- `muted` 면, `xs` 둥글기, Label 글자, `muted-foreground`. 키는 어디서나 이 키 칩 하나로 보인다: 키 안내, 메뉴 단축키, 설정의 키 배치 표, 목록의 키 힌트.
+- `muted` 면, `xs` 둥글기, 높이 1.25rem, Label Strong 글자, `muted-foreground`. 키는 어디서나 이 키 칩 하나로 보인다: 키 안내, 메뉴 단축키, 설정의 키 배치 표, 목록의 키 힌트.
 - **Keys** (`ui/kbd.tsx`): 키 배치의 표시 문자열(키마다 " / "로 이은 문자열)을 키 칩으로 그린다. 문구와 순서는 Python의 `key_display`가 정한 그대로이고, " / "는 화면에서는 칩 간격으로, 글자(읽기 프로그램)로는 그대로 남는다. 키가 없으면 "키 미할당" 글자다.
 - **Key Hints** (`components/key-hints.tsx`): 목록이 받는 키를 키 칩 + 짧은 설명으로 보인다. 자리는 한 규칙이다. **그 키를 받는 목록 바로 위 줄**에 두고, 목록 아래나 단추 옆에 두지 않는다(추천 줄·자막 대기열·모아보기·검색 결과·폴더 패널·하이라이트 목록). 줄 높이는 키 칩과 같은 1.25rem이다.
 
@@ -381,7 +400,7 @@ components:
 
 **The Instant Close Rule.** 열 때만 전환하고 닫힘은 즉시다. 닫히는 층이 초점 가두기·포인터 차단으로 다음 입력을 막지 않는다. 열리는 도중에도 키·클릭은 바로 새 화면이 받는다.
 
-**The Composite-Only Rule.** 투명도와 transform만 움직인다. 높이·너비·위치처럼 배치를 다시 계산하는 속성과 블러는 전환하지 않는다. `transition-all`은 쓰지 않는다.
+**The Composite-Only Rule.** 색 전환(`transition-colors`)과 투명도·transform만 움직인다. 높이·너비·위치처럼 배치를 다시 계산하는 속성과 블러는 전환하지 않는다. `transition-all`은 쓰지 않는다.
 
 **The Reduced Motion Rule.** `prefers-reduced-motion: reduce`이면 `index.css`의 전역 규칙 하나가 앱의 모든 전환·애니메이션(`animate-pulse` 포함)을 끈다. 진행 상태는 움직임 없이 막대·문구로 보인다. 첫 진입과 재생 복귀에는 탭 내용 전환이 없다(복귀 첫 프레임이 반투명하지 않게).
 
