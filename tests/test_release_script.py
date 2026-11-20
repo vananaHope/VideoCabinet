@@ -187,8 +187,8 @@ function global:gh {
         throw '가짜 Release 실패'
     }
     if ($args[0] -ne 'api') { throw '금지된 gh 명령' }
-    # Release 조회는 -ReleaseRepository 기본값인 배포 저장소로만 가고 소스 origin은 쓰지 않는다.
-    if ($args[1] -notmatch "^repos/$([regex]::Escape($env:RELEASE_TEST_RELEASE_REPOSITORY))(/|$)") { throw '배포 저장소가 아닌 저장소' }
+    # Release 조회는 -ReleaseRepository 기본값으로만 가고 git 원격 origin은 쓰지 않는다.
+    if ($args[1] -notmatch "^repos/$([regex]::Escape($env:RELEASE_TEST_RELEASE_REPOSITORY))(/|$)") { throw 'Release 저장소가 아닌 저장소' }
     if ($args[1] -notmatch '/releases/') {
         $global:LASTEXITCODE = 0
         return
@@ -227,7 +227,7 @@ def snapshot(repository):
 def test_release_repository_default_matches_app_constant():
     script = (ROOT / 'scripts/release.ps1').read_text(encoding='utf-8-sig')
     assert f"[string]$ReleaseRepository = '{RELEASE_REPOSITORY}'" in script
-    assert RELEASE_REPOSITORY == 'vananaHope/my-video-manager-releases'
+    assert RELEASE_REPOSITORY == 'vananaHope/VideoCabinet'
 
 
 @pytest.mark.parametrize("build", [False, True])
@@ -473,7 +473,7 @@ def test_publication_uploads_only_eligible_assets_with_verified_manifest(reposit
     else:
         assert patch.read_bytes() == b'stale patch'
     assert assets == expected
-    # 소스 origin에는 커밋과 태그만, Release는 소스 태그 없이 배포 저장소 main에 만든다.
+    # origin에는 커밋과 태그를 push하고, Release는 -ReleaseRepository 저장소에 만든다.
     _, remote = repository
     head = git(repo, 'rev-parse', 'HEAD')
     assert git(remote, 'rev-parse', 'main') == head

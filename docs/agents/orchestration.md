@@ -4,7 +4,7 @@
 
 ## 이슈 저장소
 
-- 종류: GitHub 이슈(vananaHope/my-video-manager)
+- 종류: GitHub 이슈(vananaHope/VideoCabinet)
 - 맡길 이슈: 라벨 `ready-for-agent`
 - 선행 관계: GitHub 이슈 의존 관계를 먼저 보고, 없으면 본문의 `## Blocked by` 절
 - 완료 기준: 본문의 "Acceptance criteria" 절

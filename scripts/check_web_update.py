@@ -105,7 +105,7 @@ class ReleaseHttp:
         self.downloads = []
 
     def get(self, url, *, max_bytes):
-        assert url.startswith('https://github.com/vananaHope/my-video-manager-releases/releases/download/v0.6.0/')
+        assert url.startswith('https://github.com/vananaHope/VideoCabinet/releases/download/v0.6.0/')
         assets = {name: {'filename': name, 'size': len(body), 'sha256': hashlib.sha256(body).hexdigest()}
                   for name, body in self.bodies.items()}
         data = json.dumps({'schema_version': 1, 'version': '0.6.0', 'runtime_fingerprint': FINGERPRINT,

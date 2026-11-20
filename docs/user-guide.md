@@ -14,7 +14,7 @@ GPLv3 원문은 FFmpeg와 독립적인 `licenses/GPL-3.0.txt`에도 있습니다
 
 설치 위치는 사용자별 `%LOCALAPPDATA%/Programs/MyVideoManager`이고 관리자 권한을 요구하지 않습니다.
 시작 메뉴 바로가기와 제거 프로그램을 등록하며 바탕화면 바로가기는 선택입니다.
-Release([배포 저장소](https://github.com/vananaHope/my-video-manager-releases/releases/latest))에서 받은 설치 파일을 실행한 뒤 시작 메뉴의 **VideoCabinet**으로 엽니다.
+Release([GitHub Releases](https://github.com/vananaHope/VideoCabinet/releases/latest))에서 받은 설치 파일을 실행한 뒤 시작 메뉴의 **VideoCabinet**으로 엽니다.
 코드 서명을 하지 않아 Windows SmartScreen 경고가 표시될 수 있습니다.
 Python·Node·7-Zip은 설치판 실행에 필요하지 않습니다. 번역 CLI와 NVIDIA 드라이버는 사용자가 설치합니다.
 동봉 FFmpeg·ffprobe는 실행 파일 옆 `ffmpeg/`, libmpv는 `mpv/`에서 찾습니다.

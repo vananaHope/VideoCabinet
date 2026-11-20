@@ -6,7 +6,7 @@
     [switch]$SkipTests,
     [string]$PrivateKey = '',
     # 기본값은 src/my_video_manager/app_version.py의 RELEASE_REPOSITORY와 같아야 한다(테스트가 검사).
-    [string]$ReleaseRepository = 'vananaHope/my-video-manager-releases'
+    [string]$ReleaseRepository = 'vananaHope/VideoCabinet'
 )
 # Windows PowerShell 5.1은 이 인코딩으로 git의 UTF-8 출력을 해독한다.
 $OriginalOutputEncoding = [Console]::OutputEncoding
@@ -68,7 +68,7 @@ try {
         throw '버전은 x.y.z 형식이어야 합니다.'
     }
     if ($Build -and -not $DryRun) { throw '-Build는 -DryRun과 함께만 사용합니다.' }
-    if ($ReleaseRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw '배포 저장소는 owner/name 형식이어야 합니다.' }
+    if ($ReleaseRepository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw 'Release 저장소는 owner/name 형식이어야 합니다.' }
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { throw 'scripts/setup.ps1로 Python 환경을 먼저 준비하세요.' }
     foreach ($Tool in @('git', 'gh')) {
         if (-not (Get-Command $Tool -ErrorAction SilentlyContinue)) {
@@ -92,8 +92,7 @@ try {
     $Tag = "v$Version"
     if (Get-Git @('tag', '--list', $Tag)) { throw "이미 있는 태그입니다: $Tag" }
     if (Get-Git @('ls-remote', '--tags', 'origin', "refs/tags/$Tag")) { throw "원격에 이미 있는 태그입니다: $Tag" }
-    # 비공개 소스 저장소(origin)에는 버전 커밋과 태그만 push한다.
-    # Release 조회·이전 매니페스트·자산 게시는 공개 배포 저장소에서만 한다.
+    # origin에는 버전 커밋과 태그를 push하고, Release 조회·이전 매니페스트·자산 게시는 Release 저장소에서 한다.
     $Repository = $ReleaseRepository
 
     # 저장소 접근 실패를 Release 없음(404)으로 오인하지 않는다.
@@ -166,7 +165,7 @@ try {
 
     if ($DryRun) {
         Write-Host "계획: pyproject.toml 버전 $CurrentVersion -> $Version, 커밋: $CommitMessage"
-        Write-Host "계획: 태그 $Tag 생성, origin에 main과 태그 push, 설치 파일·SHA-256·매니페스트·서명을 배포 저장소 $Repository Release에 게시"
+        Write-Host "계획: 태그 $Tag 생성, origin에 main과 태그 push, 설치 파일·SHA-256·매니페스트·서명을 Release 저장소 $Repository에 게시"
         Write-Host '실제 발행 시 서명 키 필요: 앱 내장 공개 키 일치 검사 필수 (DryRun은 개인 키를 읽거나 암호를 묻지 않음).'
         Write-Host "릴리스 노트 (기준: $Range):"
         Get-Git @('-c', 'i18n.logOutputEncoding=utf-8', 'log', '--reverse', '--format=%s', $Range) | Write-Host
@@ -236,7 +235,7 @@ try {
         $PushAttempted = $true
         Get-Git @('push', '--atomic', 'origin', 'HEAD:refs/heads/main', "refs/tags/$Tag") | Write-Host
         $PushConfirmed = $true
-        # 5. 배포 저장소에는 소스 태그가 없으므로 그 저장소 main에 같은 이름의 태그를 만들며 게시한다.
+        # 5. Release 저장소에 태그가 있으면 그 태그로, 없으면 그 저장소 main에 같은 이름의 태그를 만들며 게시한다.
         & gh release create $Tag @Assets --repo "github.com/$Repository" --target main --title "$Tag 릴리스" --notes-file $NotesPath
         if ($LASTEXITCODE -ne 0) { throw 'Release 생성에 실패했습니다. 원격 태그와 자산 상태를 확인하세요. 자동 덮어쓰기는 하지 않습니다.' }
         Write-Host "릴리스 완료: $Tag"
@@ -255,7 +254,7 @@ try {
             Write-Warning "로컬 커밋과 태그를 보존합니다. push 성공 시 원격 main과 $Tag 태그가 남아 있습니다."
             Write-Warning "먼저 확인: git ls-remote origin refs/heads/main refs/tags/$Tag"
             Write-Warning "Release 확인: gh release view $Tag --repo github.com/$Repository"
-            Write-Warning "origin의 main/태그가 이번 커밋($VersionCommit)을 가리키고 배포 저장소에 Release가 없으면 실행:"
+            Write-Warning "origin의 main/태그가 이번 커밋($VersionCommit)을 가리키고 Release 저장소에 Release가 없으면 실행:"
             $AssetArguments = ($Assets | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ' '
             Write-Warning "gh release create $Tag $AssetArguments --repo github.com/$Repository --target main --title '$Tag 릴리스' --notes-file '$NotesPath'"
             Write-Warning "Release가 이미 있으면 다음 목록 중 누락 자산만 골라 추가: gh release upload $Tag $AssetArguments --repo github.com/$Repository"
