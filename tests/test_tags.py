@@ -67,7 +67,7 @@ def test_attach_and_detach_are_independent_and_preserve_tag(core):
     assert core.tags() == (tag,)
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="NTFS의 이름순 폴더 순회를 전제한다")
+@pytest.mark.usefixtures('name_ordered_scandir')
 def test_tag_filter_keeps_video_and_highlight_targets_separate(core):
     first, second, third = core.videos()
     h1, h2 = core.highlights(first.id)[0], core.highlights(second.id)[0]
@@ -329,7 +329,7 @@ def test_missing_target_error_uses_correct_sentence(core, target, message):
     assert str(error.value) == message
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="NTFS의 이름순 폴더 순회를 전제한다")
+@pytest.mark.usefixtures('name_ordered_scandir')
 def test_tagged_highlights_keep_order_note_and_updated_times(core):
     first, second, _ = core.videos()
     core.playback.start(first.id, 5)

@@ -332,7 +332,7 @@ def test_pending_targets_reviews_and_context_are_scoped_to_source(setup):
     assert core.translation(video, source=OTHER).lines[0].text.startswith('번역 Separate ')
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다")
+@pytest.mark.usefixtures('portable_dpapi')
 def test_v6_fallback_route_and_per_line_providers_resume_after_migration(connected):
     core, http, cli, store, _, reopen = connected
     store.save('fake-key')

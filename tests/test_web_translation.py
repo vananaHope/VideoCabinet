@@ -19,7 +19,7 @@ from test_web_library_page import window_factory as base_window_factory
 from test_web_dialogs import within, wait_for, state, act
 
 # 모든 테스트가 Windows 사용자 암호화(DPAPI)를 쓰는 키 저장소에 기댄다.
-pytestmark = pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+pytestmark = pytest.mark.usefixtures('portable_dpapi')
 
 
 @pytest.fixture

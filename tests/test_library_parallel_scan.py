@@ -133,7 +133,7 @@ def test_on_registered_runs_on_scan_thread_in_registration_order(tmp_path):
     assert [titles[video_id] for video_id, _ in calls] == [Path(name).stem for name in names]
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="NTFS의 이름순 폴더 순회를 전제한다")
+@pytest.mark.usefixtures('name_ordered_scandir')
 @pytest.mark.parametrize("workers", [1, 4])
 def test_same_content_in_one_scan_is_captured_once_and_registered_as_one_video(tmp_path, monkeypatch, workers):
     monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
@@ -186,7 +186,7 @@ class SecondFirstMedia(ContentMedia):
             self.second_captured.set()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="NTFS의 이름순 폴더 순회를 전제한다")
+@pytest.mark.usefixtures('name_ordered_scandir')
 @pytest.mark.parametrize("workers", [1, 4])
 def test_content_replaced_after_prefetch_is_registered_with_thumbnail_of_final_content(
         tmp_path, monkeypatch, workers):
@@ -231,7 +231,7 @@ def observe_preparation(monkeypatch, target):
     return completed
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="NTFS의 이름순 폴더 순회를 전제한다")
+@pytest.mark.usefixtures('name_ordered_scandir')
 @pytest.mark.parametrize("workers", [1, 4])
 def test_content_restored_after_preparation_discards_changed_thumbnail(tmp_path, monkeypatch, workers):
     monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
@@ -311,7 +311,7 @@ def test_thumbnail_replace_denied_falls_back_to_direct_capture(tmp_path, monkeyp
     assert list(destination.parent.iterdir()) == [destination]
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="NTFS의 이름순 폴더 순회를 전제한다")
+@pytest.mark.usefixtures('name_ordered_scandir')
 @pytest.mark.parametrize("workers", [1, 4])
 def test_later_copy_capture_does_not_hide_earlier_copy_failure(tmp_path, monkeypatch, workers):
     monkeypatch.setattr(scan_prefetch, "SCAN_WORKERS", workers)
@@ -336,7 +336,7 @@ def test_later_copy_capture_does_not_hide_earlier_copy_failure(tmp_path, monkeyp
     assert files == referenced
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="NTFS의 이름순 폴더 순회를 전제한다")
+@pytest.mark.usefixtures('name_ordered_scandir')
 @pytest.mark.parametrize("workers", [1, 4])
 @pytest.mark.parametrize("change", ["delete", "error"])
 def test_unused_prefetched_thumbnail_is_removed(tmp_path, monkeypatch, workers, change):
