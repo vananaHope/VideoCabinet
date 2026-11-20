@@ -229,7 +229,7 @@ def test_playback_control_press_uses_accent_and_differs_from_hover_and_focus(win
     except AssertionError:
         from PySide6.QtGui import QCursor, QGuiApplication
         target = button.mapToGlobal(button.rect().center())
-        lines = [f"PROBE cursor {QCursor.pos()} target {target} active {QApplication.activeWindow()}"]
+        lines = [f"PROBE cursor {QCursor.pos()} target {target} active {QApplication.activeWindow()} buttons {QGuiApplication.mouseButtons()} grabber {QApplication.mouseGrabber()} at {QApplication.widgetAt(target)} visible {button.isVisible()} under {[type(w).__name__ for w in (QApplication.widgetAt(target),) if w]}"]
         for w in QGuiApplication.topLevelWindows():
             lines.append(f"PROBE win {type(w).__name__} {w.objectName()} {w.title()} {w.type()} vis={w.isVisible()} exp={w.isExposed()} {w.geometry()} contains={w.geometry().contains(target)}")
         raise AssertionError("\n".join(lines))
