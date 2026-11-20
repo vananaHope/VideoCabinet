@@ -1,5 +1,5 @@
 import { cva } from "class-variance-authority"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { connectBridge, request } from "@/bridge"
 import type { FolderAction, FoldersBridge, FoldersData, ScanNoticeGroup } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
@@ -29,6 +29,18 @@ export default function FoldersPage() {
   const [remove, setRemove] = useState<string | null>(null)
   useLayoutChange(section, data, error)
   const reportRevision = useRef(0)
+  const band = useRef<HTMLDivElement>(null)
+  // 떠 있는 안내 띠의 높이만큼 목록 맨 위에 빈자리를 둔다. 첫 행과 그 단추가 띠에 가리지 않고, 목록을 내리면 행이 띠 밑으로 지나간다.
+  // 영역 높이(목록 크기)는 그대로라 안내가 생기고 사라져도 목록 틀이 밀리지 않는다.
+  useLayoutEffect(() => {
+    const element = band.current
+    if (!element) return
+    const update = () => element.parentElement?.style.setProperty('--folders-band', `${element.offsetHeight ? element.offsetHeight + 8 : 0}px`)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  })
   const dismissSequence = useRef(0)
   useEffect(() => { reportRevision.current = data?.report.revision ?? 0 }, [data])
   useEffect(() => {
@@ -103,11 +115,12 @@ export default function FoldersPage() {
         띠는 안내가 있을 때만 그린다. 검사 중 표시는 목록 위 가장자리의 가는 막대라 자리를 차지하지 않는다. */}
     <div className="relative flex min-h-32 flex-1 flex-col">
       <section id="folders-section" tabIndex={-1} className={listFrame({ surface: "card", class: "flex-1" })} aria-label={section === 'folders' ? '감시 폴더 목록' : '되돌리기 목록'}>
+        <div aria-hidden="true" className="h-(--folders-band) shrink-0" />
         {section === 'folders' ? (data.folders.length ? <ul className="flex flex-col gap-0.5">{data.folders.map(path => <li key={path} className={listRow()}><p className="min-w-0 flex-1 break-all" title={path}>{path}</p>{data.unwatched.includes(path) && <InlineNotice tone="warning" text="감시 안 됨" className="shrink-0" />}<Button variant="outline" size="sm" disabled={data.scanning} aria-label={`${path} 해제`} onClick={() => setRemove(path)}>해제</Button></li>)}</ul> : <div className="p-2"><EmptyState title="감시 폴더가 없습니다" description="감시 폴더 추가로 영상이 있는 폴더를 고르면 자동으로 검사합니다." /></div>)
         : <><p className="px-3 py-2 text-body text-muted-foreground">{section === 'excluded' ? '되돌리면 라이브러리에 다시 보입니다. 파일과 기록은 그대로 남아 있습니다.' : '되돌린 영상은 다시 추천에 나올 수 있습니다. 라이브러리 표시는 그대로입니다.'}</p>{videos.length ? <ul className="flex flex-col gap-0.5">{videos.map(video => <li key={video.id} className={listRow()}><div className="min-w-0 flex-1"><p className="break-all text-body-strong">{video.title}</p>{(video.missing || (section !== 'excluded' && video.excluded)) && <p className="text-label text-muted-foreground">{section !== 'excluded' && video.excluded ? '제외' : '파일 없음'}</p>}</div><Button variant="outline" size="sm" disabled={section === 'excluded' && data.scanning} onClick={() => act(section === 'excluded' ? 'restoreExcluded' : 'restoreDismissed', String(video.id))}>되돌리기</Button></li>)}</ul> : <div className="p-2"><EmptyState title={section === 'excluded' ? '제외한 영상이 없습니다' : '관심 없음으로 뺀 영상이 없습니다'} description="되돌릴 영상이 있으면 여기에 표시합니다." /></div>}</>}
       </section>
       {data.scanning && <div role="progressbar" aria-label="영상 검사 중" className="absolute inset-x-3 top-0 z-20 h-1 animate-pulse rounded-full bg-primary" />}
-      <div className={noticeBand({ shown: pageNotices.length > 0 || hasScanNotices(data.report) })} data-folders-notices>
+      <div ref={band} className={noticeBand({ shown: pageNotices.length > 0 || hasScanNotices(data.report) })} data-folders-notices>
         <NoticeStack items={pageNotices} />
         <section id="folders-report" tabIndex={-1} className="outline-none" aria-label="검사 안내"><ScanReport layout="auto" report={data.report} onDismiss={(group, index) => dismissReport(data.report.revision, group, index)} /></section>
       </div>
