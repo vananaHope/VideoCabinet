@@ -110,9 +110,9 @@ def test_tray_show_queue_refreshes_hidden_changes_immediately(window_factory, co
     assert [row['videoId'] for row in changes[0]['rows']] == [video.id]
 
 
-@pytest.mark.parametrize('tab', [tab for tab, _ in TABS])
 @pytest.mark.parametrize('destination', ['restore', 'queue', 'playback', 'fullscreen'])
-def test_tray_restore_activates_only_destination(window_factory, core, monkeypatch, tab, destination):
+def test_tray_restore_activates_only_destination(window_factory, core, monkeypatch, destination):
+    # 창 하나에서 모든 탭을 차례로 숨겼다 되살린다. 탭마다 창을 새로 만들면 Windows에서 웹 셸 시작 비용이 32번 든다.
     from PySide6.QtWidgets import QSystemTrayIcon
     from test_library_return_ui import Player
 
@@ -121,7 +121,6 @@ def test_tray_restore_activates_only_destination(window_factory, core, monkeypat
     window.player_factory = Player
     host = window.web_host
     assert TABS and set(host.controllers) == {name for name, _ in TABS}
-    window.navigate_web_tab(tab)
     events = []
     for name, controller in host.controllers.items():
         for method in ('activated', 'deactivated'):
@@ -136,33 +135,36 @@ def test_tray_restore_activates_only_destination(window_factory, core, monkeypat
     host.bridge.shellChanged.connect(lambda state: transitions.append(json.loads(state)['tab']))
     controllers = dict(host.controllers)
     playing = destination in ('playback', 'fullscreen')
-    if playing:
-        window.play(core.videos()[0].id)
-        if destination == 'fullscreen':
-            window.set_playback_fullscreen(True)
+    for tab, _ in TABS:
+        window.navigate_web_tab(tab)
         events.clear()
-    window.close()
-    assert not window.isVisible()
-    assert core.playback.session is None
-    assert events == ([] if playing else [(tab, 'deactivated')])
-    events.clear()
-    transitions.clear()
-    if destination == 'queue':
-        window.tray.show_queue()
-    else:
+        if playing:
+            window.play(core.videos()[0].id)
+            if destination == 'fullscreen':
+                window.set_playback_fullscreen(True)
+            events.clear()
+        window.close()
+        assert not window.isVisible(), tab
+        assert core.playback.session is None, tab
+        assert events == ([] if playing else [(tab, 'deactivated')]), tab
+        events.clear()
+        transitions.clear()
+        if destination == 'queue':
+            window.tray.show_queue()
+        else:
+            window.tray.open()
+        # 재생 중 창을 닫으면 라이브러리로 돌아온다. 추천 탭처럼 출발한 탭을 지키는 페이지는 예외다.
+        returned = tab if host.controllers[tab].keeps_tab_after_close else 'library'
+        expected = {'restore': tab, 'queue': 'queue', 'playback': returned, 'fullscreen': returned}[destination]
+        assert window.isVisible(), tab
+        assert window.pages.currentWidget() is host, tab
+        assert host.active_tab == expected, tab
+        assert events == [(expected, 'activated')], tab
+        assert transitions == (['queue'] if destination == 'queue' else []), tab
+        assert host.controllers == controllers, tab
+        # 열린 창에서 다시 열기를 눌러도 페이지 수명을 다시 시작하지 않는다.
         window.tray.open()
-    # 재생 중 창을 닫으면 라이브러리로 돌아온다. 추천 탭처럼 출발한 탭을 지키는 페이지는 예외다.
-    returned = tab if host.controllers[tab].keeps_tab_after_close else 'library'
-    expected = {'restore': tab, 'queue': 'queue', 'playback': returned, 'fullscreen': returned}[destination]
-    assert window.isVisible()
-    assert window.pages.currentWidget() is host
-    assert host.active_tab == expected
-    assert events == [(expected, 'activated')]
-    assert transitions == (['queue'] if destination == 'queue' else [])
-    assert host.controllers == controllers
-    # 열린 창에서 다시 열기를 눌러도 페이지 수명을 다시 시작하지 않는다.
-    window.tray.open()
-    assert events == [(expected, 'activated')]
+        assert events == [(expected, 'activated')], tab
 
 
 def hide_to_tray(window, how):
@@ -277,22 +279,23 @@ def test_global_web_keys_and_native_escape_return(window_factory):
 
 
 
-@pytest.mark.parametrize('contract', CONTRACTS, ids=lambda contract: contract.name)
-def test_actual_qt_public_slots_and_signals_match_generator_contract(window_factory, contract):
-    bridge = window_factory().web_host.channel.registeredObjects()[contract.name]
-    meta = bridge.metaObject()
-    methods = {bytes(meta.method(i).name()).decode(): meta.method(i)
-               for i in range(meta.methodOffset(), meta.methodCount())}
-    assert set(methods) == set(contract.slots) | set(contract.signals)
+def test_actual_qt_public_slots_and_signals_match_generator_contract(window_factory):
+    registered = window_factory().web_host.channel.registeredObjects()
     names = {str: 'QString', int: 'int', float: 'double', bool: 'bool'}
-    for name, arguments in contract.slots.items():
-        method = methods[name]
-        assert method.methodType() == QMetaMethod.MethodType.Slot
-        assert method.typeName() == 'QString'
-        assert [bytes(t).decode() for t in method.parameterTypes()] == [names[arg.python_type] for arg in arguments]
-    for name, kind in contract.signals.items():
-        assert methods[name].methodType() == QMetaMethod.MethodType.Signal
-        assert [bytes(t).decode() for t in methods[name].parameterTypes()] == [names[kind]]
+    for contract in CONTRACTS:
+        meta = registered[contract.name].metaObject()
+        methods = {bytes(meta.method(i).name()).decode(): meta.method(i)
+                   for i in range(meta.methodOffset(), meta.methodCount())}
+        assert set(methods) == set(contract.slots) | set(contract.signals), contract.name
+        for name, arguments in contract.slots.items():
+            method = methods[name]
+            assert method.methodType() == QMetaMethod.MethodType.Slot, (contract.name, name)
+            assert method.typeName() == 'QString', (contract.name, name)
+            assert [bytes(t).decode() for t in method.parameterTypes()] == [names[arg.python_type] for arg in arguments], \
+                (contract.name, name)
+        for name, kind in contract.signals.items():
+            assert methods[name].methodType() == QMetaMethod.MethodType.Signal, (contract.name, name)
+            assert [bytes(t).decode() for t in methods[name].parameterTypes()] == [names[kind]], (contract.name, name)
 
 
 def test_navigation_rejects_unknown_names_without_transition(window_factory):

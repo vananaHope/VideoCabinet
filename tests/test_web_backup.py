@@ -413,34 +413,39 @@ def test_restart_uses_existing_safe_shutdown_and_aborted_shutdown_does_not_resta
     app.setProperty('backupRestartRequested', False)
 
 
+OS_ERROR_PHRASES = [(errno.EACCES, '권한'), (errno.ENOSPC, '공간'), (errno.EBUSY, '사용 중'), (errno.ENOENT, '찾을 수 없습니다'),
+                    (5, '사용 중'), (32, '사용 중'), (33, '사용 중'), (112, '공간')]
+
+
 @pytest.mark.parametrize('operation', ['create', 'schedule', 'cancel', 'refresh', 'choose'])
-@pytest.mark.parametrize('code, phrase', [(errno.EACCES, '권한'), (errno.ENOSPC, '공간'),
-                                         (errno.EBUSY, '사용 중'), (errno.ENOENT, '찾을 수 없습니다'),
-                                         (5, '사용 중'), (32, '사용 중'), (33, '사용 중'), (112, '공간')])
-def test_os_errors_have_actionable_messages_without_internal_paths(window_factory, core, tmp_path, monkeypatch, operation, code, phrase):
+def test_os_errors_have_actionable_messages_without_internal_paths(window_factory, core, tmp_path, monkeypatch, operation):
+    # 창 하나에서 오류 코드를 차례로 확인한다. 실패한 작업은 busy를 남기지 않으므로 다음 코드에 영향이 없다.
     archive = core.create_backup(tmp_path / 'source.zip').path
     bridge = bridge_for(window_factory())
     monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *args: (str(archive), ''))
     monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *args: (str(archive), ''))
     if operation == 'schedule':
         action(bridge, 'choose')
-    def fail(*args, **kwargs):
-        error = OSError(code, 'raw OS failure', str(tmp_path / '.backup-private' / 'backup.zip'))
-        if code in (5, 32, 33, 112):
-            error.winerror = code
-        raise error
-    if operation == 'choose':
-        from my_video_manager.web_backup import BackupControls
-        monkeypatch.setattr(BackupControls, 'stamp', fail)
-    else:
-        method = {'create': 'create_backup', 'schedule': 'request_backup_restore',
-                  'cancel': 'cancel_backup_restore', 'refresh': 'backup_inventory'}[operation]
-        monkeypatch.setattr(core, method, fail)
-    result = action(bridge, operation)
-    assert phrase in result['failure']
-    assert not result['busy']
-    assert f'오류 코드 {code}' in result['failure']
-    assert all(raw not in result['failure'] for raw in ('[Errno', '[WinError', '.backup-', 'raw OS'))
+    for code, phrase in OS_ERROR_PHRASES:
+        def fail(*args, code=code, **kwargs):
+            error = OSError(code, 'raw OS failure', str(tmp_path / '.backup-private' / 'backup.zip'))
+            if code in (5, 32, 33, 112):
+                error.winerror = code
+            raise error
+        with monkeypatch.context() as patch:
+            if operation == 'choose':
+                from my_video_manager.web_backup import BackupControls
+                patch.setattr(BackupControls, 'stamp', fail)
+            else:
+                method = {'create': 'create_backup', 'schedule': 'request_backup_restore',
+                          'cancel': 'cancel_backup_restore', 'refresh': 'backup_inventory'}[operation]
+                patch.setattr(core, method, fail)
+            result = action(bridge, operation)
+        failure = result['failure']
+        assert phrase in failure, (code, failure)
+        assert not result['busy'], code
+        assert f'오류 코드 {code}' in failure, (code, failure)
+        assert all(raw not in failure for raw in ('[Errno', '[WinError', '.backup-', 'raw OS')), (code, failure)
 
 
 def test_recovery_startup_error_is_not_a_backup_error(core, tmp_path, qapp):
