@@ -6,14 +6,29 @@ on:
 jobs:
   backup:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ['HEAD', '531a031^']
+        defender: ['off', 'on']
     env:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
     steps:
-      - shell: pwsh
+      - if: matrix.defender == 'off'
+        shell: pwsh
         run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 대상 코드
+        shell: pwsh
+        run: |
+          Copy-Item .github/diag/patch.py $env:RUNNER_TEMP/patch.py
+          if ('${{ matrix.ref }}' -ne 'HEAD') { git checkout '${{ matrix.ref }}' -- src scripts frontend pyproject.toml }
+          python $env:RUNNER_TEMP/patch.py
+          git log -1 --format=%h '${{ matrix.ref }}'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -40,12 +55,12 @@ jobs:
       - name: 백업 검사
         shell: pwsh
         run: |
-          foreach ($i in 1..3) {
+          foreach ($i in 1..5) {
             .venv/Scripts/python.exe scripts/check_web_backup.py --offscreen --output .local/screens-$i
             "EXIT $i = $LASTEXITCODE"
           }
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backup-screens
+          name: backup-screens-${{ matrix.defender }}-${{ strategy.job-index }}
           path: .local/
