@@ -95,11 +95,17 @@ jobs:
           .venv/Scripts/python.exe scripts/install_libmpv.py
           choco install ffmpeg -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "ffmpeg 설치 실패 ($LASTEXITCODE)" }
+          # choco의 ffmpeg.exe는 진짜 ffmpeg를 자식으로 띄우는 shim이다. shim만 kill하면 자식이
+          # 파이프를 쥔 채 남아 test_closing_generator_reaps_process가 멈추므로 진짜 실행 파일을 앞에 둔다.
+          $real = Get-ChildItem C:\ProgramData\chocolatey\lib\ffmpeg\tools -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $real) { throw "choco ffmpeg 실행 파일을 찾지 못함" }
+          "MVM_FFMPEG_DIR=$($real.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: pytest
         shell: pwsh
         run: |
-          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          $env:Path = $env:MVM_FFMPEG_DIR + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          (Get-Command ffmpeg).Source
           .venv/Scripts/python.exe -m pytest -n 2 -q -rfEs --timeout=300 --timeout-method=thread --durations=25 --junitxml=pytest-results.xml
           exit $LASTEXITCODE
 
