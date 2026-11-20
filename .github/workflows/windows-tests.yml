@@ -5,10 +5,21 @@
 # 실창 검사(MVM_REAL_WINDOW_TESTS)와 CUDA는 러너에서 확인할 수 없어 지금처럼 로컬에 남긴다.
 name: Windows tests
 
+# 문서만 바뀐 PR·push는 건너뛴다. 새 커밋이 오면 concurrency가 같은 PR의 이전 실행을 취소한다.
 on:
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE*'
+      - '.github/ISSUE_TEMPLATE/**'
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE*'
+      - '.github/ISSUE_TEMPLATE/**'
   workflow_dispatch:
 
 concurrency:
@@ -68,6 +79,8 @@ jobs:
         run: |
           uv venv --python (python -c "import sys; print(sys.executable)") .venv
           uv pip install --python .venv/Scripts/python.exe -e '.[dev]'
+          # 멈춘 테스트를 이름과 스택으로 남기려고 CI에서만 쓴다.
+          uv pip install --python .venv/Scripts/python.exe pytest-timeout==2.4.0
           .venv/Scripts/python.exe scripts/generate_web_types.py --check
 
       - name: 웹 셸 빌드
@@ -82,12 +95,18 @@ jobs:
           .venv/Scripts/python.exe scripts/install_libmpv.py
           choco install ffmpeg -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "ffmpeg 설치 실패 ($LASTEXITCODE)" }
+          # choco의 ffmpeg.exe는 진짜 ffmpeg를 자식으로 띄우는 shim이다. shim만 kill하면 자식이
+          # 파이프를 쥔 채 남아 test_closing_generator_reaps_process가 멈추므로 진짜 실행 파일을 앞에 둔다.
+          $real = Get-ChildItem C:\ProgramData\chocolatey\lib\ffmpeg\tools -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $real) { throw "choco ffmpeg 실행 파일을 찾지 못함" }
+          "MVM_FFMPEG_DIR=$($real.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: pytest
         shell: pwsh
         run: |
-          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
-          .venv/Scripts/python.exe -m pytest -n 2 -q -rfEs --durations=25 --junitxml=pytest-results.xml
+          $env:Path = $env:MVM_FFMPEG_DIR + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          (Get-Command ffmpeg).Source
+          .venv/Scripts/python.exe -m pytest -n 2 -q -rfEs --timeout=300 --timeout-method=thread --durations=25 --junitxml=pytest-results.xml
           exit $LASTEXITCODE
 
       - name: 결과 업로드
