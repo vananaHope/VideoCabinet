@@ -79,6 +79,8 @@ jobs:
         run: |
           uv venv --python (python -c "import sys; print(sys.executable)") .venv
           uv pip install --python .venv/Scripts/python.exe -e '.[dev]'
+          # 멈춘 테스트를 이름과 스택으로 남기려고 CI에서만 쓴다.
+          uv pip install --python .venv/Scripts/python.exe pytest-timeout==2.4.0
           .venv/Scripts/python.exe scripts/generate_web_types.py --check
 
       - name: 웹 셸 빌드
@@ -98,7 +100,7 @@ jobs:
         shell: pwsh
         run: |
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
-          .venv/Scripts/python.exe -m pytest -n 2 -q -rfEs --durations=25 --junitxml=pytest-results.xml
+          .venv/Scripts/python.exe -m pytest -n 2 -q -rfEs --timeout=300 --timeout-method=thread --durations=25 --junitxml=pytest-results.xml
           exit $LASTEXITCODE
 
       - name: 결과 업로드
