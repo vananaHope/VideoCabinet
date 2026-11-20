@@ -377,16 +377,27 @@ def test_search_result_badge_stays_distinct_on_rest_hover_and_selected_row(windo
 
 def test_status_badges_notices_and_highlight_text_meet_text_contrast(window):
     grid = "document.getElementById('library-grid')"
+    # 좁은 카드는 즐겨 보는을 기호로 보이므로(#381) 글자 배지가 보이는 크게로 바꿔 잰다.
+    window.library_page.bridge.view(json.dumps({**window.core.library_view_options(), 'card_size': 'large'}))
+    window.library_page.selection_changed()
+    wait_for(lambda: js(window, "document.querySelector('[aria-label=\"카드 크기\"]').dataset.value") == 'large')
+    settle(window)
     for label in ('아직 안 봄', '다 봄', '즐겨 보는'):
         badge = probe(window, text_in(grid, label))
         assert ratio(badge['text'], badge['surface']) >= TEXT, label
     partial = probe(window, f"[...{grid}.querySelectorAll('span')].find(e => e.textContent.startsWith('보다 만'))")
     assert ratio(partial['text'], partial['surface']) >= TEXT
 
-    # 위험 동작 글자(카드 위)와 하이라이트 시각 글자.
+    # 위험 동작 글자(상세 패널의 "다른 작업" 메뉴 안, #381)와 하이라이트 시각 글자.
     aside = "document.querySelector('aside')"
-    danger = probe(window, button_in(aside, '제외'))
+    QTest.mouseClick(view(window), Qt.MouseButton.LeftButton, pos=point(window, f"{aside}.querySelector('button[aria-label=\"다른 작업\"]')"))
+    menu_item = "[...document.querySelectorAll('[role=menuitem]')].find(e => e.textContent.trim() === '제외')"
+    wait_for(lambda: js(window, f"!!{menu_item}"))
+    settle(window)
+    danger = probe(window, menu_item)
     assert ratio(danger['text'], danger['surface']) >= TEXT
+    QTest.keyClick(view(window), Qt.Key.Key_Escape)
+    wait_for(lambda: not js(window, "!!document.querySelector('[role=menu]')"))
     js(window, f"{aside}.querySelector('[data-tab=highlights]').click()")
     wait_for(lambda: js(window, "document.querySelectorAll('#detail-scroll [role=option]').length") == 1)
     settle(window)
