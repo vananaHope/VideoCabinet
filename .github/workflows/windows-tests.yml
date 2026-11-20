@@ -1,0 +1,99 @@
+# Windows 전용 테스트를 포함한 전체 pytest를 GitHub 호스팅 Windows 러너에서 돌린다.
+# 공개 저장소는 표준 러너 사용 분이 무료다. 전체를 한 러너에서 돌리면 3시간 가까이 걸려
+# 10개 조각(MVM_TEST_SHARD, tests/conftest.py)으로 나눠 동시에 돌린다. 러너(4 vCPU)에서 작업자를 4개 띄우면
+# Qt 대기 시간 초과가 나서 조각마다 작업자는 2개로 둔다.
+# 실창 검사(MVM_REAL_WINDOW_TESTS)와 CUDA는 러너에서 확인할 수 없어 지금처럼 로컬에 남긴다.
+name: Windows tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.shard }}/10)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    env:
+      # 러너의 기본 코드 페이지(cp1252)는 한국어 출력을 쓰지 못한다.
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      MVM_TEST_SHARD: ${{ matrix.shard }}/10
+    steps:
+      - name: Defender 실시간 검사 끄기
+        # 임시 폴더·SQLite·Qt 캐시 쓰기마다 검사가 붙어 테스트가 크게 느려진다. 러너는 매번 새로 만들어진다.
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: libmpv 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\my-video-manager\cache\libmpv
+          key: libmpv-${{ hashFiles('scripts/install_libmpv.py') }}
+
+      - name: Python 환경
+        shell: pwsh
+        run: |
+          uv venv --python (python -c "import sys; print(sys.executable)") .venv
+          uv pip install --python .venv/Scripts/python.exe -e '.[dev]'
+          .venv/Scripts/python.exe scripts/generate_web_types.py --check
+
+      - name: 웹 셸 빌드
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: libmpv와 FFmpeg
+        shell: pwsh
+        run: |
+          .venv/Scripts/python.exe scripts/install_libmpv.py
+          choco install ffmpeg -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg 설치 실패 ($LASTEXITCODE)" }
+
+      - name: pytest
+        shell: pwsh
+        run: |
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          .venv/Scripts/python.exe -m pytest -n 2 -q -rfEs --durations=25 --junitxml=pytest-results.xml
+          exit $LASTEXITCODE
+
+      - name: 결과 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{ matrix.shard }}
+          path: pytest-results.xml
+          retention-days: 7
