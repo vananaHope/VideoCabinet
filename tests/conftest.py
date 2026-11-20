@@ -180,3 +180,19 @@ def pytest_collection_modifyitems(config, items):
     deselected = [item for item in items if id(item) not in keep]
     items[:] = [item for item in items if id(item) in keep]
     config.hook.pytest_deselected(items=deselected)
+
+
+@pytest.hookimpl(hookwrapper=True, trylast=True)
+def pytest_runtest_teardown(item, nextitem):  # 임시 진단 (#408)
+    yield
+    if 'PySide6.QtGui' not in sys.modules:
+        return
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtWidgets import QApplication
+    if QGuiApplication.instance() is None:
+        return
+    shown = [f"{type(w).__name__}:{w.objectName()}:{w.geometry()}" for w in QGuiApplication.topLevelWindows() if w.isExposed() or w.isVisible()]
+    widgets = [f"{type(w).__name__}:{w.objectName()}" for w in QApplication.topLevelWidgets() if w.isVisible()]
+    if shown or widgets:
+        with open(f"leak-{os.getpid()}.txt", "a", encoding="utf-8") as f:
+            f.write(f"LEAK {item.nodeid} windows={shown} widgets={widgets}\n")
