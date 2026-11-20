@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react"
-import { cva } from "class-variance-authority"
 import { request } from "@/bridge"
 import type { QueueBridge, QueueRuleData, QueueRulesData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SelectField } from "@/components/ui/select"
-import { selectableItem } from "@/components/ui/selectable-item"
+import { listFrame, listRow } from "@/components/ui/list"
 import { ConfirmDialog, EmptyState } from "@/components/page-parts"
 import type { KeyGuideRow } from "@/lib/key-guide"
 
-const ruleClass = cva("w-full border-b px-4 py-3 text-left text-body", { variants: { selected: { true: selectableItem({ selected: true }), false: ["bg-card", selectableItem({ selected: false })] } } })
 
 // 아래 keyDown과 같은 키. 키 안내 '지금 화면'에 보인다.
 export const queueRuleKeyRows: readonly KeyGuideRow[] = [
@@ -86,8 +84,8 @@ export function QueueRules({ bridge, data, showError }: { bridge: QueueBridge | 
   }
   return <div className="flex min-h-0 max-w-content flex-1 flex-col gap-3">
     <p className="text-body text-muted-foreground">감시 폴더나 태그에 새로 등록되는 영상의 자막을 자동으로 만듭니다.</p>
-    <div id="queue-rules" role="listbox" aria-label="저장된 자동 자막 규칙" aria-activedescendant={activeRule ? `queue-rule-${activeRule.id}` : undefined} tabIndex={0} onKeyDown={keyDown} className="min-h-0 flex-1 overflow-auto rounded-lg border focus-visible:outline-2 focus-visible:outline-ring">
-      {data.rules.map(rule => <div key={rule.id} id={`queue-rule-${rule.id}`} role="option" aria-selected={rule.id === selected} className={ruleClass({ selected: rule.id === selected })} onClick={() => selectRule(rule)}><p className="break-all">{rule.label} · {rule.language}</p></div>)}
+    <div id="queue-rules" role="listbox" aria-label="저장된 자동 자막 규칙" aria-activedescendant={activeRule ? `queue-rule-${activeRule.id}` : undefined} tabIndex={0} onKeyDown={keyDown} className={listFrame({ surface: "card", focusable: true, class: "flex-1" })}>
+      {data.rules.map(rule => <div key={rule.id} id={`queue-rule-${rule.id}`} role="option" aria-selected={rule.id === selected} className={listRow({ selected: rule.id === selected })} onClick={() => selectRule(rule)}><p className="min-w-0 break-all">{rule.label} · {rule.language}</p></div>)}
       {!data.rules.length && <EmptyState title="자동 자막 규칙이 없습니다" description="아래에서 감시 폴더나 태그를 고르고 '규칙 저장'을 누르세요." />}
     </div>
     <label htmlFor="queue-target" className="text-body">감시 폴더 또는 영상 태그</label>

@@ -134,7 +134,7 @@ def test_real_translation_layout_and_keyboard(window_factory, connected, provide
         assert js(window, 'document.querySelector("[data-dialog-frame]").scrollWidth <= document.querySelector("[data-dialog-frame]").clientWidth')
         assert js(window, '!!document.querySelector("[aria-label=\'추론 강도\']")') == (provider != 'opencode_go')
         # 이어받기는 구독 CLI 방식에만, 모델 목록 조회는 OpenCode Go에만 있다(#135).
-        assert js(window, '!!document.querySelector("[data-translation-form] input[type=checkbox]")') == (provider != 'opencode_go')
+        assert js(window, '!!document.querySelector("[data-translation-form] [role=checkbox]")') == (provider != 'opencode_go')
         assert ('모델 목록 조회' in js(window, 'document.querySelector("[aria-label=\'OpenCode Go 키\']").textContent')) == (provider == 'opencode_go')
         text = js(window, 'document.querySelector("[role=dialog]").textContent')
         if provider == 'opencode_go':
@@ -225,8 +225,8 @@ def test_real_editor_preserves_each_provider_and_discards_key_on_cancel(window_f
         assert js(window, 'document.querySelector("[aria-label=\'추론 강도\']").dataset.value') == 'max'
         input_text(window, 'OpenCode Go 키 입력', 'replacement-key-5678')
         click(window, '키 지우기')
-        assert js(window, 'document.querySelector("input[type=checkbox]").disabled')
-        assert not js(window, 'document.querySelector("input[type=checkbox]").checked')
+        assert js(window, 'document.querySelector("[data-translation-form] [role=checkbox]").disabled')
+        assert js(window, 'document.querySelector("[data-translation-form] [role=checkbox]").getAttribute("aria-checked")') == 'false'
         click(window, '취소')
     within(window.translations.settings, dialogs, cancel)
     assert store.read().reveal() == 'existing-key-1234'
@@ -293,9 +293,11 @@ def test_explicit_key_check_models_and_settings_status(window_factory, connected
     wait_for(lambda: js(window, '!!document.querySelector("[data-category=translation]")'))
     js(window, 'document.querySelector("[data-category=translation]").click()')
     wait_for(lambda: js(window, '!!document.querySelector("[aria-label=\'번역 설정\']")'))
-    text = js(window, 'document.querySelector("[aria-label=\'번역 설정\']").textContent')
+    # 지금 설정은 정의 목록(항목: 값)으로 보인다.
+    text = js(window, """[...document.querySelectorAll("[aria-label='번역 설정'] dl > div")]
+      .map(row => `${row.children[0].textContent}: ${row.children[1].textContent}`).join('\\n')""")
     assert 'OpenCode Go (API)' in text and 'deepseek-v4.1-flash' in text
-    assert '등록됨 (****1234)' in text and '이어서: 켬' in text
+    assert 'OpenCode Go 키: 등록됨 (****1234)' in text and '이어서: 켬' in text
     capture(window, 'settings-translation')
 
 

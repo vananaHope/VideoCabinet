@@ -176,8 +176,8 @@ def scope_dialog(window, scenario):
 
 def click_radio(window, title):
     js(window, f"""(() => {{ const label = Array.from(document.querySelectorAll('[role=radiogroup] label'))
-      .find(e => e.querySelector('.font-medium')?.textContent === {json.dumps(title)});
-      label.querySelector('input').click(); }})()""")
+      .find(e => e.querySelector('.text-body-strong')?.textContent === {json.dumps(title)});
+      label.querySelector('[role=radio]').click(); }})()""")
     settle()
 
 
