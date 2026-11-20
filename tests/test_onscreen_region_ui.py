@@ -66,8 +66,10 @@ def open_window(tmp_path, monkeypatch, spoken=None):
     window.web_host.frontend_loaded.connect(lambda: window.loaded.append(True))
     window.balloons = []
     monkeypatch.setattr(window.tray.icon, "showMessage", lambda *args: window.balloons.append(args))
-    # 화면 자막 작업자는 각 테스트에서 직접 확인한다.
+    # 화면 자막 작업자는 각 테스트에서 직접 확인한다. 번역 작업자는 읽은 영역의 번역 대기열을 처리해
+    # saved()의 대기열을 테스트 도중 바꾸므로 멈춘다(어댑터가 없어 바로 failed가 된다).
     window.onscreen_subtitles.timer.stop()
+    window.translations.timer.stop()
     window.show()
     window.activateWindow()
     QApplication.processEvents()
