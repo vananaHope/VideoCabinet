@@ -1,17 +1,21 @@
+import { cva } from "class-variance-authority"
 import { useEffect, useRef, useState } from "react"
 import { connectBridge, request } from "@/bridge"
 import type { FolderAction, FoldersBridge, FoldersData, ScanNoticeGroup } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
-import { InlineNotice, Notice, NoticeStack } from "@/components/ui/notice"
+import { InlineNotice, Notice, NoticeStack, noticeStackVariants, type NoticeItem } from "@/components/ui/notice"
 import { ConfirmDialog, EmptyState, PageHeader, StatusBadge, Tabs } from "@/components/page-parts"
 import { MinimumDuration } from "@/components/minimum-duration"
-import { ScanReport } from "@/components/scan-report"
+import { hasScanNotices, ScanReport } from "@/components/scan-report"
 import { listFrame, listRow } from "@/components/ui/list"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
 import { focusPage } from "@/lib/page-focus"
 import { firstData } from "@/lib/entry"
+
+// 안내가 없으면 띠를 그리지 않는다. 검사 안내 구역은 그대로 남아 마지막 안내를 닫은 뒤 초점을 받는다.
+const noticeBand = cva("", { variants: { shown: { true: noticeStackVariants({ layout: "band" }), false: "contents" } } })
 
 // 이 화면에서만 쓰는 키. pages/index.ts의 pageKeyGuides에 등록해 키 안내 '지금 화면'에 보인다.
 export const keyGuide: readonly KeyGuideGroup[] = []
@@ -80,14 +84,14 @@ export default function FoldersPage() {
   }
   if (!data || !bridge) return error ? <Notice tone="error" className="m-4">{error}</Notice> : <p role="status" className="p-6">폴더 정보를 불러오는 중…</p>
   const videos = section === 'excluded' ? data.excluded : data.dismissed
-  // 목록만 스크롤한다. 바깥 스크롤은 목록이 최소 높이까지 줄어든 아주 작은 창에서만 생긴다.
-  return <main className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4" aria-label="폴더 관리">
-    <PageHeader title="폴더 관리" description="감시 폴더의 하위 폴더까지 검사합니다. 실제 파일과 영상 기록은 유지합니다." actions={<Button variant="outline" onClick={() => act('manageTags')}>모든 태그 관리</Button>} />
-    <NoticeStack items={[
+  const pageNotices = ([
       error && { tone: "error", message: error, onDismiss: () => setError("") },
       data.unwatched.length > 0 && { key: "unwatched", tone: "warning", title: `감시하지 못하는 폴더 ${data.unwatched.length}개`, message: data.watchStartFailed ? "자동 감지를 시작하지 못했습니다. 설정에서 자동 감지를 껐다 켜면 다시 시도합니다." : "연결되면 자동으로 다시 감시하고 바뀐 파일을 검사합니다." },
       !data.automaticDetection && { tone: "info", message: "자동 감지가 꺼져 있습니다. 파일을 옮긴 뒤에는 다시 검사를 누르세요." },
-    ]} />
+    ] as (NoticeItem | false | "")[]).filter((item): item is NoticeItem => !!item)
+  // 목록만 스크롤한다. 바깥 스크롤은 목록이 최소 높이까지 줄어든 아주 작은 창에서만 생긴다.
+  return <main className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4" aria-label="폴더 관리">
+    <PageHeader title="폴더 관리" description="감시 폴더의 하위 폴더까지 검사합니다. 실제 파일과 영상 기록은 유지합니다." actions={<Button variant="outline" onClick={() => act('manageTags')}>모든 태그 관리</Button>} />
     <div className="flex flex-wrap gap-2">
       <Button id="folders-add" disabled={data.scanning} onClick={() => act('addFolder')}>감시 폴더 추가</Button>
       <Button variant="outline" disabled={data.scanning} onClick={() => act('scan')}>다시 검사</Button>
@@ -95,13 +99,20 @@ export default function FoldersPage() {
       {data.scanning && <StatusBadge variant="info">검사 중 · 폴더 및 제외 변경 잠금</StatusBadge>}
     </div>
     <Tabs label="폴더 관리 구역" value={section} onChange={setSection} items={[{ value: 'folders', label: `감시 폴더 ${data.folders.length}` }, { value: 'excluded', label: `제외 목록 ${data.excluded.length}` }, { value: 'dismissed', label: `관심 없음 되돌리기 ${data.dismissed.length}` }]} />
-    <section id="folders-section" tabIndex={-1} className={listFrame({ surface: "card", class: "min-h-32 flex-1" })} aria-label={section === 'folders' ? '감시 폴더 목록' : '되돌리기 목록'}>
-      {section === 'folders' ? (data.folders.length ? <ul className="flex flex-col gap-0.5">{data.folders.map(path => <li key={path} className={listRow()}><p className="min-w-0 flex-1 break-all" title={path}>{path}</p>{data.unwatched.includes(path) && <InlineNotice tone="warning" text="감시 안 됨" className="shrink-0" />}<Button variant="outline" size="sm" disabled={data.scanning} aria-label={`${path} 해제`} onClick={() => setRemove(path)}>해제</Button></li>)}</ul> : <div className="p-2"><EmptyState title="감시 폴더가 없습니다" description="감시 폴더 추가로 영상이 있는 폴더를 고르면 자동으로 검사합니다." /></div>)
-      : <><p className="px-3 py-2 text-body text-muted-foreground">{section === 'excluded' ? '되돌리면 라이브러리에 다시 보입니다. 파일과 기록은 그대로 남아 있습니다.' : '되돌린 영상은 다시 추천에 나올 수 있습니다. 라이브러리 표시는 그대로입니다.'}</p>{videos.length ? <ul className="flex flex-col gap-0.5">{videos.map(video => <li key={video.id} className={listRow()}><div className="min-w-0 flex-1"><p className="break-all text-body-strong">{video.title}</p>{(video.missing || (section !== 'excluded' && video.excluded)) && <p className="text-label text-muted-foreground">{section !== 'excluded' && video.excluded ? '제외' : '파일 없음'}</p>}</div><Button variant="outline" size="sm" disabled={section === 'excluded' && data.scanning} onClick={() => act(section === 'excluded' ? 'restoreExcluded' : 'restoreDismissed', String(video.id))}>되돌리기</Button></li>)}</ul> : <div className="p-2"><EmptyState title={section === 'excluded' ? '제외한 영상이 없습니다' : '관심 없음으로 뺀 영상이 없습니다'} description="되돌릴 영상이 있으면 여기에 표시합니다." /></div>}</>}
-    </section>
+    {/* 폴더 목록 영역. 페이지 안내와 검사 안내는 목록을 밀지 않고 라이브러리처럼 목록 위쪽에 떠 있는 띠로 보인다(영역 높이의 절반까지, 넘치면 띠 안에서 스크롤).
+        띠는 안내가 있을 때만 그린다. 검사 중 표시는 목록 위 가장자리의 가는 막대라 자리를 차지하지 않는다. */}
+    <div className="relative flex min-h-32 flex-1 flex-col">
+      <section id="folders-section" tabIndex={-1} className={listFrame({ surface: "card", class: "flex-1" })} aria-label={section === 'folders' ? '감시 폴더 목록' : '되돌리기 목록'}>
+        {section === 'folders' ? (data.folders.length ? <ul className="flex flex-col gap-0.5">{data.folders.map(path => <li key={path} className={listRow()}><p className="min-w-0 flex-1 break-all" title={path}>{path}</p>{data.unwatched.includes(path) && <InlineNotice tone="warning" text="감시 안 됨" className="shrink-0" />}<Button variant="outline" size="sm" disabled={data.scanning} aria-label={`${path} 해제`} onClick={() => setRemove(path)}>해제</Button></li>)}</ul> : <div className="p-2"><EmptyState title="감시 폴더가 없습니다" description="감시 폴더 추가로 영상이 있는 폴더를 고르면 자동으로 검사합니다." /></div>)
+        : <><p className="px-3 py-2 text-body text-muted-foreground">{section === 'excluded' ? '되돌리면 라이브러리에 다시 보입니다. 파일과 기록은 그대로 남아 있습니다.' : '되돌린 영상은 다시 추천에 나올 수 있습니다. 라이브러리 표시는 그대로입니다.'}</p>{videos.length ? <ul className="flex flex-col gap-0.5">{videos.map(video => <li key={video.id} className={listRow()}><div className="min-w-0 flex-1"><p className="break-all text-body-strong">{video.title}</p>{(video.missing || (section !== 'excluded' && video.excluded)) && <p className="text-label text-muted-foreground">{section !== 'excluded' && video.excluded ? '제외' : '파일 없음'}</p>}</div><Button variant="outline" size="sm" disabled={section === 'excluded' && data.scanning} onClick={() => act(section === 'excluded' ? 'restoreExcluded' : 'restoreDismissed', String(video.id))}>되돌리기</Button></li>)}</ul> : <div className="p-2"><EmptyState title={section === 'excluded' ? '제외한 영상이 없습니다' : '관심 없음으로 뺀 영상이 없습니다'} description="되돌릴 영상이 있으면 여기에 표시합니다." /></div>}</>}
+      </section>
+      {data.scanning && <div role="progressbar" aria-label="영상 검사 중" className="absolute inset-x-3 top-0 z-20 h-1 animate-pulse rounded-full bg-primary" />}
+      <div className={noticeBand({ shown: pageNotices.length > 0 || hasScanNotices(data.report) })} data-folders-notices>
+        <NoticeStack items={pageNotices} />
+        <section id="folders-report" tabIndex={-1} className="outline-none" aria-label="검사 안내"><ScanReport layout="auto" report={data.report} onDismiss={(group, index) => dismissReport(data.report.revision, group, index)} /></section>
+      </div>
+    </div>
     <MinimumDuration id="folders-minimum" value={data.minimum} scanning={data.scanning} onSave={async value => { await request(reply => bridge.setMinimum(value, reply)) }} />
-    {/* 검사 안내는 폴더 목록이 최소 높이를 지키고 남은 자리까지만 차지하고, 넘치면 안내 묶음 안에서 스크롤한다. */}
-    <section id="folders-report" tabIndex={-1} className="flex min-h-0 flex-col gap-2 outline-none" aria-label="검사 안내">{data.scanning && <div role="progressbar" aria-label="영상 검사 중" className="h-1 shrink-0 animate-pulse rounded-full bg-primary" />}<ScanReport report={data.report} onDismiss={(group, index) => dismissReport(data.report.revision, group, index)} /></section>
     <ConfirmDialog open={remove !== null} onOpenChange={open => { if (!open) setRemove(null) }} title="감시 폴더 해제" description="이 폴더 아래의 모든 위치를 해제합니다. 다른 위치가 없는 영상은 파일 없음으로 남습니다. 실제 파일과 영상 기록은 유지하며, 겹치는 감시 폴더의 위치는 다음 검사에서 복귀합니다." confirmLabel="해제" onConfirm={() => { if (remove) act('removeFolder', remove); setRemove(null) }} />
   </main>
 }

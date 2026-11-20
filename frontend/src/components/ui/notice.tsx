@@ -210,6 +210,11 @@ function fixedControls(region: Element) {
   }).map(element => element.getBoundingClientRect())
 }
 
+/** 페이지 안내. 안내 묶음 안에서 스크롤되더라도 셸 묶음이 그 글자를 덮으면 읽을 수 없으므로 보이는 안내는 모두 피한다. */
+function pageNotices(region: Element) {
+  return [...region.querySelectorAll("[data-slot=notice]")].filter(element => element.checkVisibility()).map(element => element.getBoundingClientRect())
+}
+
 /** 묶음이 지금 크기로 각 모서리에 놓일 때 가리는 고정 조작 요소가 가장 적은 모서리. current가 있으면 그 모서리가 아무것도 가리지 않을 때 그대로 둔다. */
 function chooseCorner(layer: HTMLElement, region: Element | null, current: Corner | null): Corner {
   const area = (layer.offsetParent ?? layer.parentElement)?.getBoundingClientRect()
@@ -221,7 +226,7 @@ function chooseCorner(layer: HTMLElement, region: Element | null, current: Corne
     "bottom-left": [area.left + inset, area.bottom - inset - height],
     "top-right": [area.right - inset - width, area.top + inset],
   }
-  const rects = fixedControls(region)
+  const rects = [...fixedControls(region), ...pageNotices(region)]
   const covered = (corner: Corner) => {
     const [left, top] = boxes[corner]
     return rects.filter(rect => rect.left < left + width && left < rect.right && rect.top < top + height && top < rect.bottom).length
@@ -235,7 +240,7 @@ function chooseCorner(layer: HTMLElement, region: Element | null, current: Corne
  * 여러 부품이 각자 그리는 안내를 떠 있는 한 묶음으로 모은다. 안내 순서와 닫기는 각 부품이 그대로 정한다.
  * 머리 줄은 안내 개수와 오류 개수를 보이고 접고 편다. 접어도 오류가 있다는 표시는 남고,
  * 새 안내가 생기거나 오류가 늘면 다시 편다. 안내가 하나도 없으면 묶음도 보이지 않는다(부품은 그대로 붙어 있어 상태를 잃지 않는다).
- * avoid 영역(지금 보이는 페이지)의 고정 조작 요소를 가리지 않는 모서리를 고른다. 오른쪽 아래가 기본이다.
+ * avoid 영역(지금 보이는 페이지)의 고정 조작 요소와 페이지 안내를 가리지 않는 모서리를 고른다. 오른쪽 아래가 기본이다.
  * 페이지가 바뀌거나 묶음이 새로 나타나면 처음부터 고르고, 같은 페이지에서 창 크기·묶음 크기·안내 개수가 바뀌거나
  * 페이지가 배치 변경 신호(useLayoutChange: 분류·구역 전환, 비동기 준비 완료, 안내가 생기고 사라지거나 펼치고 접힘)를 보내면 지금 모서리가 무언가를 가릴 때만 다시 고른다.
  * 페이지 DOM 변경은 관찰하지 않는다. 가상 목록은 스크롤 프레임마다 DOM을 바꾸지만 고정 조작 요소는 그대로라 다시 잴 까닭이 없다.
@@ -298,4 +303,4 @@ function NoticeLayer({ children, avoid, ...props }: Omit<React.ComponentProps<"s
   )
 }
 
-export { InlineNotice, Notice, NoticeLayer, NoticeStack, noticeVariants }
+export { InlineNotice, Notice, NoticeLayer, NoticeStack, noticeVariants, stackVariants as noticeStackVariants }
