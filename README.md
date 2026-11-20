@@ -97,6 +97,10 @@ powershell -ExecutionPolicy Bypass -File scripts/setup.ps1 -Worktree
 - 브리지 계약을 바꾸면 타입을 생성하고 pytest를 돌립니다.
 - 화면은 `scripts/check_web_*.py --offscreen`으로 1100×720을 확인합니다.
 
+### CI
+
+PR과 `main` push마다 GitHub Actions의 **Windows tests**(`.github/workflows/windows-tests.yml`)가 Windows 러너에서 전체 pytest를 10개 조각으로 나눠 돌립니다. 문서만 바꾼 변경은 건너뜁니다. 실창 검사와 CUDA는 러너에서 확인할 수 없으므로 로컬 Windows에서 확인합니다. 자세한 내용은 [개발 문서](docs/development.md#ci)를 보세요.
+
 ### 문서
 
 | 문서 | 내용 |
@@ -106,3 +110,7 @@ powershell -ExecutionPolicy Bypass -File scripts/setup.ps1 -Worktree
 | [GLOSSARY.md](GLOSSARY.md) | 도메인 용어 |
 | [docs/adr/](docs/adr/) | 설계 결정 기록 |
 | [AGENTS.md](AGENTS.md) | 작업 규칙(커밋·PR 메시지는 한국어) |
+
+## 라이선스
+
+VideoCabinet은 [GPL-3.0-or-later](LICENSE)로 배포합니다. 설치 파일에 함께 담긴 제3자 구성 요소의 라이선스는 설치 폴더의 `THIRD-PARTY-NOTICES.txt`와 `licenses/`에 있습니다.
