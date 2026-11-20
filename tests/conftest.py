@@ -182,17 +182,23 @@ def pytest_collection_modifyitems(config, items):
     config.hook.pytest_deselected(items=deselected)
 
 
-@pytest.hookimpl(hookwrapper=True, trylast=True)
-def pytest_runtest_teardown(item, nextitem):  # 임시 진단 (#408)
-    yield
-    if 'PySide6.QtGui' not in sys.modules:
-        return
-    from PySide6.QtGui import QGuiApplication
+@pytest.hookimpl(wrapper=True, trylast=True)
+def pytest_runtest_teardown(item, nextitem):
+    """테스트가 끝난 뒤 보이는 최상위 창이 남으면 그 테스트를 실패로 알린다.
+
+    offscreen에서 커서 이동은 같은 자리의 노출된 창 중 먼저 만든 창으로 가므로,
+    남은 창은 뒤 테스트의 마우스 올림을 가로챈다(#408). 다음 테스트를 위해 숨긴 뒤 알린다.
+    """
+    result = yield
+    if 'PySide6.QtWidgets' not in sys.modules:
+        return result
     from PySide6.QtWidgets import QApplication
-    if QGuiApplication.instance() is None:
-        return
-    shown = [f"{type(w).__name__}:{w.objectName()}:{w.geometry()}" for w in QGuiApplication.topLevelWindows() if w.isExposed() or w.isVisible()]
-    widgets = [f"{type(w).__name__}:{w.objectName()}" for w in QApplication.topLevelWidgets() if w.isVisible()]
-    if shown or widgets:
-        with open(f"leak-{os.getpid()}.txt", "a", encoding="utf-8") as f:
-            f.write(f"LEAK {item.nodeid} windows={shown} widgets={widgets}\n")
+    if QApplication.instance() is None:
+        return result
+    left = [widget for widget in QApplication.topLevelWidgets() if widget.isVisible()]
+    for widget in left:
+        widget.hide()
+    if left:
+        names = ", ".join(type(widget).__name__ for widget in left)
+        raise AssertionError(f"테스트가 보이는 최상위 창을 남겼다: {names}. 픽스처 정리에서 닫아야 한다.")
+    return result

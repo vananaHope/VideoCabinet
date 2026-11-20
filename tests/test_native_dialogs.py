@@ -216,7 +216,7 @@ def fake(tmp_path, app, monkeypatch, request):
                          NativeDialogEscape(window, is_emergency, escaped, system))
     window = next(opened)
     yield window, system
-    opened.close()
+    next(opened, None)  # close()는 yield 뒤 정리(완전 종료)를 건너뛰어 보이는 창을 남긴다.
 
 
 def test_emergency_key_in_owned_native_dialog_cancels_then_hides_after_it_closes(fake):

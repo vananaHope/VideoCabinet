@@ -271,7 +271,7 @@ def test_subtitle_queue_keeps_processing_after_emergency_hide(tmp_path, app, mon
         wait_for(lambda: window.core.library_details(video.id).original_lines)
         assert transcriber.calls and not window.isVisible()
     finally:
-        opened.close()
+        next(opened, None)  # close()는 yield 뒤 정리(완전 종료)를 건너뛴다.
 
 
 def test_maximized_window_returns_maximized_after_fullscreen_emergency_hide(window):
