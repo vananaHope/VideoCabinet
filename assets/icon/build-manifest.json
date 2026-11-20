@@ -23,22 +23,22 @@
     "40": {
       "source": "assets/icon/app-icon.svg",
       "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
-      "pixels_sha256": "1ebc6672c1d7c2c5a0188f505291b62eed6c3e9374e4ffe51b1fc7d6a6ed9d6e"
+      "pixels_sha256": "ea458b10e5d8fb4beb511032ce855425db3279ee614bfebe19653c9f295cf79f"
     },
     "48": {
       "source": "assets/icon/app-icon.svg",
       "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
-      "pixels_sha256": "4a82ff2df0a48ae591341d9469d6d6daa66efb6c43b2352878cec2644d46bf3c"
+      "pixels_sha256": "a6c4a4f754b3868e13956b45b5df169eac019c147d0a108931c8ecdc189c39ce"
     },
     "64": {
       "source": "assets/icon/app-icon.svg",
       "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
-      "pixels_sha256": "31b5f5461a802ecb1d05132d01807c5fcc9d69d87df06691aedd76dd09368f2f"
+      "pixels_sha256": "9ad13451dca3a78e9050f6dc08eaa8a89230bf448ab8acc5420f3bce5519995e"
     },
     "256": {
       "source": "assets/icon/app-icon.svg",
       "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
-      "pixels_sha256": "cfa4baa20eb82598a41c49af514f7c5bf5398779de2823995c0babc63cd0fdc6"
+      "pixels_sha256": "a8580de49ab067b5e935e961b562bbcdafa585cd06fcd483a2266a92c98f9024"
     }
   },
   "web": {
@@ -46,7 +46,7 @@
     "size": 128,
     "source": "assets/icon/app-icon.svg",
     "source_sha256": "2aaebc144733ab4cf1b5eefb1e08a4ece77e7ed255d620d41a6f871319affce3",
-    "pixels_sha256": "9a44b66c65893948df7c011c2b47f4e46ee8cccf950d3ea6c7521fa4cf4bffdf"
+    "pixels_sha256": "50bfec428423e6759c2db60d1fec466f398cfffed803e63c5a7589f2da32d306"
   },
   "tray": {
     "path": "src/my_video_manager/tray.ico",

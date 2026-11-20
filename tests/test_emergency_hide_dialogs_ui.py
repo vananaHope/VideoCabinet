@@ -345,10 +345,12 @@ def press_in_modal(window, kind):
             return
         seen["title"] = modal.windowTitle()
         active = QApplication.activeWindow()
-        seen["probe"] = (type(active).__name__ if active is not None else None, modal.isActiveWindow(), window.isActiveWindow(),
-                         window.has_emergency_focus(), QApplication.focusWindow() is not None)
-        print("PROBE", seen["probe"])
+        probe = (type(active).__name__ if active is not None else None, modal.isActiveWindow(), window.isActiveWindow(),
+                 window.has_emergency_focus(), QApplication.focusWindow() is not None)
         press_emergency(modal)
+        import os
+        with open(os.environ.get("MVM_PROBE_LOG", os.devnull), "a", encoding="utf-8") as log:
+            log.write(f"PROBE {kind.__name__} {probe} hidden={(window.isVisible(), modal.isVisible())}\n")
         # 아직 호출부의 exec 안이다. 창은 이미 숨었고 대화상자는 닫혔다.
         seen["inside_exec"] = (window.isVisible(), modal.isVisible())
         if modal.isVisible():
@@ -429,7 +431,7 @@ def test_file_dialog_closes_as_cancel_without_adding(window):
     videos = window.core.videos()
     seen = press_in_modal(window, QFileDialog)
     window.library_page.library_controls.add_file()
-    assert seen["inside_exec"] == (False, False), seen
+    assert seen["inside_exec"] == (False, False)
     assert not window.isVisible() and player.paused and window.balloons == []
     QTest.qWait(200)
     assert window.worker is None and window.core.videos() == videos
