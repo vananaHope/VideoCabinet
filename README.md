@@ -6,7 +6,7 @@ VideoCabinet은 Windows용 개인 영상 라이브러리입니다. 폴더의 영
 - 재생: libmpv
 - 받아쓰기: faster-whisper large-v3-turbo(GPU)
 
-**최신 버전 받기 → [GitHub Releases](https://github.com/vananaHope/my-video-manager-releases/releases/latest)**
+**최신 버전 받기 → [GitHub Releases](https://github.com/vananaHope/VideoCabinet/releases/latest)**
 
 ## 주요 기능
 
@@ -26,7 +26,7 @@ VideoCabinet은 Windows용 개인 영상 라이브러리입니다. 폴더의 영
 
 ## 설치해서 쓰기
 
-1. [Releases](https://github.com/vananaHope/my-video-manager-releases/releases/latest)에서 `MyVideoManager-Setup-<버전>.exe`를 받아 실행합니다. 관리자 권한은 필요 없습니다.
+1. [Releases](https://github.com/vananaHope/VideoCabinet/releases/latest)에서 `MyVideoManager-Setup-<버전>.exe`를 받아 실행합니다. 관리자 권한은 필요 없습니다.
 2. 시작 메뉴에서 **VideoCabinet**을 엽니다.
 3. **폴더 관리(Ctrl+7) → 감시 폴더 추가**로 영상 폴더를 등록합니다.
 

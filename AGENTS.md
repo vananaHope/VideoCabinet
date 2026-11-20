@@ -19,7 +19,7 @@ This codebase is yours: what it's for and how it's built are your call, and you'
 
 ### Issue tracker
 
-Issues live in GitHub Issues (vananaHope/my-video-manager), managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues (vananaHope/VideoCabinet), managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

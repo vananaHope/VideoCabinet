@@ -28,7 +28,7 @@ from my_video_manager.update_install import (
 
 NOW = datetime(2026, 10, 17, 12, tzinfo=timezone.utc)
 FINGERPRINT = 'a' * 64
-BASE = 'https://github.com/vananaHope/my-video-manager-releases/releases/download/v1.2.3'
+BASE = 'https://github.com/vananaHope/VideoCabinet/releases/download/v1.2.3'
 PATCH = b'patch installer'
 FULL = b'full installer bytes' * 5000  # several 64 KiB reads through the real transport
 
