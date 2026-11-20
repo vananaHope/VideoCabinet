@@ -28,7 +28,7 @@
     },
     "typographyMeta": {
       "source": "web_tokens.json typography.roles → Tailwind text-<역할>(크기·줄 높이·굵기·자간). 화면은 text-<역할> 하나만 쓴다.",
-      "display": { "displayName": "Display", "fontSize": "1.25rem", "fontWeight": 600, "lineHeight": "1.75rem", "letterSpacing": "-0.01em", "purpose": "통계의 큰 숫자(StatisticsCard·NumberCard). tabular-nums와 함께." },
+      "display": { "displayName": "Display", "fontSize": "1.875rem", "fontWeight": 600, "lineHeight": "2.25rem", "letterSpacing": "-0.02em", "purpose": "통계의 큰 숫자(StatisticsCard). 페이지 제목보다 한 단계 크다. tabular-nums와 함께, 한 줄로." },
       "page-title": { "displayName": "Page Title", "fontSize": "1.5rem", "fontWeight": 600, "lineHeight": "2rem", "letterSpacing": "-0.02em", "purpose": "페이지 제목(PageHeader h1)." },
       "section-title": { "displayName": "Section Title", "fontSize": "1.125rem", "fontWeight": 600, "lineHeight": "1.75rem", "letterSpacing": "-0.01em", "purpose": "구역·대화상자·빈 상태·차트 제목, Qt 재생 머리글·하이라이트 패널 제목." },
       "body": { "displayName": "Body", "fontSize": "0.875rem", "fontWeight": 400, "lineHeight": "1.25rem", "letterSpacing": "0em", "purpose": "앱 기본 글자. 본문·설명, Qt 재생 화면 보조 글자." },

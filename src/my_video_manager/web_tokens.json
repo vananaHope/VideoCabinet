@@ -60,7 +60,7 @@
     "text-2xl": "1.5rem",
     "text-3xl": "1.875rem",
     "roles": {
-      "display": { "size": "text-xl", "line-height": "1.75rem", "weight": "600", "letter-spacing": "-0.01em" },
+      "display": { "size": "text-3xl", "line-height": "2.25rem", "weight": "600", "letter-spacing": "-0.02em" },
       "page-title": { "size": "text-2xl", "line-height": "2rem", "weight": "600", "letter-spacing": "-0.02em" },
       "section-title": { "size": "text-lg", "line-height": "1.75rem", "weight": "600", "letter-spacing": "-0.01em" },
       "body": { "size": "text-sm", "line-height": "1.25rem", "weight": "400", "letter-spacing": "0em" },
