@@ -9,8 +9,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 18 * * *'
-  push:
-    branches: [claude/project-thread-0htugc]
 
 concurrency:
   group: windows-tests-${{ github.ref }}
