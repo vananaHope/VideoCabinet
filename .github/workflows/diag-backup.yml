@@ -10,8 +10,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ref: ['HEAD', '531a031^']
-        defender: ['off', 'on']
+        ref: ['HEAD']
+        defender: ['off']
+        stress: [8, 16]
     env:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
@@ -55,12 +56,14 @@ jobs:
       - name: 백업 검사
         shell: pwsh
         run: |
+          $burn = 1..${{ matrix.stress }} | ForEach-Object { Start-Process -PassThru -WindowStyle Hidden python -ArgumentList '-c','while True: pass' }
           foreach ($i in 1..5) {
             .venv/Scripts/python.exe scripts/check_web_backup.py --offscreen --output .local/screens-$i
             "EXIT $i = $LASTEXITCODE"
           }
+          $burn | Stop-Process -Force
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backup-screens-${{ matrix.defender }}-${{ strategy.job-index }}
+          name: backup-screens-${{ strategy.job-index }}
           path: .local/
