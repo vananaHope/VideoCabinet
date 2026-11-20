@@ -925,13 +925,17 @@ def test_settings_persist_and_use_injected_clock(library):
     assert pairs(core) == [(a.id, "forgotten"), (c.id, "forgotten"), (b.id, "highlight_review")]
 
 
-@pytest.mark.parametrize("value", [-1, True, "30", None, float("inf"), float("nan"), 10**400])
+INVALID_PERIOD_VALUES = [-1, True, "30", None, float("inf"), float("nan"), 10**400]
+
+
 @pytest.mark.parametrize("criterion", [period.criterion for period in RECOMMENDATION_PERIODS])
-def test_invalid_period_rejected(library, value, criterion):
+def test_invalid_period_rejected(library, criterion):
+    # 기간마다 DB를 새로 만들 필요는 없다. 잘못된 값은 저장하고 확인한 뒤 다음 값으로 덮어쓴다.
     core, _, _ = library
-    core.settings.set(f"recommend.{criterion}_days", value)
-    with pytest.raises(ValueError):
-        core.recommendations()
+    for value in INVALID_PERIOD_VALUES:
+        core.settings.set(f"recommend.{criterion}_days", value)
+        with pytest.raises(ValueError):
+            core.recommendations()
 
 
 def test_recommendation_period_definitions_and_defaults(library):
@@ -950,15 +954,15 @@ def test_recommendation_period_definitions_and_defaults(library):
         "rewatch": 60, "unwatched": 30}
 
 
-@pytest.mark.parametrize("value", [-1, True, "30", None, float("inf"), float("nan"), 365001, 10**400])
 @pytest.mark.parametrize("criterion", [period.criterion for period in RECOMMENDATION_PERIODS])
-def test_invalid_recommendation_period_write_is_rejected_without_storing(library, criterion, value):
+def test_invalid_recommendation_period_write_is_rejected_without_storing(library, criterion):
     core, _, _ = library
     before = core.recommendation_period_days()
-    with pytest.raises(ValueError):
-        core.set_recommendation_period_days(criterion, value)
-    assert core.recommendation_period_days() == before
-    assert core.settings.get(f"recommend.{criterion}_days") is None
+    for value in [*INVALID_PERIOD_VALUES, 365001]:
+        with pytest.raises(ValueError):
+            core.set_recommendation_period_days(criterion, value)
+        assert core.recommendation_period_days() == before, value
+        assert core.settings.get(f"recommend.{criterion}_days") is None, value
 
 
 def test_broken_stored_period_is_reported_only_for_that_period(library):

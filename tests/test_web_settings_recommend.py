@@ -71,15 +71,16 @@ def test_valid_text_saves_and_reset_restores_default(settings, core, criterion):
     assert core.recommendation_period_days()[criterion] == default
 
 
-@pytest.mark.parametrize('text', ['', '   ', 'abc', '30일', '-1', '365001', 'nan', 'inf', '-inf'])
-def test_invalid_text_is_rejected_without_saving(settings, core, text):
+def test_invalid_text_is_rejected_without_saving(settings, core):
+    # 창 하나에서 잘못된 입력을 차례로 넣는다. 거부된 입력은 아무것도 저장하지 않으므로 서로 영향이 없다.
     _, bridge = settings
     core.set_recommendation_period_days('rewatch', 45)
     before = core.recommendation_period_days()
-    result = json.loads(bridge.setRecommendationPeriod('rewatch', text))
-    assert result['error']
-    assert core.recommendation_period_days() == before
-    assert periods(bridge)['rewatch'] == 45
+    for text in ['', '   ', 'abc', '30일', '-1', '365001', 'nan', 'inf', '-inf']:
+        result = json.loads(bridge.setRecommendationPeriod('rewatch', text))
+        assert result['error'], text
+        assert core.recommendation_period_days() == before, text
+        assert periods(bridge)['rewatch'] == 45, text
 
 
 def test_unknown_criterion_is_rejected(settings, core):
