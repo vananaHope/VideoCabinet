@@ -114,7 +114,7 @@ export default function SearchPage() {
   }, [bridge, results, showError])
   // 흐린 이전 결과(최대 500개)를 둔 채 글자를 칠 때마다 다시 그리지 않도록 결과·선택·흐림이 바뀔 때만 만든다.
   const rows = useMemo(() => results.map((result, index) => <ResultRow key={index} id={`search-result-${index}`} selected={index === selectedIndex} stale={pending} onClick={() => { if (pending) return; select(index); document.getElementById("search-results")?.focus({ preventScroll: true }); play(index) }}>
-    <div className="min-w-0 flex-1 space-y-1"><p className="wrap-anywhere text-body-strong"><MatchedText parts={result.title} /></p>
+    <div className="min-w-0 flex-1 space-y-1"><p title={result.title.map(part => part.text).join("")} className="line-clamp-2 wrap-anywhere text-body-strong"><MatchedText parts={result.title} /></p>
       <div className="flex flex-wrap items-center gap-3"><StatusBadge variant={result.languageLabel !== null ? "outline" : undefined}>{result.source}</StatusBadge>{result.languageLabel !== null && <StatusBadge variant="outline">{result.languageLabel}</StatusBadge>}{result.start !== null && <span className="text-label-strong text-foreground tabular-nums">{timestamp(result.start)}</span>}{result.missing && <span className="text-label text-muted-foreground">파일 없음</span>}</div>
       <p className="whitespace-pre-wrap wrap-anywhere text-body"><MatchedText parts={result.text} /></p></div>
   </ResultRow>), [results, selectedIndex, pending, select, play])
@@ -145,10 +145,11 @@ export default function SearchPage() {
       error && { tone: "error", message: error, onDismiss: () => setError("") },
       !pending && state === "error" && { tone: "error", message: `검색 실패: ${data?.error}` },
     ]} />
+    {/* 목록 안쪽 여백(p-1)은 선택 테두리·초점 윤곽선 자리다. 같은 폭의 음수 여백으로 행 가장자리를 머리글에 맞춘다. */}
     <div id="search-results" role="listbox" aria-label="검색 결과" aria-busy={pending || state === "preparing"} aria-activedescendant={results.length ? `search-result-${selectedIndex}` : undefined} tabIndex={0}
       onScroll={event => { if (event.currentTarget.offsetParent) scroll.current = event.currentTarget.scrollTop }}
       onKeyDown={event => listKey(event, pending ? 0 : results.length, selectedIndex ?? 0, select, () => play(selectedIndex ?? -1))}
-      className="min-h-32 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
+      className="-mx-1 min-h-32 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
       {results.length ? rows : !pending && <EmptyState variant="page" title={empty[0]} description={empty[1]} />}
     </div>
     {/* 상태 줄은 비어도 한 줄 높이를 지킨다. 기다림 표시는 앞 문구가 있을 때만 띄워 놓는다. */}
