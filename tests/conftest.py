@@ -111,14 +111,20 @@ _sqlite_connect = sqlite3.connect
 def _connect_without_sync(*args, **kwargs):
     connection = _sqlite_connect(*args, **kwargs)
     # synchronous는 스키마를 읽어 다른 연결의 쓰기 잠금을 기다릴 수 있다. 잠금 테스트의 대기 시간을 바꾸지 않게
-    # 기다리지 않고 시도하고, 잠겨 있으면 이 연결만 기본 동기화로 둔다. busy_timeout 자체는 DB를 읽지 않는다.
+    # 기다리지 않고 시도하고, 잠겨 있거나 DB가 아닌 파일이면 이 연결만 기본 동기화로 둔다. 그런 오류는 앱이
+    # 연결을 받은 뒤 처음 읽을 때 직접 만나야 한다(여기서 올리면 연결이 닫히지 않아 Windows에서 파일이 잠긴다).
+    # busy_timeout 자체는 DB를 읽지 않는다.
     timeout = kwargs.get('timeout', args[1] if len(args) > 1 else 5.0)
-    connection.execute('PRAGMA busy_timeout = 0')
     try:
-        connection.execute('PRAGMA synchronous = OFF')
-    except sqlite3.OperationalError:
-        pass
-    connection.execute(f'PRAGMA busy_timeout = {int(timeout * 1000)}')
+        connection.execute('PRAGMA busy_timeout = 0')
+        try:
+            connection.execute('PRAGMA synchronous = OFF')
+        except sqlite3.DatabaseError:
+            pass
+        connection.execute(f'PRAGMA busy_timeout = {int(timeout * 1000)}')
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 
