@@ -324,11 +324,14 @@ def test_shell_notices_move_off_fixed_page_controls(open_window):
     wait_for(lambda: not any(overlaps(box(window, SHELL), box(window, selector)) for selector in fixed))
     shell, page = box(window, SHELL), box(window, '[data-page="folders"]')
     assert shell['bottom'] <= page['bottom'] and shell['top'] >= page['top'] and shell['height'] > 100
-    # 라이브러리로 돌아오면 다시 기본 자리(오른쪽 아래)에서 툴바·상세 패널 단추를 덮지 않는다.
+    # 라이브러리로 돌아오면 다시 고른 자리에서 툴바·상세 패널 단추를 덮지 않는다. 상세 패널 작업 줄이 패널 맨 아래에 있어
+    # 긴 묶음은 오른쪽 아래 대신 스크롤되는 격자 위(왼쪽 아래)로 간다.
     QTest.keyClick(view(window), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
-    wait_for(lambda: window.web_host.active_tab == 'library' and box(window, SHELL)['right'] > box(window, '#library-grid')['right'])
-    for selector in ('[aria-label="무작위 재생"]', '[aria-label="영상 작업"]', '[aria-label="영상 상세 탭"]'):
-        assert not overlaps(box(window, SHELL), box(window, selector)), selector
+    library_controls = ('[aria-label="무작위 재생"]', '[aria-label="영상 작업"]', '[aria-label="영상 상세 탭"]')
+    wait_for(lambda: window.web_host.active_tab == 'library' and all(box(window, selector) for selector in library_controls)
+             and not any(overlaps(box(window, SHELL), box(window, selector)) for selector in library_controls))
+    shell, page = box(window, SHELL), box(window, '[data-page="library"]')
+    assert shell['bottom'] <= page['bottom'] and shell['top'] >= page['top'] and shell['height'] > 100
 
 
 FULL_CELLS = f"""JSON.stringify((() => {{ const grid = {GRID}, g = grid.getBoundingClientRect(), top = g.top + grid.clientTop

@@ -38,7 +38,8 @@ KINDS = {
     '패널 탭': ('[data-page=library] nav [data-tab]:not([aria-current])', None),
     '주 단추': ('[data-page=library] [data-slot=button][data-variant=default]', None),
     '윤곽선 단추': ('[data-page=library] [data-slot=button][data-variant=outline]', None),
-    '위험 윤곽선 단추': ('[data-page=library] [data-slot=button][data-variant=destructive-outline]', None),
+    # 라이브러리의 위험 윤곽선 단추(제외)는 상세 패널의 "다른 작업" 메뉴 항목이 됐다(#381). 툴바의 고스트 아이콘 단추(폴더 패널)를 잰다.
+    '고스트 아이콘 단추': ('[data-page=library] [data-slot=button][data-variant=ghost]', None),
     '영상 카드': ('#library-grid [role=gridcell][aria-selected=false]', '#library-grid'),
 }
 
@@ -69,7 +70,8 @@ def ready(window):
     host = window.web_host
     wait_for(lambda: not host.return_pending and host._frontend_ready and 'library' in host._ready_pages)
     wait_for(lambda: js(window, "document.querySelectorAll('#library-grid [role=gridcell]').length") == 2)
-    wait_for(lambda: js(window, f"!!{shown('[data-page=library] [data-slot=button][data-variant=destructive-outline]')}"))
+    more_actions = shown('[data-page=library] aside button[aria-label="다른 작업"]')
+    wait_for(lambda: js(window, f"!!{more_actions}"))
     # offscreen은 OS 창 초점을 Chromium에 넘기지 않는다. 실창처럼 웹 뷰가 초점을 얻은 상태를 만든다.
     QApplication.sendEvent(view(window), QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.ActiveWindowFocusReason))
     away(window)
