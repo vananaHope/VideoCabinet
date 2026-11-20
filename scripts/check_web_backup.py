@@ -182,6 +182,7 @@ def button(text):
     point = json.loads(js(f'JSON.stringify((() => {{ const e=[...document.querySelectorAll("button")].find(e=>e.textContent==={json.dumps(text)} && e.getClientRects().length); if(!e)return null; e.scrollIntoView({{block:"nearest"}}); const r=e.getBoundingClientRect(); return [r.x+r.width/2,r.y+r.height/2]; }})())'))
     if point is None:
         return False
+    print('DIAG button', text, point, js(f'(() => {{ const e=document.elementFromPoint({point[0]},{point[1]}); return e ? e.outerHTML.slice(0,200) : "none" }})()'), flush=True)
     window.activateWindow()
     host.view.setFocus()
     QTest.mouseClick(host.view.focusProxy(), Qt.MouseButton.LeftButton, pos=QPoint(*map(int, point)))
@@ -378,6 +379,8 @@ try:
         finished()
         js('document.querySelector("[aria-label=\\"자동 백업\\"]").scrollIntoView({block:"end"})')
         capture('backup-many')
+        print('DIAG disk', [p.name for p in core.automatic_backups()], flush=True)
+        print('DIAG state', len(backup_state()['automatic']), backup_state()['operation'], backup_state()['failure'], flush=True)
         assert len(backup_state()['automatic']) == 5
         assert '상세 이유 기록 없음' in content('[aria-label="자동 백업"]')
         assert 'DB 버전 올리기 전' in content('[aria-label="자동 백업"]')
