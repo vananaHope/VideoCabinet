@@ -227,7 +227,10 @@ def test_playback_control_press_uses_accent_and_differs_from_hover_and_focus(win
         at = QApplication.widgetAt(target)
         return (f"{label}: cursor={QCursor.pos()} target={target} under={button.underMouse()} buttons={QGuiApplication.mouseButtons()} "
                 f"grabber={QWidget.mouseGrabber()} at={type(at).__name__ if at else None}/{at.objectName() if at else ''} "
-                f"active={type(QApplication.activeWindow()).__name__} popup={QApplication.activePopupWidget()} modal={QApplication.activeModalWidget()}")
+                f"active={type(QApplication.activeWindow()).__name__} popup={QApplication.activePopupWidget()} modal={QApplication.activeModalWidget()} "
+                f"same={at is button} top={button.window().windowHandle()} wins=" + " | ".join(
+                    f"{type(w).__name__}:{w.objectName()}:{w.flags()!r}:exp={w.isExposed()}:vis={w.isVisible()}:geo={w.geometry()}:has={w.geometry().contains(target)}"
+                    for w in QGuiApplication.topLevelWindows()))
     notes = [snap("start")]
     QTest.mouseMove(window.surface, window.surface.rect().center())
     notes.append(snap("after-surface"))
