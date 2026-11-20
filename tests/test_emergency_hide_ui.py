@@ -270,6 +270,8 @@ def test_subtitle_queue_keeps_processing_after_emergency_hide(tmp_path, app, mon
         assert not window.isVisible()
         wait_for(lambda: window.core.library_details(video.id).original_lines)
         assert transcriber.calls and not window.isVisible()
+        # 작업자가 끝나기 전에 완전 종료하면 받아쓰기 중 종료 확인 창이 떠 정리가 멈춘다.
+        wait_for(lambda: window.subtitles.worker is None)
     finally:
         next(opened, None)  # close()는 yield 뒤 정리(완전 종료)를 건너뛴다.
 
