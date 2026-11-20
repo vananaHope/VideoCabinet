@@ -18,10 +18,6 @@ const empty = cva("flex flex-col items-center justify-center gap-2 text-center",
 export function EmptyState({ title, description, action, variant }: { title: string; description: string; action?: ReactNode } & VariantProps<typeof empty>) {
   return <section data-slot="empty-state" className={empty({ variant })}><h2 className="text-section-title">{title}</h2><p className="max-w-prose text-body text-muted-foreground">{description}</p>{action && <div className="mt-2 flex flex-wrap justify-center gap-2">{action}</div>}</section>
 }
-const number = cva("rounded-xl border bg-card p-6", { variants: { variant: { default: "text-card-foreground", accent: "text-primary-text" } }, defaultVariants: { variant: "default" } })
-export function NumberCard({ label, value, description, variant }: { label: string; value: ReactNode; description?: string } & VariantProps<typeof number>) {
-  return <section className={number({ variant })}><h3 className="text-body text-muted-foreground">{label}</h3><p className="my-3 text-display tabular-nums">{value}</p>{description && <p className="text-label text-muted-foreground">{description}</p>}</section>
-}
 // 상태 배지는 각진 칩(rounded-xs)이다. 알약 모양은 태그·조건 칩(ui/chip.tsx)이 쓴다.
 const status = cva("inline-flex h-badge w-fit items-center rounded-xs px-2 text-label-strong whitespace-nowrap", { variants: { variant: { success: "bg-status-success text-status-success-foreground", info: "bg-status-info text-status-info-foreground", highlight: "bg-highlight text-highlight-foreground", destructive: "bg-destructive text-destructive-foreground", muted: "bg-muted text-muted-foreground", selectedMuted: "bg-muted-foreground text-background", outline: "bg-transparent text-muted-foreground ring-1 ring-inset ring-input" } }, defaultVariants: { variant: "muted" } })
 export function StatusBadge({ children, variant }: { children: ReactNode } & VariantProps<typeof status>) { return <span data-slot="status-badge" className={status({ variant })}>{children}</span> }

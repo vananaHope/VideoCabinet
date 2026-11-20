@@ -22,7 +22,12 @@ function IssueList({ id, label, issues, size }: { id?: string; label: string; is
  * 같은 사건은 셸 상태 안내가 이미 알리므로(폴더 탭 밖에서도) 여기서는 live region이 아닌 note로 둔다.
  * 끝난 검사의 결과만 묶음마다 닫을 수 있다. index는 닫은 묶음의 순서로, 다음 안내에 초점을 옮길 때 쓴다.
  */
-export function ScanReport({ report, onDismiss }: { report: ScanReportData; onDismiss: (group: ScanNoticeGroup, index: number) => void }) {
+/** 검사 결과가 보일 안내가 있는지. 띠로 띄우는 쪽이 빈 띠를 그리지 않게 쓴다. */
+export function hasScanNotices(report: ScanReportData) {
+  return report.failures.length > 0 || report.subtitleWarnings.length > 0 || !!report.message
+}
+
+export function ScanReport({ report, onDismiss, layout = "yield" }: { report: ScanReportData; onDismiss: (group: ScanNoticeGroup, index: number) => void; layout?: "yield" | "auto" }) {
   const [subtitlesOpen, setSubtitlesOpen] = useState(false)
   const subtitleListId = useId()
   const { failures, subtitleWarnings, notes } = report
@@ -42,7 +47,7 @@ export function ScanReport({ report, onDismiss }: { report: ScanReportData; onDi
     group: "summary", key: "summary", tone: report.failed ? "error" : "info",
     message: notes.length ? <div className="space-y-1"><p>{report.message}</p><IssueList label="검사 알림 목록" issues={notes} /></div> : report.message,
   })
-  return <NoticeStack layout="yield" clamp={false} items={items.map(({ group, ...item }, index) => ({
+  return <NoticeStack layout={layout} clamp={false} items={items.map(({ group, ...item }, index) => ({
     ...item, role: "note", onDismiss: report.dismissible ? () => onDismiss(group, index) : undefined,
   }))} />
 }

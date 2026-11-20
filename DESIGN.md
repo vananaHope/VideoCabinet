@@ -35,10 +35,10 @@ colors:
 typography:
   display:
     fontFamily: "Pretendard, Malgun Gothic, sans-serif"
-    fontSize: "1.25rem"
+    fontSize: "1.875rem"
     fontWeight: 600
-    lineHeight: "1.75rem"
-    letterSpacing: "-0.01em"
+    lineHeight: "2.25rem"
+    letterSpacing: "-0.02em"
   page-title:
     fontFamily: "Pretendard, Malgun Gothic, sans-serif"
     fontSize: "1.5rem"
@@ -231,7 +231,7 @@ components:
 
 | 역할 | 크기 / 줄 높이 | 굵기 | 자간 | 쓰는 곳 |
 |---|---|---|---|---|
-| `display` 큰 숫자 | 1.25rem / 1.75rem | 600 | -0.01em | 통계 숫자 카드(`StatisticsCard`, `NumberCard`). `tabular-nums`와 함께 쓴다. |
+| `display` 큰 숫자 | 1.875rem / 2.25rem | 600 | -0.02em | 통계 숫자 카드(`StatisticsCard`). 페이지 제목보다 한 단계 커서 화면의 주인공 숫자가 된다. `tabular-nums`와 함께 쓰고 한 줄로 둔다(1100에서 숫자 카드는 한 줄 3장). |
 | `page-title` 페이지 제목 | 1.5rem / 2rem | 600 | -0.02em | `PageHeader`의 `h1`. |
 | `section-title` 구역 제목 | 1.125rem / 1.75rem | 600 | -0.01em | 구역 제목(`SectionTitle`), 빈 상태 제목, 대화상자 제목, 통계 차트 제목, 설정 분류 제목. Qt 재생 머리글 제목·하이라이트 패널 제목. |
 | `body` 본문 | 0.875rem / 1.25rem | 400 | 0 | 앱 기본 글자(`body`). 설명·목록 글자·검색 결과 대사. Qt 재생 화면의 보조 글자. |
