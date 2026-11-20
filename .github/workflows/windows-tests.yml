@@ -1,0 +1,108 @@
+# Windows 전용 테스트를 포함한 전체 pytest를 GitHub 호스팅 Windows 러너에서 돌린다.
+# 비공개 저장소의 무료 한도(월 $12, Windows 약 1,200분)를 넘지 않도록 PR마다 돌리지 않는다.
+# - 수동 실행(workflow_dispatch): 브랜치를 골라 필요할 때 돌린다.
+# - 하루 1회(KST 03:00): 지난 24시간 안에 main에 커밋이 있을 때만 돌린다.
+# 실창 검사(MVM_REAL_WINDOW_TESTS)와 CUDA는 러너에서 확인할 수 없어 지금처럼 로컬에 남긴다.
+name: Windows tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *'
+  push:
+    branches: [claude/project-thread-0htugc]
+
+concurrency:
+  group: windows-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changed:
+    # 일정 실행은 Linux 러너에서 최근 커밋만 확인해 Windows 분을 아낀다.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - id: check
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ $(( $(date +%s) - $(git log -1 --format=%ct) )) -lt 86400 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  pytest:
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: libmpv 캐시
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\my-video-manager\cache\libmpv
+          key: libmpv-${{ hashFiles('scripts/install_libmpv.py') }}
+
+      - name: Python 환경
+        shell: pwsh
+        run: |
+          uv venv --python (python -c "import sys; print(sys.executable)") .venv
+          uv pip install --python .venv/Scripts/python.exe -e '.[dev]'
+          .venv/Scripts/python.exe scripts/generate_web_types.py --check
+
+      - name: 웹 셸 빌드
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: libmpv와 FFmpeg
+        shell: pwsh
+        run: |
+          .venv/Scripts/python.exe scripts/install_libmpv.py
+          choco install ffmpeg -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg 설치 실패 ($LASTEXITCODE)" }
+
+      - name: pytest
+        shell: pwsh
+        run: |
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          .venv/Scripts/python.exe -m pytest -n auto -q -rfEs --durations=25 --junitxml=pytest-results.xml
+          exit $LASTEXITCODE
+
+      - name: 결과 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: pytest-results.xml
+          retention-days: 7
