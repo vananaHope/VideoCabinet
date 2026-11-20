@@ -224,15 +224,7 @@ def test_playback_control_press_uses_accent_and_differs_from_hover_and_focus(win
     wait_for(lambda: not button.underMouse())
     assert colour(button, 4) == colors['secondary']
     QTest.mouseMove(button, button.rect().center())
-    try:
-        wait_for(button.underMouse, timeout=5)
-    except AssertionError:
-        from PySide6.QtGui import QCursor, QGuiApplication
-        target = button.mapToGlobal(button.rect().center())
-        lines = [f"PROBE cursor {QCursor.pos()} target {target} active {QApplication.activeWindow()} buttons {QGuiApplication.mouseButtons()} grabber {QApplication.mouseGrabber()} at {QApplication.widgetAt(target)} visible {button.isVisible()} under {[type(w).__name__ for w in (QApplication.widgetAt(target),) if w]}"]
-        for w in QGuiApplication.topLevelWindows():
-            lines.append(f"PROBE win {type(w).__name__} {w.objectName()} {w.title()} {w.type()} vis={w.isVisible()} exp={w.isExposed()} {w.geometry()} contains={w.geometry().contains(target)}")
-        raise AssertionError("\n".join(lines))
+    wait_for(button.underMouse)
     # 올림은 테두리만 밝아지고 면은 쉼과 같다.
     assert colour(button, 4) == colors['secondary']
     assert colour(button, 0) == colors['muted-foreground']
