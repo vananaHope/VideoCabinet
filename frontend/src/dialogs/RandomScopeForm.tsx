@@ -1,6 +1,6 @@
-import { useId } from 'react'
 import { cva } from 'class-variance-authority'
 import { selectableItem } from '@/components/ui/selectable-item'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import type { DialogData, DialogValues } from '@/bridge-types'
 import { RandomTagFields, tagCandidateCount } from '@/components/random-tag-dialog'
 
@@ -32,19 +32,14 @@ export function randomScopeReady(data: DialogData, values: ScopeValues) {
 export function RandomScopeForm({ data, values, update }: {
   data: DialogData; values: ScopeValues; update: (patch: Partial<ScopeValues>) => void
 }) {
-  const name = useId()
   const chosen = chosenTags(data, values)
-  // 창을 열 때 첫 초점이 고른 범위에 가도록 나머지는 Tab에서 뺀다. 화살표 키는 같은 묶음 안에서 그대로 움직인다.
-  // 고른 범위를 고를 수 없게 됐으면(후보 0) 모두 Tab으로 갈 수 있게 둔다.
-  const focused = data.choices.some(row => row.id === values.choice && !row.status) ? values.choice : ''
+  // 창을 열 때 첫 초점은 고른 범위에 간다(묶음이 고른 항목 하나만 Tab에 둔다). 화살표 키는 고를 수 있는 범위 사이를 옮기며 고른다.
   return <>
-    <div role="radiogroup" aria-label="범위" className="flex flex-col gap-2">
+    <RadioGroup aria-label="범위" value={values.choice} onValueChange={choice => update({ choice })}>
       {data.choices.map(row => {
         const disabled = !!row.status
         return <label key={row.id} className={optionStyle({ selected: values.choice === row.id, disabled })}>
-          <input type="radio" name={name} value={row.id} checked={values.choice === row.id} disabled={disabled}
-            tabIndex={focused && focused !== row.id ? -1 : 0}
-            className="mt-1 shrink-0" onChange={() => update({ choice: row.id })} />
+          <RadioGroupItem value={row.id} disabled={disabled} className="mt-0.5" />
           <span className="min-w-0 flex-1">
             <span className="block text-body-strong">{row.title}</span>
             <span className="block break-words text-muted-foreground">{row.detail}</span>
@@ -52,7 +47,7 @@ export function RandomScopeForm({ data, values, update }: {
           </span>
         </label>
       })}
-    </div>
+    </RadioGroup>
     {values.choice === 'tags' && <RandomTagFields tags={data.tags} selected={chosen}
       onChange={ids => update({ members: ids.map(String) })}
       count={tagCandidateCount(candidatesByTag(data), chosen)} />}

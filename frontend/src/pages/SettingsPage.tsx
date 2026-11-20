@@ -10,6 +10,7 @@ import { KeyBindingsEditor } from "@/components/key-bindings-editor"
 import { BackupSettings } from "@/components/backup-settings"
 import { UpdateSettings } from "@/components/update-settings"
 import { RecommendationPeriods } from "@/components/recommendation-periods"
+import { SettingsCard, SettingsSection } from "@/components/settings-parts"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
 import { useGenerationGuard } from "@/lib/generation"
@@ -76,18 +77,37 @@ export default function SettingsPage() {
       <nav id="settings-category" aria-label="설정 분류" className="flex w-40 shrink-0 flex-col gap-2">{categories.map(([id, label]) => <Button key={id} variant={category === id ? 'item-selected' : 'item'} aria-current={category === id ? 'true' : undefined} data-category={id} onClick={() => setCategory(id)}>{label}</Button>)}</nav>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
         <BackupSettings bridge={bridge} active={category === 'backup'} />
-        <section hidden={category !== 'general'} className="space-y-6" aria-label="일반 설정">
-          <h2 className="text-section-title">일반</h2>
-          <section className="space-y-3 rounded-xl border bg-card p-4"><div className="flex items-center gap-3"><img src={appIcon} alt="" className="size-10 shrink-0" /><h3 className="text-body-strong">{appName} · {data.version}</h3></div><Button variant="link" title={data.releasesUrl} onClick={() => action('releases')}>GitHub Release에서 버전 보기 ↗</Button></section>
+        <SettingsSection hidden={category !== 'general'} aria-label="일반 설정" title="일반">
+          <SettingsCard icon={<img src={appIcon} alt="" className="size-10 shrink-0" />} title={`${appName} · ${data.version}`}
+            control={<Button variant="link" title={data.releasesUrl} onClick={() => action('releases')}>GitHub Release에서 버전 보기 ↗</Button>} />
           <MinimumDuration id="settings-minimum" value={data.minimum} scanning={data.scanning} onSave={async value => { await request(reply => bridge.setMinimum(value, reply)) }} />
           <AutomaticDetection enabled={data.automaticDetection} scanning={data.scanning} onChange={async enabled => { await request(reply => bridge.setAutomaticDetection(enabled, reply)) }} />
-          <section className="space-y-3 rounded-xl border bg-card p-4"><div className="flex items-center gap-3"><h3 className="text-body-strong">완전 종료</h3><StatusBadge variant="destructive">위험 작업</StatusBadge></div><p className="text-body text-muted-foreground">창을 닫으면 트레이로 숨습니다. 완전 종료하면 진행 중인 자막 처리를 멈추고 앱을 끝냅니다.</p><Button variant="destructive-outline" onClick={() => setQuit(true)}>완전 종료</Button></section>
-        </section>
+          <SettingsCard title="완전 종료" badge={<StatusBadge variant="destructive">위험 작업</StatusBadge>} description="창을 닫으면 트레이로 숨습니다. 완전 종료하면 진행 중인 자막 처리를 멈추고 앱을 끝냅니다."
+            control={<Button variant="destructive-outline" onClick={() => setQuit(true)}>완전 종료</Button>} />
+        </SettingsSection>
         <div hidden={category !== 'keys'} className="min-h-0 flex-1"><div className="flex h-full min-h-0 flex-col"><KeyBindingsEditor rows={data.bindings} bridge={bridge} /></div></div>
         <div hidden={category !== 'recommend'}><RecommendationPeriods periods={data.recommendationPeriods} onSave={async (criterion, days) => { await request(reply => bridge.setRecommendationPeriod(criterion, days, reply)) }} onReset={async criterion => { await request(reply => bridge.resetRecommendationPeriod(criterion, reply)) }} /></div>
-        <section hidden={category !== 'translation'} className="space-y-4" aria-label="번역 설정"><h2 className="text-section-title">번역</h2><section className="space-y-4 rounded-xl border bg-card p-6"><p className="text-body text-muted-foreground">한국어 번역 방식과 모델·추론 강도를 선택합니다. 한국어 영상의 다듬기도 같은 방식을 씁니다.</p><p className="text-page-title">{translationProvider.label}</p><p className="break-all text-body" title={translationSelection.model}>모델: {translationSelection.model || '기본(CLI 기본값)'} · 추론 강도: {translationSelection.effort || '기본(모델 기본값)'}</p><p className="text-body">OpenCode Go 키: {data.translation.key_masked ? `등록됨 (${data.translation.key_masked})` : '없음'}</p><p className="text-body">실패하면 OpenCode Go로 이어서: {data.translation.fallback ? '켬' : '끔'}</p><div className="flex gap-2"><StatusBadge variant="info">보류 {data.heldTranslations}건</StatusBadge><StatusBadge variant="muted">실패 {data.failedTranslations}건</StatusBadge></div><p className="text-body text-muted-foreground">선택을 확인하면 실패·보류 번역을 저장한 묶음부터 재시도합니다. 사용량 한도 보류 시간이 남았다면 그 시각까지 기다립니다.</p><Button onClick={() => action('translation')}>선택 / 재시도</Button></section></section>
-        <section hidden={category !== 'update'} className="space-y-4" aria-label="업데이트 설정"><h2 className="text-section-title">업데이트</h2><UpdateSettings data={data.update} onCheck={async () => { await request(reply => bridge.checkUpdate(reply)) }} onAutomatic={async enabled => { await request(reply => bridge.setAutomaticUpdateCheck(enabled, reply)) }} onChoose={async (name, version) => { await request(reply => shell.updateChoice(name, version, reply)) }} /></section>
-        <section hidden={category !== 'transcription'} className="space-y-4" aria-label="받아쓰기 설정"><h2 className="text-section-title">받아쓰기</h2><section className="space-y-4 rounded-xl border bg-card p-6"><h3 className="text-body-strong">원어 자막과 자동 규칙</h3><p className="text-body text-muted-foreground">라이브러리의 ‘자막 만들기 / 원어 지정’에서 영상마다 원어를 자동 감지하거나 직접 지정합니다. 재생 중에도 대기열 순서대로 받아쓰기를 계속합니다.</p><p className="text-body text-muted-foreground">감시 폴더·태그에 대한 자동 자막 규칙, 처리 순서, 취소와 실패 항목 재시도는 자막 대기열에서 관리합니다.</p><Button onClick={() => request(reply => shell.navigate('queue', reply)).catch(error => setError(String(error)))}>자막 대기열 열기</Button></section></section>
+        {/* 지금 고른 번역 방식은 값이라 본문 크기로 정의 목록에 둔다. 방식·모델 고르기와 재시도는 대화상자에서 한다. */}
+        <SettingsSection hidden={category !== 'translation'} aria-label="번역 설정" title="번역" description="한국어 번역 방식과 모델·추론 강도를 선택합니다. 한국어 영상의 다듬기도 같은 방식을 씁니다.">
+          <SettingsCard title="번역 방식" badge={<><StatusBadge variant="info">보류 {data.heldTranslations}건</StatusBadge><StatusBadge variant="muted">실패 {data.failedTranslations}건</StatusBadge></>}
+            control={<Button onClick={() => action('translation')}>선택 / 재시도</Button>}
+            description="선택을 확인하면 실패·보류 번역을 저장한 묶음부터 재시도합니다. 사용량 한도 보류 시간이 남았다면 그 시각까지 기다립니다.">
+            <dl className="space-y-1 text-body">
+              <div className="flex gap-4"><dt className="w-52 shrink-0 text-muted-foreground">방식</dt><dd>{translationProvider.label}</dd></div>
+              <div className="flex gap-4"><dt className="w-52 shrink-0 text-muted-foreground">모델</dt><dd className="min-w-0 break-all" title={translationSelection.model}>{translationSelection.model || '기본(CLI 기본값)'}</dd></div>
+              <div className="flex gap-4"><dt className="w-52 shrink-0 text-muted-foreground">추론 강도</dt><dd>{translationSelection.effort || '기본(모델 기본값)'}</dd></div>
+              <div className="flex gap-4"><dt className="w-52 shrink-0 text-muted-foreground">OpenCode Go 키</dt><dd>{data.translation.key_masked ? `등록됨 (${data.translation.key_masked})` : '없음'}</dd></div>
+              <div className="flex gap-4"><dt className="w-52 shrink-0 text-muted-foreground">실패하면 OpenCode Go로 이어서</dt><dd>{data.translation.fallback ? '켬' : '끔'}</dd></div>
+            </dl>
+          </SettingsCard>
+        </SettingsSection>
+        <SettingsSection hidden={category !== 'update'} aria-label="업데이트 설정" title="업데이트"><UpdateSettings data={data.update} onCheck={async () => { await request(reply => bridge.checkUpdate(reply)) }} onAutomatic={async enabled => { await request(reply => bridge.setAutomaticUpdateCheck(enabled, reply)) }} onChoose={async (name, version) => { await request(reply => shell.updateChoice(name, version, reply)) }} /></SettingsSection>
+        {/* 자막 대기열 열기는 다른 탭으로 옮겨 가기만 하므로 주 단추가 아니라 윤곽선 단추다. */}
+        <SettingsSection hidden={category !== 'transcription'} aria-label="받아쓰기 설정" title="받아쓰기">
+          <SettingsCard title="원어 자막과 자동 규칙" description="라이브러리의 ‘자막 만들기 / 원어 지정’에서 영상마다 원어를 자동 감지하거나 직접 지정합니다. 재생 중에도 대기열 순서대로 받아쓰기를 계속합니다."
+            control={<Button variant="outline" onClick={() => request(reply => shell.navigate('queue', reply)).catch(error => setError(String(error)))}>자막 대기열 열기</Button>}
+            note="감시 폴더·태그에 대한 자동 자막 규칙, 처리 순서, 취소와 실패 항목 재시도는 자막 대기열에서 관리합니다." />
+        </SettingsSection>
       </div>
     </div>
     <ConfirmDialog open={quit} onOpenChange={setQuit} title="앱을 완전히 종료할까요?" description="진행 중인 자막 처리를 멈추고 앱을 종료합니다. 트레이에서 계속 처리하려면 취소한 뒤 창을 닫으세요." confirmLabel="완전 종료" variant="destructive" onConfirm={() => action('quit')} />

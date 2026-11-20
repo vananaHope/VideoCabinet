@@ -55,6 +55,7 @@ FRAME_RECORDER = """(() => {
         boxes: {
           header: box(main.firstElementChild), status: box(main.querySelector('[data-recommend-status]')), list: box(list),
           rowHeader: box(row?.children[0]), strip: box(row?.children[1]), card: box(row?.children[1].children[0]),
+          info: box(row?.children[1].children[0]?.children[1]),
         },
         skeletons: main.querySelectorAll('[data-slot=skeleton]').length,
         cells: main.querySelectorAll('[role=gridcell]').length,
@@ -174,7 +175,7 @@ def test_first_display_placeholder_keeps_header_status_and_first_row(open_window
     assert not any(EMPTY in frame['text'] for frame in loading)
     for frame in frames:
         if recommended:
-            # 머리글·개수 줄·목록 영역·첫 줄 머리·카드 줄·첫 카드의 경계가 첫 프레임부터 결과와 같다.
+            # 머리글·개수 줄·목록 영역·첫 줄 머리·카드 줄·첫 카드·카드 정보 칸의 경계가 첫 프레임부터 결과와 같다.
             assert frame['boxes'] == final['boxes'], frame
         else:
             # 결과 없음은 자리 표시와 다른 빈 안내로 바뀐다. 그 위의 머리글·개수 줄은 움직이지 않는다.

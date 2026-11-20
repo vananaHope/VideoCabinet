@@ -4,7 +4,7 @@ import type { VideoData } from "@/bridge-types"
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
 import { selectableItem } from "@/components/ui/selectable-item"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Thumbnail, duration, viewing } from "@/components/video-card"
+import { Thumbnail, ViewingBadge, duration } from "@/components/video-card"
 
 const cardVariants = cva("flex min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring", {
   variants: { variant: { default: ["border-border bg-card", selectableItem({ selected: false, inner: "muted" })], selected: "border-ring bg-card ring-1 ring-ring", placeholder: "border-border bg-card" } },
@@ -16,19 +16,19 @@ export function RecommendationCard({ video, reason, variant, ...props }: Props) 
     <Thumbnail video={video} variant="card" />
     <div className="flex w-full min-w-0 flex-col gap-1 p-2">
       <span className="truncate text-body-strong">{video.title}</span>
-      <span className="truncate text-label text-muted-foreground">{duration(video.duration)} · {viewing(video)}</span>
+      <span className="flex h-badge min-w-0 items-center gap-1"><span className="text-label text-muted-foreground tabular-nums">{duration(video.duration)}</span><ViewingBadge video={video} /></span>
       <span className="line-clamp-2 min-h-lines-label-2 text-label wrap-anywhere text-foreground">{reason}</span>
     </div>
   </button>
 }
 
-/** 추천이 오기 전의 카드 자리. RecommendationCard와 같은 테두리·16:9 썸네일·정보 칸 높이(제목 한 줄·정보 한 줄·이유 두 줄)를 쓴다. */
+/** 추천이 오기 전의 카드 자리. RecommendationCard와 같은 테두리·16:9 썸네일·정보 칸 높이(제목 한 줄·길이와 시청 상태 배지 한 줄·이유 두 줄)를 쓴다. */
 export function RecommendationCardPlaceholder() {
   return <div data-slot="recommendation-card-placeholder" aria-hidden="true" className={cardVariants({ variant: "placeholder" })}>
     <Skeleton shape="media" />
     <div className="flex w-full min-w-0 flex-col gap-1 p-2">
       <Skeleton className="w-3/4" />
-      <Skeleton shape="text" className="w-1/2" />
+      <span className="flex h-badge items-center gap-1"><Skeleton shape="text" className="w-8" /><Skeleton shape="badge" className="w-14" /></span>
       <Skeleton shape="block" className="h-lines-label-2 w-full" />
     </div>
   </div>

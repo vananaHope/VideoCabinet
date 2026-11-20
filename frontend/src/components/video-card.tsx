@@ -22,6 +22,10 @@ export function duration(seconds: number) {
 export function viewing(video: VideoData) {
   return video.missing ? "파일 없음" : video.finished ? "다 봄" : video.abandoned ? `보다 만 ${Math.round(video.stoppedPercent ?? 0)}%` : "아직 안 봄"
 }
+// 시청 상태 배지. 라이브러리 카드와 추천 카드가 같은 배지로 시청 상태를 보인다.
+export function ViewingBadge({ video }: { video: VideoData }) {
+  return <StatusBadge variant={video.missing ? "destructive" : video.finished ? "success" : video.abandoned ? "info" : "muted"}>{viewing(video)}</StatusBadge>
+}
 const thumbnailVariants = cva("relative flex w-full shrink-0 items-center justify-center overflow-hidden bg-muted", {
   variants: { variant: { default: "aspect-video", card: "aspect-video", medium: "aspect-video", large: "aspect-video", detail: "h-20 rounded-sm" } }, defaultVariants: { variant: "default" },
 })
@@ -81,7 +85,7 @@ export function VideoCard({ video, variant, cardSize = "medium", ...props }: Pro
       </span>
       <span className="flex h-badge min-w-0 items-center gap-1.5">
         <span className="shrink-0 text-label text-muted-foreground tabular-nums">{duration(video.duration)}</span>
-        <StatusBadge variant={video.missing ? "destructive" : video.finished ? "success" : video.abandoned ? "info" : "muted"}>{viewing(video)}</StatusBadge>
+        <ViewingBadge video={video} />
         {flags.map(({ label, variant }) => <span key={label} className="contents @max-card-flags/info:hidden"><StatusBadge variant={variant}>{label}</StatusBadge></span>)}
       </span>
       <VideoStatistics video={video} />
