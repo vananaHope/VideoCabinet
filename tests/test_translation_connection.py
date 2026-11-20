@@ -64,7 +64,7 @@ def connected(tmp_path):
     return core, http, cli, store, clock, reopen
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_model_policy_passes_contract_expiry_as_iso_date(connected):
     # #232: 만료일은 표시용 문자열이 아니라 ISO 날짜로 넘기고 모양은 화면이 만든다.
     core, clock = connected[0], connected[4]
@@ -93,7 +93,7 @@ def save(core, identifier='codex', model=None, effort=None, *, fallback=True, ke
     return core.save_translation_settings(identifier, selections, fallback, key_action=key_action, key=key)
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('identifier,default', [('codex', 'gpt-5.6-terra'), ('claude', 'claude-sonnet-5-5')])
 @pytest.mark.parametrize('model,effort', [(None, ''), ('my-custom-model', 'max'), ('', '')])
 def test_actual_cli_arguments_for_unset_explicit_and_cli_default(connected, tmp_path, identifier, default, model, effort):
@@ -135,7 +135,7 @@ else:
             assert args[args.index('--effort') + 1] == effort
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('message', ['The model does not exist', 'Unsupported model custom',
                                     'Invalid value for --effort', 'reasoning_effort is not supported'])
 def test_cli_configuration_error_is_failed_not_held(connected, tmp_path, message):
@@ -153,7 +153,7 @@ def test_cli_configuration_error_is_failed_not_held(connected, tmp_path, message
     assert not result.notice
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('identifier', ['codex', 'claude'])
 @pytest.mark.parametrize('kind,attempts', [('usage_limit', 1), ('other', 1), ('format', 3)])
 def test_fallback_only_remaining_lines_persists_route_and_provenance(connected, identifier, kind, attempts):
@@ -183,7 +183,7 @@ def test_fallback_only_remaining_lines_persists_route_and_provenance(connected, 
     assert [line.text.startswith('Go ') for line in core.translation(video.id).lines] == [False] * 2 + [True] * 3
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('registered,enabled', [(False, True), (True, False)])
 def test_fallback_requires_key_and_enabled(connected, registered, enabled):
     core, http, cli, store, _, _ = connected
@@ -196,7 +196,7 @@ def test_fallback_requires_key_and_enabled(connected, registered, enabled):
     assert not http.requests
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_go_primary_all_batches_distinct_job_session_and_no_unknown_effort(connected):
     core, http, cli, _, _, _ = connected
     notice = save(core, 'opencode_go', 'custom-model', 'high', key_action='replace', key='test-key-1234')
@@ -211,7 +211,7 @@ def test_go_primary_all_batches_distinct_job_session_and_no_unknown_effort(conne
     assert all(p['model'] == 'custom-model' and 'reasoning_effort' not in p for _, _, _, p in http.requests)
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_fallback_go_limit_honors_server_retry_time_and_resumes_go(connected):
     core, http, cli, store, clock, _ = connected
     store.save('key')
@@ -227,7 +227,7 @@ def test_fallback_go_limit_honors_server_retry_time_and_resumes_go(connected):
     assert len(cli.calls) == 1
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('during_go', [False, True])
 def test_user_cancel_never_falls_back_and_cleans_processing(connected, during_go):
     core, http, cli, store, _, reopen = connected
@@ -254,7 +254,7 @@ def test_user_cancel_never_falls_back_and_cleans_processing(connected, during_go
     assert core.translation_queue()[0].state == 'queued'
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_model_key_edit_validation_persistence_and_no_secret_in_snapshot(connected):
     core, _, _, store, _, reopen = connected
     assert save(core, 'codex', 'custom-codex', 'max', key_action='replace', key='secret-1234') == ''
@@ -286,7 +286,7 @@ def test_local_server_key_check_and_known_effort_payload(server):
     assert server.requests[0][1]['X-Opencode-Session'] != server.requests[1][1]['X-Opencode-Session']
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_key_storage_failure_rolls_back_settings_and_does_not_repeat_decrypt(connected, monkeypatch):
     core, _, _, store, _, _ = connected
     store.save('original-key-1234')
@@ -308,7 +308,7 @@ def test_key_storage_failure_rolls_back_settings_and_does_not_repeat_decrypt(con
     assert original().reveal() == 'original-key-1234'
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_unreadable_key_can_be_replaced_or_deleted(connected):
     core, _, _, store, _, _ = connected
     store.path.parent.mkdir(parents=True)
@@ -321,7 +321,7 @@ def test_unreadable_key_can_be_replaced_or_deleted(connected):
     assert store.read() is None
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_retranslation_keeps_old_visible_provider_until_atomic_commit(connected):
     core, http, _, store, _, _ = connected
     video = core.videos()[0]
@@ -342,7 +342,7 @@ def test_retranslation_keeps_old_visible_provider_until_atomic_commit(connected)
     assert {provenance[l.id] for l in transcript.lines[1:]} == {'opencode_go'}
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('status,expected', [(401, '키 또는 접근 권한'), (503, '서버가 일시적으로')])
 def test_primary_go_error_preserves_safe_provider_specific_message(connected, status, expected):
     core, http, _, store, _, _ = connected
@@ -359,7 +359,7 @@ def test_primary_go_error_preserves_safe_provider_specific_message(connected, st
     assert f'HTTP {status}: server diagnostic' in result.error_detail
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('identifier', ['codex', 'claude', 'opencode_go'])
 def test_running_job_freezes_provider_model_effort_across_restart(connected, identifier):
     core, http, cli, store, _, reopen = connected
@@ -400,7 +400,7 @@ def test_running_job_freezes_provider_model_effort_across_restart(connected, ide
         assert calls[-3:] == [(identifier, 'next-model', 'low')] * 3
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_manual_translation_removes_machine_provenance(connected):
     core = connected[0]
     video = core.videos()[0]
@@ -412,7 +412,7 @@ def test_manual_translation_removes_machine_provenance(connected):
     assert not core.translation_line_providers(video.id)[line.id]
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_fallback_uses_go_model_from_job_start_and_backoff_keeps_notice(connected):
     core, http, cli, store, _, _ = connected
     store.save('key')
@@ -432,7 +432,7 @@ def test_fallback_uses_go_model_from_job_start_and_backoff_keeps_notice(connecte
     assert http.requests[-1][3]['model'] == 'next-go-model'
     assert len(cli.calls) == 2
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('status', [400, 402, 404, 500])
 def test_go_failure_diagnostics_survive_queue_storage(connected, status):
     core, http, _, store, _, _ = connected
@@ -446,7 +446,7 @@ def test_go_failure_diagnostics_survive_queue_storage(connected, status):
     assert core.subtitle_queue_items()[0].error == result.error_detail
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('language', ['en', 'ko'])
 @pytest.mark.parametrize('persistent,batch_size', [(False, 20), (True, 20), (True, 10)])
 def test_go_response_timeout_shrinks_then_uses_existing_retry_and_recovery(tmp_path, language, persistent, batch_size):
@@ -494,7 +494,7 @@ def test_go_response_timeout_shrinks_then_uses_existing_retry_and_recovery(tmp_p
     assert set(core.translation_line_providers(video.id).values()) == {'opencode_go'}
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 @pytest.mark.parametrize('kind,detail', [
     ('connection', 'OpenCode Go에 연결하지 못했습니다.'),
     ('connection', 'OpenCode Go에 연결하지 못했습니다. (추가 진단)'),
@@ -515,7 +515,7 @@ def test_queue_error_deduplicates_summary_and_keeps_distinct_redacted_detail(con
     assert 'private-value' not in display
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_go_queue_error_redacts_path_without_duplicate_summary(connected):
     core, http, _, store, _, _ = connected
     store.save('fake-key')
@@ -535,7 +535,7 @@ def test_go_queue_error_redacts_path_without_duplicate_summary(connected):
     assert '/v1/chat/completions' not in display
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='키 저장소가 Windows 사용자 암호화(DPAPI)를 쓴다')
+@pytest.mark.usefixtures('portable_dpapi')
 def test_go_timeout_keeps_cli_fallback_notice(connected):
     core, http, cli, store, _, _ = connected
     store.save('key')

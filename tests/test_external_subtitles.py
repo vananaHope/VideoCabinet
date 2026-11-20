@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from concurrent.futures import CancelledError
 from asyncio import CancelledError as AsyncCancelledError
 import ctypes
+import errno
 import os
 from pathlib import Path
 import sqlite3
@@ -876,7 +877,23 @@ def test_directory_failure_uses_same_safe_cause_message(library, monkeypatch):
     assert str(video.parent) not in issue.message
 
 
-@pytest.mark.skipif(os.name != 'nt', reason='실제 Windows FormatError 문구')
+def windows_os_error(code, path, *, suffix=''):
+    """Windows가 `OSError(None, 문구, 경로, winerror)`로 만드는 오류와 그 시스템 문구를 돌려준다.
+
+    Windows 밖에서는 CPython의 winerror→errno 대응(5와 19~36은 EACCES, 나머지는 EINVAL)을 따라
+    같은 예외 형태를 만들고 시스템 문구 대신 고정 문구를 쓴다. 실제 문구는 Windows에서 확인한다.
+    """
+    if os.name == 'nt':
+        detail = ctypes.FormatError(code).strip()
+        return OSError(None, detail + suffix, str(path), code), detail
+    detail = f'Windows system error {code}.'
+    denied = code == 5 or 19 <= code <= 36
+    error = (PermissionError if denied else OSError)(errno.EACCES if denied else errno.EINVAL,
+                                                     detail + suffix, str(path))
+    error.winerror = code
+    return error, detail
+
+
 @pytest.mark.parametrize('code', [5, 21, 23, 31, 32, 33, 995, 996, 997, 1117])
 @pytest.mark.parametrize('with_path', [False, True])
 def test_windows_read_failure_preserves_system_message(library, monkeypatch, code, with_path):
@@ -884,9 +901,7 @@ def test_windows_read_failure_preserves_system_message(library, monkeypatch, cod
     subtitle = video.with_suffix('.srt')
     subtitle.write_text(srt(), encoding='utf-8')
     original = Path.read_bytes
-    detail = ctypes.FormatError(code).strip()
-    error = OSError(None, detail + (' "C:/private/subtitle.srt"' if with_path else ''),
-                    str(subtitle), code)
+    error, detail = windows_os_error(code, subtitle, suffix=' "C:/private/subtitle.srt"' if with_path else '')
 
     def read(path):
         if path == subtitle:
@@ -904,17 +919,16 @@ def test_windows_read_failure_preserves_system_message(library, monkeypatch, cod
     assert any(issue.message == warning for issue in result.issues)
 
 
-@pytest.mark.skipif(os.name != 'nt', reason='실제 Windows FormatError 문구')
 @pytest.mark.parametrize('code', [21, 23, 32, 1117])
 def test_windows_directory_device_failure_is_not_permission_failure(library, monkeypatch, code):
     core, video = library
     core.add_file(video)
     original = os.scandir
-    detail = ctypes.FormatError(code).strip()
+    detail = windows_os_error(code, video.parent)[1]
 
     def scan(path):
         if Path(path) == video.parent:
-            raise OSError(None, detail, str(path), code)
+            raise windows_os_error(code, path)[0]
         return original(path)
 
     monkeypatch.setattr(os, 'scandir', scan)
