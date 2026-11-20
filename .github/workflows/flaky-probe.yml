@@ -83,11 +83,8 @@ jobs:
           (Get-Command ffmpeg).Source
           (Get-CimInstance Win32_Processor).Name
           uv pip install --python .venv/Scripts/python.exe pytest-repeat==0.9.4
-          $env:MVM_PROBE_LOG = "$PWD\probe.log"
-          $burn = 1..3 | ForEach-Object { Start-Process -PassThru -NoNewWindow .venv/Scripts/python.exe -ArgumentList '-c','while True: pass' }
-          .venv/Scripts/python.exe -m pytest -n 2 -q -rfE --timeout=300 --timeout-method=thread -p no:cacheprovider --count=40 "tests/test_emergency_hide_dialogs_ui.py::test_file_dialog_closes_as_cancel_without_adding" "tests/test_emergency_hide_dialogs_ui.py::test_question_warning_closes_as_cancel" tests/test_app_icon.py 2>&1 | Select-String -Pattern 'FAILED|passed|failed'
-          $code = $LASTEXITCODE
-          $burn | Stop-Process
-          Get-Content probe.log | Group-Object | ForEach-Object { "$($_.Count) $($_.Name)" }
-          exit $code
+          .venv/Scripts/python.exe -m pytest -n 2 -q -rfE --timeout=300 --timeout-method=thread -p no:cacheprovider --count=40 "tests/test_emergency_hide_dialogs_ui.py::test_file_dialog_closes_as_cancel_without_adding" 2>&1 | Select-String -Pattern 'FAILED|passed|failed'
+          $a = $LASTEXITCODE
+          .venv/Scripts/python.exe -m pytest -n 2 -q -rfE --timeout=300 --timeout-method=thread -p no:cacheprovider --count=3 tests/test_emergency_hide_dialogs_ui.py tests/test_emergency_hide_ui.py tests/test_app_icon.py tests/test_tray_icon.py 2>&1 | Select-String -Pattern 'FAILED|passed|failed'
+          exit ($a + $LASTEXITCODE)
 
