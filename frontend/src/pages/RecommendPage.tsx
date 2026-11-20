@@ -57,11 +57,11 @@ function reveal(videoId: number) {
 
 // 첫 추천이 오기 전의 줄 자리. 실제 줄과 같은 머리글 높이(본문 한 줄, 실제 제목은 한 줄 말줄임)·카드 줄(고정 폭 카드 다섯 장)로 첫 화면을 채운다.
 function RecommendationsPlaceholder() {
-  return <div data-recommend-list className="min-h-0 flex-1 overflow-hidden scroll-stable rounded-lg p-1">
+  return <div data-recommend-list className="-mx-1 min-h-0 flex-1 overflow-hidden scroll-stable rounded-lg p-1">
     <Placeholder label="추천을 불러오는 중"><div className="space-y-3">
       {[0, 1, 2].map(row => <section key={row} className="flex flex-col gap-1">
-        <div className="flex h-line-body items-center px-1"><Skeleton shape="text" className="w-28" /></div>
-        <div className="recommendation-row rounded-lg p-1">{[0, 1, 2, 3, 4].map(card => <RecommendationCardPlaceholder key={card} />)}</div>
+        <div className="flex h-line-body items-center"><Skeleton shape="text" className="w-28" /></div>
+        <div className="recommendation-row -mx-1 rounded-lg p-1">{[0, 1, 2, 3, 4].map(card => <RecommendationCardPlaceholder key={card} />)}</div>
       </section>)}
     </div></Placeholder>
   </div>
@@ -203,11 +203,12 @@ export default function RecommendPage() {
     {!loaded ? (!error && <RecommendationsPlaceholder />)
       : !rows.length ? (!data?.error && <EmptyState variant="page" title="지금은 추천할 영상이 없어요"
         description="영상을 보거나 하이라이트·태그를 남기면 이유와 함께 여기에 보여 줍니다. 관심 없음으로 뺀 영상은 ‘관심 없음 되돌리기’에서 다시 추천받을 수 있어요." />)
+      // 목록·카드 줄의 안쪽 여백(p-1)은 선택 링·초점 윤곽선 자리다. 같은 폭의 음수 여백으로 줄 제목과 카드 가장자리를 머리글에 맞춘다.
       : <div id="recommendations" data-recommend-list role="grid" aria-label="추천 줄" aria-busy={requests > 0} aria-activedescendant={activeId !== null ? cardId(activeId) : undefined} tabIndex={0} onKeyDown={key}
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-stable rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
+        className="-mx-1 min-h-0 flex-1 space-y-3 overflow-y-auto scroll-stable rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
         {rows.map((row, rowIndex) => <section key={row.key} role="row" aria-label={`${row.title} · ${row.items.length}개`} className="flex flex-col gap-1">
-          <div role="rowheader" className="flex h-line-body min-w-0 items-baseline gap-2 px-1"><h2 title={row.title} className="min-w-0 truncate text-body-strong">{row.title}</h2><span className="shrink-0 text-label text-muted-foreground">{row.items.length}개</span></div>
-          <div className="recommendation-row rounded-lg p-1">
+          <div role="rowheader" className="flex h-line-body min-w-0 items-baseline gap-2"><h2 title={row.title} className="min-w-0 truncate text-body-strong">{row.title}</h2><span className="shrink-0 text-label text-muted-foreground">{row.items.length}개</span></div>
+          <div className="recommendation-row -mx-1 rounded-lg p-1">
             {row.items.map((item, column) => <RecommendationMenu key={item.video.id} onPlay={() => play({ row: rowIndex, column })} onDismiss={() => dismiss({ row: rowIndex, column })}
               onClose={() => document.getElementById("recommendations")?.focus({ preventScroll: true })}>
               <RecommendationCard id={cardId(item.video.id)} video={item.video} reason={item.reason} role="gridcell" aria-selected={activeId === item.video.id} tabIndex={-1}
