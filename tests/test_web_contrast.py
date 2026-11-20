@@ -102,6 +102,9 @@ def hover(window, element):
     # 떠 있는 층 안 목록은 스크롤되므로 요소를 보이는 자리로 옮긴 뒤 마우스를 올린다.
     js(window, f"({element}).scrollIntoView({{ block: 'nearest' }})")
     settle(window)
+    # 커서가 이미 그 자리면(같은 작업자의 앞 테스트가 같은 좌표에 올려 둔 경우) 마우스 이동 이벤트가 생기지 않아
+    # 새 창의 요소가 호버되지 않는다. 빈 자리를 거쳐 옮긴다.
+    QTest.mouseMove(view(window), QPoint(2, 2))
     QTest.mouseMove(view(window), point(window, element))
     wait_for(lambda: probe(window, element)['hovered'])
     still(window, element)
