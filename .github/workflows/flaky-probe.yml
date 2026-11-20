@@ -18,7 +18,7 @@ jobs:
       # 러너의 기본 코드 페이지(cp1252)는 한국어 출력을 쓰지 못한다.
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
-          steps:
+    steps:
       - name: Defender 실시간 검사 끄기
         # 임시 폴더·SQLite·Qt 캐시 쓰기마다 검사가 붙어 테스트가 크게 느려진다. 러너는 매번 새로 만들어진다.
         shell: pwsh
@@ -81,7 +81,6 @@ jobs:
         run: |
           $env:Path = $env:MVM_FFMPEG_DIR + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
           (Get-Command ffmpeg).Source
-          .venv/Scripts/python.exe -m pip --version > $null
           (Get-CimInstance Win32_Processor).Name
           $fail = 0
           for ($i = 0; $i -lt 8; $i++) {
