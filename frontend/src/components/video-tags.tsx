@@ -11,10 +11,9 @@ export function VideoTags({ tags }: { tags: TagData[] }) {
   </span>
 }
 
-/** 상세 패널의 태그 칩. 클릭·우클릭·메뉴 키로 태그 메뉴를 연다. */
+/** 상세 패널의 태그 칩. 클릭·우클릭·메뉴 키로 태그 메뉴를 연다. 라벨("태그")은 상세 정보 목록의 라벨 열이 보인다. */
 export function TagMenuChips({ tags, onRandomPlay }: { tags: TagData[]; onRandomPlay: (tagId: number) => void }) {
   return <div role="group" aria-label="태그" className="flex flex-wrap items-center gap-1">
-    <span>태그:</span>
     {tags.length ? tags.map(tag => <TagMenuChip key={tag.id} tag={tag} onRandomPlay={onRandomPlay} />) : <span>없음</span>}
   </div>
 }

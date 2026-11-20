@@ -169,7 +169,8 @@ def check_folder_toggle():
     assert subset or not args.count, '일부 영상만 담은 폴더가 없음'
     view(mode='folders', folder=subset, collapsed_folders=page.options['collapsed_folders'])
     assert not args.count or 0 < len(page.visible_ids) < args.count, (subset, len(page.visible_ids))
-    js("document.getElementById('library-folders').focus()")
+    # 폴더 패널 단추는 툴바 맨 앞이라 제목 검색 칸에서 Shift+Tab으로 닿는다(#381).
+    js("document.querySelector('[aria-label=\"영상 제목 빠른 검색\"]').focus()")
     QTest.keyClick(host.view.focusProxy(), Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
     settle()
     assert js('document.activeElement.getAttribute("aria-label")') == '폴더 패널'
@@ -192,7 +193,7 @@ def check_folder_toggle():
     reopened = AppCore(media=media, clock=lambda: datetime.now(timezone.utc), database=core.database)
     assert reopened.library_view_options()['mode'] == 'folders' and reopened.library_view_options()['folder'] == folder
     shown = f'일부 폴더 {len(members)}/{args.count}개 → 닫기 전체 → 열기 {len(members)}개' if args.count else '폴더 없음'
-    metrics['checks'].append(f'#194 폴더 패널 아이콘 Shift+Tab 도달·Enter 닫기(폴더 거르기 해제, 선택 보존)·Space 열기(폴더 복원)·설정 저장 ({shown})')
+    metrics['checks'].append(f'#194 폴더 패널 아이콘 검색 칸에서 Shift+Tab 도달·Enter 닫기(폴더 거르기 해제, 선택 보존)·Space 열기(폴더 복원)·설정 저장 ({shown})')
 
 
 try:

@@ -58,6 +58,9 @@
   --spacing-card-info: var(--library-card-info-height);
   /* 읽는 화면(설정·양식·모아보기·검색)의 내용 최대 폭. 기준 창 폭과 같아 기본 창에서는 그대로이고, 최대화에서만 내용이 끝없이 늘어나지 않게 한다. */
   --container-content: var(--content-max-width);
+  /* 영상 카드 정보 칸이 이보다 좁으면 자막 있음·즐겨 보는 배지를 작은 기호로 보인다. 긴 길이(1:23:45) + 가장 긴 상태 배지 + 두 배지가
+     한 줄에 들어가는 폭이다. 컨테이너 쿼리는 var()를 읽지 못해 값을 직접 둔다. */
+  --container-card-flags: 17.5rem;
   /* 대기열 고정 머리글 높이. 머리글 높이와 목록 scroll-padding이 같은 값을 쓴다. */
   --spacing-queue-header: calc(var(--spacing) * 7.25);
   /* 전환은 web_tokens.json의 motion 값 하나를 쓴다. transition-colors 같은 유틸리티도 이 기본 시간·곡선을 따른다.
@@ -115,4 +118,6 @@
 @utility library-grid-small { --grid-card-width: var(--library-card-small); }
 @utility library-grid-medium { --grid-card-width: var(--library-card-medium); }
 @utility library-grid-large { --grid-card-width: var(--library-card-large); }
+/* 상세 정보 같은 정의 목록. 라벨 열은 가장 긴 라벨 폭이고 값 열이 나머지를 채워 줄마다 라벨과 값의 시작이 맞는다. */
+@utility definition-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); }
 @utility folder-tree-row { padding-left: calc((1 + var(--folder-depth) * 2) * var(--spacing)); }
