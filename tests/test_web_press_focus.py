@@ -220,11 +220,27 @@ def test_playback_control_press_uses_accent_and_differs_from_hover_and_focus(win
     wait_for(lambda: page.isVisible())
     button = page.pause_button
     colors = TOKENS['colors']
+    from PySide6.QtGui import QCursor, QGuiApplication
+    target = button.mapToGlobal(button.rect().center())
+    def snap(label):
+        at = QApplication.widgetAt(target)
+        return (f"{label}: cursor={QCursor.pos()} target={target} under={button.underMouse()} buttons={QGuiApplication.mouseButtons()} "
+                f"grabber={QApplication.mouseGrabber()} at={type(at).__name__ if at else None}/{at.objectName() if at else ''} "
+                f"active={type(QApplication.activeWindow()).__name__} popup={QApplication.activePopupWidget()} modal={QApplication.activeModalWidget()}")
+    notes = [snap("start")]
     QTest.mouseMove(window.surface, window.surface.rect().center())
-    wait_for(lambda: not button.underMouse())
+    notes.append(snap("after-surface"))
+    try:
+        wait_for(lambda: not button.underMouse(), timeout=20)
+    except AssertionError:
+        raise AssertionError("PROBE\n" + "\n".join(notes + [snap("leave-timeout")]))
     assert colour(button, 4) == colors['secondary']
     QTest.mouseMove(button, button.rect().center())
-    wait_for(button.underMouse)
+    notes.append(snap("after-button"))
+    try:
+        wait_for(button.underMouse, timeout=20)
+    except AssertionError:
+        raise AssertionError("PROBE\n" + "\n".join(notes + [snap("enter-timeout")]))
     # 올림은 테두리만 밝아지고 면은 쉼과 같다.
     assert colour(button, 4) == colors['secondary']
     assert colour(button, 0) == colors['muted-foreground']
