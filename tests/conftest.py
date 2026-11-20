@@ -134,7 +134,8 @@ def pytest_collection_modifyitems(config, items):
 
     nodeid 순서대로 번갈아 나눠 느린 파일이 한 조각에 몰리지 않게 한다.
     """
-    shard = os.environ.get('MVM_TEST_SHARD')
+    # 테스트가 띄우는 하위 pytest(단일 nodeid 실행)가 조각 설정을 물려받아 모두 제외되지 않게 지운다.
+    shard = os.environ.pop('MVM_TEST_SHARD', None)
     if not shard:
         return
     index, count = (int(part) for part in shard.split('/'))
