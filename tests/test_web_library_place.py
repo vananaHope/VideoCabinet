@@ -279,7 +279,8 @@ def test_folder_panel_keeps_selected_card_at_same_height(open_window):
 
 def test_folder_panel_keeps_scroll_near_when_selected_card_leaves_result(open_window):
     # 패널을 닫아도 남아 있던 폴더(직접 추가)가 열면 다시 적용되어, 감시 폴더의 선택 영상이 결과에서 빠진다.
-    window = open_window(folder='direct')
+    # 보통 카드는 이 창에서 패널을 열면 2열, 닫으면 3열이다(#381 전의 작게와 같은 열 수).
+    window = open_window(folder='direct', card_size='medium')
     selected = choose_middle_card(window)
     if selected not in window.library_page.visible_ids[1::2]:
         QTest.keyClick(view(window), Qt.Key.Key_Right)
@@ -337,9 +338,9 @@ FULL_CELLS = f"""JSON.stringify((() => {{ const grid = {GRID}, g = grid.getBound
 
 @pytest.mark.parametrize('start, row_index', [('top', 2), ('top', 3), ('middle', 0), ('middle', 1), ('bottom', -1)])
 def test_folder_panel_close_from_open_panel_keeps_card_or_clamps_scroll(open_window, start, row_index):
-    # 저장된 열린 패널(폴더별·폴더 미선택이라 결과는 60개 그대로, 2열)에서 시작해 패널 안에서 고른 카드로 닫는다(3열).
+    # 저장된 열린 패널(보통 카드, 폴더별·폴더 미선택이라 결과는 60개 그대로, 2열)에서 시작해 패널 안에서 고른 카드로 닫는다(3열).
     # top: 맨 위에서 둘째 줄 카드(결과 index 2·3). middle: 몇 줄 내린 뒤 완전히 보이는 첫 줄의 카드. bottom: 맨 끝에서 마지막 카드.
-    window = open_window(mode='folders')
+    window = open_window(mode='folders', card_size='medium')
     wait_for(lambda: js(window, '!!document.getElementById("library-folder-panel")'))
     wait_for(lambda: js(window, f"{GRID}.getAttribute('aria-colcount')") == '2')
     if start != 'top':
