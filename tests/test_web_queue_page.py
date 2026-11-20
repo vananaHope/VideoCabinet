@@ -643,3 +643,24 @@ def test_keyboard_selection_stays_below_sticky_queue_header(window_factory, core
     QTest.mouseClick(view, Qt.MouseButton.LeftButton, pos=QPoint(int(point[0]), int(point[1])))
     wait_for(lambda: js("document.getElementById('queue-list').getAttribute('aria-activedescendant')") != f'queue-row-{ids[0]}')
     assert json.loads(js(QUEUE_SELECTION))['scrollTop'] == 0
+
+
+def test_progress_fill_stands_out_from_track_on_selected_and_resting_rows(window_factory, core):
+    # 진행 중 채움(강조색)과 트랙은 UI 대비 3:1을 넘는다. 트랙은 바탕색에 테두리로 전체 길이를 보인다(#385).
+    from test_web_contrast import UI, ratio
+    window, js, rendered = open_queue(window_factory, core, 1100, 720, long_notices=False)
+    js("document.querySelectorAll('#queue-list [data-queue-row]')[1].click()")
+    rendered()
+    pairs = json.loads(js("""JSON.stringify((() => {
+      const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+      const rgb = color => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = color; ctx.fillRect(0, 0, 1, 1); return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3) }
+      return [...document.querySelectorAll('#queue-list [data-queue-row]')].map(row => {
+        const track = row.querySelector('[role=progressbar]')
+        return { selected: row.getAttribute('aria-selected'), fill: rgb(getComputedStyle(track.querySelector('rect')).fill),
+          track: rgb(getComputedStyle(track).backgroundColor), border: getComputedStyle(track).borderTopWidth }
+      })
+    })())"""))
+    assert {pair['selected'] for pair in pairs} == {'true', 'false'}, pairs
+    for pair in pairs:
+        assert ratio(pair['fill'], pair['track']) >= UI, pair
+        assert pair['border'] == '1px', pair

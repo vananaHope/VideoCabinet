@@ -14,7 +14,7 @@ const rowClass = cva(`${columns} items-center border-b py-1 text-body`, { varian
 // 고정 머리글 높이 토큰을 scroll-padding에도 써서, 키보드로 위쪽 행을 골라도 머리글에 가리지 않게 한다.
 const listClass = cva("min-h-32 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border scroll-pt-queue-header" } } })
 // 트랙은 놓인 면보다 어두운 홈이다. 선택 행(accent 면)에서는 바탕색으로 내려 빈 트랙이 꽉 찬 막대처럼 보이지 않게 한다.
-const trackClass = cva("h-2 min-w-0 flex-1 rounded-full", { variants: { selected: { true: "bg-background", false: "bg-muted" } } })
+const trackClass = "h-2 min-w-0 flex-1 rounded-full border border-border bg-background"
 // 채움은 진행 중에만 강조색이고, 끝난 상태는 배지와 같은 의미색이다.
 const fillClass = cva("", { variants: { state: { completed: "fill-status-success", failed: "fill-destructive", held: "fill-status-warning", active: "fill-primary" } } })
 const fills = { completed: "completed", failed: "failed", held: "held" } as const
@@ -29,7 +29,7 @@ const QueueRow = memo(function QueueRow({ store, id, selected, onSelect }: { sto
   return <div id={`queue-row-${id}`} role="row" aria-selected={selected} data-queue-row={id} data-queue-kind={row.queueKind} className={rowClass({ selected })} onClick={() => onSelect(id)}>
     <div role="gridcell" title={row.title} className={`${wide} truncate text-body-strong`}>{row.title}</div>
     <div role="gridcell"><StatusBadge variant={selected && row.state === "queued" ? "selectedMuted" : badges[row.state as keyof typeof badges]}>{row.stateLabel}</StatusBadge></div>
-    <div role="gridcell" className="flex min-w-0 items-center gap-2"><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="progressbar" aria-label={`${row.title} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(row.progress * 100)} className={trackClass({ selected })}><rect width={Math.max(0, Math.min(100, row.progress * 100))} height={8} className={fillClass({ state: fills[row.state as keyof typeof fills] ?? "active" })} /></svg><span className="w-9 shrink-0 text-right text-label tabular-nums">{Math.round(row.progress * 100)}%</span></div>
+    <div role="gridcell" className="flex min-w-0 items-center gap-2"><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="progressbar" aria-label={`${row.title} 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(row.progress * 100)} className={trackClass}><rect width={Math.max(0, Math.min(100, row.progress * 100))} height={8} className={fillClass({ state: fills[row.state as keyof typeof fills] ?? "active" })} /></svg><span className="w-9 shrink-0 text-right text-label tabular-nums">{Math.round(row.progress * 100)}%</span></div>
     <div role="gridcell" className={`${wide} text-muted-foreground`}>{row.message && <InlineNotice tone={tones[row.state as keyof typeof tones] ?? "info"} text={row.message} />}</div>
   </div>
 })
