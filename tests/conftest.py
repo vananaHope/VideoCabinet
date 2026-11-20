@@ -1,6 +1,7 @@
 """각 pytest 프로세스에서 Qt를 불러오기 전에 테스트 환경을 준비한다."""
 import os
 import logging
+import sqlite3
 import sys
 
 import pytest
@@ -102,6 +103,39 @@ def name_ordered_scandir(monkeypatch):
             return Entries(sorted(entries, key=lambda entry: entry.name.upper()))
 
     monkeypatch.setattr(os, 'scandir', scandir)
+
+
+_sqlite_connect = sqlite3.connect
+
+
+def _connect_without_sync(*args, **kwargs):
+    connection = _sqlite_connect(*args, **kwargs)
+    # synchronous는 스키마를 읽어 다른 연결의 쓰기 잠금을 기다릴 수 있다. 잠금 테스트의 대기 시간을 바꾸지 않게
+    # 기다리지 않고 시도하고, 잠겨 있거나 DB가 아닌 파일이면 이 연결만 기본 동기화로 둔다. 그런 오류는 앱이
+    # 연결을 받은 뒤 처음 읽을 때 직접 만나야 한다(여기서 올리면 연결이 닫히지 않아 Windows에서 파일이 잠긴다).
+    # busy_timeout 자체는 DB를 읽지 않는다.
+    timeout = kwargs.get('timeout', args[1] if len(args) > 1 else 5.0)
+    try:
+        connection.execute('PRAGMA busy_timeout = 0')
+        try:
+            connection.execute('PRAGMA synchronous = OFF')
+        except sqlite3.DatabaseError:
+            pass
+        connection.execute(f'PRAGMA busy_timeout = {int(timeout * 1000)}')
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
+@pytest.fixture(autouse=True)
+def sqlite_without_sync(monkeypatch):
+    """테스트 DB는 커밋마다 디스크에 동기화하지 않는다.
+
+    앱 DB를 새로 만들면 스키마 설치만으로 fsync가 약 270번 일어나 Windows 러너에서 준비 단계가 수십 초씩 걸린다.
+    전원이 꺼질 때의 내구성만 잃고 트랜잭션·잠금·저널 동작은 그대로다. 하위 프로세스에는 적용되지 않는다.
+    """
+    monkeypatch.setattr(sqlite3, 'connect', _connect_without_sync)
 
 
 @pytest.fixture(autouse=True)
