@@ -221,11 +221,12 @@ def test_playback_control_press_uses_accent_and_differs_from_hover_and_focus(win
     button = page.pause_button
     colors = TOKENS['colors']
     from PySide6.QtGui import QCursor, QGuiApplication
+    from PySide6.QtWidgets import QWidget
     target = button.mapToGlobal(button.rect().center())
     def snap(label):
         at = QApplication.widgetAt(target)
         return (f"{label}: cursor={QCursor.pos()} target={target} under={button.underMouse()} buttons={QGuiApplication.mouseButtons()} "
-                f"grabber={QApplication.mouseGrabber()} at={type(at).__name__ if at else None}/{at.objectName() if at else ''} "
+                f"grabber={QWidget.mouseGrabber()} at={type(at).__name__ if at else None}/{at.objectName() if at else ''} "
                 f"active={type(QApplication.activeWindow()).__name__} popup={QApplication.activePopupWidget()} modal={QApplication.activeModalWidget()}")
     notes = [snap("start")]
     QTest.mouseMove(window.surface, window.surface.rect().center())
