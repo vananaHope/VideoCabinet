@@ -81,6 +81,8 @@ def away(window):
 
 
 def hover(window, selector):
+    # 커서가 이미 그 자리면 마우스 이동 이벤트가 생기지 않아 호버되지 않는다. 빈 자리를 거쳐 옮긴다.
+    QTest.mouseMove(view(window), NEUTRAL)
     QTest.mouseMove(view(window), center(window, selector))
     wait_for(lambda: state(window, selector)['hover'])
     still(window, selector)

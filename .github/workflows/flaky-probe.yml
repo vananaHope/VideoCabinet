@@ -83,6 +83,8 @@ jobs:
           (Get-Command ffmpeg).Source
           (Get-CimInstance Win32_Processor).Name
           uv pip install --python .venv/Scripts/python.exe pytest-repeat==0.9.4
-          .venv/Scripts/python.exe -m pytest -n 2 -q -rfE -l --tb=long --timeout=300 --timeout-method=thread -p no:cacheprovider --durations=5 --count=30 "tests/test_web_contrast.py::test_search_result_badge_stays_distinct_on_rest_hover_and_selected_row" tests/test_web_contrast.py
-          exit $LASTEXITCODE
+          .venv/Scripts/python.exe -m pytest -n 2 -q -rfE -l --tb=long --timeout=300 --timeout-method=thread -p no:cacheprovider --durations=5 --count=20 "tests/test_web_contrast.py::test_search_result_badge_stays_distinct_on_rest_hover_and_selected_row"
+          $a = $LASTEXITCODE
+          .venv/Scripts/python.exe -m pytest -n 2 -q -rfE --timeout=300 --timeout-method=thread -p no:cacheprovider --count=2 tests/test_web_contrast.py tests/test_web_press_focus.py
+          exit ($a + $LASTEXITCODE)
 
