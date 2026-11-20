@@ -2,6 +2,7 @@ import { RotateCcw } from 'lucide-react'
 import { useState } from 'react'
 import type { DialogValues, TranslationModelData, TranslationSettingsData } from '@/bridge-types'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Notice, NoticeStack } from '@/components/ui/notice'
 import { formatDate } from '@/lib/dates'
@@ -45,7 +46,7 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
     // 모델 직접 입력·키 편집의 Enter는 전체 대화상자를 저장하지 않는다.
     if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.stopPropagation()
   }}>
-    {/* 읽는 순서대로 묶는다: 방식과 전송 안내 → 모델·추론 강도와 정책 → OpenCode Go 키와 확인 결과·이어받기. 대화상자가 스크롤되므로 안내는 접지 않는다. */}
+    {/* 단추는 대화상자 끝(취소·확인)을 빼고 모두 작은 윤곽선 단추다. 읽는 순서대로 묶는다: 방식과 전송 안내 → 모델·추론 강도와 정책 → OpenCode Go 키와 확인 결과·이어받기. 대화상자가 스크롤되므로 안내는 접지 않는다. */}
     <fieldset disabled={busy || request.pending} className="space-y-3">
       <div className="space-y-2">
         <Choice label="번역 방식" rows={rows(data.providers)} value={form.choice} onChange={choice => { update({ choice }); setNotice('') }} />
@@ -63,7 +64,7 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
           {efforts.length > 0 && <Choice label="추론 강도" rows={rows([{ id: '', label: '기본(모델 기본값)' }, ...efforts.map(id => ({ id, label: id }))])}
             value={current.effort} onChange={effort => update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, effort } : s) })} />}
           {/* 기본값 버튼은 제공자와 관계없이 묶음 머리 행 오른쪽 끝에 보인다. Tab은 입력 칸 다음에 오도록 DOM에서는 맨 뒤에 둔다. */}
-          <Button variant="outline" size="xs" className="col-start-2 row-start-1 self-center justify-self-end" onClick={() => { setNotice(''); update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, model: selected.default_model, effort: '' } : s) }) }}>
+          <Button variant="outline" size="sm" className="col-start-2 row-start-1 self-center justify-self-end" onClick={() => { setNotice(''); update({ selections: form.selections.map(s => s.provider === form.choice ? { ...s, model: selected.default_model, effort: '' } : s) }) }}>
             <RotateCcw aria-hidden="true" />모델·강도 기본값</Button>
         </div>
         {model.policy && <Notice tone={model.warning ? 'warning' : 'info'} role="note" aria-label="모델 정책" clamp={false}
@@ -78,11 +79,11 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
         <p className="text-body-strong">OpenCode Go 키 · {form.key_action === 'delete' ? '삭제 예정' : form.key_action === 'replace' ? '교체 예정' : registered ? `등록됨 (${data.key_masked})` : '없음'}</p>
         <Input type="password" autoComplete="off" aria-label="OpenCode Go 키 입력" placeholder="새 키 입력 (확인할 때 저장)" value={form.key} onChange={event => update({ key: event.target.value, key_action: event.target.value ? 'replace' : 'keep', fallback: !data.key_masked && !form.key && !!event.target.value ? true : form.fallback })} />
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => send('check-key')}>키 확인</Button>
-          {direct && <Button variant="outline" onClick={() => send('load-models')}>모델 목록 조회</Button>}
+          <Button variant="outline" size="sm" onClick={() => send('check-key')}>키 확인</Button>
+          {direct && <Button variant="outline" size="sm" onClick={() => send('load-models')}>모델 목록 조회</Button>}
           <div className="ml-auto flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => update({ key: '', key_action: 'delete', fallback: false })}>키 지우기</Button>
-            <Button variant="ghost" disabled={form.key_action === 'keep'} onClick={() => update({ key: '', key_action: 'keep' })}>키 편집 취소</Button>
+            <Button variant="outline" size="sm" onClick={() => update({ key: '', key_action: 'delete', fallback: false })}>키 지우기</Button>
+            <Button variant="outline" size="sm" disabled={form.key_action === 'keep'} onClick={() => update({ key: '', key_action: 'keep' })}>키 편집 취소</Button>
           </div>
         </div>
         {/* 저장된 키 상태와 확인 결과는 이 한 자리에서 확인 중(정보) → 성공 · 실패(오류)로 바뀐다. */}
@@ -93,7 +94,7 @@ export function TranslationForm({ data, form, update, act, busy, request }: {
             : fresh && request.information && { tone: 'success', message: request.information },
         ]} />
         {!direct && <>
-          <label className="flex items-center gap-2 pt-1 text-body"><input type="checkbox" disabled={!hasKey} checked={hasKey && form.fallback} onChange={event => update({ fallback: event.target.checked })} />실패하면 OpenCode Go로 이어서</label>
+          <label className="flex items-center gap-2 pt-1 text-body"><Checkbox disabled={!hasKey} checked={hasKey && form.fallback} onCheckedChange={checked => update({ fallback: checked === true })} />실패하면 OpenCode Go로 이어서</label>
           {data.fallback_notice && <Notice tone="info" size="compact" role="note">{data.fallback_notice}</Notice>}
         </>}
       </section>

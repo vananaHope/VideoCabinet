@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { NoticeStack, type NoticeItem } from "@/components/ui/notice"
 import { UpdateChoices, UpdateProgress, UpdateTitle, useShellUpdate } from "@/components/update-notice"
 import { formatDateTime } from "@/lib/dates"
+import { SettingsCard } from "@/components/settings-parts"
 
 // 고른 뒤 사라지는 버튼 대신 포커스를 둘 자리. 건너뛰기와 건너뛰기 취소는 서로 자리를 바꾸고, 업데이트는 진행 안내의 취소로 간다.
 const focusAfter: Record<UpdateChoice, string> = {
@@ -77,12 +78,10 @@ export function UpdateSettings({ data, onCheck, onAutomatic, onChoose }: { data:
   }
   const last = data.last
   const checked = data.checking ? '확인 중…' : last ? `마지막 확인: ${formatDateTime(last.checkedAt)}` : '아직 확인하지 않았습니다.'
-  return <div className="space-y-6">
-    <section className="space-y-3 rounded-xl border bg-card px-4 py-3" aria-labelledby="settings-update-heading">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div><h3 id="settings-update-heading" className="text-body-strong">현재 버전 {data.installedVersion}</h3><p role="status" className="text-body text-muted-foreground">{checked}</p></div>
-        <Button id="settings-update-check" variant="outline" aria-disabled={locked || undefined} onClick={() => { if (!locked) { setDismissed(''); void run(onCheck) } }}>{data.checking ? '확인 중…' : '지금 확인'}</Button>
-      </div>
+  return <>
+    <SettingsCard aria-labelledby="settings-update-heading" titleId="settings-update-heading" title={`현재 버전 ${data.installedVersion}`} status description={checked}
+      control={<Button id="settings-update-check" variant="outline" aria-disabled={locked || undefined} onClick={() => { if (!locked) { setDismissed(''); void run(onCheck) } }}>{data.checking ? '확인 중…' : '지금 확인'}</Button>}
+      note="GitHub Release에서 새 버전을 확인합니다. ‘업데이트’를 누르면 설치 파일을 받아 크기와 SHA-256을 확인한 뒤, 앱을 닫고 설치하고 다시 실행합니다.">
       <NoticeStack items={[
         error && { tone: 'error', message: error, onDismiss: () => setError('') },
         data.error && data.error !== dismissed && { tone: 'error', message: data.error, onDismiss: () => setDismissed(data.error) },
@@ -90,11 +89,9 @@ export function UpdateSettings({ data, onCheck, onAutomatic, onChoose }: { data:
         last && !(installing && last.latestVersion === install.version) && resultNotice(data, last, locked, choose),
       ]} />
       {installing && <UpdateProgress idPrefix="settings-update-progress" install={install} locked={sending} onAction={act} />}
-      <p className="text-label text-muted-foreground">GitHub Release에서 새 버전을 확인합니다. ‘업데이트’를 누르면 설치 파일을 받아 크기와 SHA-256을 확인한 뒤, 앱을 닫고 설치하고 다시 실행합니다.</p>
-    </section>
-    <section className="space-y-1 rounded-xl border bg-card px-4 py-3" aria-labelledby="settings-update-automatic">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2"><div><h3 id="settings-update-automatic" className="text-body-strong">시작할 때 업데이트 확인</h3><p className="text-body text-muted-foreground">앱을 시작할 때 하루에 한 번 새 버전을 확인합니다.</p></div><Button id="settings-update-automatic-toggle" variant={data.automatic ? 'secondary' : 'outline'} aria-pressed={data.automatic} aria-disabled={sending || undefined} onClick={() => void run(() => onAutomatic(!data.automatic))}>시작할 때 확인: {data.automatic ? '켜짐' : '꺼짐'}</Button></div>
-      <p className="text-label text-muted-foreground">기본값 켬 · 꺼도 ‘지금 확인’으로 직접 확인할 수 있습니다. 연결 문제로 실패하면 몇 시간 뒤 다시 확인합니다.</p>
-    </section>
-  </div>
+    </SettingsCard>
+    <SettingsCard aria-labelledby="settings-update-automatic" titleId="settings-update-automatic" title="시작할 때 업데이트 확인" description="앱을 시작할 때 하루에 한 번 새 버전을 확인합니다."
+      control={<Button id="settings-update-automatic-toggle" variant={data.automatic ? 'secondary' : 'outline'} aria-pressed={data.automatic} aria-disabled={sending || undefined} onClick={() => void run(() => onAutomatic(!data.automatic))}>시작할 때 확인: {data.automatic ? '켜짐' : '꺼짐'}</Button>}
+      note="기본값 켬 · 꺼도 ‘지금 확인’으로 직접 확인할 수 있습니다. 연결 문제로 실패하면 몇 시간 뒤 다시 확인합니다." />
+  </>
 }

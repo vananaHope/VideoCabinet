@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Switch } from "@/components/ui/switch"
 import { Notice } from "@/components/ui/notice"
+import { SettingsCard } from "@/components/settings-parts"
 
 export function AutomaticDetection({ enabled, scanning, onChange }: { enabled: boolean; scanning: boolean; onChange: (enabled: boolean) => Promise<void> }) {
   const [saving, setSaving] = useState(false)
@@ -15,9 +16,10 @@ export function AutomaticDetection({ enabled, scanning, onChange }: { enabled: b
     catch (error) { setError(String(error)) }
     finally { setSaving(false) }
   }
-  return <section className="space-y-1 rounded-xl border bg-card px-4 py-3" aria-labelledby="settings-automatic-detection">
-    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2"><div><h3 id="settings-automatic-detection" className="text-body-strong">자동 감지</h3><p role="status" className="text-body text-muted-foreground">감시 폴더에서 바뀐 영상을 목록에 바로 반영합니다.{scanning && " · 검사 중 변경 잠금"}</p></div><div className="flex items-center gap-2"><span aria-hidden="true" className="text-body text-muted-foreground">{enabled ? '켜짐' : '꺼짐'}</span><Switch id="settings-automatic-detection-toggle" aria-labelledby="settings-automatic-detection" checked={enabled} aria-disabled={locked || undefined} onCheckedChange={() => void toggle()} /></div></div>
-    <p className="text-label text-muted-foreground">기본값 켬 · 끄면 앱을 시작할 때의 검사도 하지 않습니다. 다시 켜면 그동안 바뀐 파일을 한 번 검사합니다.</p>
-    {error && <Notice tone="error" className="mt-2">{error}</Notice>}
-  </section>
+  return <SettingsCard aria-labelledby="settings-automatic-detection" titleId="settings-automatic-detection" title="자동 감지" status
+    description={<>감시 폴더에서 바뀐 영상을 목록에 바로 반영합니다.{scanning && " · 검사 중 변경 잠금"}</>}
+    control={<><span aria-hidden="true" className="text-body text-muted-foreground">{enabled ? '켜짐' : '꺼짐'}</span><Switch id="settings-automatic-detection-toggle" aria-labelledby="settings-automatic-detection" checked={enabled} aria-disabled={locked || undefined} onCheckedChange={() => void toggle()} /></>}
+    note="기본값 켬 · 끄면 앱을 시작할 때의 검사도 하지 않습니다. 다시 켜면 그동안 바뀐 파일을 한 번 검사합니다.">
+    {error && <Notice tone="error">{error}</Notice>}
+  </SettingsCard>
 }

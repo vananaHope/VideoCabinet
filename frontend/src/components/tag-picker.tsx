@@ -4,6 +4,7 @@ import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { selectableItem } from "@/components/ui/selectable-item"
+import { listFrame, listRow } from "@/components/ui/list"
 import { tagNameKey } from "@/lib/tag-name-key"
 import { tagChoices } from "@/lib/tag-search"
 import type { TagUsageData } from "@/bridge-types"
@@ -15,9 +16,10 @@ type Choice =
   | { mode: "multiple"; selected: readonly number[]; onChange: (ids: number[]) => void; chips?: boolean }
   | { mode: "immediate"; onPick: (tag: TagUsageData) => Promise<boolean>; onCreate?: (name: string) => Promise<boolean> }
 
-const option = cva("flex min-w-0 cursor-default items-center gap-2 text-body data-active:ring-2 data-active:ring-ring data-active:ring-inset", {
+// 행은 공용 목록 행(대화상자 목록과 같은 높이·둥글기)이다. 면은 아래 multiple 변형이 칠한다.
+const option = cva("data-active:ring-2 data-active:ring-ring data-active:ring-inset", {
   variants: {
-    layout: { chip: "max-w-full rounded-full border px-3 py-1", row: "w-full rounded-md px-3 py-1.5" },
+    layout: { chip: "flex min-w-0 max-w-full cursor-default items-center gap-2 rounded-full border px-3 py-1 text-body", row: listRow() },
     multiple: {
       true: "hover:bg-muted aria-selected:bg-primary aria-selected:text-primary-foreground",
       false: selectableItem({ selected: "aria" }),
@@ -134,7 +136,7 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
     {available <= 0 ? <p id={statusId} className="text-label text-muted-foreground">{emptyText}</p>
       : !choices.length ? <p id={statusId} className="text-label wrap-anywhere text-muted-foreground">‘{query.trim()}’이(가) 들어간 태그가 없습니다.</p>
       : <div id={listId} role="listbox" aria-label={searching ? `${label} 검색 결과` : showAll || listAll ? `모든 ${label}` : `자주 쓴 ${label}`} aria-multiselectable={multiple || undefined}
-        className={layout === "chip" ? "flex flex-wrap gap-1.5" : "max-h-48 space-y-0.5 overflow-y-auto rounded-md border p-1"}>
+        className={layout === "chip" ? "flex flex-wrap gap-1.5" : listFrame({ class: "max-h-48" })}>
         {choices.map((tag, index) => {
           const chosen = multiple ? selected.includes(tag.id) : index === active
           return <div key={tag.id} id={optionId(tag)} role="option" aria-selected={chosen} data-active={index === active || undefined} title={tag.name}

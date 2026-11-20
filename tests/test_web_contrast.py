@@ -403,16 +403,16 @@ def test_status_badges_notices_and_highlight_text_meet_text_contrast(window):
 
 
 def test_checkbox_boundary_meets_ui_contrast_on_floating_layer(window):
-    # 네이티브 체크박스는 계산된 테두리 색과 실제로 그려지는 색이 달라, 대화상자에 그려진 픽셀을 잰다.
+    # 공용 체크박스(구간 하이라이트)의 꺼진 테두리를 대화상자에 실제로 그려진 픽셀로 잰다.
     core = window.core
     video = min(core.videos(), key=lambda video: video.title)
     highlight = core.highlights(video.id)[0]
-    box = shown('[role=dialog] input[type=checkbox]')
+    box = shown('[role=dialog] [role=checkbox]')
 
     def check():
         wait_for(lambda: js(window, f"!!{box}"))
         painted_still(window, box)
-        assert not js(window, f"{box}.checked")
+        assert js(window, f"{box}.getAttribute('aria-checked')") == 'false'
         surface = probe(window, box)['outer']
         rect = json.loads(js(window, f"JSON.stringify(({box}).getBoundingClientRect())"))
         origin = view(window).mapTo(window, QPoint(0, 0))
