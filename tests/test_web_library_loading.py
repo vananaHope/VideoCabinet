@@ -244,7 +244,8 @@ def test_first_entry_placeholders_keep_toolbar_and_first_row_in_place(open_windo
     loading = [frame for frame in frames if frame['busy']]
     final = frames[-1]
     assert loading and not final['busy']
-    assert final['placeholders'] == 0 and len(final['cells']) == final['columns'] == 2
+    # 기본 카드 크기(보통)는 1100×720에서 상세 패널과 함께 3열이다(#381).
+    assert final['placeholders'] == 0 and len(final['cells']) == final['columns'] == 3
     assert not core.library_view_options()['descending'], '데이터 전 클릭이 보기 조건을 바꾸지 않아야 한다'
     for frame in frames:
         # 첫 프레임부터 툴바·격자·상세 패널·첫 줄 카드의 경계가 실제 목록과 같다(임시 열 수나 늦게 나타나는 툴바가 없다).

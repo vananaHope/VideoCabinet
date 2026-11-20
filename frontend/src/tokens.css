@@ -35,10 +35,10 @@
   --grid-row-height: 15.5rem;
   --grid-card-width: 14rem;
   --dialog-list-max-height: 18rem;
-  --library-card-small: 12rem;
-  --library-card-medium: 16rem;
+  --library-card-small: 11rem;
+  --library-card-medium: 15rem;
   --library-card-large: 22rem;
-  --library-card-info-height: 10rem;
+  --library-card-info-height: 6.5rem;
   --content-max-width: 68.75rem;
   --recommendation-card-width: 12.85rem;
   --motion-duration-quick: 100ms;
