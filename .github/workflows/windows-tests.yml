@@ -1,53 +1,36 @@
 # Windows 전용 테스트를 포함한 전체 pytest를 GitHub 호스팅 Windows 러너에서 돌린다.
-# 비공개 저장소의 무료 한도(월 $12, Windows 약 1,200분)를 넘지 않도록 PR마다 돌리지 않는다.
-# - 수동 실행(workflow_dispatch): 브랜치를 골라 필요할 때 돌린다.
-# - 하루 1회(KST 03:00): 지난 24시간 안에 main에 커밋이 있을 때만 돌린다.
+# 공개 저장소는 표준 러너 사용 분이 무료다. 전체를 한 러너에서 돌리면 3시간 가까이 걸려
+# 6개 조각(MVM_TEST_SHARD, tests/conftest.py)으로 나눠 동시에 돌린다.
 # 실창 검사(MVM_REAL_WINDOW_TESTS)와 CUDA는 러너에서 확인할 수 없어 지금처럼 로컬에 남긴다.
 name: Windows tests
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
-  schedule:
-    - cron: '0 18 * * *'
 
 concurrency:
-  group: windows-tests-${{ github.ref }}
+  group: windows-tests-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  changed:
-    # 일정 실행은 Linux 러너에서 최근 커밋만 확인해 Windows 분을 아낀다.
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      run: ${{ steps.check.outputs.run }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - id: check
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ $(( $(date +%s) - $(git log -1 --format=%ct) )) -lt 86400 ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-
   pytest:
-    needs: changed
-    if: needs.changed.outputs.run == 'true'
+    name: pytest (${{ matrix.shard }}/6)
     runs-on: windows-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       # 러너의 기본 코드 페이지(cp1252)는 한국어 출력을 쓰지 못한다.
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
+      MVM_TEST_SHARD: ${{ matrix.shard }}/6
     steps:
       - name: Defender 실시간 검사 끄기
         # 임시 폴더·SQLite·Qt 캐시 쓰기마다 검사가 붙어 테스트가 크게 느려진다. 러너는 매번 새로 만들어진다.
@@ -110,6 +93,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-results
+          name: pytest-results-${{ matrix.shard }}
           path: pytest-results.xml
           retention-days: 7

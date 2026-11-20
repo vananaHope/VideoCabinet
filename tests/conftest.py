@@ -68,3 +68,21 @@ def qapp():
     app = QApplication.instance() or QApplication([])
     yield app
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def pytest_collection_modifyitems(config, items):
+    """CI 조각 실행: MVM_TEST_SHARD=i/n이면 수집한 테스트 중 i번째 조각(1부터)만 남긴다.
+
+    nodeid 순서대로 번갈아 나눠 느린 파일이 한 조각에 몰리지 않게 한다.
+    """
+    shard = os.environ.get('MVM_TEST_SHARD')
+    if not shard:
+        return
+    index, count = (int(part) for part in shard.split('/'))
+    if not 1 <= index <= count:
+        raise pytest.UsageError(f'MVM_TEST_SHARD는 1/n~n/n 이어야 합니다: {shard}')
+    ordered = sorted(items, key=lambda item: item.nodeid)
+    keep = {id(item) for position, item in enumerate(ordered) if position % count == index - 1}
+    deselected = [item for item in items if id(item) not in keep]
+    items[:] = [item for item in items if id(item) in keep]
+    config.hook.pytest_deselected(items=deselected)
