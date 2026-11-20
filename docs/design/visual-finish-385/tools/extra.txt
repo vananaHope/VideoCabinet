@@ -1,0 +1,17 @@
+preparation|preparation2|03-preparing-one.png
+preparation|preparation2|04-preparing-300-long-title.png
+preparation|preparation2|06-failed-detail.png
+settings|update|update-install-2-settings-progress.png
+settings|update|update-settings-available.png
+settings|backup|web-backup-progress.png
+settings|settings_recommend|web-settings-recommend-changed.png
+statistics|stats50000|50000-placeholder.png
+statistics|stats50000|50000-365-inventory.png
+statistics|stats8|8-7-watched_seconds.png
+folders-notice|scan_notice_copy|web-mixed.png
+folders-notice|scan_notice_copy|web-subtitle-one.png
+folders-notice|scan_notice_copy|web-failed.png
+folders-notice|scan_notice_copy|web-scanning.png
+folders-watch|folder_watch|settings-detection-on.png
+library|modified_copy|6-panel-default.png
+library|views0|0-large.png
