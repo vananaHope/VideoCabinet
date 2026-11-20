@@ -290,9 +290,9 @@ _Avoid_: 패치 설치 파일, 백업
 앱 실행에 필요한 런타임 구성을 식별하여 패치 적용 가능 여부를 비교하는 값. 영상의 동일성을 판단하는 파일 지문과 별개다.
 _Avoid_: 앱 버전, 영상 지문
 
-**배포 저장소 (Release Repository)**:
-설치 파일·체크섬·업데이트 매니페스트·서명만 발행하는 공개 GitHub 저장소(`vananaHope/my-video-manager-releases`, `RELEASE_REPOSITORY`). 소스 저장소는 비공개라 앱의 업데이트 확인·내려받기와 릴리스 페이지는 모두 이곳을 가리키며, 소스 저장소에는 버전 커밋과 태그만 남는다.
-_Avoid_: 소스 저장소, origin
+**Release 저장소 (Release Repository)**:
+설치 파일·체크섬·업데이트 매니페스트·서명을 발행하는 공개 GitHub 저장소(`RELEASE_REPOSITORY`). 앱의 업데이트 확인·내려받기와 릴리스 페이지가 이곳을 가리킨다. 지금은 소스 저장소 `vananaHope/VideoCabinet`과 같고, v0.9.0까지는 별도 저장소 `vananaHope/my-video-manager-releases`였다.
+_Avoid_: 배포 저장소
 
 **업데이트 매니페스트 (Update Manifest)**:
 배포 버전·런타임 지문·패치 제공 여부와 설치 파일의 이름·크기·해시를 담은 문서(`UpdateManifest`). 별도 서명은 문서의 원본 바이트에 대응하며, 앱에 내장한 공개 키로 서명을 검증한 뒤 내용을 신뢰한다.

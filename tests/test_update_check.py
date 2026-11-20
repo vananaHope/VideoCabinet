@@ -18,7 +18,7 @@ from my_video_manager.update_http import UpdateCheckError, UrllibUpdateHttp
 
 NOW = datetime(2026, 10, 17, 12, tzinfo=timezone.utc)
 FINGERPRINT = 'a' * 64
-BASE = 'https://github.com/vananaHope/my-video-manager-releases/releases/download/v1.2.3'
+BASE = 'https://github.com/vananaHope/VideoCabinet/releases/download/v1.2.3'
 
 
 class FakeClock:
@@ -128,9 +128,9 @@ def test_numeric_version_order_not_lexical(core, key):
 
 
 def test_update_endpoints_use_public_release_repository():
-    # 소스 저장소는 비공개라 토큰 없는 앱 요청은 배포 저장소로만 간다.
-    assert LATEST_RELEASE_URL == 'https://api.github.com/repos/vananaHope/my-video-manager-releases/releases/latest'
-    assert RELEASES_URL == 'https://github.com/vananaHope/my-video-manager-releases/releases'
+    # 토큰 없는 앱 요청은 공개 Release 저장소(소스 저장소)로 간다.
+    assert LATEST_RELEASE_URL == 'https://api.github.com/repos/vananaHope/VideoCabinet/releases/latest'
+    assert RELEASES_URL == 'https://github.com/vananaHope/VideoCabinet/releases'
 
 
 def test_one_tag_pins_both_metadata_requests(core, http):

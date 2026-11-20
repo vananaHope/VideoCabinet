@@ -281,13 +281,12 @@ FFmpeg 원본 `LICENSE`·`README.txt`도 함께 추출합니다. 번들은 불�
 급할 때는 `-SkipTests`로 건너뛸 수 있지만, Linux 클라우드 세션은 Windows 전용 테스트(웹 셸·트레이·DPAPI 등)를 건너뛰므로
 이 단계를 생략하면 그 테스트는 어디에서도 실행되지 않습니다. `run_tests.ps1`은 단독으로도 실행할 수 있으며 추가 인자는 pytest에 넘깁니다.
 
-소스 저장소(`origin`, `vananaHope/my-video-manager`)는 비공개이므로 토큰 없이 요청하는 앱은 그 Release를 볼 수 없습니다.
-그래서 설치 파일·체크섬·매니페스트·서명은 공개 **배포 저장소** `vananaHope/my-video-manager-releases`에만 발행합니다.
-`origin`에는 지금처럼 버전 커밋과 `v<version>` 태그만 push하고, 이전 Release 조회·같은 태그의 Release 확인·
-`gh release create`·실패 시 안내 명령은 모두 배포 저장소를 씁니다. 배포 저장소 이름은 앱의
+소스 저장소(`origin`, `vananaHope/VideoCabinet`)는 공개 저장소이며 설치 파일·체크섬·매니페스트·서명도 이 저장소의 Release에 발행합니다.
+`origin`에 버전 커밋과 `v<version>` 태그를 push하고, 이전 Release 조회·같은 태그의 Release 확인·
+`gh release create`·실패 시 안내 명령은 **Release 저장소**(`RELEASE_REPOSITORY`)를 씁니다. 그 이름은 앱의
 `src/my_video_manager/app_version.py`의 `RELEASE_REPOSITORY`와 `release.ps1`의 `-ReleaseRepository` 기본값에 있으며
-테스트가 두 값이 같은지 검사합니다. 배포 저장소에 이전 Release가 없으면 첫 릴리스(전체 설치만)로 처리하며,
-소스 저장소에 남은 옛 Release(v0.5.0·v0.5.1)는 조회하지 않습니다.
+테스트가 두 값이 같은지 검사합니다. 이전 Release나 매니페스트가 없으면 첫 릴리스(전체 설치만)로 처리합니다.
+v0.9.0까지는 별도 배포 저장소 `vananaHope/my-video-manager-releases`에 발행했고, 그 버전을 설치한 앱은 그 저장소에서만 업데이트를 찾습니다.
 
 첫 서명 릴리스는 다음 순서로 준비합니다.
 
@@ -317,7 +316,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1
 성공·실패 시 환경 변수를 지웁니다(호출한 PowerShell 프로세스에 설정한 값도 제거).
 서명 시에도 동일 키 검사를 다시 합니다.
 
-이전 메타데이터는 배포 저장소의 `releases/latest`가 가리키는 정식(비 draft·비 prerelease)
+이전 메타데이터는 Release 저장소의 `releases/latest`가 가리키는 정식(비 draft·비 prerelease)
 Release에서 읽습니다. 태그는 `vX.Y.Z`여야 하며 새 버전 이상이면 발행을 중단합니다.
 매니페스트와 `.sig`가 함께 있으면 앱 내장 공개 키로 정확한 바이트를 검증한 후 읽습니다.
 서명 없는 이전 매니페스트는 지문을 신뢰하지 않고 "패치 불가(이전 매니페스트 서명 없음)"으로 전체 설치만 발행합니다.
@@ -335,7 +334,7 @@ Release에서 읽습니다. 태그는 `vX.Y.Z`여야 하며 새 버전 이상이
 #140에서 `cryptography`를 번들에 포함하는 변경도 실제 지문 비교가 자동으로 감지합니다.
 
 모든 파일 생성·서명이 성공하면 `v<version>` 태그와 main을 `origin`에 atomic push하고,
-배포 저장소에는 그 태그가 없으므로 `gh release create --target main`으로 배포 저장소 기본 브랜치에 같은 이름의 태그를 만들며
+`gh release create`는 push한 그 태그로 Release를 만들며(`--target main`은 태그가 없는 저장소를 지정했을 때만 쓰임)
 전체 설치 파일·체크섬·매니페스트·서명과 해당하는 패치를 게시합니다.
 노트는 현재 main에 포함된 가장 높은 버전 태그 이후의 커밋 제목입니다(태그가 없으면 전체).
 이름이 바뀐 첫 Release에는 노트 맨 앞에 "앱 이름이 My Video Manager에서 VideoCabinet으로 바뀌었고 라이브러리·설정 데이터와 설치 위치는 그대로"라는 안내를 넣습니다(`release.ps1`의 `$RenameNote`·`$IncludeRenameNote`). 이 Release를 발행한 뒤 `$RenameNote`·`$IncludeRenameNote` 선언, 이를 쓰는 DryRun·노트 분기, `tests/test_release_script.py`의 이름 안내 단언, 이 문서 문단을 함께 지웁니다.
@@ -347,7 +346,7 @@ GitHub Release 자산 이름에는 버전 하위 폴더가 붙지 않습니다. 
 기존 태그·Release를 덮어쓰거나 강제 push하지 않습니다.
 빌드 실패나 원격에서 거부한 push는 로컬 버전 커밋과 이번에 만든 태그를 자동 복구합니다.
 다른 파일 변경이나 불확실한 원격 상태가 있으면 보존하고 복구 명령을 안내합니다.
-push 뒤 Release 생성이 실패하면 `origin`의 main과 태그를 유지하며 배포 저장소 기준의 Release 확인·생성·자산 추가 명령을 안내합니다.
+push 뒤 Release 생성이 실패하면 `origin`의 main과 태그를 유지하며 Release 저장소 기준의 Release 확인·생성·자산 추가 명령을 안내합니다.
 안내된 `gh release upload` 목록에는 매니페스트·서명과 해당하는 패치도 포함됩니다.
 이미 올라간 자산은 그대로 두고 목록에서 **누락된 파일만 골라** 업로드합니다(`--clobber` 사용 안 함).
 자동 재발행하지 않으므로 안내에 따라 상태를 확인하세요.

@@ -342,7 +342,7 @@ def test_executable_version_info_uses_display_name_and_app_version(monkeypatch, 
 
 
 def test_product_identifiers_stay_fixed_after_rename():
-    """이름을 바꿔도 실행 파일·데이터 폴더·단일 실행 키·배포 저장소·출력 파일 이름은 그대로다.
+    """이름을 바꿔도 실행 파일·데이터 폴더·단일 실행 키·출력 파일 이름은 그대로다.
 
     AppId와 설치 폴더는 위의 test_executable_installer_and_uninstall_entry_use_built_icon이 이미 고정한다.
     """
@@ -350,7 +350,7 @@ def test_product_identifiers_stay_fixed_after_rename():
     root = Path(__file__).resolve().parents[1]
     specs = (root / 'installer/my-video-manager.spec').read_text(encoding='utf-8')
     iss = _setup_source()
-    assert app_version.RELEASE_REPOSITORY == 'vananaHope/my-video-manager-releases'
+    assert app_version.RELEASE_REPOSITORY == 'vananaHope/VideoCabinet'
     assert core.default_data_directory() == Path.home() / '.my-video-manager'
     assert single_instance.instance_name(core.default_data_directory()).startswith('my-video-manager-')
     assert specs.count("name='my-video-manager'") == 2

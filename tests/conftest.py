@@ -45,6 +45,65 @@ def skip_web_shell_off_windows(monkeypatch):
     monkeypatch.setattr(web_shell.WebShellHost, '__init__', skip)
 
 
+class _ReversibleDPAPI:
+    """Windows 밖에서 쓰는 가역 가짜 DPAPI. 암호문에 평문이 그대로 남지 않게 바이트를 뒤섞는다."""
+
+    _PREFIX = b'fake-dpapi:'
+
+    def protect(self, data: bytes) -> bytes:
+        return self._PREFIX + bytes(byte ^ 0x5A for byte in reversed(data))
+
+    def unprotect(self, data: bytes) -> bytes:
+        if not data.startswith(self._PREFIX):
+            raise ValueError('fake DPAPI 암호문이 아니다')
+        return bytes(byte ^ 0x5A for byte in reversed(data[len(self._PREFIX):]))
+
+
+@pytest.fixture
+def portable_dpapi(monkeypatch):
+    """키 저장소를 거치는 로직 테스트를 Linux에서도 돌린다.
+
+    Windows에서는 실제 사용자 DPAPI를 그대로 쓴다. 실제 DPAPI 동작은 test_secret_store가 Windows에서 검사한다.
+    """
+    if sys.platform == 'win32':
+        return
+    from my_video_manager import secret_store
+    monkeypatch.setattr(secret_store, 'WindowsDPAPI', _ReversibleDPAPI)
+
+
+@pytest.fixture
+def name_ordered_scandir(monkeypatch):
+    """NTFS처럼 폴더 항목을 이름순으로 돌려준다. ext4 등은 순회 순서가 정해져 있지 않다.
+
+    Windows에서는 실제 NTFS 순서를 그대로 쓴다.
+    """
+    if sys.platform == 'win32':
+        return
+    original = os.scandir
+
+    class Entries:
+        def __init__(self, entries):
+            self._entries = entries
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def __iter__(self):
+            return iter(self._entries)
+
+        def close(self):
+            pass
+
+    def scandir(path='.'):
+        with original(path) as entries:
+            return Entries(sorted(entries, key=lambda entry: entry.name.upper()))
+
+    monkeypatch.setattr(os, 'scandir', scandir)
+
+
 @pytest.fixture(autouse=True)
 def offline_update_check(monkeypatch):
     """앱 창의 시작 업데이트 확인을 포함해 어떤 테스트도 실제 GitHub에 요청하지 않게 기본 전송을 막는다.
