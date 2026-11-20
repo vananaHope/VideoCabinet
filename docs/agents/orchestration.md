@@ -43,6 +43,7 @@
 - 관련 테스트만 `pytest -n auto`로 돌린다. 예: `pytest -n auto tests/test_<영역>*.py -q`
 - `frontend/`를 바꿨으면 그 폴더에서 `npm run lint`, `npm run typecheck`, `npm run build`
 - 전체 테스트(관리자가 Release 직전 `main`에서 한 번): `pytest -n auto`
+- PR마다 GitHub Actions **Windows tests**가 Windows 러너에서 전체 pytest를 10개 조각으로 돌린다(문서만 바뀐 PR은 건너뜀, 필수 체크 아님). 실창 검사와 CUDA는 여기서 확인되지 않는다(`docs/development.md`의 CI 절).
 
 ## UI 작업
 

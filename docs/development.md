@@ -100,6 +100,34 @@ Qt는 주 창이 숨거나 최소화된 동안에도 모달 열림·닫힘을 �
 숨김 완료를 기다리는 조건과, 300ms 뒤에도 재생 대화상자가 다시 뜨지 않았는지 확인하는 관찰 구간은 구분합니다.
 후자는 준비 완료를 추측하는 고정 대기가 아니라 지연된 콜백에 의한 재표시를 검출하는 지속 확인입니다.
 
+## CI
+
+`.github/workflows/windows-tests.yml`(**Windows tests**)은 PR과 `main` push마다 GitHub 호스팅 Windows 러너에서
+Windows 전용 테스트를 포함한 전체 pytest를 돌립니다. 수동 실행(`workflow_dispatch`)도 됩니다.
+`docs/`, `*.md`, `LICENSE*`만 바꾼 변경은 건너뛰며, 같은 PR에 새 커밋이 오면 이전 실행을 취소합니다. 필수 체크는 아닙니다.
+
+- 전체를 한 러너에서 돌리면 오래 걸려 10개 조각으로 나눠 동시에 돌립니다. 조각은 `MVM_TEST_SHARD=i/n`
+  (예: `3/10`)으로 고르며, `tests/conftest.py`의 수집 훅이 수집한 테스트 가운데 i번째 조각만 남깁니다.
+  하위 pytest에는 물려주지 않습니다. 로컬에서도 같은 값으로 한 조각만 재현할 수 있습니다.
+- 러너(4 vCPU)에서 작업자를 4개 띄우면 Qt 대기 시간이 초과돼 조각마다 `-n 2`로 돌립니다.
+- CI에서만 `pytest-timeout`을 설치해 5분(`--timeout=300`) 넘게 멈춘 테스트를 이름과 스택과 함께 실패로 남깁니다.
+- FFmpeg는 choco로 설치하되 shim이 아닌 패키지 안의 실제 `ffmpeg.exe` 폴더를 PATH 맨 앞에 둡니다.
+  shim만 종료되면 자식 ffmpeg가 파이프를 쥔 채 남아 프로세스 정리 테스트가 멈춥니다.
+- 실창 검사(`MVM_REAL_WINDOW_TESTS`)와 CUDA는 러너에서 확인할 수 없어 로컬 Windows에서 확인합니다.
+- 조각별 JUnit 결과(`pytest-results-<조각>`)를 7일 동안 Actions 산출물로 남깁니다.
+
+테스트는 `tests/conftest.py`의 autouse 픽스처가 테스트에서 여는 SQLite 연결에 `PRAGMA synchronous = OFF`를 걸어
+디스크 동기화를 끕니다. 잠금 중이거나 DB가 아닌 파일이면 그 연결만 기본 동기화로 둡니다. 앱 코드의 설정은 바꾸지 않습니다.
+
+Claude Code 클라우드(Linux) 세션은 `.claude/hooks/session-start.sh`가 Qt 시스템 라이브러리, Python 3.10 `.venv`,
+웹 빌드를 준비하므로 바로 `pytest -n auto`와 `frontend/` 검사를 돌릴 수 있습니다.
+Linux에서도 DPAPI·폴더 순회 순서 등은 `tests/conftest.py`의 대체 픽스처(`portable_dpapi`, `name_ordered_scandir`)로 돌지만,
+웹 셸(Linux offscreen에서 PySide6가 세그폴트), 실제 Windows ACL·DPAPI·파일 잠금·DLL 탐색, Windows OCR 등을 쓰는 테스트는 건너뜁니다.
+그 테스트는 위 Windows tests 체크나 로컬 Windows에서 확인합니다.
+
+GitHub Actions에는 이 밖에 Claude 워크플로 두 개가 있습니다. `claude.yml`은 저장소 소유자·멤버·협업자가 쓴 글의
+`@claude` 멘션에만 반응하고, `claude-code-review.yml`은 외부 포크에서 온 PR을 건너뜁니다.
+
 ## 웹 빌드와 개발 서버
 
 배포용 빌드는 `src/my_video_manager/web/`에 생성되며 package-data로 포함됩니다.
@@ -278,8 +306,9 @@ FFmpeg 원본 `LICENSE`·`README.txt`도 함께 추출합니다. 번들은 불�
 
 실제 발행과 `-DryRun -Build`는 버전 커밋·빌드 전에 `scripts/run_tests.ps1`(전체 `pytest -n auto`)을 실행합니다.
 테스트가 실패하거나 작업 트리를 바꾸면 버전·커밋·태그·원격을 바꾸지 않고 멈춥니다. `-DryRun`만 주면 실행하지 않고 계획만 표시합니다.
-급할 때는 `-SkipTests`로 건너뛸 수 있지만, Linux 클라우드 세션은 Windows 전용 테스트(웹 셸·트레이·DPAPI 등)를 건너뛰므로
-이 단계를 생략하면 그 테스트는 어디에서도 실행되지 않습니다. `run_tests.ps1`은 단독으로도 실행할 수 있으며 추가 인자는 pytest에 넘깁니다.
+급할 때는 `-SkipTests`로 건너뛸 수 있습니다. 그때는 발행할 `main` 커밋의 [Windows tests](#ci) 체크가 통과했는지 확인하세요.
+Linux 클라우드 세션은 Windows 전용 테스트(웹 셸·트레이·실제 ACL 등)를 건너뛰고, CI는 실창 검사와 CUDA를 확인하지 않습니다.
+`run_tests.ps1`은 단독으로도 실행할 수 있으며 추가 인자는 pytest에 넘깁니다.
 
 소스 저장소(`origin`, `vananaHope/VideoCabinet`)는 공개 저장소이며 설치 파일·체크섬·매니페스트·서명도 이 저장소의 Release에 발행합니다.
 `origin`에 버전 커밋과 `v<version>` 태그를 push하고, 이전 Release 조회·같은 태그의 Release 확인·
