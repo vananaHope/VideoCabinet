@@ -180,3 +180,25 @@ def pytest_collection_modifyitems(config, items):
     deselected = [item for item in items if id(item) not in keep]
     items[:] = [item for item in items if id(item) in keep]
     config.hook.pytest_deselected(items=deselected)
+
+
+@pytest.hookimpl(wrapper=True, trylast=True)
+def pytest_runtest_teardown(item, nextitem):
+    """테스트가 끝난 뒤 보이는 최상위 창이 남으면 그 테스트를 실패로 알린다.
+
+    offscreen에서 커서 이동은 같은 자리의 노출된 창 중 먼저 만든 창으로 가므로,
+    남은 창은 뒤 테스트의 마우스 올림을 가로챈다(#408). 다음 테스트를 위해 숨긴 뒤 알린다.
+    """
+    result = yield
+    if 'PySide6.QtWidgets' not in sys.modules:
+        return result
+    from PySide6.QtWidgets import QApplication
+    if QApplication.instance() is None:
+        return result
+    left = [widget for widget in QApplication.topLevelWidgets() if widget.isVisible()]
+    for widget in left:
+        widget.hide()
+    if left:
+        names = ", ".join(type(widget).__name__ for widget in left)
+        raise AssertionError(f"테스트가 보이는 최상위 창을 남겼다: {names}. 픽스처 정리에서 닫아야 한다.")
+    return result
