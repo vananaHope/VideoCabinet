@@ -279,7 +279,8 @@ def test_folder_panel_keeps_selected_card_at_same_height(open_window):
 
 def test_folder_panel_keeps_scroll_near_when_selected_card_leaves_result(open_window):
     # 패널을 닫아도 남아 있던 폴더(직접 추가)가 열면 다시 적용되어, 감시 폴더의 선택 영상이 결과에서 빠진다.
-    window = open_window(folder='direct')
+    # 보통 카드는 이 창에서 패널을 열면 2열, 닫으면 3열이다(#381 전의 작게와 같은 열 수).
+    window = open_window(folder='direct', card_size='medium')
     selected = choose_middle_card(window)
     if selected not in window.library_page.visible_ids[1::2]:
         QTest.keyClick(view(window), Qt.Key.Key_Right)
@@ -323,11 +324,14 @@ def test_shell_notices_move_off_fixed_page_controls(open_window):
     wait_for(lambda: not any(overlaps(box(window, SHELL), box(window, selector)) for selector in fixed))
     shell, page = box(window, SHELL), box(window, '[data-page="folders"]')
     assert shell['bottom'] <= page['bottom'] and shell['top'] >= page['top'] and shell['height'] > 100
-    # 라이브러리로 돌아오면 다시 기본 자리(오른쪽 아래)에서 툴바·상세 패널 단추를 덮지 않는다.
+    # 라이브러리로 돌아오면 다시 고른 자리에서 툴바·상세 패널 단추를 덮지 않는다. 상세 패널 작업 줄이 패널 맨 아래에 있어
+    # 긴 묶음은 오른쪽 아래 대신 스크롤되는 격자 위(왼쪽 아래)로 간다.
     QTest.keyClick(view(window), Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
-    wait_for(lambda: window.web_host.active_tab == 'library' and box(window, SHELL)['right'] > box(window, '#library-grid')['right'])
-    for selector in ('[aria-label="무작위 재생"]', '[aria-label="영상 작업"]', '[aria-label="영상 상세 탭"]'):
-        assert not overlaps(box(window, SHELL), box(window, selector)), selector
+    library_controls = ('[aria-label="무작위 재생"]', '[aria-label="영상 작업"]', '[aria-label="영상 상세 탭"]')
+    wait_for(lambda: window.web_host.active_tab == 'library' and all(box(window, selector) for selector in library_controls)
+             and not any(overlaps(box(window, SHELL), box(window, selector)) for selector in library_controls))
+    shell, page = box(window, SHELL), box(window, '[data-page="library"]')
+    assert shell['bottom'] <= page['bottom'] and shell['top'] >= page['top'] and shell['height'] > 100
 
 
 FULL_CELLS = f"""JSON.stringify((() => {{ const grid = {GRID}, g = grid.getBoundingClientRect(), top = g.top + grid.clientTop
@@ -337,9 +341,9 @@ FULL_CELLS = f"""JSON.stringify((() => {{ const grid = {GRID}, g = grid.getBound
 
 @pytest.mark.parametrize('start, row_index', [('top', 2), ('top', 3), ('middle', 0), ('middle', 1), ('bottom', -1)])
 def test_folder_panel_close_from_open_panel_keeps_card_or_clamps_scroll(open_window, start, row_index):
-    # 저장된 열린 패널(폴더별·폴더 미선택이라 결과는 60개 그대로, 2열)에서 시작해 패널 안에서 고른 카드로 닫는다(3열).
+    # 저장된 열린 패널(보통 카드, 폴더별·폴더 미선택이라 결과는 60개 그대로, 2열)에서 시작해 패널 안에서 고른 카드로 닫는다(3열).
     # top: 맨 위에서 둘째 줄 카드(결과 index 2·3). middle: 몇 줄 내린 뒤 완전히 보이는 첫 줄의 카드. bottom: 맨 끝에서 마지막 카드.
-    window = open_window(mode='folders')
+    window = open_window(mode='folders', card_size='medium')
     wait_for(lambda: js(window, '!!document.getElementById("library-folder-panel")'))
     wait_for(lambda: js(window, f"{GRID}.getAttribute('aria-colcount')") == '2')
     if start != 'top':

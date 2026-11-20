@@ -188,8 +188,9 @@ def test_placeholders_use_saved_card_size_chips_and_folder_panel(open_window, op
     if options.get('mode') == 'folders':
         assert final['controls']['#library-folder-panel'], final
     else:
-        # 기본 카드 크기(보통)는 이 폭에서 2열이다. 작은 카드는 그보다 많다.
-        assert final['columns'] > 2 and not final['controls']['#library-folder-panel'], final
+        # 기본 카드 크기(보통)는 이 폭에서 3열이다(#381). 작은 카드는 그보다 많다.
+        # (#381 전에는 2열이었다.)
+        assert final['columns'] > 3 and not final['controls']['#library-folder-panel'], final
     for frame in frames:
         # 자리 표시의 첫 프레임부터 열 수·첫 줄 칸·격자·폴더 패널·상세 패널·칩 줄의 경계와 칩이 데이터 뒤와 같다.
         assert frame['columns'] == final['columns'] and frame['cells'] == final['cells'], frame

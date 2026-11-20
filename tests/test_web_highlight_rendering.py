@@ -95,10 +95,11 @@ def test_detail_info_shows_modified_date_or_why_it_is_missing():
                     finished: false, abandoned: false, favorite: false, resumePoint: null, stoppedPercent: null,
                     tags: [], series: '', viewingCount: 0, watchedSeconds: 0, lastViewedAt: null,
                     modifiedAt: null, hasSubtitles: false};
+      // 정보는 이름(dt)·값(dd) 목록이다(#381). 이름과 값을 "이름: 값" 글자로 이어 읽는다.
       const render = values => renderToStaticMarkup(React.createElement(DetailPanel, {
         video: {...base, ...values}, details: null, highlights: null, revision: 0, tab: 'info',
         onTabChange() {}, scanning: false, onAction() {}, onHighlight() {}, onRandomTag() {},
-      }));
+      })).replace(/<\/dt><dd[^>]*>/g, ': ').replace(/<[^>]+>/g, '');
       process.env.TZ = 'Asia/Seoul';
       assert(render({modifiedAt: '2026-09-01T18:00:00+00:00'}).includes('수정한 날짜: 2026. 09. 02.'));
       assert(render({missing: true, locationCount: 0}).includes('수정한 날짜: 파일 없음'));

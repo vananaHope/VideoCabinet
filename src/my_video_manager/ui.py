@@ -621,6 +621,12 @@ class MainWindow(QMainWindow):
             settings = self.web_host.controllers.get('settings')
             if settings is not None and settings.capture_event(event):
                 return True
+        if (event.type() == QEvent.Type.ShortcutOverride and self.has_emergency_focus()
+                and self.is_emergency_key(key_name(event))):
+            # 대화상자 단축키보다 먼저 키로 받는다. Qt 파일 창은 Ctrl+Shift+H(숨긴 파일 보기)를 단축키로 가져
+            # 그 창이 활성 창이면 이 키가 KeyPress로 오지 않았다.
+            event.accept()
+            return True
         if (event.type() == QEvent.Type.KeyPress and self.has_emergency_focus()
                 and self.is_emergency_key(key_name(event))):
             # 재생 화면, 웹 셸의 모든 탭, 열린 대화상자·메뉴·팝업, 입력·IME 조합 중에도 이 필터 한 곳에서 받는다.

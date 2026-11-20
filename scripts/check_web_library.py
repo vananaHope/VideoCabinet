@@ -142,6 +142,17 @@ def js_json(code):
     return json.loads(js(f'JSON.stringify({code})'))
 
 
+def press_detail_action(title):
+    """상세 패널의 작업을 누른다. 재생·태그 편집은 단추, 나머지는 "다른 작업" 메뉴 항목이다(#381)."""
+    name = json.dumps(title)
+    if js(f"[...document.querySelectorAll('aside button')].some(e => e.textContent === {name})"):
+        js(f"[...document.querySelectorAll('aside button')].find(e => e.textContent === {name}).click()")
+        return
+    js("document.querySelector('aside button[aria-label=\"다른 작업\"]').dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, button: 0, pointerType: 'mouse'}))")
+    wait_until(lambda: js(f"[...document.querySelectorAll('[role=menuitem]')].some(e => e.textContent === {name})"))
+    js(f"[...document.querySelectorAll('[role=menuitem]')].find(e => e.textContent === {name}).click()")
+
+
 def settle(milliseconds=250):
     loop = QEventLoop()
     QTimer.singleShot(milliseconds, loop.quit)
@@ -572,7 +583,7 @@ if args.verify:
         closer.setInterval(20)
         closer.timeout.connect(close_dialog)
         closer.start()
-        js(f"[...document.querySelectorAll('aside button')].find(button => button.textContent === {json.dumps(title)}).click()")
+        press_detail_action(title)
         wait_until(lambda: bool(observed) and not page.bridge.busy)
         closer.stop()
         assert expected in observed, (expected, observed)

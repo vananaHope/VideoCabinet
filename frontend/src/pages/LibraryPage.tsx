@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { LibraryChoice, LibraryFilters, LibraryFilterChips, clearLibraryFilters } from "@/components/library-filters"
 import { LibraryFolders, folderKeyRows } from "@/components/library-folders"
@@ -426,14 +426,23 @@ export default function LibraryPage() {
     })
   }
   return <main aria-label="라이브러리" className="flex h-full flex-col gap-2 p-2">
-    {/* 툴바는 첫 데이터 전에도 같은 자리에 그리고, 데이터가 올 때까지 누를 수 없다. */}
+    {/* 툴바는 첫 데이터 전에도 같은 자리에 그리고, 데이터가 올 때까지 누를 수 없다.
+        테두리 조작은 검색·보기 선택·필터·무작위 재생만 두고, 폴더 패널과 정렬 방향은 테두리 없는 아이콘 단추다. */}
     <div className="flex shrink-0 items-center gap-2">
+      {/* 폴더 패널 단추는 툴바 맨 앞에 두어 격자 왼쪽에 빈 기둥을 남기지 않는다. 패널을 닫아도 고른 폴더(folder)는 옵션에 남아 다시 열 때 복원된다. */}
+      <Button size="icon-sm" variant={foldersOpen ? "secondary" : "ghost"} aria-label="폴더 패널" aria-expanded={foldersOpen} aria-controls={foldersOpen ? "library-folder-panel" : undefined} disabled={!data}
+        title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>
       <div className="max-w-md min-w-24 flex-1"><Input aria-label="영상 제목 빠른 검색" placeholder="제목 검색" value={draft} disabled={!data}
         onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { composing.current = false; filter({ query: event.currentTarget.value }) }}
         onChange={event => { const query = event.target.value; if (composing.current) setDraftValue(query); else filter({ query }) }} /></div>
       <LibraryChoice name="card_size" label="카드 크기" options={options} disabled={!data} onChange={filter} />
-      <LibraryChoice name="sort" label="정렬" options={options} disabled={!data} onChange={filter} />
-      <Button size="sm" variant="outline" aria-label="정렬 방향" disabled={!data} onClick={() => filter({ descending: !options.descending })}>{options.descending ? "내림차순 ↓" : "오름차순 ↑"}</Button>
+      {/* 정렬 방향은 정렬 선택 바로 옆의 아이콘 단추다. 읽기 이름과 title은 지금 방향을 글자로 알린다. */}
+      <div className="flex items-center gap-0.5">
+        <LibraryChoice name="sort" label="정렬" options={options} disabled={!data} onChange={filter} />
+        <Button size="icon-sm" variant="ghost" aria-label="정렬 방향" title={options.descending ? "내림차순 (누르면 오름차순)" : "오름차순 (누르면 내림차순)"} disabled={!data} onClick={() => filter({ descending: !options.descending })}>
+          {options.descending ? <ArrowDownWideNarrow aria-hidden="true" /> : <ArrowUpNarrowWide aria-hidden="true" />}<span className="sr-only">{options.descending ? "내림차순 ↓" : "오름차순 ↑"}</span>
+        </Button>
+      </div>
       <LibraryFilters options={options} tags={data?.tags ?? []} disabled={!data} onChange={filter} />
       {/* 개수 자리는 9,999개까지 들어가는 폭을 잡아 두어 첫 데이터가 와도 옆 컨트롤이 밀리지 않는다. 그 전에는 "0개" 대신 기다림 표시를 둔다. */}
       {data ? <p aria-label="라이브러리 등록·표시 개수" className="min-w-44 shrink-0 text-label text-muted-foreground tabular-nums">등록 영상 {data.videoCount}개 · 표시 {data.visibleIds.length}개</p>
@@ -450,9 +459,6 @@ export default function LibraryPage() {
     {/* 칩 줄은 칩이 없거나 첫 데이터 전에도 같은 높이를 차지해 아래 목록이 밀리지 않는다. */}
     <LibraryFilterChips options={options} chips={data?.chips ?? entry?.chips ?? []} onChange={filter} pending={viewPending} />
     <div className="flex min-h-40 flex-1 gap-2">
-      {/* 패널을 닫아도 고른 폴더(folder)는 옵션에 남아 다시 열 때 복원된다. */}
-      <Button size="icon-sm" variant={foldersOpen ? "secondary" : "outline"} aria-label="폴더 패널" aria-expanded={foldersOpen} aria-controls={foldersOpen ? "library-folder-panel" : undefined} disabled={!data}
-        title={foldersOpen ? "폴더 패널 닫기" : "폴더 패널 열기"} onClick={() => filter({ mode: foldersOpen ? 'all' : 'folders' })}>{foldersOpen ? <PanelLeftClose /> : <PanelLeftOpen />}</Button>
       {foldersOpen && <LibraryFolders collapsedIds={options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data?.folders ?? []} selected={options.folder} onSelect={folder => filter({ folder })} />}
       {/* 페이지 안내는 격자 위쪽에 떠 있는 띠라 생기고 사라져도 격자의 자리·열 수·스크롤이 그대로다. 툴바·칩 줄·상세 패널은 덮지 않는다. */}
       <div className="relative flex min-w-0 flex-1">

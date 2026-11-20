@@ -1,6 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority"
 import type { ComponentProps } from "react"
-import { Film } from "lucide-react"
+import { Captions, Film, Star } from "lucide-react"
 import { StatusBadge } from "@/components/page-parts"
 import { selectableItem } from "@/components/ui/selectable-item"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -40,27 +40,60 @@ type Props = Omit<ComponentProps<"button">, "className"> & VariantProps<typeof c
 function lastViewed(value: string | null) {
   return value ? formatDate(value) : "기록 없음"
 }
+/**
+ * 시청 통계 한 줄. 카드 속 상자 없이 라벨 글자로 "횟수 · 시간 · 마지막 시청"을 잇는다. 이름표는 줄의 title과 읽기 이름에 둔다.
+ * 마지막 날짜가 틀어보기뿐이면 "틀어봄"을 앞에 붙인다(틀어보기는 횟수·시간에 넣지 않는다).
+ */
 function VideoStatistics({ video }: { video: VideoData }) {
   const glanceOnly = video.viewingCount === 0 && video.lastViewedAt !== null
-  return <span aria-label="시청 통계" className="grid grid-cols-2 gap-1 rounded-lg border bg-background/40 p-1.5 text-label">
-    <span className="flex min-w-0 flex-col"><span className="text-muted-foreground">횟수 · 시간</span><span className="truncate text-label-strong tabular-nums" title={`${video.viewingCount}회 · ${duration(video.watchedSeconds)}`}>{video.viewingCount}회 · {duration(video.watchedSeconds)}</span></span>
-    <span className="flex min-w-0 flex-col"><span className="truncate text-muted-foreground" title={glanceOnly ? "틀어보기는 시청 횟수·시간에 넣지 않습니다" : undefined}>{glanceOnly ? "마지막 틀어보기" : "마지막 시청"}</span><span className="truncate tabular-nums" title={lastViewed(video.lastViewedAt)}>{lastViewed(video.lastViewedAt)}</span></span>
+  const totals = `${video.viewingCount}회 · ${duration(video.watchedSeconds)}`
+  const last = `${glanceOnly ? "마지막 틀어보기" : "마지막 시청"} ${lastViewed(video.lastViewedAt)}`
+  return <span aria-label="시청 통계" title={`시청 ${totals} · ${last}${glanceOnly ? " (틀어보기는 시청 횟수·시간에 넣지 않습니다)" : ""}`}
+    className="flex h-line-label min-w-0 items-center gap-1 text-label text-muted-foreground tabular-nums">
+    <span className="shrink-0">{totals}</span>
+    <span aria-hidden="true">·</span>
+    <span className="truncate">{glanceOnly && "틀어봄 "}<span>{lastViewed(video.lastViewedAt)}</span></span>
   </span>
 }
+/**
+ * 있을 때만 붙는 표시(자막 있음·즐겨 보는). 정보 칸이 좁으면(작게, 좁은 보통) 같은 줄에 다 들어가도록 글자 배지 대신 작은 기호로 보이고,
+ * 이름은 기호의 읽기 이름과 title로 남는다. 넓으면 글자 배지다.
+ */
+const flagIcon = cva("size-3.5", { variants: { variant: { outline: "text-muted-foreground", highlight: "fill-highlight text-highlight" } } })
+type Flag = { label: string; icon: typeof Film; variant: "outline" | "highlight" }
+function videoFlags(video: VideoData): Flag[] {
+  return [
+    ...video.hasSubtitles ? [{ label: "자막 있음", icon: Captions, variant: "outline" } as const] : [],
+    ...video.favorite ? [{ label: "즐겨 보는", icon: Star, variant: "highlight" } as const] : [],
+  ]
+}
+/**
+ * 정보 칸은 네 줄이다: 제목, 길이·상태 배지, 시청 통계, 분류(시리즈·태그). 줄마다 늘 내용이 있어 빈 띠가 생기지 않고,
+ * 높이는 web_tokens.json layout.library-card-info-height 한곳에서 정한다(격자 줄 높이 계산도 같은 토큰을 읽는다).
+ * 있을 때만 붙는 표시(자막 있음·즐겨 보는)는 넓은 칸에서는 상태 배지 옆 글자 배지이고, 칸이 좁으면(card-flags 미만) 둘째 줄이 넘치지 않게
+ * 제목 줄 끝의 작은 기호가 된다. 제목은 줄여 쓰므로 기호 자리는 늘 있고, 이름은 기호의 읽기 이름과 title로 남는다.
+ */
 export function VideoCard({ video, variant, cardSize = "medium", ...props }: Props) {
+  const flags = videoFlags(video)
   return <button {...props} className={cardVariants({ variant })} title={video.title}>
     <Thumbnail video={video} variant={cardSize === "large" ? "large" : cardSize === "small" ? "card" : "medium"} />
-    <div className="flex h-card-info w-full shrink-0 flex-col gap-0.5 p-2">
-      <span className="shrink-0 truncate text-body-strong">{video.title}</span>
-      <span className="flex flex-wrap items-center gap-1">
-        <span className="text-label text-muted-foreground tabular-nums">{duration(video.duration)}</span>
-        <ViewingBadge video={video} />
-        {video.hasSubtitles && <StatusBadge variant="outline">자막 있음</StatusBadge>}
-        {video.favorite && <StatusBadge variant="highlight">즐겨 보는</StatusBadge>}
+    <div className="@container/info flex h-card-info w-full shrink-0 flex-col gap-1 p-2">
+      <span className="flex h-line-body min-w-0 shrink-0 items-center gap-1">
+        <span className="min-w-0 flex-1 truncate text-body-strong">{video.title}</span>
+        {flags.map(({ label, icon: Icon, variant }) => <span key={label} title={label} className="hidden shrink-0 @max-card-flags/info:inline-flex">
+          <Icon aria-hidden="true" className={flagIcon({ variant })} /><span className="sr-only">{label}</span></span>)}
       </span>
-      {video.series && <span className="shrink-0 truncate text-label text-muted-foreground" title={video.series}>{video.series}</span>}
+      <span className="flex h-badge min-w-0 items-center gap-1.5">
+        <span className="shrink-0 text-label text-muted-foreground tabular-nums">{duration(video.duration)}</span>
+        <ViewingBadge video={video} />
+        {flags.map(({ label, variant }) => <span key={label} className="contents @max-card-flags/info:hidden"><StatusBadge variant={variant}>{label}</StatusBadge></span>)}
+      </span>
       <VideoStatistics video={video} />
-      <span className="mt-auto min-w-0"><VideoTags tags={video.tags} /></span>
+      <span aria-label="분류" className="flex h-badge min-w-0 items-center gap-1.5">
+        {video.series && <span className="max-w-1/2 min-w-0 shrink-0 truncate text-label text-muted-foreground" title={`시리즈 ${video.series}`}>{video.series}</span>}
+        {video.tags.length ? <span className="min-w-0 flex-1"><VideoTags tags={video.tags} /></span>
+          : !video.series && <span className="text-label text-muted-foreground">태그 없음</span>}
+      </span>
     </div>
   </button>
 }
@@ -72,11 +105,11 @@ export function VideoCard({ video, variant, cardSize = "medium", ...props }: Pro
 export function VideoCardPlaceholder({ selected = false, ...props }: Omit<ComponentProps<"div">, "className" | "children"> & { selected?: boolean }) {
   return <div data-slot="video-card-placeholder" aria-hidden={props.role ? undefined : true} {...props} className={cardVariants({ variant: selected ? "selected" : "placeholder" })}>
     <Skeleton shape="media" />
-    <div className="flex h-card-info w-full shrink-0 flex-col gap-0.5 p-2">
+    <div className="flex h-card-info w-full shrink-0 flex-col gap-1 p-2">
       <Skeleton shape="line" className="w-3/4" />
-      <span className="flex gap-1"><Skeleton shape="badge" className="w-10" /><Skeleton shape="badge" className="w-14" /></span>
-      <Skeleton shape="block" className="mt-1 h-12 w-full" />
-      <Skeleton shape="badge" className="mt-auto w-16" />
+      <span className="flex gap-1.5"><Skeleton shape="badge" className="w-10" /><Skeleton shape="badge" className="w-14" /></span>
+      <Skeleton shape="text" className="w-1/2" />
+      <Skeleton shape="badge" className="w-16" />
     </div>
   </div>
 }

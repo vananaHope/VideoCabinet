@@ -324,7 +324,8 @@ def test_web_root_is_restored_before_playback_cover_is_removed(window, tmp_path)
         window.core.add_file(path)
     window.show_library()
     wait_for(lambda: not host.return_pending)
-    wait_for(lambda: javascript(window, "Number(document.getElementById('library-grid').getAttribute('aria-rowcount')) > 20"))
+    # 열 수는 카드 크기 토큰에 따라 바뀌니 줄 수 대신 1800px까지 내릴 수 있는지를 기다린다.
+    wait_for(lambda: javascript(window, "(g => Number(g.getAttribute('aria-rowcount')) > 10 && g.scrollHeight - g.clientHeight > 1800)(document.getElementById('library-grid'))"))
     javascript(window, "document.getElementById('library-grid').scrollTop=1800")
     javascript(window, "document.getElementById('library-grid').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))")
     wait_for(lambda: window.player is not None)
@@ -766,7 +767,8 @@ def test_sorted_library_return_never_scrolls_to_top(window, tmp_path):
     selected = window.core.videos()[25].id
     library.selected_id = selected
     library.refresh()
-    wait_for(lambda: javascript(window, "Number(document.getElementById('library-grid').getAttribute('aria-rowcount')) > 20"))
+    # 열 수는 카드 크기 토큰에 따라 바뀌니 줄 수 대신 1800px까지 내릴 수 있는지를 기다린다.
+    wait_for(lambda: javascript(window, "(g => Number(g.getAttribute('aria-rowcount')) > 10 && g.scrollHeight - g.clientHeight > 1800)(document.getElementById('library-grid'))"))
     javascript(window, "document.getElementById('library-grid').scrollTop=1800")
     javascript(window, "document.getElementById('library-grid').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))")
     wait_for(lambda: window.core.playback.session is not None)

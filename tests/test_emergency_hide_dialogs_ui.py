@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 import warnings
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -335,12 +336,21 @@ def test_playback_dialog_without_tray_minimizes_with_the_dialog_left_to_the_os(w
 
 
 def press_in_modal(window, kind):
-    """exec 중인 Qt 대화상자가 뜨면 그 안에서 실제 키로 긴급 탈출을 누르고, exec가 반환되기 전 상태를 기록한다."""
+    """exec 중인 Qt 대화상자가 뜨면 그 안에서 실제 키로 긴급 탈출을 누르고, exec가 반환되기 전 상태를 기록한다.
+
+    사용자가 키를 누르는 때처럼 대화상자가 활성 창이 된 뒤에 누른다. 활성화 전에는 키가 앱 창 쪽 단축키 문맥에서 처리돼
+    대화상자 자신의 단축키(Qt 파일 창의 Ctrl+Shift+H)와 부딪히는지 잴 수 없다.
+    """
     seen = {}
+    deadline = time.monotonic() + 10
 
     def press():
         modal = QApplication.activeModalWidget()
-        if not isinstance(modal, kind):
+        if not isinstance(modal, kind) or not modal.isActiveWindow():
+            if isinstance(modal, kind) and time.monotonic() > deadline:
+                seen["inside_exec"] = "대화상자가 활성 창이 되지 않음"
+                modal.done(0)
+                return
             QTimer.singleShot(20, press)
             return
         seen["title"] = modal.windowTitle()

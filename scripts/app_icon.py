@@ -71,7 +71,9 @@ def rgba(image):
 
 
 def pixel_digest(image):
-    image = rgba(image)
+    """사전 곱셈 RGBA로 비교한다. 거의 투명한 픽셀을 사전 곱셈에서 되돌리는 반올림이 CPU(AVX-512 여부)마다 1씩 달라
+    같은 그림도 직선 RGBA 해시가 PC·러너마다 달라졌다. 사전 곱셈 값은 렌더 결과 그대로라 흔들리지 않는다."""
+    image = image.convertToFormat(QImage.Format.Format_RGBA8888_Premultiplied)
     return hashlib.sha256(f'{image.width()}x{image.height()}:'.encode() + _pixels(image)).hexdigest()
 
 

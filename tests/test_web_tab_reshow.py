@@ -107,9 +107,12 @@ def active_element(window):
 
 
 def middle_card(window):
-    """격자 보기 영역 가운데에 그려진 카드의 영상 ID."""
+    """격자 보기 영역 가운데에 가장 가까운 카드의 영상 ID. 열 수가 짝수면 정가운데는 카드 사이 틈이다."""
     return int(js(window, f"""(() => {{ const g = {GRID}.getBoundingClientRect();
-      return document.elementFromPoint(g.x + g.width / 2, g.y + g.height / 2).closest('[role=gridcell]').id.slice(6) }})()"""))
+      const x = g.x + g.width / 2, y = g.y + g.height / 2;
+      const distance = cell => {{ const r = cell.getBoundingClientRect(); return Math.hypot(r.x + r.width / 2 - x, r.y + r.height / 2 - y) }};
+      const cells = [...{GRID}.querySelectorAll('[role=gridcell]')];
+      return cells.reduce((best, cell) => distance(cell) < distance(best) ? cell : best).id.slice(6) }})()"""))
 
 
 def switch(window, number, tab, focused):
