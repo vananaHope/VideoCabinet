@@ -192,6 +192,10 @@ try:
     window.navigate_web_tab('folders')
     settle()
     assert capture('initial')['tones'] == ['info']
+    # 폴더 감시는 끈다. Windows에서는 아래에서 만든 파일의 감시 묶음이 실제 검사 뒤 늦게 와서(약 0.5초)
+    # 그 조용한 검사가 뒤이어 넣은 검사 결과(외부 자막 경고 300개 등)를 실제 결과로 바꿔 놓는다(#415).
+    # 자동 감지는 check_web_folder_watch.py가 따로 본다.
+    window.folder_watch.stop()
     for index in range(30):
         folder = workspace / f'감시 폴더 {index:02}'
         folder.mkdir()
@@ -200,9 +204,7 @@ try:
     video = workspace / '감시 폴더 00' / '강의.mkv'
     video.write_bytes(b'video')
     video.with_suffix('.ko.srt').write_text('1\n00:00:01,000 --> 00:00:02,000\n정상 줄\n\n끝 잔여 블록\n', encoding='utf-8')
-    # 자동 감지의 조용한 검사가 끝난 뒤에 검사 결과를 넣는다.
-    settle(1500)
-    wait(lambda: window.worker is None, '자동 감지 검사 완료')
+    wait(lambda: window.worker is None, '앞선 검사 완료')
     window.refresh()
 
     run_scan(lambda: ScanResult(0, ()))

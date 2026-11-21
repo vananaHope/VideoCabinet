@@ -10,7 +10,7 @@ jobs:
   check:
     name: ${{ matrix.name }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -19,6 +19,8 @@ jobs:
             cmd: scripts/check_web_scan_notice.py --offscreen --output out
           - name: scan-notice-offscreen-trace
             cmd: .github/diag/trace_watch.py scripts/check_web_scan_notice.py --offscreen --output out
+          - name: scan-notice-real
+            cmd: scripts/check_web_scan_notice.py --output out
     env:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
@@ -59,7 +61,7 @@ jobs:
           New-Item -ItemType Directory -Force .local | Out-Null
           $env:Path = $env:MVM_FFMPEG_DIR + ';' + $env:Path
           $fail = 0
-          foreach ($i in 1..3) {
+          foreach ($i in 1..5) {
             Write-Host "===== run $i ====="
             .venv/Scripts/python.exe ${{ matrix.cmd }}
             Write-Host "exit=$LASTEXITCODE"
