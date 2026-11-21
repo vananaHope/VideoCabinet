@@ -1,0 +1,72 @@
+# 임시: #415·#359 판별용. 러너에서 원본 검사 스크립트를 돌린다. PR 병합 전에 지운다.
+name: diag pc checks
+on:
+  push:
+    branches: [claude/project-thread-stwd0w]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    name: ${{ matrix.name }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: scan-notice-offscreen
+            cmd: scripts/check_web_scan_notice.py --offscreen --output out
+          - name: scan-notice-real
+            cmd: scripts/check_web_scan_notice.py --output out
+          - name: playback-real
+            cmd: scripts/check_playback_controls.py --real --trace-focus --output out
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Python 환경
+        shell: pwsh
+        run: |
+          uv venv --python (python -c "import sys; print(sys.executable)") .venv
+          uv pip install --python .venv/Scripts/python.exe -e '.[dev]'
+      - name: 웹 셸 빌드
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: libmpv와 FFmpeg
+        shell: pwsh
+        run: |
+          .venv/Scripts/python.exe scripts/install_libmpv.py
+          choco install ffmpeg -y --no-progress
+          $real = Get-ChildItem C:\ProgramData\chocolatey\lib\ffmpeg\tools -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          "MVM_FFMPEG_DIR=$($real.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: 검사 (3회)
+        shell: pwsh
+        run: |
+          $env:Path = $env:MVM_FFMPEG_DIR + ';' + $env:Path
+          $fail = 0
+          foreach ($i in 1..3) {
+            Write-Host "===== run $i ====="
+            .venv/Scripts/python.exe ${{ matrix.cmd }}
+            Write-Host "exit=$LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0) { $fail++ }
+          }
+          Write-Host "failures=$fail"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: out-${{ matrix.name }}
+          path: out
+          retention-days: 3
