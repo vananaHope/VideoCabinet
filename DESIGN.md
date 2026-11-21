@@ -191,7 +191,7 @@ components:
 어두운 상영실 같은 무채색 바탕에 인디고 빛줄기 하나, 그리고 의미 전용 상태 색이 있다.
 
 ### Primary
-- **Projector Indigo** (`primary`): 주 동작 단추, 켜진 스위치·체크박스, 고른 라디오, 태그 고르기의 여러 개 고르기에서 고른 태그, 진행 중인 진행 막대, 입력란의 글자 선택 영역처럼 "지금 이것"을 가리키는 곳에만 쓴다. 위에 오는 글자는 `primary-foreground`. 탭의 선택(머리글·구역·패널)은 무채색 면으로 보이고 인디고를 쓰지 않는다.
+- **Projector Indigo** (`primary`): 주 동작 단추, 켜진 스위치·체크박스, 고른 라디오, 진행 중인 진행 막대, 입력란의 글자 선택 영역처럼 "지금 이것"을 가리키는 곳에만 쓴다. 위에 오는 글자는 `primary-foreground`. 탭의 선택(머리글·구역·패널)은 무채색 면으로 보이고 인디고를 쓰지 않는다.
 - **Focus Beam** (`ring`): 키보드 초점 윤곽과 선택된 카드의 테두리·링. 마우스 호버와 구별되는 유일한 신호다.
 - **Soft Indigo Text** (`primary-text`): 어두운 바탕 위 인디고 글자와 선. 링크 단추, 통계 차트의 막대·선, Qt의 켜진(checked) 단추 글자. 진한 `primary`를 글자에 쓰면 대비가 모자라서 따로 둔다. 통계 숫자 카드의 큰 숫자는 `foreground`다.
 
@@ -366,7 +366,7 @@ components:
 ### Chips (Status Badge · Chip)
 상태는 각진 배지, 분류는 알약 칩이다. 둘은 높이(1.25rem)가 같고 모양으로 구별된다.
 - **Status Badge** (`StatusBadge`): `xs` 둥글기, Label 글자, 상태 색 면 + 짝이 되는 진한 글자. 다 본 영상은 Mint, 보다 만 영상은 Sky, 파일 없음은 Rose, 아직 안 봄은 `muted`, 즐겨 보는은 Marker Yellow, "자막 있음"은 `input` 링만 있는 윤곽선. 고른 대기열 행(`accent` 면) 위의 대기 배지는 `selectedMuted`(`muted-foreground` 면 + `background` 글자)다.
-- **Chip** (`components/ui/chip.tsx`): 태그와 적용한 검색 조건. 알약(`full`), `secondary` 면, Label 글자. 영상 카드·상세 패널·하이라이트 목록·모아보기의 태그와 라이브러리의 조건 칩이 모두 이 부품 하나다. 누를 수 있는 칩(태그 메뉴, 조건 지우기)은 호버에 `accent` 면이 된다. 긴 이름은 칩 안에서 말줄임하고 전체 이름은 툴팁에 둔다. 쓰는 곳은 최대 폭만 정한다.
+- **Chip** (`components/ui/chip.tsx`): 태그와 적용한 검색 조건. 알약(`full`), `secondary` 면, Label 글자. 영상 카드·상세 패널·하이라이트 목록·모아보기의 태그와 라이브러리의 조건 칩이 모두 이 부품 하나다. 누를 수 있는 칩(태그 메뉴, 조건 지우기, 태그 고르기의 고른 태그·자주 쓴 태그 후보)은 호버에 `accent` 면이 된다. 태그 고르기 후보 칩의 고름은 `accent` 면 + 안쪽 `ring` 1px와 체크 표시다. 긴 이름은 칩 안에서 말줄임하고 전체 이름은 툴팁에 둔다. 쓰는 곳은 최대 폭만 정한다.
 
 ### Progress
 - **Progress** (`ui/progress.tsx`: 업데이트 내려받기·자막 기능 준비, `components/queue-list.tsx`: 자막 대기열 행): 높이 0.5rem 알약(`full`). 트랙은 `background` 면 + `border` 테두리 1px, 채움은 진행 중 `primary`다. 채움과 트랙은 3.16:1로 UI 기준 3:1을 넘는다(이전 트랙 `muted`는 2.09:1이었다, #385).

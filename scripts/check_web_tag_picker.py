@@ -249,6 +249,8 @@ def offscreen():
     open_panel()
     capture('tags-300-frequent')
     frequent = layout('tags-300-frequent')
+    slots = json.loads(js(f"JSON.stringify([...document.querySelectorAll('{PANEL} [role=listbox] [role=option]')].map(o => o.dataset.slot))"))
+    assert slots and all(slot == 'chip' for slot in slots), slots
     expected = [t['name'] for t in sorted(page.tags, key=lambda t: (-t['videoCount'], tag_name_key(t['name'])))[:12]]
     assert frequent['options'] == 12 and frequent['names'] == expected, (frequent, expected)
     metrics['checks'].append('입력 없음: 영상 수 많은 순 12개(같으면 이름순)')
@@ -309,6 +311,17 @@ def offscreen():
     assert picker_chips() == applied_tag_chips() and set(picker_chips()) == {'액션', expected[0], 'Straße'}, (picker_chips(), applied_tag_chips())
     selected = json.loads(js(f"JSON.stringify([...document.querySelectorAll('{PANEL} [role=option][aria-selected=true]')].map(o => o.title))"))
     assert set(selected) == {'액션', expected[0], 'Straße'}, selected
+    # 고른 행·고른 태그는 인디고 채움이 아니라 무채색 선택(accent)이고, 고른 태그 칩은 공용 Chip이다(#414).
+    looks = json.loads(js(f"""JSON.stringify((() => {{
+      const primary = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()
+      const fill = e => getComputedStyle(e).backgroundColor
+      const probe = document.createElement('div'); probe.style.background = primary; document.body.append(probe)
+      const indigo = getComputedStyle(probe).backgroundColor; probe.remove()
+      const picked = [...document.querySelectorAll('{PANEL} [role=option][aria-selected=true]'), ...document.querySelectorAll('{PANEL} [aria-label="고른 태그"] button')]
+      return {{ indigo: picked.filter(e => fill(e) === indigo).length, primaryClass: picked.filter(e => /(^|\\s|:)bg-primary/.test(e.className)).length,
+        chips: [...document.querySelectorAll('{PANEL} [aria-label="고른 태그"] button')].map(e => e.dataset.slot) }} }})())"""))
+    assert looks['indigo'] == 0 and looks['primaryClass'] == 0, looks
+    assert looks['chips'] and all(slot == 'chip' for slot in looks['chips']), looks
     capture('tags-300-picked')
     metrics['checks'].append('검색·자주 쓴 태그·모두 보기에서 고른 결과가 같은 AND 필터와 적용 조건 칩에 맞음')
 

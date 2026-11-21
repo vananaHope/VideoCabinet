@@ -2,10 +2,12 @@ import { useId, useLayoutEffect, useRef, useState } from "react"
 import { cva } from "class-variance-authority"
 import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Chip } from "@/components/ui/chip"
 import { Input } from "@/components/ui/input"
 import { selectableItem } from "@/components/ui/selectable-item"
 import { listFrame, listRow } from "@/components/ui/list"
 import { tagNameKey } from "@/lib/tag-name-key"
+import { cn } from "@/lib/utils"
 import { tagChoices } from "@/lib/tag-search"
 import type { TagUsageData } from "@/bridge-types"
 
@@ -16,18 +18,14 @@ type Choice =
   | { mode: "multiple"; selected: readonly number[]; onChange: (ids: number[]) => void; chips?: boolean }
   | { mode: "immediate"; onPick: (tag: TagUsageData) => Promise<boolean>; onCreate?: (name: string) => Promise<boolean> }
 
-// 행은 공용 목록 행(대화상자 목록과 같은 높이·둥글기)이다. 면은 아래 multiple 변형이 칠한다.
-const option = cva("data-active:ring-2 data-active:ring-ring data-active:ring-inset", {
+// 행은 공용 목록 행(대화상자 목록과 같은 높이·둥글기)이고, 자주 쓴 태그 후보는 공용 Chip이다.
+// 면은 다른 고를 수 있는 목록과 같은 selectableItem(호버 muted, 고름 accent)이고, 여러 개 고르기의 고름은 체크 표시로도 보인다.
+const option = cva("cursor-default data-active:ring-2 data-active:ring-ring data-active:ring-inset", {
   variants: {
-    layout: { chip: "flex min-w-0 max-w-full cursor-default items-center gap-2 rounded-full border px-3 py-1 text-body", row: listRow() },
-    multiple: {
-      true: "hover:bg-muted aria-selected:bg-primary aria-selected:text-primary-foreground",
-      false: selectableItem({ selected: "aria" }),
-    },
+    layout: { chip: "", row: cn(listRow(), selectableItem({ selected: "aria" })) },
   },
 })
 const mark = cva("size-4 shrink-0", { variants: { chosen: { true: "", false: "invisible" } } })
-const count = cva("shrink-0 text-label tabular-nums", { variants: { chosen: { true: "text-primary-foreground", false: "text-muted-foreground" } } })
 
 // listAll이면 입력이 없을 때 자주 쓴 태그 대신 전체를 자체 스크롤 행 목록으로 늘 펼친다('모두 보기' 없음).
 export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 태그가 없습니다.", listAll = false, ...choice }: Choice & {
@@ -107,7 +105,7 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
     else if (showAll) setShowAll(false)
   }}>
     {!!chips.length && <div role="group" aria-label={`고른 ${label}`} className="flex max-h-16 flex-wrap gap-1 overflow-y-auto">
-      {chips.map((tag, index) => <Button key={tag.id} id={chipId(tag)} variant="secondary" size="xs" title={tag.name} aria-label={`${tag.name} 빼기`} onClick={() => unchip(index)}><span className="max-w-48 truncate">{tag.name}</span><X /></Button>)}
+      {chips.map((tag, index) => <Chip key={tag.id} asChild interactive><button type="button" id={chipId(tag)} title={tag.name} aria-label={`${tag.name} 빼기`} onClick={() => unchip(index)}><span className="max-w-48 truncate">{tag.name}</span><X /></button></Chip>)}
     </div>}
     {/* 새 태그 버튼은 입력 옆에 늘 두고, 만들 이름이 있을 때만 켠다. */}
     <div className="flex gap-2">
@@ -139,12 +137,13 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
         className={layout === "chip" ? "flex flex-wrap gap-1.5" : listFrame({ class: "max-h-48" })}>
         {choices.map((tag, index) => {
           const chosen = multiple ? selected.includes(tag.id) : index === active
-          return <div key={tag.id} id={optionId(tag)} role="option" aria-selected={chosen} data-active={index === active || undefined} title={tag.name}
-            className={option({ layout, multiple })} onMouseDown={event => event.preventDefault()} onClick={() => pick(tag)}>
-            {multiple && layout === "row" && <Check aria-hidden className={mark({ chosen })} />}
+          const body = <div key={tag.id} id={optionId(tag)} role="option" aria-selected={chosen} data-active={index === active || undefined} title={tag.name}
+            className={option({ layout })} onMouseDown={event => event.preventDefault()} onClick={() => pick(tag)}>
+            {multiple && (layout === "row" ? <Check aria-hidden className={mark({ chosen })} /> : chosen && <Check aria-hidden />)}
             <span className="min-w-0 flex-1 truncate">{tag.name}</span>
-            <span className={count({ chosen: multiple && chosen })}>{tag.videoCount}</span>
+            <span className="shrink-0 text-label text-muted-foreground tabular-nums">{tag.videoCount}</span>
           </div>
+          return layout === "chip" ? <Chip key={tag.id} asChild interactive selectable>{body}</Chip> : body
         })}
       </div>}
     {!searching && !listAll && (showAll || choices.length < available) && <Button variant="link" size="xs" aria-expanded={showAll} aria-controls={listId} onClick={() => setShowAll(!showAll)}>
