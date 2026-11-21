@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { request } from "@/bridge"
 import type { ShellUpdateData, UpdateAction, UpdateChoice, UpdateResultData, UpdateStatusData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { NoticeStack, type NoticeItem } from "@/components/ui/notice"
 import { UpdateChoices, UpdateProgress, UpdateTitle, useShellUpdate } from "@/components/update-notice"
 import { formatDateTime } from "@/lib/dates"
@@ -91,7 +92,7 @@ export function UpdateSettings({ data, onCheck, onAutomatic, onChoose }: { data:
       {installing && <UpdateProgress idPrefix="settings-update-progress" install={install} locked={sending} onAction={act} />}
     </SettingsCard>
     <SettingsCard aria-labelledby="settings-update-automatic" titleId="settings-update-automatic" title="시작할 때 업데이트 확인" description="앱을 시작할 때 하루에 한 번 새 버전을 확인합니다."
-      control={<Button id="settings-update-automatic-toggle" variant={data.automatic ? 'secondary' : 'outline'} aria-pressed={data.automatic} aria-disabled={sending || undefined} onClick={() => void run(() => onAutomatic(!data.automatic))}>시작할 때 확인: {data.automatic ? '켜짐' : '꺼짐'}</Button>}
+      control={<><span aria-hidden="true" className="text-body text-muted-foreground">{data.automatic ? '켜짐' : '꺼짐'}</span><Switch id="settings-update-automatic-toggle" aria-label="시작할 때 확인" checked={data.automatic} aria-disabled={sending || undefined} onCheckedChange={enabled => void run(() => onAutomatic(enabled))} /></>}
       note="기본값 켬 · 꺼도 ‘지금 확인’으로 직접 확인할 수 있습니다. 연결 문제로 실패하면 몇 시간 뒤 다시 확인합니다." />
   </>
 }
