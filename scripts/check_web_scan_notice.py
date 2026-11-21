@@ -152,8 +152,15 @@ def measure(name):
     layout = json.loads(js('''JSON.stringify((() => {
         const box = selector => document.querySelector(selector)?.getBoundingClientRect()
         const main = document.querySelector('main[aria-label="폴더 관리"]')
+        // 검사 안내는 목록 위 띠 안에서 스크롤하므로 보이는 아래 끝은 띠의 아래 끝까지다.
         const report = box('[aria-label="검사 안내"]'), list = box('#folders-section')
-        return {list: Math.round(list.height), report: Math.round(report.height), reportBottom: Math.round(report.bottom),
+        // 셸 안내 묶음이 최소 길이 카드의 제목·설명·보조 설명을 덮는지(#412).
+        const layer = [...document.querySelectorAll('[data-slot=notice-layer]')].find(e => e.checkVisibility())?.getBoundingClientRect()
+        const card = document.getElementById('folders-minimum').closest('section')
+        const texts = [...card.querySelectorAll('label, p')].map(e => e.getBoundingClientRect())
+        const hits = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+        return {list: Math.round(list.height), report: Math.round(report.height), reportBottom: Math.round(Math.min(report.bottom, box('[data-folders-notices]').bottom)),
+                layerOverMinimum: layer ? texts.filter(r => hits(layer, r)).length : 0,
                 pageScroll: main.scrollHeight - main.clientHeight, wide: document.documentElement.scrollWidth > innerWidth,
                 tones: [...document.querySelectorAll('[aria-label="검사 안내"] [data-slot=notice]')].map(e => e.dataset.tone)}
     })())'''))
@@ -162,6 +169,7 @@ def measure(name):
     assert layout['list'] >= 128, (name, layout)
     assert layout['pageScroll'] <= 0 and not layout['wide'], (name, layout)
     assert layout['reportBottom'] <= 720, (name, layout)
+    assert layout['layerOverMinimum'] == 0, (name, layout)
     return layout
 
 

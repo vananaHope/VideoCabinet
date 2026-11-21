@@ -26,7 +26,7 @@ function SelectTrigger({
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       className={cn(
-        "flex h-9 w-fit min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm whitespace-nowrap text-foreground shadow-xs focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:truncate dark:bg-input/30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "flex h-9 w-fit min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm whitespace-nowrap text-foreground shadow-xs disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:truncate dark:bg-input/30 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className
       )}
       // 비활성 fieldset 안의 트리거는 Radix가 비활성으로 알지 못하므로 여기서 열기를 막는다.

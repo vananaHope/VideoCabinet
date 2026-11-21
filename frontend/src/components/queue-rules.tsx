@@ -84,7 +84,7 @@ export function QueueRules({ bridge, data, showError }: { bridge: QueueBridge | 
   }
   return <div className="flex min-h-0 max-w-content flex-1 flex-col gap-3">
     <p className="text-body text-muted-foreground">감시 폴더나 태그에 새로 등록되는 영상의 자막을 자동으로 만듭니다.</p>
-    <div id="queue-rules" role="listbox" aria-label="저장된 자동 자막 규칙" aria-activedescendant={activeRule ? `queue-rule-${activeRule.id}` : undefined} tabIndex={0} onKeyDown={keyDown} className={listFrame({ surface: "card", focusable: true, class: "flex-1" })}>
+    <div id="queue-rules" role="listbox" aria-label="저장된 자동 자막 규칙" aria-activedescendant={activeRule ? `queue-rule-${activeRule.id}` : undefined} tabIndex={0} onKeyDown={keyDown} className={listFrame({ surface: "card", class: "flex-1" })}>
       {data.rules.map(rule => <div key={rule.id} id={`queue-rule-${rule.id}`} role="option" aria-selected={rule.id === selected} className={listRow({ selected: rule.id === selected })} onClick={() => selectRule(rule)}><p className="min-w-0 break-all">{rule.label} · {rule.language}</p></div>)}
       {!data.rules.length && <EmptyState title="자동 자막 규칙이 없습니다" description="아래에서 감시 폴더나 태그를 고르고 '규칙 저장'을 누르세요." />}
     </div>

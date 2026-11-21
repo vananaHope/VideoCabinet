@@ -65,7 +65,7 @@ export function KeyGuideDialog({ bridge, tab, open, onOpenChange }: { bridge: Sh
         닫으면(Esc·F1·닫기·바깥 누르기) 공용 대화상자 틀이 연 자리(F1이면 격자·입력 칸, ⌨이면 그 단추)로 초점을 돌려준다. */}
     <DialogContent size="wide" onEscapeKeyDown={event => event.stopPropagation()}>
       <DialogHeader title={`키 안내 · ${label}`} description="바꿀 수 있는 키는 설정 → 키 배치에서 바꾸며, 여기에는 지금 키 배치가 보입니다." />
-      <div tabIndex={0} aria-label="키 목록" className="grid min-h-0 grid-cols-2 gap-6 overflow-y-auto rounded-md focus-visible:outline-2 focus-visible:outline-ring">
+      <div tabIndex={0} aria-label="키 목록" className="grid min-h-0 grid-cols-2 gap-6 overflow-y-auto rounded-md">
         <section aria-label="앱 전체" className="min-w-0 space-y-2">
           <h3 className="text-body-strong">앱 전체</h3>
           {error ? <Notice tone="error">{error}</Notice> : app ? <KeyRows rows={app} /> : <p role="status" className="text-body text-muted-foreground">키 배치를 읽는 중…</p>}

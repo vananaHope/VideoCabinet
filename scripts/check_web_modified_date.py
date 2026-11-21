@@ -198,24 +198,32 @@ def page_overflow():
 
 
 def panel_layout(name):
-    """패널이 창 안에 있고 최대 높이(28rem)를 넘으면 스크롤되는지 잰다."""
+    """패널이 창 안(가장자리 1rem)에 있고, 머리 줄·"조건 모두 지우기" 줄은 고정, 그 사이 조건 영역만 스크롤하는지 잰다(#381)."""
     state = json.loads(js(f"""JSON.stringify((() => {{
       const e = document.querySelector('{PANEL}'), p = e.getBoundingClientRect()
+      const area = e.querySelector('.definition-list'), a = area.getBoundingClientRect()
+      const head = e.querySelector('h2').getBoundingClientRect()
       const clear = [...e.querySelectorAll('button')].find(b => b.textContent === '조건 모두 지우기').getBoundingClientRect()
+      const inside = r => r.top >= p.top - 0.5 && r.bottom <= p.bottom + 0.5
       return {{ top: p.top, bottom: p.bottom, left: p.left, right: p.right, height: p.height, innerWidth, innerHeight,
         rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
-        scrollHeight: e.scrollHeight, clientHeight: e.clientHeight, scrollTop: e.scrollTop,
-        overflowX: e.scrollWidth > e.clientWidth, clearVisible: clear.top >= p.top && clear.bottom <= p.bottom,
+        scrollHeight: area.scrollHeight, clientHeight: area.clientHeight, scrollTop: area.scrollTop,
+        panelScroll: e.scrollHeight > e.clientHeight + 1,
+        overflowX: e.scrollWidth > e.clientWidth || area.scrollWidth > area.clientWidth,
+        headVisible: inside(head) && head.bottom <= a.top + 0.5, clearVisible: inside(clear) && clear.top >= a.bottom - 0.5,
         dateInputs: [...e.querySelectorAll('input[type=date]')].map(i => i.getAttribute('aria-label')) }} }})())"""))
     metrics['layout'][name] = state
-    assert state['top'] >= 0 and state['left'] >= 0, state
-    assert state['bottom'] <= state['innerHeight'] and state['right'] <= state['innerWidth'], state
-    assert state['height'] <= 28 * state['rem'] + 1 and not state['overflowX'], state
+    edge = state['rem'] - 1
+    assert state['top'] >= edge and state['left'] >= edge, state
+    assert state['bottom'] <= state['innerHeight'] - edge and state['right'] <= state['innerWidth'] - edge, state
+    assert not state['overflowX'] and not state['panelScroll'], state
+    assert state['headVisible'] and state['clearVisible'], state
     return state
 
 
 def detail_line():
-    return js("[...document.querySelectorAll('#detail-scroll p')].map(p => p.textContent).find(t => t.startsWith('수정한 날짜')) ?? null")
+    """상세 정보 `dt`·`dd` 짝(#406)을 '수정한 날짜: 값' 한 줄로 읽는다."""
+    return js("(dt => dt ? `${dt.textContent}: ${dt.nextElementSibling?.textContent ?? ''}` : null)([...document.querySelectorAll('#detail-scroll dt')].find(d => d.textContent === '수정한 날짜'))")
 
 
 def local_day(value):
@@ -253,20 +261,20 @@ def check_panel_and_range():
         assert visible, '직접 지정 범위에 맞는 영상이 없음'
     metrics['custom_range'] = {'from': start, 'to': end, 'visible': len(visible)}
     close_panel()
-    # 세 날짜를 모두 직접 지정하면 패널이 가장 길어진다. 최대 높이 안에서 스크롤해 끝까지 닿는지 본다.
+    # 세 날짜를 모두 직접 지정하면 패널이 가장 길어진다. 조건 영역만 스크롤해 끝까지 닿는지 본다.
     view(added_preset='custom', modified_preset='custom', viewed_preset='custom')
     open_panel()
     state = panel_layout('all-custom-top')
-    assert state['scrollHeight'] > state['clientHeight'] and not state['clearVisible'], state
+    assert state['scrollHeight'] > state['clientHeight'] and state['scrollTop'] == 0, state
     capture('panel-scroll-top')
-    js(f"document.querySelector('{PANEL}').scrollTop = 1e6")
+    js(f"document.querySelector('{PANEL} .definition-list').scrollTop = 1e6")
     settle()
     state = panel_layout('all-custom-bottom')
-    assert state['scrollTop'] > 0 and state['clearVisible'], state
+    assert state['scrollTop'] > 0 and state['scrollTop'] + state['clientHeight'] >= state['scrollHeight'] - 1, state
     assert len(state['dateInputs']) == 6, state
     capture('panel-scroll-bottom')
     close_panel()
-    metrics['checks'].append(f"검색 조건 패널: 추가일·수정한 날짜·마지막 시청 순서, 직접 지정 입력 2칸, 범위 결과 {len(visible)}개(파일 없음 제외), 28rem 안 스크롤로 '조건 모두 지우기' 도달")
+    metrics['checks'].append(f"검색 조건 패널: 추가일·수정한 날짜·마지막 시청 순서, 직접 지정 입력 2칸, 범위 결과 {len(visible)}개(파일 없음 제외), 조건 영역만 스크롤하고 머리 줄·'조건 모두 지우기' 고정")
 
 
 def check_sort():

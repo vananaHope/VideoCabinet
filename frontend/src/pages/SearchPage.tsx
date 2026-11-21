@@ -149,7 +149,7 @@ export default function SearchPage() {
     <div id="search-results" role="listbox" aria-label="검색 결과" aria-busy={pending || state === "preparing"} aria-activedescendant={results.length ? `search-result-${selectedIndex}` : undefined} tabIndex={0}
       onScroll={event => { if (event.currentTarget.offsetParent) scroll.current = event.currentTarget.scrollTop }}
       onKeyDown={event => listKey(event, pending ? 0 : results.length, selectedIndex ?? 0, select, () => play(selectedIndex ?? -1))}
-      className="-mx-1 min-h-32 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
+      className="-mx-1 min-h-32 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1">
       {results.length ? rows : !pending && <EmptyState variant="page" title={empty[0]} description={empty[1]} />}
     </div>
     {/* 상태 줄은 비어도 한 줄 높이를 지킨다. 기다림 표시는 앞 문구가 있을 때만 띄워 놓는다. */}

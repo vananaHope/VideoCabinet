@@ -8,7 +8,8 @@ import { SelectField } from "@/components/ui/select"
 import { EmptyState, PageHeader } from "@/components/page-parts"
 import { KeyHints } from "@/components/key-hints"
 import { Chip } from "@/components/ui/chip"
-import { ResultRow, highlightTime, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+import { ResultRow, listKey, listKeyRows, restoreListFocus, timestamp } from "@/components/reel-search-parts"
+import { highlightTime } from "@/components/highlight-time"
 import { formatDateTime } from "@/lib/dates"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
@@ -89,7 +90,7 @@ export default function ReelPage() {
     <div id="reel-list" role="listbox" aria-label="모든 영상의 하이라이트" aria-activedescendant={selected ? `reel-${selected.id}` : undefined} tabIndex={0}
       onScroll={event => { if (event.currentTarget.offsetParent) scroll.current = event.currentTarget.scrollTop }}
       onKeyDown={event => listKey(event, entries.length, entries.findIndex(e => e.id === selected?.id), select, () => { if (selected?.playable) play(selected.id) })}
-      className="-mx-1 min-h-32 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring">
+      className="-mx-1 min-h-32 flex-1 space-y-1.5 overflow-y-auto rounded-lg p-1">
       {!entries.length ? <EmptyState variant="page" title={data?.emptyTitle ?? "불러오는 중…"} description={data?.emptyDescription ?? ""} /> : entries.map((entry, index) => <ResultRow key={entry.id} id={`reel-${entry.id}`} selected={entry.id === selected?.id}
         onClick={() => { select(index); document.getElementById("reel-list")?.focus({ preventScroll: true }) }} onDoubleClick={() => { if (entry.playable) play(entry.id) }}>
         <div className="relative flex aspect-video w-32 shrink-0 items-center justify-center self-start overflow-hidden rounded-md bg-muted"><Film aria-hidden="true" className="absolute size-8 text-muted-foreground" />{entry.thumbnail && <img src={entry.thumbnail} alt="" loading="lazy" onError={event => { event.currentTarget.hidden = true }} className="relative h-full w-full object-cover" />}</div>

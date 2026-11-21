@@ -34,7 +34,7 @@ stats8_pending|check_web_statistics.py|--count 8 --resolution-pending
 stats0_empty|check_web_statistics.py|--count 0 --empty-library
 tag_dialog|check_web_tag_dialog.py|
 update|check_web_update.py|
-modified_copy|@check_web_modified_date.py|
-tag_picker_copy|@check_web_tag_picker.py|
+modified_copy|check_web_modified_date.py|
+tag_picker_copy|check_web_tag_picker.py|
 scan_notice_copy|@check_web_scan_notice.py|
-preparation2|@check_web_preparation.py|
+preparation2|check_web_preparation.py|

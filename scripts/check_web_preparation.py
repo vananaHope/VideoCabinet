@@ -170,7 +170,13 @@ try:
     controls.process_queue()
     wait(lambda: controls.preparation['phase'] == 'download' and controls.preparation['asset'] == 'model.bin')
     wait(lambda: js("document.body.innerText.includes('파일 4/7')"))
-    assert js("document.querySelector('[role=progressbar]').getAttribute('aria-valuenow')") == str(controls.preparation['percent'])
+    # 대기열 행에도 진행 막대가 있어 첫 [role=progressbar]는 그 행 막대다. 준비 막대를 접근 이름으로 집는다.
+    bars = json.loads(js("JSON.stringify([...document.querySelectorAll('[role=progressbar]')].map(e => [e.getAttribute('aria-label'), e.getAttribute('aria-valuenow')]))"))
+    metrics['progressbars'] = bars
+    preparing = [value for label, value in bars if label == '자막 기능 준비 진행률']
+    assert preparing == [str(controls.preparation['percent'])], (bars, controls.preparation['percent'])
+    rows = [value for label, value in bars if label != '자막 기능 준비 진행률']
+    assert rows and all(value == '0' for value in rows), bars
     capture('03-preparing-one')
     metrics['checks'].append('파일 4/7·전체 크기·누적 진행률과 progressbar aria 값')
     for video in videos[1:]:

@@ -75,22 +75,6 @@ function ContextMenuSubTrigger({
   )
 }
 
-function ContextMenuSubContent({
-  className,
-  ...props
-}: React.ComponentProps<typeof ContextMenuPrimitive.SubContent>) {
-  return (
-    <ContextMenuPrimitive.SubContent
-      data-slot="context-menu-sub-content"
-      className={cn(
-        "z-50 min-w-32 origin-(--radix-context-menu-content-transform-origin) animate-layer-enter overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg",
-        className
-      )}
-      {...props}
-    />
-  )
-}
-
 function ContextMenuContent({
   className,
   ...props
@@ -237,7 +221,6 @@ export {
   ContextMenuGroup,
   ContextMenuPortal,
   ContextMenuSub,
-  ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuRadioGroup,
 }

@@ -201,6 +201,11 @@ def js(script):
     return values[0]
 
 
+def automatic_switch():
+    """시작할 때 확인 스위치의 역할·접근 이름·aria-checked(#411)."""
+    return json.loads(js("JSON.stringify((e => [e.getAttribute('role'), e.getAttribute('aria-label'), e.getAttribute('aria-checked')])(document.getElementById('settings-update-automatic-toggle')))"))
+
+
 def click(selector):
     window.activateWindow()
     host.view.setFocus()
@@ -270,7 +275,8 @@ try:
     click('[data-category="update"]')
     show(None)
     text = section_text()
-    assert '현재 버전 0.5.0' in text and '아직 확인하지 않았습니다' in text and '시작할 때 확인: 켜짐' in text
+    assert '현재 버전 0.5.0' in text and '아직 확인하지 않았습니다' in text and '켜짐' in text and '시작할 때 확인:' not in text
+    assert automatic_switch() == ['switch', '시작할 때 확인', 'true'], automatic_switch()
     capture('1-before')
     checks.append('확인 전: 현재 버전·확인 전 문구·자동 확인 기본 켬')
 
@@ -551,7 +557,8 @@ try:
     click('#settings-update-automatic-toggle')
     wait(lambda: not core.automatic_update_check_enabled(), '자동 확인 끄기')
     settle()
-    assert '시작할 때 확인: 꺼짐' in section_text()
+    assert automatic_switch() == ['switch', '시작할 때 확인', 'false'], automatic_switch()
+    assert '꺼짐' in section_text()
     assert js('document.activeElement.id') == 'settings-update-automatic-toggle'
     capture('9-automatic-off')
     click('#settings-update-automatic-toggle')

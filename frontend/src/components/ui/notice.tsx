@@ -210,9 +210,26 @@ function fixedControls(region: Element) {
   }).map(element => element.getBoundingClientRect())
 }
 
-/** 페이지 안내. 안내 묶음 안에서 스크롤되더라도 셸 묶음이 그 글자를 덮으면 읽을 수 없으므로 보이는 안내는 모두 피한다. */
+/** 넘침을 자르는 조상(안내 띠·목록 틀)에 잘린 뒤 화면에 보이는 부분. 다 잘려 안 보이면 null이다. */
+function visibleRect(element: Element, region: Element) {
+  let { left, top, right, bottom } = element.getBoundingClientRect()
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    if (getComputedStyle(parent).overflowY !== "visible") {
+      const clip = parent.getBoundingClientRect()
+      left = Math.max(left, clip.left); top = Math.max(top, clip.top); right = Math.min(right, clip.right); bottom = Math.min(bottom, clip.bottom)
+    }
+    if (parent === region) break
+  }
+  return right > left && bottom > top ? new DOMRect(left, top, right - left, bottom - top) : null
+}
+
+/**
+ * 페이지 안내. 안내 묶음 안에서 스크롤되더라도 셸 묶음이 그 글자를 덮으면 읽을 수 없으므로 보이는 안내는 모두 피한다.
+ * 띠 안에서 스크롤해 잘린 안내는 보이는 부분만 센다. 잘린 아래쪽까지 세면 띠 아래 빈 모서리도 안내를 덮는다고 잘못 본다(#412).
+ */
 function pageNotices(region: Element) {
-  return [...region.querySelectorAll("[data-slot=notice]")].filter(element => element.checkVisibility()).map(element => element.getBoundingClientRect())
+  return [...region.querySelectorAll("[data-slot=notice]")].filter(element => element.checkVisibility())
+    .map(element => visibleRect(element, region)).filter((rect): rect is DOMRect => rect !== null)
 }
 
 /** 묶음이 지금 크기로 각 모서리에 놓일 때 가리는 고정 조작 요소가 가장 적은 모서리. current가 있으면 그 모서리가 아무것도 가리지 않을 때 그대로 둔다. */
