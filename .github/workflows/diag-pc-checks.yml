@@ -52,9 +52,13 @@ jobs:
           choco install ffmpeg -y --no-progress
           $real = Get-ChildItem C:\ProgramData\chocolatey\lib\ffmpeg\tools -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           "MVM_FFMPEG_DIR=$($real.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: 화면 해상도
+        shell: pwsh
+        run: .venv/Scripts/python.exe .github/diag/resolution.py
       - name: 검사 (3회)
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force .local | Out-Null
           $env:Path = $env:MVM_FFMPEG_DIR + ';' + $env:Path
           $fail = 0
           foreach ($i in 1..3) {
