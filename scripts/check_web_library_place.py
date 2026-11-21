@@ -112,8 +112,11 @@ def js(script):
     return values[0]
 
 
-def click(selector):
-    point = json.loads(js(f'JSON.stringify((() => {{ const r = document.querySelector({json.dumps(selector)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }})())'))
+def click(selector, name=None):
+    """selector에 맞는 요소 가운데를 누른다. name을 주면 그 가운데 접근 이름(aria-label, 없으면 글자)이 같은 요소를 누른다."""
+    find = (f'document.querySelector({json.dumps(selector)})' if name is None else
+            f'[...document.querySelectorAll({json.dumps(selector)})].find(e => (e.getAttribute("aria-label") ?? e.textContent).trim() === {json.dumps(name)})')
+    point = json.loads(js(f'JSON.stringify((() => {{ const r = {find}.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] }})())'))
     QTest.mouseClick(host.view.focusProxy(), Qt.MouseButton.LeftButton, pos=QPoint(*map(round, point)))
     settle()
 
@@ -313,34 +316,38 @@ try:
     assert scrolled['grid'] == many['grid'] and js("document.querySelector('[aria-label=\"적용한 검색 조건\"]').scrollLeft") > 0
     checks.append(f'칩 {count}개(긴 태그 8개, "모두 지우기" 포함): 한 줄({row[0]}px) 안에서 가로로 넘김(내용 폭 {row[1]}px > 보이는 폭 {row[2]}px, 끝까지 가로 스크롤), 격자·선택 카드 그대로')
     # 끝까지 넘긴 채로 둔다. 줄 끝의 “모두 지우기”를 눌러 칩을 지운다.
-    click('[aria-label="적용한 검색 조건"] button:last-child')
+    click('[aria-label="적용한 검색 조건"] button', name='모두 지우기')
     wait(lambda: js("document.querySelectorAll('[aria-label=\"적용한 검색 조건\"] button').length") == 0, '칩 모두 지우기')
     assert capture('many-chips-cleared')['grid'] == many['grid']
 
     # 폴더 패널: 열 수는 바뀌어도 선택 카드의 세로 위치는 같다.
+    # 열 수는 DESIGN.md "라이브러리 격자"를 따른다. 작은 카드(최소 폭 11rem)는 기준 창에서 상세 패널이 열려 있으면 4열이고,
+    # 폴더 패널(12rem)이 옆 자리를 차지하면 같은 최소 폭 규칙으로 3열이 된다.
+    closed_columns, open_columns = 4, 3
+    assert many['grid']['columns'] == closed_columns, many['grid']
     click('button[aria-label="폴더 패널"]')
     wait(lambda: js('!!document.getElementById("library-folder-panel")'), '폴더 패널')
-    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == '2', '열 수')
+    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == str(open_columns), '열 수')
     folders = capture('many-folders')
     assert abs(card_y(selected) - y) <= 1, (y, card_y(selected))
     click('button[aria-label="폴더 패널"]')
-    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == '3', '열 수 복원')
+    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == str(closed_columns), '열 수 복원')
     assert abs(card_y(selected) - y) <= 1
-    checks.append(f"폴더 패널 열기·닫기: 열 {many['grid']['columns']}→{folders['grid']['columns']}→3, 선택 카드 세로 위치 ±1px")
+    checks.append(f"폴더 패널 열기·닫기: 열 {many['grid']['columns']}→{folders['grid']['columns']}→{closed_columns}, 선택 카드 세로 위치 ±1px")
 
     # 폴더 패널 위쪽 경계: 열린 패널의 맨 위에서 둘째 줄 첫 카드를 고르고 닫으면, 같은 자리에 두려면 음수 스크롤이 필요해
     # 스크롤은 0으로 제한되고 카드는 새 첫 줄에서 완전히 보인다.
     click('button[aria-label="폴더 패널"]')
-    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == '2', '열 수')
+    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == str(open_columns), '열 수')
     js(f'{GRID}.scrollTop = 0; true')
-    edge = window.library_page.visible_ids[2]
+    edge = window.library_page.visible_ids[open_columns]
     wait(lambda: js(f"!!document.getElementById('video-{edge}')"), '둘째 줄 카드')
     click(f'#video-{edge}')
     wait(lambda: window.library_page.selected_id == edge, '둘째 줄 카드 선택')
     capture('many-folders-edge-open')
     open_y = card_y(edge)
     click('button[aria-label="폴더 패널"]')
-    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == '3', '열 수 복원')
+    wait(lambda: js(f'{GRID}.getAttribute("aria-colcount")') == str(closed_columns), '열 수 복원')
     capture('many-folders-edge-closed')
     full = js(f"""(() => {{ const grid = {GRID}, g = grid.getBoundingClientRect(), c = document.getElementById('video-{edge}').getBoundingClientRect()
       return c.top >= g.top && c.bottom <= g.top + grid.clientTop + grid.clientHeight }})()""")
@@ -361,7 +368,7 @@ try:
       const rect = e => {{ const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom] }}
       const inside = (a, b) => a[0] >= b[0] - 0.5 && a[1] >= b[1] - 0.5 && a[2] <= b[2] + 0.5 && a[3] <= b[3] + 0.5
       const grid = {GRID}, g = grid.getBoundingClientRect(), card = document.getElementById('video-{long_video.id}')
-      const text = [...card.querySelectorAll('span')].find(e => e.textContent === {json.dumps(long_video.title)})
+      const text = [...card.querySelectorAll('span')].find(e => !e.childElementCount && e.textContent === {json.dumps(long_video.title)})
       const aside = document.querySelector('aside[aria-label="선택 영상 상세"]'), h2 = aside.querySelector('h2')
       return {{ cardShown: rect(card)[1] >= g.top && rect(card)[3] <= g.top + grid.clientTop + grid.clientHeight,
         cardText: !!text, cardInside: !!text && inside(rect(text), rect(card)), cardTruncated: !!text && text.scrollWidth > text.clientWidth,
