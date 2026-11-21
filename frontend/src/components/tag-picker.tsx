@@ -143,7 +143,7 @@ export function TagPicker({ tags, label, exclude = [], emptyText = "등록한 �
             <span className="min-w-0 flex-1 truncate">{tag.name}</span>
             <span className="shrink-0 text-label text-muted-foreground tabular-nums">{tag.videoCount}</span>
           </div>
-          return layout === "chip" ? <Chip key={tag.id} asChild interactive selectable>{body}</Chip> : body
+          return layout === "chip" ? <Chip key={tag.id} asChild selectable>{body}</Chip> : body
         })}
       </div>}
     {!searching && !listAll && (showAll || choices.length < available) && <Button variant="link" size="xs" aria-expanded={showAll} aria-controls={listId} onClick={() => setShowAll(!showAll)}>

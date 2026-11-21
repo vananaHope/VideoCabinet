@@ -366,7 +366,7 @@ components:
 ### Chips (Status Badge · Chip)
 상태는 각진 배지, 분류는 알약 칩이다. 둘은 높이(1.25rem)가 같고 모양으로 구별된다.
 - **Status Badge** (`StatusBadge`): `xs` 둥글기, Label 글자, 상태 색 면 + 짝이 되는 진한 글자. 다 본 영상은 Mint, 보다 만 영상은 Sky, 파일 없음은 Rose, 아직 안 봄은 `muted`, 즐겨 보는은 Marker Yellow, "자막 있음"은 `input` 링만 있는 윤곽선. 고른 대기열 행(`accent` 면) 위의 대기 배지는 `selectedMuted`(`muted-foreground` 면 + `background` 글자)다.
-- **Chip** (`components/ui/chip.tsx`): 태그와 적용한 검색 조건. 알약(`full`), `secondary` 면, Label 글자. 영상 카드·상세 패널·하이라이트 목록·모아보기의 태그와 라이브러리의 조건 칩이 모두 이 부품 하나다. 누를 수 있는 칩(태그 메뉴, 조건 지우기, 태그 고르기의 고른 태그·자주 쓴 태그 후보)은 호버에 `accent` 면이 된다. 태그 고르기 후보 칩의 고름은 `accent` 면 + 안쪽 `ring` 1px와 체크 표시다. 긴 이름은 칩 안에서 말줄임하고 전체 이름은 툴팁에 둔다. 쓰는 곳은 최대 폭만 정한다.
+- **Chip** (`components/ui/chip.tsx`): 태그와 적용한 검색 조건. 알약(`full`), `secondary` 면, Label 글자. 영상 카드·상세 패널·하이라이트 목록·모아보기의 태그와 라이브러리의 조건 칩이 모두 이 부품 하나다. 누를 수 있는 칩(태그 메뉴, 조건 지우기, 태그 고르기의 고른 태그)은 호버에 `accent` 면이 된다. 태그 고르기의 자주 쓴 태그 후보는 고를 수 있는 목록 항목이라 Lit Ladder대로 호버 `muted`, 고름 `accent` 면 + 안쪽 `ring` 1px와 체크 표시다. 긴 이름은 칩 안에서 말줄임하고 전체 이름은 툴팁에 둔다. 쓰는 곳은 최대 폭만 정한다.
 
 ### Progress
 - **Progress** (`ui/progress.tsx`: 업데이트 내려받기·자막 기능 준비, `components/queue-list.tsx`: 자막 대기열 행): 높이 0.5rem 알약(`full`). 트랙은 `background` 면 + `border` 테두리 1px, 채움은 진행 중 `primary`다. 채움과 트랙은 3.16:1로 UI 기준 3:1을 넘는다(이전 트랙 `muted`는 2.09:1이었다, #385).
