@@ -356,6 +356,16 @@ try:
     run_scan(ScanResult(0, (ScanIssue(workspace / '연속 닫기.mkv', '액세스가 거부되었습니다.'),
                             ScanIssue(workspace / '연속 닫기.srt', '외부 자막: 1개 블록을 건너뜀', subtitle=True))))
     hold_next_reply()
+    js('''window.diag = []; const tones = () => [...document.querySelectorAll('[aria-label="검사 안내"] [data-slot=notice]')].map(e => e.dataset.tone).join(',');
+        const where = () => { const a = document.activeElement; return a?.closest('[data-slot=notice]')?.dataset.tone ?? (a?.id || a?.tagName) };
+        const t0 = performance.now(), log = (...x) => { if (window.diag.length < 600) window.diag.push([Math.round(performance.now() - t0), ...x, tones(), where()]) };
+        const wrapped = qt.webChannelTransport.onmessage;
+        qt.webChannelTransport.onmessage = function (event) { const m = typeof event.data === 'string' ? JSON.parse(event.data) : event.data; log('msg', m.type, m.signal ?? m.id ?? ''); return wrapped.call(this, event) };
+        const raf = window.requestAnimationFrame.bind(window);
+        window.requestAnimationFrame = cb => raf(t => { const before = where(); cb(t); if (where() !== before) log('raf-focus', before) });
+        document.addEventListener('focusin', () => log('focusin'), true);
+        document.addEventListener('focusout', () => log('focusout'), true);
+        true''')
     window.activateWindow()
     host.view.setFocus()
     js(f'document.querySelector({json.dumps(dismiss)}).focus(); true')
@@ -365,7 +375,10 @@ try:
     js(f'document.querySelector({json.dumps(dismiss)}).focus(); true')
     assert js('document.activeElement.closest("[data-slot=notice]").dataset.tone') == 'warning'
     key(Qt.Key.Key_Return)
-    wait(lambda: js('document.activeElement.closest("[data-slot=notice]")?.dataset.tone ?? ""') == 'info', '두 번째 닫기 초점')
+    try:
+        wait(lambda: js('document.activeElement.closest("[data-slot=notice]")?.dataset.tone ?? ""') == 'info', '두 번째 닫기 초점')
+    finally:
+        print('DIAG', js('JSON.stringify(window.diag)'), flush=True)
     js('document.getElementById("folders-minimum").focus(); document.getElementById("folders-minimum").select(); true')
     QTest.keyClicks(QApplication.focusWidget(), '123')
     settle()

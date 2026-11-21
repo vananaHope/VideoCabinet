@@ -1,0 +1,74 @@
+# 임시: #423 진단. 병합 전에 지운다.
+name: diag scan notice
+on:
+  push:
+    branches: [claude/project-thread-ft0v0b]
+permissions:
+  contents: read
+jobs:
+  real:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Python 환경
+        shell: pwsh
+        run: |
+          uv venv --python (python -c "import sys; print(sys.executable)") .venv
+          uv pip install --python .venv/Scripts/python.exe -e '.[dev]'
+      - name: 웹 셸 빌드
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: libmpv
+        shell: pwsh
+        run: .venv/Scripts/python.exe scripts/install_libmpv.py
+      - name: 해상도 1920x1080
+        shell: python
+        run: |
+          import ctypes
+          from ctypes import wintypes
+          class DEVMODEW(ctypes.Structure):
+              _fields_ = [('dmDeviceName', wintypes.WCHAR * 32), ('dmSpecVersion', wintypes.WORD), ('dmDriverVersion', wintypes.WORD),
+                          ('dmSize', wintypes.WORD), ('dmDriverExtra', wintypes.WORD), ('dmFields', wintypes.DWORD),
+                          ('dmPositionX', wintypes.LONG), ('dmPositionY', wintypes.LONG), ('dmDisplayOrientation', wintypes.DWORD),
+                          ('dmDisplayFixedOutput', wintypes.DWORD), ('dmColor', wintypes.SHORT), ('dmDuplex', wintypes.SHORT),
+                          ('dmYResolution', wintypes.SHORT), ('dmTTOption', wintypes.SHORT), ('dmCollate', wintypes.SHORT),
+                          ('dmFormName', wintypes.WCHAR * 32), ('dmLogPixels', wintypes.WORD), ('dmBitsPerPel', wintypes.DWORD),
+                          ('dmPelsWidth', wintypes.DWORD), ('dmPelsHeight', wintypes.DWORD), ('dmDisplayFlags', wintypes.DWORD),
+                          ('dmDisplayFrequency', wintypes.DWORD), ('dmICMMethod', wintypes.DWORD), ('dmICMIntent', wintypes.DWORD),
+                          ('dmMediaType', wintypes.DWORD), ('dmDitherType', wintypes.DWORD), ('dmReserved1', wintypes.DWORD),
+                          ('dmReserved2', wintypes.DWORD), ('dmPanningWidth', wintypes.DWORD), ('dmPanningHeight', wintypes.DWORD)]
+          mode = DEVMODEW(); mode.dmSize = ctypes.sizeof(DEVMODEW)
+          assert ctypes.windll.user32.EnumDisplaySettingsW(None, -1, ctypes.byref(mode))
+          mode.dmPelsWidth, mode.dmPelsHeight, mode.dmFields = 1920, 1080, 0x80000 | 0x100000
+          print('ChangeDisplaySettings', ctypes.windll.user32.ChangeDisplaySettingsW(ctypes.byref(mode), 0))
+      - name: 실창 반복
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .local | Out-Null
+          $failures = 0
+          for ($i = 1; $i -le $env:RUNS; $i++) {
+            Write-Host "=== run $i"
+            .venv/Scripts/python.exe scripts/check_web_scan_notice.py *>&1 | Select-String -Pattern 'DIAG|Error|assert|passed' | ForEach-Object { $_.Line.Substring(0, [Math]::Min($_.Line.Length, 20000)) }
+            if ($LASTEXITCODE -ne 0) { $failures++ ; Write-Host "FAILED run $i" }
+          }
+          Write-Host "failures=$failures of $env:RUNS"
+        env:
+          RUNS: '25'
+      - name: offscreen
+        shell: pwsh
+        run: .venv/Scripts/python.exe scripts/check_web_scan_notice.py --offscreen
