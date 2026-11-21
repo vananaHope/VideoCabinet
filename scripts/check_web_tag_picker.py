@@ -139,7 +139,7 @@ def close_panel():
 
 
 def layout(name):
-    """패널과 태그 영역이 창 안에 있고 패널이 최대 높이(28rem)를 넘지 않는지 잰다."""
+    """패널과 태그 영역이 창 안(가장자리 1rem)에 있고, 패널 자체는 스크롤하지 않으며 "조건 모두 지우기" 줄이 보이는지 잰다(#381)."""
     state = json.loads(js(f"""JSON.stringify((() => {{
       const p = document.querySelector('{PANEL}').getBoundingClientRect()
       const list = document.querySelector('{PANEL} [role=listbox]')
@@ -150,13 +150,16 @@ def layout(name):
         listHeight: list?.clientHeight ?? 0, listScroll: list?.scrollHeight ?? 0,
         listOverflowX: list ? list.scrollWidth > list.clientWidth : false,
         panelOverflowX: document.querySelector('{PANEL}').scrollWidth > document.querySelector('{PANEL}').clientWidth,
+        panelScroll: document.querySelector('{PANEL}').scrollHeight > document.querySelector('{PANEL}').clientHeight + 1,
+        clearVisible: (r => r.top >= p.top - 0.5 && r.bottom <= p.bottom + 0.5)([...document.querySelectorAll('{PANEL} button')].find(b => b.textContent === '조건 모두 지우기').getBoundingClientRect()),
         clipped: list ? [...list.querySelectorAll('[role=option]')].filter(o => o.lastElementChild.getBoundingClientRect().right > list.getBoundingClientRect().right + 0.5).length : 0,
         chipHeight: chips?.clientHeight ?? 0, chipScroll: chips?.scrollHeight ?? 0,
         names: list ? [...list.querySelectorAll('[role=option]')].slice(0, 15).map(o => o.title) : [] }} }})())"""))
     metrics['panels'][name] = state
-    assert state['top'] >= 0 and state['left'] >= 0, state
-    assert state['bottom'] <= state['innerHeight'] and state['right'] <= state['innerWidth'], state
-    assert state['height'] <= 28 * state['rem'] + 1, state
+    edge = state['rem'] - 1
+    assert state['top'] >= edge and state['left'] >= edge, state
+    assert state['bottom'] <= state['innerHeight'] - edge and state['right'] <= state['innerWidth'] - edge, state
+    assert not state['panelScroll'] and state['clearVisible'], state
     assert not state['listOverflowX'] and not state['panelOverflowX'] and not state['clipped'], state
     return state
 
