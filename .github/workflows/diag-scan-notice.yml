@@ -75,8 +75,10 @@ jobs:
           $failures = 0
           for ($i = 1; $i -le $env:RUNS; $i++) {
             Write-Host "=== run $i"
-            .venv/Scripts/python.exe scripts/check_web_scan_notice.py *>&1 | Select-String -Pattern 'DIAG|Error|line [0-9]+' | ForEach-Object { $_.Line.Substring(0, [Math]::Min($_.Line.Length, 4000)) }
-            if ($LASTEXITCODE -ne 0) { $failures++ ; Write-Host "FAILED run $i" }
+            $p = Start-Process -FilePath .venv/Scripts/python.exe -ArgumentList 'scripts/check_web_scan_notice.py' -NoNewWindow -PassThru -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+            if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Host "TIMEOUT run $i" }
+            Get-Content out.txt, err.txt | Select-String -Pattern 'DIAG|Error|line [0-9]+' | ForEach-Object { $_.Line.Substring(0, [Math]::Min($_.Line.Length, 4000)) }
+            if ($p.ExitCode -ne 0) { $failures++ ; Write-Host "FAILED run $i exit=$($p.ExitCode)" }
           }
           Write-Host "failures=$failures of $env:RUNS"
         env:

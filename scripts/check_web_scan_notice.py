@@ -153,8 +153,15 @@ def measure(name):
     layout = json.loads(js('''JSON.stringify((() => {
         const box = selector => document.querySelector(selector)?.getBoundingClientRect()
         const main = document.querySelector('main[aria-label="폴더 관리"]')
+        // 검사 안내는 목록 위 띠 안에서 스크롤하므로 보이는 아래 끝은 띠의 아래 끝까지다.
         const report = box('[aria-label="검사 안내"]'), list = box('#folders-section')
-        return {list: Math.round(list.height), report: Math.round(report.height), reportBottom: Math.round(report.bottom),
+        // 셸 안내 묶음이 최소 길이 카드의 제목·설명·보조 설명을 덮는지(#412).
+        const layer = [...document.querySelectorAll('[data-slot=notice-layer]')].find(e => e.checkVisibility())?.getBoundingClientRect()
+        const card = document.getElementById('folders-minimum').closest('section')
+        const texts = [...card.querySelectorAll('label, p')].map(e => e.getBoundingClientRect())
+        const hits = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+        return {list: Math.round(list.height), report: Math.round(report.height), reportBottom: Math.round(Math.min(report.bottom, box('[data-folders-notices]').bottom)),
+                layerOverMinimum: layer ? texts.filter(r => hits(layer, r)).length : 0,
                 pageScroll: main.scrollHeight - main.clientHeight, wide: document.documentElement.scrollWidth > innerWidth,
                 tones: [...document.querySelectorAll('[aria-label="검사 안내"] [data-slot=notice]')].map(e => e.dataset.tone)}
     })())'''))
@@ -163,6 +170,7 @@ def measure(name):
     assert layout['list'] >= 128, (name, layout)
     assert layout['pageScroll'] <= 0 and not layout['wide'], (name, layout)
     assert layout['reportBottom'] <= 720, (name, layout)
+    assert layout['layerOverMinimum'] == 0, (name, layout)
     return layout
 
 
@@ -185,6 +193,10 @@ try:
     window.navigate_web_tab('folders')
     settle()
     assert capture('initial')['tones'] == ['info']
+    # 폴더 감시는 끈다. Windows에서는 아래에서 만든 파일의 감시 묶음이 실제 검사 뒤 늦게 와서(약 0.5초)
+    # 그 조용한 검사가 뒤이어 넣은 검사 결과(외부 자막 경고 300개 등)를 실제 결과로 바꿔 놓는다(#415).
+    # 자동 감지는 check_web_folder_watch.py가 따로 본다.
+    window.folder_watch.stop()
     for index in range(30):
         folder = workspace / f'감시 폴더 {index:02}'
         folder.mkdir()
@@ -193,9 +205,7 @@ try:
     video = workspace / '감시 폴더 00' / '강의.mkv'
     video.write_bytes(b'video')
     video.with_suffix('.ko.srt').write_text('1\n00:00:01,000 --> 00:00:02,000\n정상 줄\n\n끝 잔여 블록\n', encoding='utf-8')
-    # 자동 감지의 조용한 검사가 끝난 뒤에 검사 결과를 넣는다.
-    settle(1500)
-    wait(lambda: window.worker is None, '자동 감지 검사 완료')
+    wait(lambda: window.worker is None, '앞선 검사 완료')
     window.refresh()
 
     run_scan(lambda: ScanResult(0, ()))
