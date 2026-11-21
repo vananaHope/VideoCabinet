@@ -27,7 +27,7 @@ export const gridKeyRows: readonly KeyGuideRow[] = [
 ]
 
 // 자리 표시는 보이는 줄만 채우므로 스크롤하지 않는다. 스크롤바 자리는 scroll-stable이 늘 예약해 바뀔 때 열 폭이 같다.
-const gridVariants = cva("scroll-stable h-full min-w-0 flex-1 rounded-lg p-1 focus-visible:outline-2 focus-visible:outline-ring", {
+const gridVariants = cva("scroll-stable h-full min-w-0 flex-1 rounded-lg p-1", {
   variants: {
     cardSize: { small: "library-grid-small", medium: "library-grid-medium", large: "library-grid-large" },
     loading: { true: "overflow-y-hidden", false: "overflow-y-auto" },

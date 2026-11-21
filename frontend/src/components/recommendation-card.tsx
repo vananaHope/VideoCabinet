@@ -6,7 +6,7 @@ import { selectableItem } from "@/components/ui/selectable-item"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Thumbnail, ViewingBadge, duration } from "@/components/video-card"
 
-const cardVariants = cva("flex min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring", {
+const cardVariants = cva("flex min-w-0 flex-col overflow-hidden rounded-lg border text-left transition-colors", {
   variants: { variant: { default: ["border-border bg-card", selectableItem({ selected: false, inner: "muted" })], selected: "border-ring bg-card ring-1 ring-ring", placeholder: "border-border bg-card" } },
   defaultVariants: { variant: "default" },
 })

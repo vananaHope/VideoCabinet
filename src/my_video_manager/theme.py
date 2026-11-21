@@ -75,7 +75,7 @@ def playback_stylesheet():
     QWidget#playbackHighlights {{ border-left: 1px solid {c['border']}; }}
     QWidget#playbackHelp {{ border: 1px solid {c['border']}; border-radius: {radius}px; }}
     QLabel[playbackRole="muted"] {{ color: {c['muted-foreground']}; }}
-    QLabel[playbackRole="warning"] {{ color: {c['highlight-open']}; }}
+    QLabel[playbackRole="warning"] {{ color: {c['status-warning']}; }}
     QPushButton, QToolButton {{ background: {c['secondary']}; color: {c['foreground']};
         border: 1px solid {c['input']}; border-radius: {radius}px;
         padding: {spacing}px {spacing * 2}px; }}

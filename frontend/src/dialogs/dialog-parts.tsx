@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader } from '@/components/ui/dialog'
 import { SelectField } from '@/components/ui/select'
 import { listFrame, listRow } from '@/components/ui/list'
 import { tagPickerKeepsEscape } from '@/lib/tag-search'
+import { highlightTime } from '@/components/highlight-time'
 
 export function DialogFrame({ title, description, children, onClose, composing, onSize, wide }: { title: string; description: string; children: ReactNode; onClose: () => void; composing: { current: boolean }; onSize: (width: number, height: number) => void; wide: boolean }) {
   const [content, setContent] = useState<HTMLDivElement | null>(null)
@@ -33,7 +34,6 @@ export function DialogFrame({ title, description, children, onClose, composing, 
 
 // 하이라이트 메모는 모아보기 결과의 메모처럼 본문 글자색이다. 다른 목록의 설명은 보조 글자다.
 const detail = cva('line-clamp-3 whitespace-pre-wrap break-words', { variants: { highlights: { true: '', false: 'text-muted-foreground' } } })
-const marker = cva('font-mono text-label tabular-nums', { variants: { range: { true: 'text-highlight-range', false: 'text-highlight' } } })
 
 export function DialogList({ label, rows, selected, onSelect, onActivate, review = false, highlights = false, clickActivates = false }: {
   label: string; rows: DialogRow[]; selected: string; onSelect: (id: string) => void; onActivate?: (id: string) => void;
@@ -44,7 +44,7 @@ export function DialogList({ label, rows, selected, onSelect, onActivate, review
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <p className="mb-2 text-body-strong">{label} · {rows.length}</p>
     <div ref={ref} role="listbox" aria-label={label} tabIndex={0} aria-activedescendant={selected ? `${label}-${selected}` : undefined}
-      data-dialog-list className={listFrame({ focusable: true, class: "min-h-24 flex-1 in-data-dialog-container:max-h-(--dialog-list-max-height)" })}
+      data-dialog-list className={listFrame({ class: "min-h-24 flex-1 in-data-dialog-container:max-h-(--dialog-list-max-height)" })}
       onKeyDown={event => {
         if (event.nativeEvent.isComposing || event.keyCode === 229) return
         const index = rows.findIndex(row => row.id === selected)
@@ -63,7 +63,7 @@ export function DialogList({ label, rows, selected, onSelect, onActivate, review
         {review ? <div className="grid grid-cols-2 gap-3">
           <span className="col-span-2 font-mono text-label tabular-nums">{row.start.toFixed(3)}–{row.end?.toFixed(3)}초 · {row.status}</span>
           <p className="whitespace-pre-wrap break-words">{row.title}</p><p className="whitespace-pre-wrap break-words text-muted-foreground">{row.detail}</p>
-        </div> : <><p className={highlights ? marker({ range: row.end !== null }) : 'break-words'}>{row.title}</p>
+        </div> : <><p className={highlights ? highlightTime({ range: row.end !== null }) : 'break-words'}>{row.title}</p>
           {row.detail && <p className={detail({ highlights })} title={row.detail}>{row.detail}</p>}
           {row.status && <p className="truncate text-label text-muted-foreground" title={row.status}>{row.status}</p>}</>}
       </div>)}
@@ -72,7 +72,7 @@ export function DialogList({ label, rows, selected, onSelect, onActivate, review
 }
 
 export function TextArea({ value, onChange }: { value: string; onChange: (text: string) => void }) {
-  return <textarea aria-label="텍스트" className="min-h-28 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-body"
+  return <textarea aria-label="텍스트" className="min-h-28 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-body shadow-xs transition-colors selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground dark:bg-input/30"
     value={value} onChange={event => onChange(event.target.value)} />
 }
 

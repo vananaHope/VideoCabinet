@@ -12,7 +12,7 @@ const wide = "col-span-2 min-w-0"
 const rowClass = cva(`${columns} items-center border-b py-1 text-body`, { variants: { selected: { true: selectableItem({ selected: true }), false: ["bg-card", selectableItem({ selected: false, inner: "muted" })] } } })
 // 안내가 많아도 머리글과 행 세 개 이상이 보이는 높이를 지킨다.
 // 고정 머리글 높이 토큰을 scroll-padding에도 써서, 키보드로 위쪽 행을 골라도 머리글에 가리지 않게 한다.
-const listClass = cva("min-h-32 flex-1 rounded-lg focus-visible:outline-2 focus-visible:outline-ring", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border scroll-pt-queue-header" } } })
+const listClass = cva("min-h-32 flex-1 rounded-lg", { variants: { empty: { true: "flex flex-col", false: "overflow-auto border scroll-pt-queue-header" } } })
 // 트랙은 놓인 면보다 어두운 홈이다. 선택 행(accent 면)에서는 바탕색으로 내려 빈 트랙이 꽉 찬 막대처럼 보이지 않게 한다.
 const trackClass = "h-2 min-w-0 flex-1 rounded-full border border-border bg-background"
 // 채움은 진행 중에만 강조색이고, 끝난 상태는 배지와 같은 의미색이다.

@@ -23,7 +23,7 @@ const periods = [7, 30, 90, 365].map(days => ({ value: String(days), label: `${d
 const metrics = [{ value: "watched_seconds", label: "시청 시간" }, { value: "viewing_count", label: "시청 횟수" }]
 const weekdays = ["일", "월", "화", "수", "목", "금", "토"]
 // 많이 본 영상 행은 고를 수 있는 목록 항목처럼 호버에 한 단계 밝아진다.
-const topVideo = cva(["flex w-full min-w-0 items-center gap-3 rounded-lg p-3 text-left focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60", selectableItem({ selected: false })])
+const topVideo = cva(["flex w-full min-w-0 items-center gap-3 rounded-lg p-3 text-left disabled:opacity-60", selectableItem({ selected: false })])
 const hours = Array.from({ length: 24 }, (_, hour) => `${hour}시`)
 const change = (value: number | null) => value === null ? "이전 기록 없음" : `이전 같은 기간 대비 ${value > 0 ? "+" : ""}${value.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`
 
