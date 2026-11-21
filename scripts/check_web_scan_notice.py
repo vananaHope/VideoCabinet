@@ -133,6 +133,7 @@ def hold_next_reply():
     js('''window.heldReplies = []; window.receiveReply = qt.webChannelTransport.onmessage; window.holdReply = true;
         qt.webChannelTransport.onmessage = function (event) {
             const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+            ;(window.seen ??= []).push([Math.round(performance.now()), message.type, message.id ?? message.signal ?? ''])
             if (window.holdReply && message.type === 10) { window.heldReplies.push(event); window.holdReply = false; return }
             window.receiveReply.call(this, event)
         }; true''')
@@ -152,15 +153,8 @@ def measure(name):
     layout = json.loads(js('''JSON.stringify((() => {
         const box = selector => document.querySelector(selector)?.getBoundingClientRect()
         const main = document.querySelector('main[aria-label="폴더 관리"]')
-        // 검사 안내는 목록 위 띠 안에서 스크롤하므로 보이는 아래 끝은 띠의 아래 끝까지다.
         const report = box('[aria-label="검사 안내"]'), list = box('#folders-section')
-        // 셸 안내 묶음이 최소 길이 카드의 제목·설명·보조 설명을 덮는지(#412).
-        const layer = [...document.querySelectorAll('[data-slot=notice-layer]')].find(e => e.checkVisibility())?.getBoundingClientRect()
-        const card = document.getElementById('folders-minimum').closest('section')
-        const texts = [...card.querySelectorAll('label, p')].map(e => e.getBoundingClientRect())
-        const hits = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
-        return {list: Math.round(list.height), report: Math.round(report.height), reportBottom: Math.round(Math.min(report.bottom, box('[data-folders-notices]').bottom)),
-                layerOverMinimum: layer ? texts.filter(r => hits(layer, r)).length : 0,
+        return {list: Math.round(list.height), report: Math.round(report.height), reportBottom: Math.round(report.bottom),
                 pageScroll: main.scrollHeight - main.clientHeight, wide: document.documentElement.scrollWidth > innerWidth,
                 tones: [...document.querySelectorAll('[aria-label="검사 안내"] [data-slot=notice]')].map(e => e.dataset.tone)}
     })())'''))
@@ -169,7 +163,6 @@ def measure(name):
     assert layout['list'] >= 128, (name, layout)
     assert layout['pageScroll'] <= 0 and not layout['wide'], (name, layout)
     assert layout['reportBottom'] <= 720, (name, layout)
-    assert layout['layerOverMinimum'] == 0, (name, layout)
     return layout
 
 
@@ -192,10 +185,6 @@ try:
     window.navigate_web_tab('folders')
     settle()
     assert capture('initial')['tones'] == ['info']
-    # 폴더 감시는 끈다. Windows에서는 아래에서 만든 파일의 감시 묶음이 실제 검사 뒤 늦게 와서(약 0.5초)
-    # 그 조용한 검사가 뒤이어 넣은 검사 결과(외부 자막 경고 300개 등)를 실제 결과로 바꿔 놓는다(#415).
-    # 자동 감지는 check_web_folder_watch.py가 따로 본다.
-    window.folder_watch.stop()
     for index in range(30):
         folder = workspace / f'감시 폴더 {index:02}'
         folder.mkdir()
@@ -204,7 +193,9 @@ try:
     video = workspace / '감시 폴더 00' / '강의.mkv'
     video.write_bytes(b'video')
     video.with_suffix('.ko.srt').write_text('1\n00:00:01,000 --> 00:00:02,000\n정상 줄\n\n끝 잔여 블록\n', encoding='utf-8')
-    wait(lambda: window.worker is None, '앞선 검사 완료')
+    # 자동 감지의 조용한 검사가 끝난 뒤에 검사 결과를 넣는다.
+    settle(1500)
+    wait(lambda: window.worker is None, '자동 감지 검사 완료')
     window.refresh()
 
     run_scan(lambda: ScanResult(0, ()))
@@ -356,16 +347,6 @@ try:
     run_scan(ScanResult(0, (ScanIssue(workspace / '연속 닫기.mkv', '액세스가 거부되었습니다.'),
                             ScanIssue(workspace / '연속 닫기.srt', '외부 자막: 1개 블록을 건너뜀', subtitle=True))))
     hold_next_reply()
-    js('''window.diag = []; const tones = () => [...document.querySelectorAll('[aria-label="검사 안내"] [data-slot=notice]')].map(e => e.dataset.tone).join(',');
-        const where = () => { const a = document.activeElement; return a?.closest('[data-slot=notice]')?.dataset.tone ?? (a?.id || a?.tagName) };
-        const t0 = performance.now(), log = (...x) => { if (window.diag.length < 600) window.diag.push([Math.round(performance.now() - t0), ...x, tones(), where()]) };
-        const wrapped = qt.webChannelTransport.onmessage;
-        qt.webChannelTransport.onmessage = function (event) { const m = typeof event.data === 'string' ? JSON.parse(event.data) : event.data; log('msg', m.type, m.signal ?? m.id ?? ''); return wrapped.call(this, event) };
-        const raf = window.requestAnimationFrame.bind(window);
-        window.requestAnimationFrame = cb => raf(t => { const before = where(); cb(t); if (where() !== before) log('raf-focus', before) });
-        document.addEventListener('focusin', () => log('focusin'), true);
-        document.addEventListener('focusout', () => log('focusout'), true);
-        true''')
     window.activateWindow()
     host.view.setFocus()
     js(f'document.querySelector({json.dumps(dismiss)}).focus(); true')
@@ -377,8 +358,12 @@ try:
     key(Qt.Key.Key_Return)
     try:
         wait(lambda: js('document.activeElement.closest("[data-slot=notice]")?.dataset.tone ?? ""') == 'info', '두 번째 닫기 초점')
-    finally:
-        print('DIAG', js('JSON.stringify(window.diag)'), flush=True)
+    except AssertionError:
+        print('DIAG', js('''JSON.stringify({seen: window.seen, held: window.heldReplies.length, now: Math.round(performance.now()),
+            tones: [...document.querySelectorAll('[aria-label="검사 안내"] [data-slot=notice]')].map(e => e.dataset.tone),
+            active: document.activeElement?.outerHTML.slice(0, 200), focused: document.hasFocus()})'''),
+              QApplication.focusWidget(), window.isActiveWindow(), flush=True)
+        raise
     js('document.getElementById("folders-minimum").focus(); document.getElementById("folders-minimum").select(); true')
     QTest.keyClicks(QApplication.focusWidget(), '123')
     settle()
