@@ -27,6 +27,11 @@ export function hasScanNotices(report: ScanReportData) {
   return report.failures.length > 0 || report.subtitleWarnings.length > 0 || !!report.message
 }
 
+/** 이 묶음의 안내가 그려지는지. 닫은 묶음이 화면에서 사라졌는지 볼 때 쓴다. */
+export function hasScanGroup(report: ScanReportData, group: ScanNoticeGroup) {
+  return group === "failures" ? report.failures.length > 0 : group === "subtitleWarnings" ? report.subtitleWarnings.length > 0 : !!report.message
+}
+
 export function ScanReport({ report, onDismiss, layout = "yield" }: { report: ScanReportData; onDismiss: (group: ScanNoticeGroup, index: number) => void; layout?: "yield" | "auto" }) {
   const [subtitlesOpen, setSubtitlesOpen] = useState(false)
   const subtitleListId = useId()
