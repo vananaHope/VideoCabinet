@@ -133,7 +133,6 @@ def hold_next_reply():
     js('''window.heldReplies = []; window.receiveReply = qt.webChannelTransport.onmessage; window.holdReply = true;
         qt.webChannelTransport.onmessage = function (event) {
             const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-            ;(window.seen ??= []).push([Math.round(performance.now()), message.type, message.id ?? message.signal ?? ''])
             if (window.holdReply && message.type === 10) { window.heldReplies.push(event); window.holdReply = false; return }
             window.receiveReply.call(this, event)
         }; true''')
@@ -366,14 +365,7 @@ try:
     js(f'document.querySelector({json.dumps(dismiss)}).focus(); true')
     assert js('document.activeElement.closest("[data-slot=notice]").dataset.tone') == 'warning'
     key(Qt.Key.Key_Return)
-    try:
-        wait(lambda: js('document.activeElement.closest("[data-slot=notice]")?.dataset.tone ?? ""') == 'info', '두 번째 닫기 초점')
-    except AssertionError:
-        print('DIAG', js('''JSON.stringify({seen: window.seen, held: window.heldReplies.length, now: Math.round(performance.now()),
-            tones: [...document.querySelectorAll('[aria-label="검사 안내"] [data-slot=notice]')].map(e => e.dataset.tone),
-            active: document.activeElement?.outerHTML.slice(0, 200), focused: document.hasFocus()})'''),
-              QApplication.focusWidget(), window.isActiveWindow(), flush=True)
-        raise
+    wait(lambda: js('document.activeElement.closest("[data-slot=notice]")?.dataset.tone ?? ""') == 'info', '두 번째 닫기 초점')
     js('document.getElementById("folders-minimum").focus(); document.getElementById("folders-minimum").select(); true')
     QTest.keyClicks(QApplication.focusWidget(), '123')
     settle()
