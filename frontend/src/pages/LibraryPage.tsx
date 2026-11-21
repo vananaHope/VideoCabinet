@@ -460,8 +460,9 @@ export default function LibraryPage() {
     <LibraryFilterChips options={options} chips={data?.chips ?? entry?.chips ?? []} onChange={filter} pending={viewPending} />
     <div className="flex min-h-40 flex-1 gap-2">
       {foldersOpen && <LibraryFolders collapsedIds={options.collapsed_folders} onCollapse={collapsed_folders => filter({ collapsed_folders })} folders={data?.folders ?? []} selected={options.folder} onSelect={folder => filter({ folder })} />}
-      {/* 페이지 안내는 격자 위쪽에 떠 있는 띠라 생기고 사라져도 격자의 자리·열 수·스크롤이 그대로다. 툴바·칩 줄·상세 패널은 덮지 않는다. */}
-      <div className="relative flex min-w-0 flex-1">
+      {/* 페이지 안내는 격자 위쪽에 떠 있는 띠라 생기고 사라져도 격자의 자리·열 수·스크롤이 그대로다. 툴바·칩 줄·상세 패널은 덮지 않는다.
+          격자 스크롤바와 상세 패널 테두리(그 안의 스크롤바) 사이는 1rem을 띄워 두 스크롤 영역이 한 띠로 붙어 보이지 않게 한다(#413). */}
+      <div className="relative mr-2 flex min-w-0 flex-1">
         <LibraryGrid cardSize={options.card_size} load={firstLoad} ids={data?.visibleIds ?? []} cards={cards} selectedId={data?.selectedId ?? null} scanning={data?.scanning ?? false} total={data?.videoCount ?? 0} onSelect={select} onAction={action} onRange={rangeChanged} layoutPaused={layoutPaused} revealRequest={revealRequest} keepPlace={keepPlace}
           emptyAction={!data ? undefined : data.videoCount === 0 ? <Button variant="outline" onClick={openFolders}>폴더 관리 열기</Button>
             : data.chips.length > 0 ? <Button variant="outline" onClick={clearFilters}>조건 모두 지우기</Button> : undefined} />
