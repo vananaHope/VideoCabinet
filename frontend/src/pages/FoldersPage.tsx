@@ -1,12 +1,12 @@
 import { cva } from "class-variance-authority"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { connectBridge, request } from "@/bridge"
-import type { FolderAction, FoldersBridge, FoldersData, ScanNoticeGroup } from "@/bridge-types"
+import type { FolderAction, FoldersBridge, FoldersData, ScanNoticeGroup, ScanReportData } from "@/bridge-types"
 import { Button } from "@/components/ui/button"
 import { InlineNotice, Notice, NoticeStack, noticeStackVariants, type NoticeItem } from "@/components/ui/notice"
 import { ConfirmDialog, EmptyState, PageHeader, StatusBadge, Tabs } from "@/components/page-parts"
 import { MinimumDuration } from "@/components/minimum-duration"
-import { hasScanNotices, ScanReport } from "@/components/scan-report"
+import { hasScanGroup, hasScanNotices, ScanReport } from "@/components/scan-report"
 import { listFrame, listRow } from "@/components/ui/list"
 import type { KeyGuideGroup } from "@/lib/key-guide"
 import { useLayoutChange } from "@/lib/layout-change"
@@ -28,7 +28,6 @@ export default function FoldersPage() {
   const [section, setSection] = useState("folders")
   const [remove, setRemove] = useState<string | null>(null)
   useLayoutChange(section, data, error)
-  const reportRevision = useRef(0)
   const band = useRef<HTMLDivElement>(null)
   // 떠 있는 안내 띠의 높이만큼 목록 맨 위에 빈자리를 둔다. 첫 행과 그 단추가 띠에 가리지 않고, 목록을 내리면 행이 띠 밑으로 지나간다.
   // 영역 높이(목록 크기)는 그대로라 안내가 생기고 사라져도 목록 틀이 밀리지 않는다.
@@ -42,7 +41,11 @@ export default function FoldersPage() {
     return () => observer.disconnect()
   })
   const dismissSequence = useRef(0)
-  useEffect(() => { reportRevision.current = data?.report.revision ?? 0 }, [data])
+  const reportShown = useRef<ScanReportData | null>(null)
+  // 응답이 온 닫기의 초점 옮기기. 닫은 안내가 화면에서 사라진 렌더 뒤에만 옮긴다(#423).
+  const pendingFocus = useRef<{ sequence: number; revision: number; group: ScanNoticeGroup; index: number } | null>(null)
+  // 렌더마다 그려진 검사 결과를 적어 두고, 기다리던 초점 옮기기가 있으면 이 렌더 뒤에 한다.
+  useLayoutEffect(() => { reportShown.current = data?.report ?? null; placeDismissFocus() })
   useEffect(() => {
     let disposed = false
     let disconnect = () => {}
@@ -70,25 +73,31 @@ export default function FoldersPage() {
   function dismissReport(revision: number, group: ScanNoticeGroup, index: number) {
     if (!bridge) return
     const sequence = ++dismissSequence.current
-    // 초점은 가장 최근 닫기의 응답에서만, 그사이 새 결과가 오지 않았고(revision) 사용자가 초점을 검사 안내 밖으로
-    // 옮기지 않았을 때만 옮긴다. 닫은 단추가 사라지면 초점은 body로 빠지므로 body는 아직 옮기지 않은 것으로 본다.
-    const current = () => {
-      const section = document.getElementById('folders-report')
-      const active = document.activeElement
-      return sequence === dismissSequence.current && reportRevision.current === revision
-        && (!active || active === document.body || !!section?.contains(active))
-    }
     // 닫은 상태는 foldersChanged로만 받는다. 응답은 늦게 올 수 있어 그사이 온 새 검사 결과를 덮지 않도록 데이터를 싣지 않는다.
     request(reply => bridge.dismissReport(revision, group, reply)).then(() => {
-      if (!current()) return
-      // 닫은 단추가 사라지므로 같은 자리에 온 다음 검사 안내의 닫기 단추로, 남은 안내가 없으면 검사 안내 구역으로 초점을 옮긴다.
-      requestAnimationFrame(() => {
-        if (!current()) return
-        const section = document.getElementById('folders-report')
-        const remaining = [...section?.querySelectorAll<HTMLElement>('button[aria-label="안내 닫기"]') ?? []]
-        ;(remaining[Math.min(index, remaining.length - 1)] ?? section)?.focus()
-      })
+      if (sequence !== dismissSequence.current) return
+      pendingFocus.current = { sequence, revision, group, index }
+      // foldersChanged가 이미 그려졌으면 지금, 아니면 그 렌더의 layout effect에서 옮긴다.
+      placeDismissFocus()
     }).catch(error => setError(String(error)))
+  }
+  /**
+   * 닫은 단추가 사라지므로 같은 자리에 온 다음 검사 안내의 닫기 단추로, 남은 안내가 없으면 검사 안내 구역으로 초점을 옮긴다.
+   * 닫은 묶음이 아직 그려져 있으면(foldersChanged 렌더 전) 기다린다. 그 전에 옮기면 사라질 단추에 초점을 둬 body로 빠진다.
+   * 초점은 가장 최근 닫기의 응답에서만, 그사이 새 결과가 오지 않았고(revision) 사용자가 초점을 검사 안내 밖으로
+   * 옮기지 않았을 때만 옮긴다. 닫은 단추가 사라지면 초점은 body로 빠지므로 body는 아직 옮기지 않은 것으로 본다.
+   */
+  function placeDismissFocus() {
+    const pending = pendingFocus.current, report = reportShown.current
+    if (!pending || !report) return
+    if (pending.sequence !== dismissSequence.current || report.revision !== pending.revision) { pendingFocus.current = null; return }
+    if (hasScanGroup(report, pending.group)) return
+    pendingFocus.current = null
+    const section = document.getElementById('folders-report')
+    const active = document.activeElement
+    if (active && active !== document.body && !section?.contains(active)) return
+    const remaining = [...section?.querySelectorAll<HTMLElement>('button[aria-label="안내 닫기"]') ?? []]
+    ;(remaining[Math.min(pending.index, remaining.length - 1)] ?? section)?.focus()
   }
   function act(name: FolderAction, target = "") {
     setError("")
