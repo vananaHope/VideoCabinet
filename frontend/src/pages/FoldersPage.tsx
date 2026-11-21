@@ -110,6 +110,8 @@ export default function FoldersPage() {
       <Button variant="outline" disabled={data.scanning} onClick={() => act('addFile')}>파일 직접 추가</Button>
       {data.scanning && <StatusBadge variant="info">검사 중 · 폴더 및 제외 변경 잠금</StatusBadge>}
     </div>
+    {/* 최소 길이 카드는 목록 위에 둔다. 목록 아래 끝에 두면 셸 안내 묶음이 고를 모서리(조작 요소가 없는 왼쪽 아래)가 이 카드 제목·설명 자리라 글자를 덮는다(#412). */}
+    <MinimumDuration id="folders-minimum" value={data.minimum} scanning={data.scanning} onSave={async value => { await request(reply => bridge.setMinimum(value, reply)) }} />
     <Tabs label="폴더 관리 구역" value={section} onChange={setSection} items={[{ value: 'folders', label: `감시 폴더 ${data.folders.length}` }, { value: 'excluded', label: `제외 목록 ${data.excluded.length}` }, { value: 'dismissed', label: `관심 없음 되돌리기 ${data.dismissed.length}` }]} />
     {/* 폴더 목록 영역. 페이지 안내와 검사 안내는 목록을 밀지 않고 라이브러리처럼 목록 위쪽에 떠 있는 띠로 보인다(영역 높이의 절반까지, 넘치면 띠 안에서 스크롤).
         띠는 안내가 있을 때만 그린다. 검사 중 표시는 목록 위 가장자리의 가는 막대라 자리를 차지하지 않는다. */}
@@ -125,7 +127,6 @@ export default function FoldersPage() {
         <section id="folders-report" tabIndex={-1} className="outline-none" aria-label="검사 안내"><ScanReport layout="auto" report={data.report} onDismiss={(group, index) => dismissReport(data.report.revision, group, index)} /></section>
       </div>
     </div>
-    <MinimumDuration id="folders-minimum" value={data.minimum} scanning={data.scanning} onSave={async value => { await request(reply => bridge.setMinimum(value, reply)) }} />
     <ConfirmDialog open={remove !== null} onOpenChange={open => { if (!open) setRemove(null) }} title="감시 폴더 해제" description="이 폴더 아래의 모든 위치를 해제합니다. 다른 위치가 없는 영상은 파일 없음으로 남습니다. 실제 파일과 영상 기록은 유지하며, 겹치는 감시 폴더의 위치는 다음 검사에서 복귀합니다." confirmLabel="해제" onConfirm={() => { if (remove) act('removeFolder', remove); setRemove(null) }} />
   </main>
 }
