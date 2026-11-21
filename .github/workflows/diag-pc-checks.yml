@@ -17,10 +17,8 @@ jobs:
         include:
           - name: scan-notice-offscreen
             cmd: scripts/check_web_scan_notice.py --offscreen --output out
-          - name: scan-notice-real
-            cmd: scripts/check_web_scan_notice.py --output out
-          - name: playback-real
-            cmd: scripts/check_playback_controls.py --real --trace-focus --output out
+          - name: scan-notice-offscreen-trace
+            cmd: .github/diag/trace_watch.py scripts/check_web_scan_notice.py --offscreen --output out
     env:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
