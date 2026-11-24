@@ -228,6 +228,13 @@ def click(text):
     settle()
 
 
+def cancel_confirmation():
+    """읽을 언어 대화상자 위에 뜬 확인 창의 취소다. 대화상자 자체의 취소 단추와 구별한다."""
+    wait(lambda: js("(() => { const e = Array.from(document.querySelectorAll('[role=alertdialog] button'))"
+                    ".find(e => e.textContent === '취소'); if (!e || e.disabled) return false; e.click(); return true; })()"))
+    settle()
+
+
 def input_value(label, text):
     js(f"""(() => {{ const e = document.querySelector('[aria-label={json.dumps(label)}]');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, {json.dumps(text)});
@@ -348,7 +355,7 @@ def onscreen_region_edits():
                 assert f'검수로 고친 줄 {expected:,}개의 수정이 사라집니다' in current()['confirmation']
                 settle(300)
                 capture(f'container-onscreen-region-rebuild-confirm-{name}', dialogs.container)
-                click('취소')
+                cancel_confirmation()
                 wait(lambda: not current()['confirmation'])
                 assert core.onscreen_subtitle_regions(target.id)[1] == region
             web_modal('onscreen-region', {'video_id': target.id, 'region': region.rect, 'region_id': region.id}, edit_check)
@@ -406,12 +413,6 @@ def onscreen_series_regions():
     def saved():
         return [(core.onscreen_subtitle_regions(v), core.onscreen_subtitles(v),
                  core.onscreen_translation_reviewed_lines(v)) for v in episodes], core.subtitle_queue(kind='onscreen_subtitle')
-
-    def cancel_confirmation():
-        # 읽을 언어 대화상자 위에 뜬 확인 창의 취소다. 대화상자 자체의 취소 단추와 구별한다.
-        wait(lambda: js("(() => { const e = Array.from(document.querySelectorAll('[role=alertdialog] button'))"
-                        ".find(e => e.textContent === '취소'); if (!e || e.disabled) return false; e.click(); return true; })()"))
-        settle()
 
     def opened(name):
         wait(lambda: dialogs.container is not None)
