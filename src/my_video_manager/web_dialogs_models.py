@@ -252,8 +252,8 @@ class DialogModel:
         def save(impact):
             try:
                 if region_id is not None:
-                    c.update_onscreen_subtitle_region(region_id, ctx['region'], language, series=True,
-                                                      expected_series_impact=impact)
+                    c.update_onscreen_subtitle_region(region_id, ctx['region'], language, mode=RegionEdit.REBUILD,
+                                                      series=True, expected_series_impact=impact)
                 else:
                     c.add_onscreen_subtitle_region(ctx['video_id'], ctx['region'], language, series=True,
                                                    expected_series_impact=impact)

@@ -472,7 +472,8 @@ class OnScreenSubtitles:
 
     def _move_region(self, region_id, rect: RegionRect, language: str, guard) -> None:
         """자리만 바꾸기. 세대가 그대로라 화면 번역의 세대 토큰도 그대로여서 진행 중 번역 응답도 저장된다.
-        그 영역의 구간 다시 생성을 읽는 중이었으면 그 읽기만 멈춰 새 사각형으로 다시 읽게 한다(항목은 대기로 돌아간다)."""
+        그 영역에 남은 읽기(구간 다시 생성)가 있으면 대기열 항목을 순번 그대로 새 ID로 바꿔, 옛 사각형으로 읽기 시작한
+        결과는 저장하지 않고 새 사각형으로 다시 읽게 한다."""
         if not isinstance(rect, RegionRect):
             raise ValueError("화면 자막 영역이 올바르지 않습니다.")
         region = self.region(region_id)
@@ -493,6 +494,8 @@ class OnScreenSubtitles:
                               "WHERE id = ? AND language = ?", (*_rect_values(rect), region_id, language)).rowcount:
                 raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
             make_direct(db, region.video_id)
+            if region_id in _pending_reads(db, region.video_id):
+                self.request_reading(db, region.video_id, self._clock().isoformat(), automatic=True)
 
     def delete_region(self, region_id: int, *, guard=None) -> None:
         """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다.

@@ -735,6 +735,41 @@ def test_moving_a_region_during_its_range_reading_reads_the_range_again_at_the_n
     assert [l.text for l in core.onscreen_subtitles(video)[1].lines] == ['Moved corner']
 
 
+def test_range_reading_that_starts_right_before_a_move_is_not_saved_at_the_new_place(screen):
+    """읽기 멈춤과 사각형 저장 사이에 시작한 읽기도 옛 사각형으로 읽으니 저장하지 않는다."""
+    core, media, *_ = screen
+    video = core.videos()[0].id
+    _, top = read_two_regions(core, media, video)
+    finish(core)
+    moved = RegionRect(0.1, 0.4, 0.8, 0.2)
+    media.captions_by_region[moved] = ((5, 7, 'Moved corner'),)
+    core.request_onscreen_subtitle_range(top.region.id, 4, 8)
+    store, entered, release = core._onscreen, Event(), Event()
+    region_frames, cancel_reading = media.region_frames, store.cancel_reading
+    def blocked(path, rect, **kwargs):
+        entered.set()
+        assert release.wait(10)
+        yield from region_frames(path, rect, **kwargs)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        def start_then_cancel(video_id):
+            cancel_reading(video_id)
+            media.region_frames = blocked
+            started.append(pool.submit(core.process_next_onscreen_subtitle))
+            assert entered.wait(10)
+        started = []
+        store.cancel_reading = start_then_cancel
+        try:
+            core.update_onscreen_subtitle_region(top.region.id, moved, 'ja', mode=RegionEdit.MOVE)
+        finally:
+            store.cancel_reading = cancel_reading
+            release.set()
+        started[0].result(timeout=10)
+    media.region_frames = region_frames
+    assert [l.text for l in core.onscreen_subtitles(video)[1].lines] == ['Corner']
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert [l.text for l in core.onscreen_subtitles(video)[1].lines] == ['Moved corner']
+
+
 def test_deleting_one_region_removes_its_translations_and_reviews_only(screen):
     core, media, adapter, *_, reopen = screen
     video = core.videos()[0].id
