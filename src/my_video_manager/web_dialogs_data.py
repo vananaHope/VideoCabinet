@@ -64,6 +64,10 @@ class DialogData(TypedDict):
     series_note: str
     # 화면 자막 영역 고치기에서 선택지를 켰을 때 information 대신 보이는 시리즈 범위 안내(확인 창과 같은 문구·숫자).
     series_information: str
+    # 화면 자막 영역 고치기에서 자리만 바꾸기를 고를 수 있는 읽을 언어(그 영역의 지금 언어). 읽은 적이 없는 영역이나 새 영역이면
+    # 빈 문자열이다. 고른 언어가 이 값이고 시리즈 전체에 적용이 꺼졌을 때만 자리만 바꾸기와 move_information이 보인다.
+    move_language: str
+    move_information: str
 
 
 class DialogSnapshot(TypedDict):

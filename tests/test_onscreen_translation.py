@@ -13,7 +13,7 @@ from legacy_schema import replace_with_frozen
 from my_video_manager.core import AppCore
 from my_video_manager.library import LIBRARY_DB_VERSION
 from my_video_manager.onscreen_translation import onscreen_generation_token
-from my_video_manager.onscreen_subtitles import OnScreenRegionChanged, RegionRect
+from my_video_manager.onscreen_subtitles import OnScreenRegionChanged, RegionEdit, RegionRect
 from my_video_manager.review import ReviewConfirmationRequired
 from my_video_manager.secret_store import SecretStore
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
@@ -614,7 +614,7 @@ def test_updating_one_region_retranslates_only_its_lines_and_keeps_other_reviews
     kept = {line.id: translated(core, video)[line.id] for line in bottom.lines}
     moved = RegionRect(0.1, 0.4, 0.8, 0.2)
     media.captions_by_region[moved] = ((40, 42, 'Moved corner'),)
-    core.update_onscreen_subtitle_region(top.region.id, moved, 'en')
+    core.update_onscreen_subtitle_region(top.region.id, moved, 'en', mode=RegionEdit.REBUILD)
     assert core.onscreen_translation_reviewed_lines(video) == {bottom.lines[0].id}
     assert core.onscreen_subtitle_region_reviewed_line_count(top.region.id) is None
     assert core.onscreen_subtitle_region_reviewed_line_count(bottom.region.id) == 1
@@ -626,6 +626,113 @@ def test_updating_one_region_retranslates_only_its_lines_and_keeps_other_reviews
     assert [[line.text for line in call[0]] for call in adapter.calls] == [['Moved corner']]
     assert translated(core, video) == {**kept, new_top.lines[0].id: '번역 Moved corner'}
     assert core.onscreen_translation_reviewed_lines(video) == {bottom.lines[0].id}
+
+
+def screen_state(core, video):
+    """화면 자막 줄, 화면 번역, 검수 표시, 두 대기열."""
+    return (review_flags(core, video), translated(core, video), core.onscreen_translation_reviewed_lines(video),
+            core.subtitle_queue(kind=ONSCREEN_SUBTITLE), core.translation_queue())
+
+
+def test_moving_a_region_keeps_its_lines_translations_and_reviews_and_queues_nothing(screen):
+    core, media, adapter, *_, reopen = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    core.edit_onscreen_subtitle_line(top.lines[0].id, 'Fixed corner')
+    finish(core)
+    core.edit_onscreen_translation_line(bottom.lines[0].id, '고친 번역')
+    before, calls = screen_state(core, video), len(adapter.calls)
+    moved = RegionRect(0.1, 0.4, 0.8, 0.2)
+
+    assert core.update_onscreen_subtitle_region(top.region.id, moved, 'ja', mode=RegionEdit.MOVE) is None
+
+    assert screen_state(core, video) == before and len(adapter.calls) == calls
+    assert [r.rect for r in core.onscreen_subtitle_regions(video)] == [BAND, moved]
+    # 재생 화면의 번역 띠는 새 사각형에 같은 줄을 그린다.
+    bands = core.onscreen_translation_regions(video)
+    assert [(b.rect, [l.id for l in b.lines]) for b in bands] == [
+        (BAND, [l.id for l in bottom.lines]), (moved, [top.lines[0].id])]
+    assert core.process_next_onscreen_subtitle() is None
+    reopened = reopen()
+    assert screen_state(reopened, video) == before
+    assert reopened.onscreen_subtitle_regions(video)[1].rect == moved
+
+
+def test_moving_a_region_while_its_video_is_translated_keeps_the_inflight_response(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    moved = RegionRect(0.1, 0.4, 0.8, 0.2)
+    entered, release = Event(), Event()
+    def delayed(lines, kwargs):
+        entered.set()
+        assert release.wait(10)
+        return None
+    adapter.action = delayed
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        work = pool.submit(core.process_next_translation)
+        try:
+            assert entered.wait(10)
+            core.update_onscreen_subtitle_region(top.region.id, moved, 'ja', mode=RegionEdit.MOVE)
+        finally:
+            release.set()
+        assert work.result(timeout=10).completed_lines == 2
+    adapter.action = None
+    finish(core)
+    texts = [line.text for call in adapter.calls for line in call[0]]
+    assert sorted(texts) == ['Corner', 'Jon show', 'Next']  # 저장된 묶음은 다시 번역하지 않는다
+    assert translated(core, video) == {l.id: '번역 ' + l.text for s in (bottom, top) for l in s.lines}
+
+
+def test_move_is_refused_for_a_changed_language_or_an_unread_region(screen):
+    core, media, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = read_two_regions(core, media, video)
+    finish(core)
+    core.edit_onscreen_translation_line(top.lines[0].id, '고친 코너')
+    core.add_onscreen_subtitle_region(video, RegionRect(0, 0.4, 0.5, 0.2), 'en')
+    waiting = core.onscreen_subtitle_regions(video)[2]
+    before = (core.onscreen_subtitle_regions(video), screen_state(core, video))
+    moved = RegionRect(0.1, 0.4, 0.8, 0.2)
+    with pytest.raises(ValueError, match='처음부터 다시 만들어야'):
+        core.update_onscreen_subtitle_region(top.region.id, moved, 'en', mode=RegionEdit.MOVE)
+    with pytest.raises(ValueError, match='처음부터 다시 만들어야'):
+        core.update_onscreen_subtitle_region(waiting.id, moved, 'en', mode=RegionEdit.MOVE)
+    assert (core.onscreen_subtitle_regions(video), screen_state(core, video)) == before
+
+
+def test_move_with_an_outdated_confirmation_changes_nothing(screen):
+    core, media, *_ = screen
+    video = core.videos()[0].id
+    _, top = read_two_regions(core, media, video)
+    finish(core)
+    core.edit_onscreen_translation_line(top.lines[0].id, '고친 코너')
+    before = (core.onscreen_subtitle_regions(video), screen_state(core, video))
+    with pytest.raises(OnScreenRegionChanged):
+        core.update_onscreen_subtitle_region(top.region.id, RegionRect(0.1, 0.4, 0.8, 0.2), 'ja',
+                                             mode=RegionEdit.MOVE, expected_reviewed_line_count=0)
+    assert (core.onscreen_subtitle_regions(video), screen_state(core, video)) == before
+
+
+def test_moving_a_region_during_its_range_reading_reads_the_range_again_at_the_new_place(screen):
+    core, media, *_ = screen
+    video = core.videos()[0].id
+    _, top = read_two_regions(core, media, video)
+    finish(core)
+    moved = RegionRect(0.1, 0.4, 0.8, 0.2)
+    media.captions_by_region[moved] = ((5, 7, 'Moved corner'),)
+    core.request_onscreen_subtitle_range(top.region.id, 4, 8)
+    region_frames = media.region_frames
+    def move_while_reading(path, rect, **kwargs):
+        if rect == TOP:
+            core.update_onscreen_subtitle_region(top.region.id, moved, 'ja', mode=RegionEdit.MOVE)
+        yield from region_frames(path, rect, **kwargs)
+    media.region_frames = move_while_reading
+    assert core.process_next_onscreen_subtitle().state == 'queued'  # 옛 자리로 읽던 결과는 버린다
+    media.region_frames = region_frames
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert [l.text for l in core.onscreen_subtitles(video)[1].lines] == ['Moved corner']
 
 
 def test_deleting_one_region_removes_its_translations_and_reviews_only(screen):
@@ -991,7 +1098,7 @@ def test_range_request_survives_adding_a_region_and_is_dropped_when_its_region_c
     core.request_onscreen_subtitle_range(top.region.id, 5, 7)
     moved = RegionRect(0.1, 0.4, 0.8, 0.2)
     media.captions_by_region[moved] = ((40, 42, 'Moved'),)
-    core.update_onscreen_subtitle_region(top.region.id, moved, 'en')
+    core.update_onscreen_subtitle_region(top.region.id, moved, 'en', mode=RegionEdit.REBUILD)
     media.intervals.clear()
     assert core.process_next_onscreen_subtitle().state == 'completed'
     assert media.intervals == [(moved, None, None)]

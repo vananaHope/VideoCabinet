@@ -16,7 +16,8 @@ from test_web_library_page import window_factory
 from test_review import setup, finish
 from test_onscreen_subtitles import BAND
 from test_onscreen_translation import read_screen, screen
-from my_video_manager.onscreen_subtitles import RegionRect
+from my_video_manager.onscreen_subtitles import RegionEdit, RegionRect
+from my_video_manager.subtitle_queue_kind import ONSCREEN_SUBTITLE
 from my_video_manager.translation_source import ONSCREEN
 from my_video_manager.web_dialogs_entries import TagEditor, TagManager
 from my_video_manager.web_dialogs_entries import SeriesEditor
@@ -722,7 +723,7 @@ def test_series_apply_from_a_directly_set_episode_confirms_the_replacement(scree
     window, (core, media, *_) = screen_window
     a, b = series_episodes(core, media)
     region, = core.onscreen_subtitle_regions(b)
-    core.update_onscreen_subtitle_region(region.id, region.rect, region.language)  # 2화만 고쳐 직접 정한 화가 됐다
+    core.update_onscreen_subtitle_region(region.id, region.rect, region.language, mode=RegionEdit.REBUILD)  # 2화만 고쳐 직접 정한 화가 됐다
     dialogs, seen = window.web_host.dialogs, {}
     core.playback.start(b, 0)
 
@@ -757,6 +758,86 @@ def test_series_region_edit_information_follows_the_series_option(screen_window)
     within(lambda: OnScreenRegionDialog(core, a, CORNER, window, region_id=region.id).exec(), dialogs, check)
     # 이어지는 확인 창과 같은 문구·숫자다(확인 창은 두 줄로 나눠 보인다).
     assert seen['confirmation'].replace('\n', ' ') == seen['information']
+
+
+def read_region_with_review(core, media):
+    """한 화에 읽기를 마친 영역 하나(두 줄)와 검수로 고친 줄 하나."""
+    a = core.videos()[0].id
+    media.captions = ((10, 12, 'Jon show'), (20, 22, 'Next'))
+    core.add_onscreen_subtitle_region(a, BAND, 'en')
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    finish(core)
+    region, = core.onscreen_subtitle_regions(a)
+    core.edit_onscreen_translation_line(core.onscreen_subtitles(a)[0].lines[0].id, '고친 번역')
+    return a, region
+
+
+def test_region_edit_offers_move_only_for_a_read_region_and_keeps_everything(screen_window):
+    """#426: 읽은 영역을 고치면 자리만 바꾸기를 고를 수 있고, 고르면 줄·번역·검수가 그대로이고 대기열에 넣지 않는다."""
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, region = read_region_with_review(core, media)
+    before = (core.onscreen_subtitles(a)[0].lines, core.translation(a, source=ONSCREEN),
+              core.onscreen_translation_reviewed_lines(a))
+    dialogs = window.web_host.dialogs
+    core.playback.start(a, 0)
+
+    def check():
+        data = state(dialogs)
+        assert data['move_language'] == 'en'
+        assert '자리만 바꿉니다' in data['move_information'] and '사라집니다' not in data['move_information']
+        assert '검수로 고친 줄 1개의 수정이 사라집니다' in data['information']
+        act(dialogs, 'save', choice='en', mode='move')
+        assert not dialogs.active
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window, region_id=region.id).exec(), dialogs, check)
+    assert [r.rect for r in core.onscreen_subtitle_regions(a)] == [CORNER]
+    assert (core.onscreen_subtitles(a)[0].lines, core.translation(a, source=ONSCREEN),
+            core.onscreen_translation_reviewed_lines(a)) == before
+    assert core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+
+
+@pytest.mark.parametrize('answer', ['cancel-confirm', 'confirm'])
+def test_region_rebuild_from_more_confirms_the_lost_reviews(screen_window, answer):
+    """#426: 자리만 바꾸기를 고를 수 있을 때 처음부터 다시 만들기는 사라질 검수 수를 확인 창으로 묻는다."""
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, region = read_region_with_review(core, media)
+    lines = core.onscreen_subtitles(a)[0].lines
+    dialogs = window.web_host.dialogs
+    core.playback.start(a, 0)
+
+    def check():
+        data = act(dialogs, 'save', choice='en', mode='rebuild')
+        assert data['confirm_destructive'] and '검수로 고친 줄 1개의 수정이 사라집니다' in data['confirmation']
+        assert core.onscreen_subtitles(a)[0].lines == lines  # 확인 전에는 바뀌지 않는다
+        act(dialogs, answer)
+        if dialogs.active:
+            act(dialogs, 'close')
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window, region_id=region.id).exec(), dialogs, check)
+    if answer == 'confirm':
+        assert core.onscreen_subtitles(a) == () and len(core.subtitle_queue(kind=ONSCREEN_SUBTITLE)) == 1
+    else:
+        assert core.onscreen_subtitles(a)[0].lines == lines and core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+
+
+def test_region_edit_of_an_unread_region_offers_only_rebuild_without_a_confirmation(screen_window):
+    """#426: 아직 읽지 않은 영역은 자리만 바꾸기가 없고, 화면 자막 만들기는 지금처럼 바로 대기열에 넣는다."""
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a = core.videos()[0].id
+    core.add_onscreen_subtitle_region(a, BAND, 'en')
+    region, = core.onscreen_subtitle_regions(a)
+    dialogs = window.web_host.dialogs
+    core.playback.start(a, 0)
+
+    def check():
+        data = state(dialogs)
+        assert (data['move_language'], data['move_information']) == ('', '')
+        result = act(dialogs, 'save', choice='en')
+        assert result is None or not result['confirmation']
+        assert not dialogs.active
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window, region_id=region.id).exec(), dialogs, check)
+    assert [r.rect for r in core.onscreen_subtitle_regions(a)] == [CORNER]
 
 
 def test_series_add_whose_range_changed_at_the_last_moment_saves_without_a_replace_confirmation(screen_window, monkeypatch):

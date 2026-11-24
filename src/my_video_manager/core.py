@@ -29,7 +29,7 @@ from .translation import (Translator, Translations, Translation, TranslationQueu
                           translation_skip_reason)
 from .subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION, queue_task_key
 from .onscreen_subtitles import (OcrEngine, OnScreenRegionChanged, OnScreenSubtitle, OnScreenSubtitleQueueEntry,
-                                 OnScreenSubtitleRegion, OnScreenSubtitles, RegionOrigin, RegionRect)
+                                 OnScreenSubtitleRegion, OnScreenSubtitles, RegionEdit, RegionOrigin, RegionRect)
 from .translation_source import ONSCREEN, TRANSCRIPT, TranslationSources
 from .onscreen_translation import OnScreenTranslationSource
 from .onscreen_series import OnScreenSeriesImpact, OnScreenSeriesRegions
@@ -789,11 +789,16 @@ class AppCore:
             return self._onscreen_series.add(video_id, rect, language, expected=_expected(expected_series_impact))
         return self._onscreen.add_region(video_id, rect, language)
 
-    def update_onscreen_subtitle_region(self, region_id: int, rect: RegionRect, language: str, *, series=False,
-                                        expected_reviewed_line_count=UNCHECKED,
-                                        expected_series_impact=UNCHECKED) -> OnScreenSubtitleQueueEntry:
-        """영역 하나의 자리·크기·읽을 언어를 고친다. 그 영역의 화면 자막과 화면 번역 자막(검수로 고친 줄 포함)만
+    def update_onscreen_subtitle_region(self, region_id: int, rect: RegionRect, language: str, *, mode: RegionEdit,
+                                        series=False, expected_reviewed_line_count=UNCHECKED,
+                                        expected_series_impact=UNCHECKED) -> OnScreenSubtitleQueueEntry | None:
+        """영역 하나를 고치기 방식(mode)대로 고친다.
+
+        RegionEdit.REBUILD는 자리·크기·읽을 언어를 고치고 그 영역의 화면 자막과 화면 번역 자막(검수로 고친 줄 포함)만
         지우고 다시 읽도록 직접 요청한다. 읽기가 끝나면 그 영역의 줄만 다시 번역된다.
+        RegionEdit.MOVE는 다시 읽지 않고 사각형만 바꾼다. 그 영역의 줄·화면 번역 자막·검수 기록이 그대로이고 대기열에
+        아무것도 넣지 않는다(None을 돌려준다). 읽은 적이 없거나 읽을 언어가 바뀐 영역이면 아무것도 바꾸지 않고
+        ValueError를 던진다. 시리즈 전체에 적용(series=True)은 아직 REBUILD만 받는다.
 
         series=False면 이 화만 고친다. 시리즈에서 온 화였으면 이 화의 영역 묶음은 직접 정함이 되어 이후 시리즈 영역
         변경을 따르지 않는다. expected_reviewed_line_count는 확인 창이 보인 onscreen_subtitle_region_reviewed_line_count
@@ -802,12 +807,15 @@ class AppCore:
         다시 읽는다(다른 화는 자동 대상). 직접 정한 화의 영역이면 고친 뒤 이 화의 영역 묶음이 시리즈 영역이 된다
         (add_onscreen_subtitle_region의 series=True와 같다). expected_series_impact는 add_onscreen_subtitle_region과 같다.
         """
+        mode = RegionEdit(mode)
         video_id = self._onscreen.region(region_id).video_id
         self.playback_location(video_id)
         if series:
+            if mode != RegionEdit.REBUILD:
+                raise ValueError("시리즈 전체에 적용할 때는 처음부터 다시 만들기만 할 수 있습니다.")
             return self._onscreen_series.update(region_id, rect, language, video_id=video_id,
                                                 expected=_expected(expected_series_impact))
-        return self._onscreen.update_region(region_id, rect, language,
+        return self._onscreen.update_region(region_id, rect, language, mode,
                                             guard=self._reviewed_guard(region_id, expected_reviewed_line_count))
 
     def delete_onscreen_subtitle_region(self, region_id: int, *, expected_reviewed_line_count=UNCHECKED,

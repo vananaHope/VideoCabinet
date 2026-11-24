@@ -93,6 +93,12 @@ class RegionOrigin(str, Enum):
     SERIES = "series"  # 시리즈에서 옴: 시리즈 영역의 복사본이라 시리즈 영역 변경을 따른다.
 
 
+class RegionEdit(str, Enum):
+    """영역 고치기의 고치기 방식. 자리만 바꾸기는 읽은 적이 있고 읽을 언어가 그대로인 영역에만 쓸 수 있다."""
+    MOVE = "move"  # 자리만 바꾸기: 다시 읽지 않는다. 줄·화면 번역 자막·검수 기록이 그대로다.
+    REBUILD = "rebuild"  # 처음부터 다시 만들기: 그 영역의 줄·번역·검수 기록을 지우고 영상 전체를 다시 읽는다.
+
+
 @dataclass(frozen=True)
 class OnScreenSubtitleRegion:
     id: int
@@ -438,15 +444,20 @@ class OnScreenSubtitles:
             insert_region(db, video_id, rect, language, now)
             return self.request_reading(db, video_id, now)
 
-    def update_region(self, region_id: int, rect: RegionRect, language: str, *,
-                      guard=None) -> OnScreenSubtitleQueueEntry:
-        """영역 하나의 자리·크기·읽을 언어를 그 자리에서 고친다. 그 영역의 화면 자막·화면 번역 자막·검수 기록을
-        지우고 그 영역만 다시 읽도록 대기열에 넣는다. 다른 영역은 그대로다. 시리즈에서 온 화였으면 이 화만 직접 정함이
-        된다.
+    def update_region(self, region_id: int, rect: RegionRect, language: str, mode: RegionEdit, *,
+                      guard=None) -> OnScreenSubtitleQueueEntry | None:
+        """영역 하나를 고친다. 다른 영역은 그대로다. 시리즈에서 온 화였으면 어느 방식이든 이 화만 직접 정함이 된다.
+
+        REBUILD는 자리·크기·읽을 언어를 고치고 그 영역의 화면 자막·화면 번역 자막·검수 기록을 지운 뒤 그 영역만 다시
+        읽도록 대기열에 넣는다. MOVE는 사각형만 바꾸고 대기열에 넣지 않는다(None). 읽은 적이 없거나 읽을 언어가 바뀐
+        영역의 MOVE는 아무것도 바꾸지 않고 거부한다.
 
         guard(db)는 읽기를 멈추기 전과 쓰기 트랜잭션 안에서 바꾸기 전에 부른다. 예외를 던지면 아무것도 바꾸지 않고, 읽기를
         멈추기 전에 던지면 읽던 결과도 그대로다.
         """
+        mode = RegionEdit(mode)
+        if mode == RegionEdit.MOVE:
+            return self._move_region(region_id, rect, language, guard)
         self.check_region(rect, language)
         video_id = self.region(region_id).video_id
         self._precheck(guard)
@@ -458,6 +469,30 @@ class OnScreenSubtitles:
             reread_region(db, region_id, rect, language)
             make_direct(db, video_id)
             return self.request_reading(db, video_id, self._clock().isoformat())
+
+    def _move_region(self, region_id, rect: RegionRect, language: str, guard) -> None:
+        """자리만 바꾸기. 세대가 그대로라 화면 번역의 세대 토큰도 그대로여서 진행 중 번역 응답도 저장된다.
+        그 영역의 구간 다시 생성을 읽는 중이었으면 그 읽기만 멈춰 새 사각형으로 다시 읽게 한다(항목은 대기로 돌아간다)."""
+        if not isinstance(rect, RegionRect):
+            raise ValueError("화면 자막 영역이 올바르지 않습니다.")
+        region = self.region(region_id)
+        if language != region.language:
+            raise ValueError("읽을 언어를 바꾸면 처음부터 다시 만들어야 합니다.")
+        self._precheck(guard)
+        with self._connect() as db:
+            reads = _pending_reads(db, region.video_id)
+        if region_id in reads:
+            self.cancel_reading(region.video_id)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if guard is not None:
+                guard(db)
+            if not db.execute("SELECT 1 FROM onscreen_subtitles WHERE region_id = ?", (region_id,)).fetchone():
+                raise ValueError("아직 읽지 않은 영역은 처음부터 다시 만들어야 합니다.")
+            if not db.execute("UPDATE onscreen_subtitle_regions SET x = ?, y = ?, width = ?, height = ? "
+                              "WHERE id = ? AND language = ?", (*_rect_values(rect), region_id, language)).rowcount:
+                raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
+            make_direct(db, region.video_id)
 
     def delete_region(self, region_id: int, *, guard=None) -> None:
         """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다.
