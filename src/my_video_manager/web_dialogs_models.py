@@ -631,14 +631,17 @@ class DialogModel:
             if ctx.get('region_id') is None:
                 self.save_region(lambda: c.add_onscreen_subtitle_region(ctx['video_id'], ctx['region'], data['choice']))
                 return
-            mode, reviewed = RegionEdit(data.get('mode', RegionEdit.REBUILD)), self.reviewed
+            # 자리만 바꾸기와 더 보기의 처음부터 다시 만들기는 방식을 적어 보낸다. 방식이 없으면 그 창에 단추가
+            # "화면 자막 만들기" 하나뿐이었고, 잃을 것은 정보 줄이 이미 알렸다.
+            chosen = data.get('mode')
+            mode, reviewed = RegionEdit(chosen or RegionEdit.REBUILD), self.reviewed
             def update():
                 c.update_onscreen_subtitle_region(ctx['region_id'], ctx['region'], data['choice'], mode=mode,
                                                   expected_reviewed_line_count=reviewed)
             if mode == RegionEdit.MOVE:
                 self.save_region(update, '화면 자막 영역의 자리만 바꿨습니다. 화면 자막과 화면 번역 자막은 그대로입니다.')
-            elif reviewed is not None and data['choice'] == self.editing.language:
-                # 자리만 바꾸기를 고를 수 있었는데 처음부터 다시 만든다. 잃는 것을 확인 창으로 한 번 더 묻는다.
+            elif chosen is not None and reviewed is not None and data['choice'] == self.editing.language:
+                # 자리만 바꾸기를 두고 더 보기에서 처음부터 다시 만들기를 골랐다. 잃는 것을 확인 창으로 한 번 더 묻는다.
                 title = c.video(ctx['video_id']).title
                 self.confirm(f"'{title}'의 이 영역을 처음부터 다시 만들까요?\n화면 자막과 화면 번역 자막을 지우고 영상 전체를 "
                              f'다시 읽어 다시 번역합니다. 검수로 고친 줄 {reviewed:,}개의 수정이 사라집니다. 다른 영역은 그대로입니다.',
