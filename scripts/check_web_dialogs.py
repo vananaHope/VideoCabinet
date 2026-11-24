@@ -345,7 +345,7 @@ def onscreen_region_edits():
                 assert data['move_language'] == region.language
                 text = js("document.querySelector('[role=dialog]').textContent")
                 assert '자리만 바꾸기' in text and '다시 읽기' in text and '수정이 사라집니다' not in text, text
-                buttons = js("[...document.querySelectorAll('[role=dialog] button')].map(b => b.textContent)")
+                buttons = js("[...document.querySelectorAll('[role=dialog] button')].map(b => b.textContent).join('|')").split('|')
                 assert buttons.index('다시 읽기') + 1 == buttons.index('자리만 바꾸기'), buttons
                 assert '처음부터 다시 만들기' not in text and '화면 자막 만들기' not in text, text
                 footer_layout(f'onscreen-region-edit-{name}')
