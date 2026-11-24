@@ -6,7 +6,7 @@ import pytest
 
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.onscreen_series import OnScreenSeriesChanged, OnScreenSeriesImpact
-from my_video_manager.onscreen_subtitles import OnScreenRegionChanged, RegionOrigin, RegionRect
+from my_video_manager.onscreen_subtitles import OnScreenRegionChanged, RegionEdit, RegionOrigin, RegionRect
 from my_video_manager.subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION
 from my_video_manager.translation_source import ONSCREEN
 from test_onscreen_subtitles import FakeMedia, FakeOcr
@@ -201,7 +201,7 @@ def test_joining_episode_with_its_own_regions_and_members_left_without_regions_a
     apply_and_read(core, first)
     assert regions(core, third) == regions(core, second)  # 사용자가 고른 적용은 영역이 없는 화를 채운다
     band = core.onscreen_subtitle_regions(third)[0]
-    core.update_onscreen_subtitle_region(band.id, band.rect, band.language)  # 3화만 고쳐 직접 정함이 된다
+    core.update_onscreen_subtitle_region(band.id, band.rect, band.language, mode=RegionEdit.REBUILD)  # 3화만 고쳐 직접 정함이 된다
     for region in core.onscreen_subtitle_regions(third):
         core.delete_onscreen_subtitle_region(region.id)
     assert regions(core, third) == []
@@ -227,7 +227,7 @@ def test_episode_leaving_the_series_keeps_its_regions_lines_and_reviews_as_direc
     assert core.onscreen_translation_reviewed_lines(second) == kept[1]
     # 이후 시리즈 영역 변경을 따르지 않는다.
     band = core.onscreen_subtitle_regions(first)[0]
-    core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True)
+    core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True, mode=RegionEdit.REBUILD)
     assert [s.lines for s in core.onscreen_subtitles(second)] == [s.lines for s in kept[0]]
     assert regions(core, second)[0][0] == BAND
 
@@ -297,7 +297,7 @@ def test_series_region_update_rereads_only_that_region_in_each_series_episode(se
     # 다른 화 하나(2화), 1·2화의 그 영역에서 검수로 고친 줄 한 줄씩.
     assert core.onscreen_subtitle_region_series_impact(first, edited.id) == OnScreenSeriesImpact(1, 2, True)
 
-    core.update_onscreen_subtitle_region(edited.id, CORNER, "ja", series=True)
+    core.update_onscreen_subtitle_region(edited.id, CORNER, "ja", series=True, mode=RegionEdit.REBUILD)
 
     assert regions(core, first) == regions(core, second) == [(CORNER, "ja", SERIES), (TOP, "ja", SERIES)]
     assert core.onscreen_subtitle_regions(second)[0].id == band.id  # 그 자리에서 고친다
@@ -310,20 +310,43 @@ def test_series_region_update_rereads_only_that_region_in_each_series_episode(se
     assert [(call[0].name, call[1]) for call in media.calls] == [("드라마 01화.mkv", CORNER), ("드라마 02화.mkv", CORNER)]
 
 
+def test_moving_a_series_region_in_one_episode_only_makes_it_directly_set_and_keeps_its_lines(series):
+    core, _, _, (first, second, third), _ = series
+    series_with_direct_episode(core, first, third)
+    band = core.onscreen_subtitle_regions(first)[0]
+    kept, others = state(core, first), state(core, second)
+
+    assert core.update_onscreen_subtitle_region(band.id, CORNER, "en", mode=RegionEdit.MOVE) is None
+
+    assert regions(core, first) == [(CORNER, "en", DIRECT), (TOP, "ja", DIRECT)]
+    assert state(core, first) == kept and queue(core) == []
+    assert regions(core, second) == [(BAND, "en", SERIES), (TOP, "ja", SERIES)] and state(core, second) == others
+
+
+def test_series_wide_edit_accepts_only_rebuild_for_now(series):
+    core, _, _, (first, second, third), _ = series
+    series_with_direct_episode(core, first, third)
+    band = core.onscreen_subtitle_regions(first)[0]
+    before = everything(core, (first, second, third))
+    with pytest.raises(ValueError, match="처음부터 다시 만들기"):
+        core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True, mode=RegionEdit.MOVE)
+    assert everything(core, (first, second, third)) == before
+
+
 def test_turning_the_option_off_makes_only_this_episode_directly_set(series):
     core, _, _, (first, second, third), _ = series
     series_with_direct_episode(core, first, third)
     band = core.onscreen_subtitle_regions(first)[0]
     others = state(core, second)
 
-    core.update_onscreen_subtitle_region(band.id, CORNER, "en", expected_reviewed_line_count=1)
+    core.update_onscreen_subtitle_region(band.id, CORNER, "en", expected_reviewed_line_count=1, mode=RegionEdit.REBUILD)
 
     assert regions(core, first) == [(CORNER, "en", DIRECT), (TOP, "ja", DIRECT)]
     assert regions(core, second) == [(BAND, "en", SERIES), (TOP, "ja", SERIES)] and state(core, second) == others
     assert queue(core) == [(first, "queued")]
     # 이후 시리즈 변경을 따르지 않는다.
     top = core.onscreen_subtitle_regions(second)[1]
-    core.update_onscreen_subtitle_region(top.id, TOP, "en", series=True)
+    core.update_onscreen_subtitle_region(top.id, TOP, "en", series=True, mode=RegionEdit.REBUILD)
     core.add_onscreen_subtitle_region(second, BAND, "ja", series=True)
     assert regions(core, first) == [(CORNER, "en", DIRECT), (TOP, "ja", DIRECT)]
     # 새 영역을 선택지 없이 더해도 그 화만 직접 정함이 된다.
@@ -375,7 +398,7 @@ def test_editing_a_direct_region_with_the_option_on_makes_this_set_the_series_re
     impact = core.onscreen_subtitle_region_series_impact(first, band.id)
     assert impact == OnScreenSeriesImpact(2, 1, False)
 
-    core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True, expected_series_impact=impact)
+    core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True, expected_series_impact=impact, mode=RegionEdit.REBUILD)
 
     assert regions(core, first) == regions(core, second) == regions(core, third) == [
         (CORNER, "en", SERIES), (TOP, "ja", SERIES)]
@@ -417,7 +440,7 @@ def impact_of(core, change, first, third, region):
 
 def change_with(core, change, third, region, seen):
     if change == "update":
-        core.update_onscreen_subtitle_region(region.id, CORNER, "en", series=True, expected_series_impact=seen)
+        core.update_onscreen_subtitle_region(region.id, CORNER, "en", series=True, expected_series_impact=seen, mode=RegionEdit.REBUILD)
     elif change == "delete":
         core.delete_onscreen_subtitle_region(region.id, expected_series_impact=seen)
     else:
@@ -467,7 +490,7 @@ def test_a_failure_while_changing_many_episodes_changes_nothing(series, monkeypa
         return original(db, *args)
     monkeypatch.setattr(onscreen_series, "reread_region", failing)
     with pytest.raises(RuntimeError):
-        core.update_onscreen_subtitle_region(region.id, CORNER, "en", series=True)
+        core.update_onscreen_subtitle_region(region.id, CORNER, "en", series=True, mode=RegionEdit.REBUILD)
     assert len(calls) == 2
     assert everything(core, (first, second, third)) == before
 
@@ -502,7 +525,7 @@ def test_excluded_episode_without_regions_is_neither_filled_nor_counted(series):
 
 def excluded_change(core, change, first, third, region):
     if change == "update":
-        core.update_onscreen_subtitle_region(region.id, CORNER, "en", series=True)
+        core.update_onscreen_subtitle_region(region.id, CORNER, "en", series=True, mode=RegionEdit.REBUILD)
     elif change == "delete":
         core.delete_onscreen_subtitle_region(region.id)
     elif change == "add":
@@ -538,7 +561,7 @@ def test_excluded_episode_from_the_series_keeps_its_regions_as_directly_set(seri
     core.scan()
     assert state(core, second) == kept[1]
     band = core.onscreen_subtitle_regions(third)[0] if change == "replace" else core.onscreen_subtitle_regions(first)[0]
-    core.update_onscreen_subtitle_region(band.id, RegionRect(0.2, 0.2, 0.3, 0.3), "en", series=True)
+    core.update_onscreen_subtitle_region(band.id, RegionRect(0.2, 0.2, 0.3, 0.3), "en", series=True, mode=RegionEdit.REBUILD)
     assert state(core, second) == kept[1]
 
 
@@ -573,7 +596,7 @@ def test_episode_left_unreconciled_changes_only_itself(series, change):
         core.delete_onscreen_subtitle_region(band.id, expected_reviewed_line_count=reviewed)
         assert regions(core, second) == [(TOP, "ja", DIRECT)]
     else:
-        core.update_onscreen_subtitle_region(band.id, CORNER, "en", expected_reviewed_line_count=reviewed)
+        core.update_onscreen_subtitle_region(band.id, CORNER, "en", expected_reviewed_line_count=reviewed, mode=RegionEdit.REBUILD)
         assert regions(core, second) == [(CORNER, "en", DIRECT), (TOP, "ja", DIRECT)]
     assert everything(core, (first, third))[0] == others[0]
     assert regions(core, first) == [(BAND, "en", SERIES), (TOP, "ja", SERIES)]
@@ -595,7 +618,7 @@ def test_an_outdated_series_change_does_not_discard_a_reading_in_progress(series
         if index == 5 and not refused:
             with pytest.raises(OnScreenSeriesChanged) as changed:
                 core.update_onscreen_subtitle_region(region.id, CORNER, "en", series=True,
-                                                     expected_series_impact=seen)
+                                                     expected_series_impact=seen, mode=RegionEdit.REBUILD)
             refused.append(changed.value)
     media.hook = change_while_reading
 
@@ -653,7 +676,7 @@ def test_a_series_change_whose_kind_changed_is_refused(series):
     seen = core.onscreen_subtitle_region_series_impact(second)
     assert seen.change == "add"
     band = core.onscreen_subtitle_regions(second)[0]
-    core.update_onscreen_subtitle_region(band.id, band.rect, band.language)  # 2화만 고쳐 직접 정함이 된다
+    core.update_onscreen_subtitle_region(band.id, band.rect, band.language, mode=RegionEdit.REBUILD)  # 2화만 고쳐 직접 정함이 된다
     before = everything(core, (first, second, third))
     with pytest.raises(OnScreenSeriesChanged) as changed:
         core.add_onscreen_subtitle_region(second, CORNER, "en", series=True, expected_series_impact=seen)

@@ -377,6 +377,7 @@ class PlaybackPage(QWidget):
         """읽을 언어를 웹 업무 대화상자로 확인한다. 확인하면 자막 대기열에 화면 자막 만들기가 들어간다.
 
         region_id가 있으면 그 영역을 고친다(자리·크기·읽을 언어). 확인하든 취소하든 영역 정하기를 끝낸다.
+        자리만 바꾸기면 번역 띠가 새 자리에 바로 보이도록 주기를 기다리지 않고 다시 그린다.
         """
         from .web_dialogs_entries import OnScreenRegionDialog
         if self.region_selector is None:
@@ -385,6 +386,7 @@ class PlaybackPage(QWidget):
             OnScreenRegionDialog(self.core, video_id, rect, self.shell, region_id=region_id).exec()
         finally:
             self.close_region_selector()
+            self.refresh_onscreen_translation()
 
     def confirm_onscreen_region_delete(self, video_id, region_id):
         """고른 영역을 지울지 웹 확인 창으로 묻는다. 확인하든 취소하든 영역 정하기를 끝낸다."""

@@ -9,8 +9,8 @@ import pytest
 from legacy_schema import replace_with_frozen
 from my_video_manager.core import AppCore, MediaInfo
 from my_video_manager.library import LIBRARY_DB_VERSION
-from my_video_manager.onscreen_subtitles import (NO_TEXT_NOTICE, OcrLanguageUnavailable, RegionImage, RegionRect,
-                                                 SAMPLES_PER_SECOND, images_similar)
+from my_video_manager.onscreen_subtitles import (NO_TEXT_NOTICE, OcrLanguageUnavailable, RegionEdit, RegionImage,
+                                                 RegionRect, SAMPLES_PER_SECOND, images_similar)
 from my_video_manager.subtitle_queue_kind import ONSCREEN_SUBTITLE, TRANSCRIPTION
 from test_backup import apply
 
@@ -466,7 +466,7 @@ def test_updating_one_region_rereads_only_that_region(setup, change):
     moved = RegionRect(0.1, 0.55, 0.8, 0.2) if change == "move" else TOP
     language = "en" if change == "language" else "ja"
     media.captions_by_region[moved] = ((20, 22, "Changed corner"),)
-    entry = core.update_onscreen_subtitle_region(top.region.id, moved, language)
+    entry = core.update_onscreen_subtitle_region(top.region.id, moved, language, mode=RegionEdit.REBUILD)
     assert (entry.video_id, entry.state) == (a.id, "queued")
     # 고친 영역은 같은 영역으로 남고, 화면 자막은 다시 읽을 때까지 없다. 다른 영역은 그대로다.
     assert [(r.id, r.rect, r.language) for r in core.onscreen_subtitle_regions(a.id)] == [
@@ -487,7 +487,7 @@ def test_updating_or_adding_with_an_unreadable_language_changes_nothing(setup):
     bottom, top = read_bottom_and_top(core, media, ocr, a.id)
     before = (core.onscreen_subtitle_regions(a.id), core.onscreen_subtitles(a.id))
     with pytest.raises(OcrLanguageUnavailable, match="ru 언어 팩을 설치하세요"):
-        core.update_onscreen_subtitle_region(top.region.id, BAND, "ru")
+        core.update_onscreen_subtitle_region(top.region.id, BAND, "ru", mode=RegionEdit.REBUILD)
     with pytest.raises(ValueError, match="한국어"):
         core.add_onscreen_subtitle_region(a.id, TOP, "ko")
     assert (core.onscreen_subtitle_regions(a.id), core.onscreen_subtitles(a.id)) == before
@@ -506,7 +506,7 @@ def test_deleting_one_region_removes_only_its_lines_even_after_restart(setup):
     with pytest.raises(ValueError):
         reopened.delete_onscreen_subtitle_region(bottom.region.id)
     with pytest.raises(ValueError):
-        reopened.update_onscreen_subtitle_region(bottom.region.id, BAND, "en")
+        reopened.update_onscreen_subtitle_region(bottom.region.id, BAND, "en", mode=RegionEdit.REBUILD)
     reopened.delete_onscreen_subtitle_region(top.region.id)
     assert reopened.onscreen_subtitle_regions(a.id) == () and reopened.onscreen_subtitles(a.id) == ()
 
@@ -543,7 +543,7 @@ def test_changing_a_region_while_it_is_read_discards_that_reading(setup, change)
         if index == 5 and len(media.calls) == 2:  # 두 번째 영역(코너)을 읽는 중
             media.hook = None
             if change == "update":
-                core.update_onscreen_subtitle_region(top.id, moved, "en")
+                core.update_onscreen_subtitle_region(top.id, moved, "en", mode=RegionEdit.REBUILD)
             else:
                 core.delete_onscreen_subtitle_region(top.id)
     media.hook = edit
@@ -564,7 +564,7 @@ def test_a_change_that_saw_an_outdated_reviewed_count_is_refused_without_changin
     region, = core.onscreen_subtitle_regions(a.id)
     core.process_next_onscreen_subtitle()  # 확인 창이 '아직 화면 자막 없음(None)'을 본 뒤 읽기가 끝났다
     before = (core.onscreen_subtitle_regions(a.id), core.onscreen_subtitles(a.id), core.subtitle_queue(kind=None))
-    apply_change = ((lambda seen: core.update_onscreen_subtitle_region(region.id, TOP, "en", expected_reviewed_line_count=seen))
+    apply_change = ((lambda seen: core.update_onscreen_subtitle_region(region.id, TOP, "en", expected_reviewed_line_count=seen, mode=RegionEdit.REBUILD))
                     if change == "update" else
                     (lambda seen: core.delete_onscreen_subtitle_region(region.id, expected_reviewed_line_count=seen)))
     with pytest.raises(OnScreenRegionChanged) as refused:

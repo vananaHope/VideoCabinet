@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from my_video_manager.core import AppCore, Command, CommandType
 from my_video_manager.onscreen_playback import OnScreenBand
-from my_video_manager.onscreen_subtitles import RegionRect
+from my_video_manager.onscreen_subtitles import RegionEdit, RegionRect
 from my_video_manager.translation_source import ONSCREEN
 from my_video_manager.ui import MainWindow
 from qt_wait import wait_for
@@ -233,7 +233,7 @@ def pending_translation(window, ids, media):
     core = window.core
     region = core.onscreen_subtitle_regions(ids['b'])[0]
     media.captions_by_region = {BOTTOM: BOTTOM_CAPTIONS}
-    core.update_onscreen_subtitle_region(region.id, BOTTOM, 'en')
+    core.update_onscreen_subtitle_region(region.id, BOTTOM, 'en', mode=RegionEdit.REBUILD)
     assert core.process_next_onscreen_subtitle().state == 'completed'
     assert core.translation(ids['b'], source=ONSCREEN) is None
 

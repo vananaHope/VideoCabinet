@@ -9,7 +9,7 @@ import pytest
 
 from my_video_manager.core import AppCore, Command, CommandType, MediaInfo
 from my_video_manager.subtitles import TranscriberResult, TranscriptSegment
-from my_video_manager.onscreen_subtitles import RegionRect
+from my_video_manager.onscreen_subtitles import RegionEdit, RegionRect
 from my_video_manager.translation import TranslatedLine
 from my_video_manager.web_search_data import result_data
 from test_onscreen_subtitles import BAND
@@ -463,7 +463,7 @@ def test_deleted_or_updated_region_lines_leave_search_and_other_regions_stay(scr
         ("onscreen", "Caption bottom"), ("onscreen_translation", "번역 Caption bottom")]
     moved = RegionRect(0.1, 0.5, 0.8, 0.15)
     media.captions_by_region[moved] = ((40, 42, "Moved caption"),)
-    core.update_onscreen_subtitle_region(bottom_region.id, moved, "en")
+    core.update_onscreen_subtitle_region(bottom_region.id, moved, "en", mode=RegionEdit.REBUILD)
     assert core.search("caption bottom").results == ()
     core.process_next_onscreen_subtitle()
     finish(core)

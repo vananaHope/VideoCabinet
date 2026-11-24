@@ -43,7 +43,7 @@ from my_video_manager.web_dialogs_entries import TagEditor, TagManager
 from my_video_manager.web_dialogs_entries import SeriesEditor
 from my_video_manager.web_dialogs_entries import HighlightList, HighlightEditor
 from my_video_manager.web_dialogs_entries import ReviewDialog
-from my_video_manager.onscreen_subtitles import RegionImage, RegionRect
+from my_video_manager.onscreen_subtitles import RegionEdit, RegionImage, RegionRect
 from my_video_manager.windows_ocr import WindowsOcrEngine
 
 app = QApplication([])
@@ -228,6 +228,13 @@ def click(text):
     settle()
 
 
+def cancel_confirmation():
+    """읽을 언어 대화상자 위에 뜬 확인 창의 취소다. 대화상자 자체의 취소 단추와 구별한다."""
+    wait(lambda: js("(() => { const e = Array.from(document.querySelectorAll('[role=alertdialog] button'))"
+                    ".find(e => e.textContent === '취소'); if (!e || e.disabled) return false; e.click(); return true; })()"))
+    settle()
+
+
 def input_value(label, text):
     js(f"""(() => {{ const e = document.querySelector('[aria-label={json.dumps(label)}]');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(e, {json.dumps(text)});
@@ -333,8 +340,24 @@ def onscreen_region_edits():
                 data = current()
                 assert data['values']['choice'] == region.language
                 assert f'검수로 고친 줄 {expected:,}개의 수정이 사라집니다' in data['information'], data['information']
+                # #426 읽은 영역은 자리만 바꾸기가 기본이고 처음부터 다시 만들기는 더 보기 안에 있다. 보이는 안내는 자리만 바꾸기다.
+                assert data['move_language'] == region.language
+                text = js("document.querySelector('[role=dialog]').textContent")
+                assert '자리만 바꿉니다' in text and '수정이 사라집니다' not in text, text
+                assert '처음부터 다시 만들기' not in text and '화면 자막 만들기' not in text, text
                 footer_layout(f'onscreen-region-edit-{name}')
                 capture(f'container-onscreen-region-edit-{name}', container)
+                click('더 보기')
+                footer_layout(f'onscreen-region-edit-more-{name}')
+                capture(f'container-onscreen-region-edit-more-{name}', container)
+                click('처음부터 다시 만들기')
+                wait(lambda: bool(current()['confirmation']))
+                assert f'검수로 고친 줄 {expected:,}개의 수정이 사라집니다' in current()['confirmation']
+                settle(300)
+                capture(f'container-onscreen-region-rebuild-confirm-{name}', dialogs.container)
+                cancel_confirmation()
+                wait(lambda: not current()['confirmation'])
+                assert core.onscreen_subtitle_regions(target.id)[1] == region
             web_modal('onscreen-region', {'video_id': target.id, 'region': region.rect, 'region_id': region.id}, edit_check)
             def delete_check(name=name, expected=expected):
                 wait(lambda: dialogs.container is not None)
@@ -352,7 +375,8 @@ def onscreen_region_edits():
             if name == 'max':
                 del core.onscreen_subtitle_region_reviewed_line_count
     Ocr.available.discard('zh-Hant')
-    metrics['checks'].append('화면 자막 영역 고치기·지우기(검수로 고친 줄 0·3·9,999·긴 제목/언어) 컨테이너 촬영, 지우기 취소 무변경')
+    metrics['checks'].append('화면 자막 영역 고치기(자리만 바꾸기 기본, 더 보기의 처음부터 다시 만들기 확인)·지우기(검수로 고친 줄 '
+                            '0·3·9,999·긴 제목/언어) 컨테이너 촬영, 다시 만들기·지우기 취소 무변경')
 
 
 def onscreen_series_regions():
@@ -389,12 +413,6 @@ def onscreen_series_regions():
     def saved():
         return [(core.onscreen_subtitle_regions(v), core.onscreen_subtitles(v),
                  core.onscreen_translation_reviewed_lines(v)) for v in episodes], core.subtitle_queue(kind='onscreen_subtitle')
-
-    def cancel_confirmation():
-        # 읽을 언어 대화상자 위에 뜬 확인 창의 취소다. 대화상자 자체의 취소 단추와 구별한다.
-        wait(lambda: js("(() => { const e = Array.from(document.querySelectorAll('[role=alertdialog] button'))"
-                        ".find(e => e.textContent === '취소'); if (!e || e.disabled) return false; e.click(); return true; })()"))
-        settle()
 
     def opened(name):
         wait(lambda: dialogs.container is not None)
@@ -490,7 +508,7 @@ def onscreen_series_regions():
                 del core.onscreen_subtitle_region_series_impact
     # 바꾸기 확인 창의 최대 자릿수와 긴 영상 제목·시리즈 이름(#365). 긴 제목 화를 직접 정한 화로 만든 뒤 그 화에서 켠다.
     region = core.onscreen_subtitle_regions(long_first)[0]
-    core.update_onscreen_subtitle_region(region.id, region.rect, region.language)
+    core.update_onscreen_subtitle_region(region.id, region.rect, region.language, mode=RegionEdit.REBUILD)
     for name, target, others, reviewed in (('max', direct, 9999, 99999), ('long', long_first, 1, 1)):
         if name == 'max':
             core.onscreen_subtitle_region_series_impact = lambda *a, **k: OnScreenSeriesImpact(9999, 99999, True,

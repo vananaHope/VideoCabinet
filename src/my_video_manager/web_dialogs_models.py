@@ -4,8 +4,8 @@ from math import isfinite
 
 from .highlight_editing import initial_time_input, resolve_time_input, time_input_maximum
 from .onscreen_series import OnScreenSeriesChanged
-from .onscreen_subtitles import (ONSCREEN_LANGUAGES, OcrLanguageUnavailable, OnScreenRegionChanged, RegionOrigin,
-                                 default_onscreen_language, onscreen_language_name)
+from .onscreen_subtitles import (ONSCREEN_LANGUAGES, OcrLanguageUnavailable, OnScreenRegionChanged, RegionEdit,
+                                 RegionOrigin, default_onscreen_language, onscreen_language_name)
 from .review import ReviewConfirmationRequired
 from .subtitle_queue_kind import ONSCREEN_SUBTITLE
 from .translation_kind import ONSCREEN_TRANSLATION
@@ -252,8 +252,8 @@ class DialogModel:
         def save(impact):
             try:
                 if region_id is not None:
-                    c.update_onscreen_subtitle_region(region_id, ctx['region'], language, series=True,
-                                                      expected_series_impact=impact)
+                    c.update_onscreen_subtitle_region(region_id, ctx['region'], language, mode=RegionEdit.REBUILD,
+                                                      series=True, expected_series_impact=impact)
                 else:
                     c.add_onscreen_subtitle_region(ctx['video_id'], ctx['region'], language, series=True,
                                                    expected_series_impact=impact)
@@ -271,6 +271,21 @@ class DialogModel:
             self.ask_series(measure, impact, save)
         else:
             save(impact)  # 잃는 것이 없거나(언어 팩이 없으면 아무것도 바꾸지 않고 안내한다) 바로 저장한다.
+
+    def save_region(self, save, status='자막 대기열에 화면 자막 만들기를 추가했습니다. 재생 중에도 계속 처리합니다.'):
+        """영역 하나를 더하거나 고친다. 창이 본 것과 달라졌거나 언어 팩이 없으면 바꾸지 않고 안내한 채 다시 확인받는다."""
+        try:
+            save()
+        except OnScreenRegionChanged as changed:
+            # 창이 보인 안내와 사라질 것이 달라졌다. 바꾸지 않고 새 안내를 보인 채 다시 확인받는다.
+            self.reviewed, self.message = changed.reviewed_line_count, str(changed)
+            return
+        except OcrLanguageUnavailable as missing:
+            # 경고 안내로 설치 방법을 보이고 대기열에는 넣지 않는다. 다른 언어를 고르거나 취소할 수 있다.
+            self.message = str(missing)
+            return
+        self.owner.window.statusBar().showMessage(status)
+        self.owner.pop(accepted=True)
 
     def refresh_region_warning(self):
         """창이 열린 동안 그 영역의 읽기가 끝나면(화면 자막이 생기면) 사라질 것의 안내를 지금 상태로 바꾼다."""
@@ -348,7 +363,7 @@ class DialogModel:
                     keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], tags=[], tag_candidates=[], available=[], exports=[],
                     choices=[], values=self.values.copy(), maximum=0.0, locked=False, warning='',
                     confirmation=self.confirmation, confirm_title=self.confirm_title, confirm_destructive=self.confirm_destructive, translation=None, network_busy=False, information=self.information,
-                    series_label='', series_note='', series_information='')
+                    series_label='', series_note='', series_information='', move_language='', move_information='')
         if kind == 'tags':
             highlight = ctx.get('highlight_id')
             tags = c.highlight_tags(highlight) if highlight is not None else c.video_tags(ctx['video_id'])
@@ -414,6 +429,10 @@ class DialogModel:
                     f"'{title}'의 이 영역만 고칩니다. 다른 영역은 그대로입니다." if self.reviewed is None else
                     f"'{title}'의 이 영역만 화면 자막과 화면 번역 자막을 다시 만듭니다. 검수로 고친 줄 "
                     f'{self.reviewed:,}개의 수정이 사라집니다. 다른 영역은 그대로입니다.')
+                if self.reviewed is not None:
+                    data.update(move_language=editing.language, move_information=(
+                        f"'{title}'의 이 영역 자리만 바꿉니다. 다시 읽지 않아 화면 자막·화면 번역 자막·검수 기록이 "
+                        '그대로 남고 번역 띠는 새 자리에 보입니다. 다른 영역은 그대로입니다.'))
             if self.video_series is not None:
                 data.update(series_label=f'시리즈 전체에 적용 · {self.video_series.name}',
                             series_note=SERIES_OPT_OUT if self.from_series else SERIES_OPT_IN)
@@ -609,22 +628,26 @@ class DialogModel:
             if data.get('series') and self.video_series is not None:
                 self.save_to_series(data['choice'])
                 return
-            try:
-                if ctx.get('region_id') is not None:
-                    c.update_onscreen_subtitle_region(ctx['region_id'], ctx['region'], data['choice'],
-                                                      expected_reviewed_line_count=self.reviewed)
-                else:
-                    c.add_onscreen_subtitle_region(ctx['video_id'], ctx['region'], data['choice'])
-            except OnScreenRegionChanged as changed:
-                # 창이 보인 안내와 사라질 것이 달라졌다. 바꾸지 않고 새 안내를 보인 채 다시 확인받는다.
-                self.reviewed, self.message = changed.reviewed_line_count, str(changed)
+            if ctx.get('region_id') is None:
+                self.save_region(lambda: c.add_onscreen_subtitle_region(ctx['video_id'], ctx['region'], data['choice']))
                 return
-            except OcrLanguageUnavailable as missing:
-                # 경고 안내로 설치 방법을 보이고 대기열에는 넣지 않는다. 다른 언어를 고르거나 취소할 수 있다.
-                self.message = str(missing)
-                return
-            self.owner.window.statusBar().showMessage('자막 대기열에 화면 자막 만들기를 추가했습니다. 재생 중에도 계속 처리합니다.')
-            self.owner.pop(accepted=True)
+            # 자리만 바꾸기와 더 보기의 처음부터 다시 만들기는 방식을 적어 보낸다. 방식이 없으면 그 창에 단추가
+            # "화면 자막 만들기" 하나뿐이었고, 잃을 것은 정보 줄이 이미 알렸다.
+            chosen = data.get('mode')
+            mode, reviewed = RegionEdit(chosen or RegionEdit.REBUILD), self.reviewed
+            def update():
+                c.update_onscreen_subtitle_region(ctx['region_id'], ctx['region'], data['choice'], mode=mode,
+                                                  expected_reviewed_line_count=reviewed)
+            if mode == RegionEdit.MOVE:
+                self.save_region(update, '화면 자막 영역의 자리만 바꿨습니다. 화면 자막과 화면 번역 자막은 그대로입니다.')
+            elif chosen is not None and reviewed is not None and data['choice'] == self.editing.language:
+                # 자리만 바꾸기를 두고 더 보기에서 처음부터 다시 만들기를 골랐다. 잃는 것을 확인 창으로 한 번 더 묻는다.
+                title = c.video(ctx['video_id']).title
+                self.confirm(f"'{title}'의 이 영역을 처음부터 다시 만들까요?\n화면 자막과 화면 번역 자막을 지우고 영상 전체를 "
+                             f'다시 읽어 다시 번역합니다. 검수로 고친 줄 {reviewed:,}개의 수정이 사라집니다. 다른 영역은 그대로입니다.',
+                             lambda: self.save_region(update), title='화면 자막 처음부터 다시 만들기', destructive=True)
+            else:
+                self.save_region(update)
         elif kind == 'subtitles' and action == 'save':
             def request():
                 c.request_subtitles(ctx['video_id'], None if data['choice'] == '자동 감지' else data['choice'])

@@ -62,8 +62,12 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   const composing = useRef(false)
   const currentSelected = data.rows.some(row => row.id === selected) ? selected : data.rows[0]?.id ?? ''
   const kind = data.kind
+  // 영역 고치기: 읽은 적이 있는 영역을 같은 언어로, 이 화에서만 고칠 때 자리만 바꾸기가 기본이고 처음부터 다시 만들기는 더 보기에 있다.
+  const movable = kind === 'onscreen-region' && !!data.move_language && form.choice === data.move_language && !form.series
+  const [more, setMore] = useState(false)
   // 화면 자막 영역 고치기에서 "시리즈 전체에 적용"을 켜면 정보 줄은 이 화가 아니라 시리즈 범위(확인 창과 같은 숫자)를 말한다.
-  const information = kind === 'onscreen-region' && form.series && data.series_information ? data.series_information : data.information
+  const information = kind === 'onscreen-region' && form.series && data.series_information ? data.series_information
+    : movable ? data.move_information : data.information
   useEffect(() => {
     if (kind !== 'range') return
     const timer = setTimeout(() => {
@@ -81,8 +85,8 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
     } catch (error) { setError(String(error)); return false }
     finally { busyRef.current = false; setBusy(false) }
   }
-  const button = (label: string, action: string, disabled = false, variant: 'default' | 'outline' | 'destructive' | 'destructive-outline' = 'outline') =>
-    <Button key={action} variant={variant} disabled={busy || disabled} onClick={() => void act(action, action === 'close' ? { accepted: !editable } : {})}>{label}</Button>
+  const button = (label: string, action: string, disabled = false, variant: 'default' | 'outline' | 'destructive' | 'destructive-outline' = 'outline', payload: object = {}) =>
+    <Button key={label} variant={variant} disabled={busy || disabled} onClick={() => void act(action, action === 'close' ? { accepted: !editable } : payload)}>{label}</Button>
   const editable = ['series', 'tag-rename', 'highlight', 'subtitles', 'line', 'range', 'translation', 'video-rename', 'random-scope', 'onscreen-region'].includes(kind)
   const disabledEdit = data.locked || !currentSelected
   // 검수 화면이 지금 보는 자막의 작업이 화면 번역이면 화면 자막 영역 하나의 줄을 보고 있다.
@@ -104,7 +108,7 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
         // 태그 고르기 검색 칸처럼 Enter를 먼저 쓴 입력(defaultPrevented)에서는 저장하지 않는다.
         if (editable && event.target instanceof HTMLInputElement && event.target.type !== 'checkbox'
           && event.key === 'Enter' && !event.defaultPrevented && !composing.current && !event.nativeEvent.isComposing && event.keyCode !== 229
-          && !data.locked && !data.confirmation) { event.preventDefault(); void act('save') }
+          && !data.locked && !data.confirmation) { event.preventDefault(); void act('save', movable ? { mode: 'move' } : {}) }
       }}>
       {kind === 'tags' && <TagPicker mode="immediate" label="태그" tags={data.tags} exclude={data.rows.map(row => Number(row.id))} listAll
         emptyText={data.tags.length ? '등록한 태그가 모두 붙어 있습니다. 새 이름을 입력해 붙이세요.' : '등록한 태그가 없습니다. 이름을 입력하고 Enter로 새 태그를 만드세요.'}
@@ -159,10 +163,13 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
       : kind === 'highlights' ? <>{button('시각·메모 편집', 'edit', !currentSelected, 'default')}{button('태그 편집', 'tags', !currentSelected)}{button('하이라이트 삭제', 'delete', !currentSelected, 'destructive-outline')}</>
       : kind === 'review' && onscreen ? <>{button('원문 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{data.exports.map(row => button(row.title, row.id))}</>
       : kind === 'review' ? <>{data.task_kind === 'refinement' && button(data.task_label, 'refine', data.locked)}{button('원어 줄 수정', 'edit-original', disabledEdit, 'default')}{button(`${data.short_label} 줄 수정`, 'edit-translation', disabledEdit)}{button('구간 다시 생성', 'range', data.locked)}{button('전체 다시 생성', 'regenerate', false, 'destructive')}{button('원어 SRT 저장', 'export-original', !data.rows.length)}{button(`${data.short_label} SRT 저장`, 'export-translation', !data.rows.length)}{data.exports.map(row => button(row.title, row.id))}</>
+      : movable ? more ? button('처음부터 다시 만들기', 'save', false, 'destructive-outline', { mode: 'rebuild' })
+        : <Button key="more" variant="outline" disabled={busy} onClick={() => setMore(true)}>더 보기</Button>
       : undefined}>
       {button(editable ? '취소' : '닫기', 'close')}
-      {editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'onscreen-region' ? '화면 자막 만들기' : kind === 'translation' || kind === 'random-scope' ? '확인' : '저장', 'save',
-        data.locked || data.network_busy || kind === 'range' && !!data.warning || kind === 'random-scope' && !randomScopeReady(data, form) || kind === 'onscreen-region' && !form.choice, kind === 'range' ? 'destructive' : 'default')}
+      {movable ? button('자리만 바꾸기', 'save', false, 'default', { mode: 'move' })
+        : editable && button(kind === 'range' ? '다시 생성' : kind === 'subtitles' ? '자막 만들기' : kind === 'onscreen-region' ? '화면 자막 만들기' : kind === 'translation' || kind === 'random-scope' ? '확인' : '저장', 'save',
+          data.locked || data.network_busy || kind === 'range' && !!data.warning || kind === 'random-scope' && !randomScopeReady(data, form) || kind === 'onscreen-region' && !form.choice, kind === 'range' ? 'destructive' : 'default')}
     </DialogFooter>
     {data.keep_reviewed && <ConfirmDialog open onOpenChange={open => { if (!open) void act('cancel-confirm') }} title={data.confirm_title} description={data.confirmation}
       confirmLabel={`새 원어로 다시 ${data.task_label}`} cancelLabel="사용자 수정본 유지" onCancel={() => void act('keep-reviewed')}
