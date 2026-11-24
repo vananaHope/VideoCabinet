@@ -94,8 +94,9 @@ class RegionOrigin(str, Enum):
 
 
 class RegionEdit(str, Enum):
-    """영역 고치기의 고치기 방식. 자리만 바꾸기는 읽은 적이 있고 읽을 언어가 그대로인 영역에만 쓸 수 있다."""
+    """영역 고치기의 고치기 방식. 자리만 바꾸기와 다시 읽기는 읽은 적이 있고 읽을 언어가 그대로인 영역에만 쓸 수 있다."""
     MOVE = "move"  # 자리만 바꾸기: 다시 읽지 않는다. 줄·화면 번역 자막·검수 기록이 그대로다.
+    REREAD = "reread"  # 다시 읽기: 영상 전체를 다시 읽고 글자가 같은 줄과 검수한 줄은 지킨다.
     REBUILD = "rebuild"  # 처음부터 다시 만들기: 그 영역의 줄·번역·검수 기록을 지우고 영상 전체를 다시 읽는다.
 
 
@@ -323,6 +324,12 @@ def migrate_onscreen_review(db) -> None:
         end REAL NOT NULL)""")
 
 
+def migrate_onscreen_reread(db) -> None:
+    """v13: 영역 다시 읽기 요청. 구간 요청과 같은 자리(영역마다 하나)를 쓰고, whole이면 영상 전체를 다시 읽어 예전 줄과
+    맞춘다. 영역의 구간 요청을 다시 읽기가 대신하므로 한 영역에 둘이 함께 남지 않는다."""
+    db.execute("ALTER TABLE onscreen_subtitle_review_ranges ADD COLUMN whole INTEGER NOT NULL DEFAULT 0")
+
+
 def ensure_onscreen_reviewable(db, video_id) -> None:
     """그 영상의 화면 자막 읽기가 대기·읽는 중이면 화면 자막 줄 수정과 구간 다시 생성을 막는다."""
     if db.execute("SELECT 1 FROM subtitle_queue WHERE video_id = ? AND kind = ? AND state IN ('queued', 'reading')",
@@ -449,15 +456,16 @@ class OnScreenSubtitles:
         """영역 하나를 고친다. 다른 영역은 그대로다. 시리즈에서 온 화였으면 어느 방식이든 이 화만 직접 정함이 된다.
 
         REBUILD는 자리·크기·읽을 언어를 고치고 그 영역의 화면 자막·화면 번역 자막·검수 기록을 지운 뒤 그 영역만 다시
-        읽도록 대기열에 넣는다. MOVE는 사각형만 바꾸고 대기열에 넣지 않는다(None). 읽은 적이 없거나 읽을 언어가 바뀐
-        영역의 MOVE는 아무것도 바꾸지 않고 거부한다.
+        읽도록 대기열에 넣는다. MOVE는 사각형만 바꾸고 대기열에 넣지 않는다(None). REREAD는 사각형을 바꾸고 그 영역만
+        영상 전체를 다시 읽도록 넣는다. 그동안 줄과 화면 번역 자막은 그대로이고, 처리가 새 줄을 예전 줄과 맞춘다
+        (_merge_reread). 읽은 적이 없거나 읽을 언어가 바뀐 영역의 MOVE·REREAD는 아무것도 바꾸지 않고 거부한다.
 
         guard(db)는 읽기를 멈추기 전과 쓰기 트랜잭션 안에서 바꾸기 전에 부른다. 예외를 던지면 아무것도 바꾸지 않고, 읽기를
         멈추기 전에 던지면 읽던 결과도 그대로다.
         """
         mode = RegionEdit(mode)
-        if mode == RegionEdit.MOVE:
-            return self._move_region(region_id, rect, language, guard)
+        if mode != RegionEdit.REBUILD:
+            return self._edit_in_place(region_id, rect, language, guard, reread=mode == RegionEdit.REREAD)
         self.check_region(rect, language)
         video_id = self.region(region_id).video_id
         self._precheck(guard)
@@ -470,11 +478,15 @@ class OnScreenSubtitles:
             make_direct(db, video_id)
             return self.request_reading(db, video_id, self._clock().isoformat())
 
-    def _move_region(self, region_id, rect: RegionRect, language: str, guard) -> None:
-        """자리만 바꾸기. 세대가 그대로라 화면 번역의 세대 토큰도 그대로여서 진행 중 번역 응답도 저장된다.
-        그 영역에 남은 읽기(구간 다시 생성)가 있으면 대기열 항목을 순번 그대로 새 ID로 바꿔, 옛 사각형으로 읽기 시작한
-        결과는 저장하지 않고 새 사각형으로 다시 읽게 한다."""
-        if not isinstance(rect, RegionRect):
+    def _edit_in_place(self, region_id, rect: RegionRect, language: str, guard, *, reread: bool):
+        """자리만 바꾸기와 다시 읽기. 세대가 그대로라 화면 번역의 세대 토큰도 그대로여서 진행 중 번역 응답도 저장된다.
+
+        자리만 바꾸기는 그 영역에 남은 읽기(구간 다시 생성·다시 읽기)가 있으면 대기열 항목을 순번 그대로 새 ID로 바꿔,
+        옛 사각형으로 읽기 시작한 결과는 저장하지 않고 새 사각형으로 다시 읽게 한다. 다시 읽기는 그 영역의 구간 요청을
+        영상 전체 요청으로 바꾸고 직접 요청으로 넣는다."""
+        if reread:
+            self.check_region(rect, language)
+        elif not isinstance(rect, RegionRect):
             raise ValueError("화면 자막 영역이 올바르지 않습니다.")
         region = self.region(region_id)
         if language != region.language:
@@ -482,20 +494,28 @@ class OnScreenSubtitles:
         self._precheck(guard)
         with self._connect() as db:
             reads = _pending_reads(db, region.video_id)
-        if region_id in reads:
+        if reread or region_id in reads:
             self.cancel_reading(region.video_id)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if guard is not None:
                 guard(db)
-            if not db.execute("SELECT 1 FROM onscreen_subtitles WHERE region_id = ?", (region_id,)).fetchone():
+            generation = db.execute("SELECT id FROM onscreen_subtitles WHERE region_id = ?", (region_id,)).fetchone()
+            if generation is None:
                 raise ValueError("아직 읽지 않은 영역은 처음부터 다시 만들어야 합니다.")
             if not db.execute("UPDATE onscreen_subtitle_regions SET x = ?, y = ?, width = ?, height = ? "
                               "WHERE id = ? AND language = ?", (*_rect_values(rect), region_id, language)).rowcount:
                 raise ValueError("화면 자막 영역이 바뀌었습니다. 영역 정하기를 다시 여세요.")
             make_direct(db, region.video_id)
+            now = self._clock().isoformat()
+            if reread:
+                duration = db.execute("SELECT duration FROM videos WHERE id = ?", (region.video_id,)).fetchone()[0]
+                db.execute("INSERT OR REPLACE INTO onscreen_subtitle_review_ranges(region_id, generation_id, start, end, "
+                           "whole) VALUES (?, ?, 0, ?, 1)", (region_id, generation[0], duration or 0.0))
+                return self.request_reading(db, region.video_id, now)
             if region_id in _pending_reads(db, region.video_id):
-                self.request_reading(db, region.video_id, self._clock().isoformat(), automatic=True)
+                self.request_reading(db, region.video_id, now, automatic=True)
+            return None
 
     def delete_region(self, region_id: int, *, guard=None) -> None:
         """영역 하나와 그 화면 자막·화면 번역 자막·검수 기록을 지운다. 다른 영역은 그대로다.
@@ -558,7 +578,8 @@ class OnScreenSubtitles:
             if generation is None:
                 raise ValueError("먼저 이 영역의 화면 자막을 만드세요.")
             entry = self.request_reading(db, video_id, self._clock().isoformat())
-            db.execute("INSERT OR REPLACE INTO onscreen_subtitle_review_ranges VALUES (?, ?, ?, ?)",
+            db.execute("INSERT OR REPLACE INTO onscreen_subtitle_review_ranges(region_id, generation_id, start, end) "
+                       "VALUES (?, ?, ?, ?)",
                        (region_id, generation[0], start, end))
             return entry
 
@@ -679,7 +700,8 @@ class OnScreenSubtitles:
                                            [(uuid4().hex, generation, ordinal, start, end, text)
                                             for ordinal, (start, end, text) in enumerate(region_lines)])
                         else:
-                            new_ids += _replace_range(db, interval, region_lines)
+                            new_ids += (_merge_reread if interval["whole"] else _replace_range)(db, interval,
+                                                                                               region_lines)
                             generation = interval["generation_id"]
                         line_count += db.execute("SELECT COUNT(*) FROM onscreen_subtitle_lines WHERE generation_id = ?",
                                                  (generation,)).fetchone()[0]
@@ -718,7 +740,8 @@ class OnScreenSubtitles:
     def _read(self, pending, duration, cancellation):
         """아직 세대가 없는 영역 전체와 구간 요청이 있는 영역의 그 구간을 차례로 훑는다. DB는 잠그지 않는다.
 
-        결과는 (영역 ID, 구간 기록 또는 None(영역 전체), 줄)이다. 구간 줄은 구간 안으로 자른다.
+        결과는 (영역 ID, 구간 기록 또는 None(영역 전체), 줄)이다. 구간 줄은 구간 안으로 자른다. 다시 읽기 기록(whole)은
+        영역 전체처럼 영상 전체를 읽는다.
         """
         if self._frames is None or self._ocr is None:
             raise RuntimeError("화면 자막 어댑터가 설정되지 않았습니다.")
@@ -731,11 +754,12 @@ class OnScreenSubtitles:
         for index, (region, interval) in enumerate(work):
             if not self._ocr.language_available(region.language):
                 raise OcrLanguageUnavailable(region.language, self._ocr.missing_language_guidance(region.language))
-            begin, finish = (0.0, duration) if interval is None else (interval["start"], interval["end"])
+            whole = interval is None or bool(interval["whole"])
+            begin, finish = (0.0, duration) if whole else (interval["start"], interval["end"])
             samples, anchor, text = [], None, ""
             for seconds, image in self._frames.region_frames(
                     path, region.rect, fps=SAMPLES_PER_SECOND, cancellation=cancellation,
-                    start=None if interval is None else begin, end=None if interval is None else finish):
+                    start=None if whole else begin, end=None if whole else finish):
                 if cancellation.is_set():
                     break
                 if anchor is None or not images_similar(anchor, image):
@@ -747,7 +771,7 @@ class OnScreenSubtitles:
             if cancellation.is_set():
                 raise _Cancelled
             lines = merge_samples(samples)
-            if interval is not None:
+            if not whole:
                 lines = tuple((max(begin, s), min(finish, e), t) for s, e, t in lines if max(begin, s) < min(finish, e))
             result.append((region.id, interval, lines))
         return result
@@ -774,10 +798,55 @@ def _replace_range(db, interval, lines) -> list[str]:
     """
     generation, start, end = interval["generation_id"], interval["start"], interval["end"]
     if not db.execute("DELETE FROM onscreen_subtitle_review_ranges WHERE region_id = ? AND generation_id = ? "
-                      "AND start = ? AND end = ?", (interval["region_id"], generation, start, end)).rowcount:
+                      "AND start = ? AND end = ? AND whole = 0",
+                      (interval["region_id"], generation, start, end)).rowcount:
         return []
     db.execute("DELETE FROM onscreen_subtitle_lines WHERE generation_id = ? AND start < ? AND end > ?",
                (generation, end, start))
+    return _insert_lines(db, generation, lines)
+
+
+def _merge_reread(db, interval, lines) -> list[str]:
+    """다시 읽은 영상 전체의 줄을 세대 안의 예전 줄과 맞춘다. 새로 저장한 줄 ID만 돌려준다.
+
+    검수로 원문이나 번역을 고친 줄은 그대로 두고, 그와 시각이 겹치는 새 줄은 버린다. 남은 새 줄마다 정규화한 글자가
+    같고 시각이 겹치는 검수하지 않은 예전 줄 중 가장 많이 겹치는 하나와 짝짓는다. 짝은 줄 ID(화면 번역 자막)를 지키고
+    시각만 새것이 된다. 짝이 없는 예전 줄은 지워 그 번역과 진행 중 번역 대상도 사라지고, 짝이 없는 새 줄은 새로 넣는다.
+    그사이 세대가 바뀌었거나 영역이 지워져 기록이 없으면 아무것도 쓰지 않는다.
+    """
+    generation = interval["generation_id"]
+    if not db.execute("DELETE FROM onscreen_subtitle_review_ranges WHERE region_id = ? AND generation_id = ? "
+                      "AND whole = 1", (interval["region_id"], generation)).rowcount:
+        return []
+    old = db.execute(
+        "SELECT l.id, l.start, l.end, l.text, COALESCE(p.original_reviewed OR p.translation_reviewed, 0) AS reviewed "
+        "FROM onscreen_subtitle_lines l LEFT JOIN onscreen_translation_reviews p ON p.line_id = l.id "
+        "WHERE l.generation_id = ? ORDER BY l.ordinal", (generation,)).fetchall()
+    reviewed = [row for row in old if row["reviewed"]]
+    candidates = {row["id"]: row for row in old if not row["reviewed"]}
+    matched, new = {}, []
+    for start, end, text in lines:
+        if any(_overlap(start, end, row["start"], row["end"]) > 0 for row in reviewed):
+            continue
+        best = max((row for row in candidates.values()
+                    if normalize_onscreen_text(row["text"]) == text and _overlap(start, end, row["start"], row["end"]) > 0),
+                   key=lambda row: _overlap(start, end, row["start"], row["end"]), default=None)
+        if best is None:
+            new.append((start, end, text))
+        else:
+            matched[candidates.pop(best["id"])["id"]] = (start, end)
+    db.executemany("DELETE FROM onscreen_subtitle_lines WHERE id = ?", [(id_,) for id_ in candidates])
+    db.executemany("UPDATE onscreen_subtitle_lines SET start = ?, end = ? WHERE id = ?",
+                   [(start, end, id_) for id_, (start, end) in matched.items()])
+    return _insert_lines(db, generation, new)
+
+
+def _overlap(start, end, other_start, other_end) -> float:
+    return min(end, other_end) - max(start, other_start)
+
+
+def _insert_lines(db, generation, lines) -> list[str]:
+    """세대에 새 줄을 넣고 남은 줄과 함께 시작 시각 순으로 순서를 다시 매긴다. 새 줄 ID를 돌려준다."""
     retained = db.execute("SELECT id, start FROM onscreen_subtitle_lines WHERE generation_id = ? ORDER BY ordinal",
                           (generation,)).fetchall()
     # UNIQUE는 행마다 검사된다. 남은 줄의 순서를 먼저 충돌하지 않는 음수로 옮긴다.

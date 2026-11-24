@@ -323,13 +323,29 @@ def test_moving_a_series_region_in_one_episode_only_makes_it_directly_set_and_ke
     assert regions(core, second) == [(BAND, "en", SERIES), (TOP, "ja", SERIES)] and state(core, second) == others
 
 
-def test_series_wide_edit_accepts_only_rebuild_for_now(series):
+def test_rereading_a_series_region_in_one_episode_only_makes_it_directly_set_and_reads_only_that_region(series):
+    core, media, _, (first, second, third), _ = series
+    series_with_direct_episode(core, first, third)
+    band = core.onscreen_subtitle_regions(first)[0]
+    others = state(core, second)
+    media.calls.clear()
+
+    assert core.update_onscreen_subtitle_region(band.id, CORNER, "en", mode=RegionEdit.REREAD).state == "queued"
+
+    assert regions(core, first) == [(CORNER, "en", DIRECT), (TOP, "ja", DIRECT)]
+    assert core.process_next_onscreen_subtitle().state == "completed"
+    assert [call[1] for call in media.calls] == [CORNER]
+    assert regions(core, second) == [(BAND, "en", SERIES), (TOP, "ja", SERIES)] and state(core, second) == others
+
+
+@pytest.mark.parametrize("mode", [RegionEdit.MOVE, RegionEdit.REREAD])
+def test_series_wide_edit_accepts_only_rebuild_for_now(series, mode):
     core, _, _, (first, second, third), _ = series
     series_with_direct_episode(core, first, third)
     band = core.onscreen_subtitle_regions(first)[0]
     before = everything(core, (first, second, third))
     with pytest.raises(ValueError, match="처음부터 다시 만들기"):
-        core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True, mode=RegionEdit.MOVE)
+        core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True, mode=mode)
     assert everything(core, (first, second, third)) == before
 
 

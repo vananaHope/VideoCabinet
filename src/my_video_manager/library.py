@@ -144,7 +144,7 @@ def _signature(path: Path) -> tuple[int, int]:
     return info.st_size, info.st_mtime_ns
 
 
-LIBRARY_DB_VERSION = 12
+LIBRARY_DB_VERSION = 13
 
 
 def migrate_library(db, *, before_upgrade=None) -> None:
@@ -258,6 +258,11 @@ def migrate_library(db, *, before_upgrade=None) -> None:
             from .transcript_originals import migrate_transcript_originals
             migrate_transcript_originals(db)
             db.execute("PRAGMA user_version = 12")
+        if version < 13:
+            # 화면 자막 영역 다시 읽기 요청. 기존 구간 요청은 모두 구간 다시 생성이다.
+            from .onscreen_subtitles import migrate_onscreen_reread
+            migrate_onscreen_reread(db)
+            db.execute("PRAGMA user_version = 13")
         db.commit()
     except BaseException:
         db.rollback()

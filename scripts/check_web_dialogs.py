@@ -340,10 +340,13 @@ def onscreen_region_edits():
                 data = current()
                 assert data['values']['choice'] == region.language
                 assert f'검수로 고친 줄 {expected:,}개의 수정이 사라집니다' in data['information'], data['information']
-                # #426 읽은 영역은 자리만 바꾸기가 기본이고 처음부터 다시 만들기는 더 보기 안에 있다. 보이는 안내는 자리만 바꾸기다.
+                # #426·#427 읽은 영역은 자리만 바꾸기가 기본이고 그 옆에 다시 읽기, 처음부터 다시 만들기는 더 보기 안에 있다.
+                # 보이는 안내는 두 방식을 말하고 검수한 줄이 사라진다는 경고는 없다.
                 assert data['move_language'] == region.language
                 text = js("document.querySelector('[role=dialog]').textContent")
-                assert '자리만 바꿉니다' in text and '수정이 사라집니다' not in text, text
+                assert '자리만 바꾸기' in text and '다시 읽기' in text and '수정이 사라집니다' not in text, text
+                buttons = js("[...document.querySelectorAll('[role=dialog] button')].map(b => b.textContent)")
+                assert buttons.index('다시 읽기') + 1 == buttons.index('자리만 바꾸기'), buttons
                 assert '처음부터 다시 만들기' not in text and '화면 자막 만들기' not in text, text
                 footer_layout(f'onscreen-region-edit-{name}')
                 capture(f'container-onscreen-region-edit-{name}', container)
@@ -375,7 +378,7 @@ def onscreen_region_edits():
             if name == 'max':
                 del core.onscreen_subtitle_region_reviewed_line_count
     Ocr.available.discard('zh-Hant')
-    metrics['checks'].append('화면 자막 영역 고치기(자리만 바꾸기 기본, 더 보기의 처음부터 다시 만들기 확인)·지우기(검수로 고친 줄 '
+    metrics['checks'].append('화면 자막 영역 고치기(자리만 바꾸기 기본, 옆에 다시 읽기, 더 보기의 처음부터 다시 만들기 확인)·지우기(검수로 고친 줄 '
                             '0·3·9,999·긴 제목/언어) 컨테이너 촬영, 다시 만들기·지우기 취소 무변경')
 
 
