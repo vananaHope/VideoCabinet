@@ -746,6 +746,7 @@ export interface DialogData {
   series_label: string
   series_note: string
   series_information: string
+  series_move_information: string
   move_language: string
   move_information: string
 }

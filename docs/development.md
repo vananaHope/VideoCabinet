@@ -1008,8 +1008,10 @@ v11은 시리즈 영역 `series_onscreen_regions(id, series_id, x, y, width, hei
 보이고 고치기·지우기가 그 화만 바꿉니다. `onscreen_series.py`의 `OnScreenSeriesRegions`가 시리즈 영역의 적용·고치기·지우기와 소속 맞추기를 맡습니다.
 `add_onscreen_subtitle_region(..., series=True)`는 시리즈에서 온 화면 시리즈 영역에 영역 하나를 더하고, 아니면 이 화의 영역 묶음
 전체를 시리즈 영역으로 삼습니다(이전 시리즈 영역은 통째로 바뀜). 시리즈에서 온 화와 영역이 없는 화가 같은 영역을 받아 자동 대상으로
-들어가고, 지금 화는 직접 요청입니다. `update_onscreen_subtitle_region(..., series=True)`는 시리즈 영역을 고쳐 시리즈에서 온 화마다
-그 영역만 다시 읽고, `delete_onscreen_subtitle_region`은 시리즈에서 온 영역이면 시리즈에서 온 모든 화에서 지웁니다. `series=False`로
+들어가고, 지금 화는 직접 요청입니다. `update_onscreen_subtitle_region(..., series=True, mode=...)`는 시리즈 영역을 고쳐 시리즈에서 온
+화마다 그 영역의 복사본에 같은 고치기 방식을 적용하고(`RegionEdit.MOVE`는 사각형만, `REREAD`는 다시 읽어 예전 줄과 맞추기,
+`REBUILD`는 다시 만들기), 사라질 검수 수(`onscreen_subtitle_region_series_impact(..., mode=...)`)는 고친 영역에서는 `REBUILD`일
+때만 셉니다. `delete_onscreen_subtitle_region`은 시리즈에서 온 영역이면 시리즈에서 온 모든 화에서 지웁니다. `series=False`로
 고치거나 더하면 그 화만 직접 정함이 됩니다. 여러 화의 영역·줄은 한 트랜잭션에서 바꿉니다. 제외 영상은 시리즈 영역 변경에서
 빠집니다(채우거나 바꾸지 않고, 대기열에 넣지 않고, 범위에 세지 않음). 시리즈에서 온 제외 영상은 시리즈 영역을 바꾸는 순간 영역·줄·검수를
 지킨 채 직접 정함이 됩니다.

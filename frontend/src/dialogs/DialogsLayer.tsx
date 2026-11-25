@@ -62,13 +62,15 @@ function DialogBody({ bridge, data, drafts }: { bridge: DialogsBridge; data: Dia
   const composing = useRef(false)
   const currentSelected = data.rows.some(row => row.id === selected) ? selected : data.rows[0]?.id ?? ''
   const kind = data.kind
-  // 영역 고치기: 읽은 적이 있는 영역을 같은 언어로, 이 화에서만 고칠 때 자리만 바꾸기가 기본이고 그 옆에 다시 읽기,
-  // 처음부터 다시 만들기는 더 보기에 있다.
-  const movable = kind === 'onscreen-region' && !!data.move_language && form.choice === data.move_language && !form.series
+  // 영역 고치기: 읽은 적이 있는 영역을 같은 언어로 고칠 때 자리만 바꾸기가 기본이고 그 옆에 다시 읽기,
+  // 처음부터 다시 만들기는 더 보기에 있다. 시리즈 전체에 적용을 켜도 같은 방식을 시리즈에서 온 화마다 적용한다.
+  const movable = kind === 'onscreen-region' && !!data.move_language && form.choice === data.move_language
   const [more, setMore] = useState(false)
   // 화면 자막 영역 고치기에서 "시리즈 전체에 적용"을 켜면 정보 줄은 이 화가 아니라 시리즈 범위(확인 창과 같은 숫자)를 말한다.
-  const information = kind === 'onscreen-region' && form.series && data.series_information ? data.series_information
-    : movable ? data.move_information : data.information
+  const series = kind === 'onscreen-region' && form.series
+  const information = series && movable && data.series_move_information ? data.series_move_information
+    : series && data.series_information ? data.series_information
+      : movable ? data.move_information : data.information
   useEffect(() => {
     if (kind !== 'range') return
     const timer = setTimeout(() => {
