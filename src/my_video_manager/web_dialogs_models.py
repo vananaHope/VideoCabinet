@@ -43,6 +43,13 @@ SERIES_OPT_IN = ('켜면 이 화의 영역 묶음이 시리즈 영역이 되어,
                  '직접 정한 다른 화는 바뀌지 않습니다.')
 # 시리즈 영역 확인 창: 더하기(시리즈에서 온 화에 새 영역, 보통은 확인 없이 바로 바뀐다), 고치기(시리즈에서 온 영역), 지우기,
 # 바꾸기(직접 정한 화의 묶음으로 기존 시리즈 영역을 바꿈). 종류는 코어가 잰 범위(impact.change)를 따른다.
+SERIES_PLACE_TITLES = {RegionEdit.MOVE: '시리즈 화면 자막 영역 자리만 바꾸기',
+                      RegionEdit.REREAD: '시리즈 화면 자막 영역 다시 읽기'}
+SERIES_STATUS = {
+    RegionEdit.REBUILD: '자막 대기열에 화면 자막 만들기를 추가했습니다. 시리즈의 다른 화는 자동 대상으로 뒤이어 처리합니다.',
+    RegionEdit.MOVE: '시리즈 화면 자막 영역의 자리만 바꿨습니다. 화면 자막과 화면 번역 자막은 그대로입니다.',
+    RegionEdit.REREAD: '시리즈 화면 자막 영역을 다시 읽도록 자막 대기열에 넣었습니다. 시리즈의 다른 화는 자동 대상으로 뒤이어 '
+                       '읽습니다.'}
 SERIES_TITLES = {'add': '시리즈 화면 자막 영역 더하기', 'update': '시리즈 화면 자막 영역 고치기',
                  'delete': '시리즈 화면 자막 영역 지우기', 'replace': '시리즈 화면 자막 영역 바꾸기'}
 
@@ -96,6 +103,8 @@ class DialogModel:
         # 화면 자막 영역 창: 영상이 속한 시리즈(없으면 None)와, 보인 시리즈 확인 창의 (종류, 범위 다시 재기, 본 범위, 확인).
         self.video_series = None
         self.series_change = None
+        # 시리즈 확인 창이 묻는 고치기 방식. 문구·제목·사라질 검수 수가 이 방식을 따른다.
+        self.series_mode = RegionEdit.REBUILD
         if kind == 'highlight':
             h, duration = context['highlight'], context['duration']
             self.values = values(start=initial_time_input(h.start, duration),
@@ -189,8 +198,10 @@ class DialogModel:
         """시리즈 영역 확인 창. 확인하면 창이 보인 범위(impact)를 넘겨, 그 사이 바뀌었으면 바꾸지 않고 다시 묻는다.
         measure()는 지금 범위를 다시 잰다(창이 열린 동안 안내를 지금 상태로 바꾼다). 문구는 범위의 변경 종류를 따른다."""
         self.series_change = (measure, impact, save)
+        placed = impact.change == 'update' and self.series_mode != RegionEdit.REBUILD
         self.confirm(notice + self.series_message(impact), lambda: save(impact),
-                     title=SERIES_TITLES[impact.change], destructive=True)
+                     title=SERIES_PLACE_TITLES[self.series_mode] if placed else SERIES_TITLES[impact.change],
+                     destructive=not placed)
 
     def series_changed(self, measure, changed, save):
         """확인 창이 본 범위가 달라졌다. 지금 범위가 확인이 필요 없는 변경(기존 시리즈 영역을 바꾸지 않음)이면 처음 저장과
@@ -200,15 +211,25 @@ class DialogModel:
         else:
             save(changed.impact)
 
-    def series_message(self, impact):
+    def series_message(self, impact, mode=None):
         title = self.core.video(self.context['video_id']).title
         name, others, lost, change = self.video_series.name, impact.other_videos, impact.reviewed_line_count, impact.change
+        mode = self.series_mode if mode is None else mode
         if change == 'replace':
             episodes = f'이 화와 다른 화 {others:,}개' if others else '이 화'
+            here = {RegionEdit.MOVE: ' 이 화의 이 영역은 자리만 바꿔 화면 자막·화면 번역 자막·검수 기록이 그대로입니다.',
+                    RegionEdit.REREAD: ' 이 화의 이 영역은 새 자리로 다시 읽고, 글자가 같은 줄과 검수로 고친 줄의 번역은 '
+                                       '지킵니다.'}.get(mode, '')
             return (f"'{title}'의 영역 묶음으로 '{name}' 시리즈 영역을 바꿉니다.\n{episodes}의 화면 자막 영역이 바뀝니다. "
                     f'지금 시리즈 영역을 받은 화는 그 영역과 화면 자막·화면 번역 자막을 잃고, 검수로 고친 줄 {lost:,}개의 '
-                    '수정이 사라집니다. 직접 정한 화는 그대로입니다.')
+                    f'수정이 사라집니다.{here} 직접 정한 화는 그대로입니다.')
         episodes = f'이 화와 시리즈 영역을 받은 다른 화 {others:,}개' if others else '이 화(시리즈 영역을 받은 다른 화는 없습니다)'
+        if change == 'update' and mode == RegionEdit.MOVE:
+            return (f"'{title}'에서 '{name}' 시리즈 영역의 자리만 바꿉니다.\n{episodes}에서 이 영역의 사각형만 바뀌고, "
+                    '화면 자막·화면 번역 자막·검수 기록은 그대로입니다. 직접 정한 화와 다른 영역은 그대로입니다.')
+        if change == 'update' and mode == RegionEdit.REREAD:
+            return (f"'{title}'에서 '{name}' 시리즈 영역을 새 자리로 다시 읽습니다.\n{episodes}에서 이 영역만 영상 전체를 "
+                    '다시 읽고, 글자가 같은 줄과 검수로 고친 줄의 번역은 지킵니다. 직접 정한 화와 다른 영역은 그대로입니다.')
         if change == 'add':
             reading = f'이 화와 다른 화 {others:,}개' if others else '이 화'
             return (f"'{title}'에서 '{name}' 시리즈 영역에 이 영역을 더합니다.\n{reading}에서 이 영역을 새로 읽습니다. "
@@ -221,8 +242,23 @@ class DialogModel:
                 f'{region_language(region.language)})을 지울까요?\n{episodes}에서 이 영역과 그 화면 자막·화면 번역 자막이 '
                 f'사라지고, 검수로 고친 줄 {lost:,}개의 수정이 사라집니다. 직접 정한 화와 다른 영역은 그대로입니다.')
 
+    def series_move_message(self, impact):
+        """시리즈 전체에 적용을 켜고 자리만 바꾸기·다시 읽기를 고를 수 있을 때의 정보 줄."""
+        title = self.core.video(self.context['video_id']).title
+        name, others = self.video_series.name, impact.other_videos
+        ways = ('자리만 바꾸기는 다시 읽지 않아 화면 자막·화면 번역 자막·검수 기록이 그대로이고, 다시 읽기는 새 자리로 영상 '
+                '전체를 다시 읽어 글자가 같은 줄과 검수로 고친 줄의 번역을 지킵니다.')
+        if impact.change == 'replace':
+            return (f"'{title}'의 영역 묶음으로 '{name}' 시리즈 영역을 바꿉니다. 이 화의 이 영역에는 고른 방식을 적용합니다. "
+                    f'{ways} 지금 시리즈 영역을 받은 화는 그 영역을 잃고, 검수로 고친 줄 {impact.reviewed_line_count:,}개의 '
+                    '수정이 사라집니다. 직접 정한 화는 그대로입니다.')
+        episodes = f'이 화와 시리즈 영역을 받은 다른 화 {others:,}개' if others else '이 화'
+        return (f"'{title}'에서 '{name}' 시리즈 영역을 고칩니다. {episodes}에 고른 방식을 똑같이 적용합니다. {ways} "
+                '직접 정한 화와 다른 영역은 그대로입니다.')
+
     def ask_series_delete(self):
         region, video_id = self.region, self.context['video_id']
+        self.series_mode = RegionEdit.REBUILD
 
         def measure():
             return self.core.onscreen_subtitle_region_series_impact(video_id, region.id, delete=True)
@@ -241,18 +277,22 @@ class DialogModel:
             self.owner.pop(accepted=True)
         self.ask_series(measure, measure(), delete)
 
-    def save_to_series(self, language):
-        """시리즈 전체에 적용 선택지를 켜고 저장한다. 기존 시리즈 영역을 고치거나 통째로 바꾸면 확인 창을 거친다."""
+    def save_to_series(self, language, mode=RegionEdit.REBUILD):
+        """시리즈 전체에 적용 선택지를 켜고 고치기 방식(mode)대로 저장한다. 기존 시리즈 영역을 고치거나 통째로 바꾸면 어느
+        방식이든 바뀌는 다른 화 수를 확인 창으로 묻는다."""
         c, ctx = self.core, self.context
         region_id = ctx.get('region_id')
+        self.series_mode = mode
 
         def measure():
-            return c.onscreen_subtitle_region_series_impact(ctx['video_id'], region_id)
+            if region_id is None:
+                return c.onscreen_subtitle_region_series_impact(ctx['video_id'])
+            return c.onscreen_subtitle_region_series_impact(ctx['video_id'], region_id, mode=mode)
 
         def save(impact):
             try:
                 if region_id is not None:
-                    c.update_onscreen_subtitle_region(region_id, ctx['region'], language, mode=RegionEdit.REBUILD,
+                    c.update_onscreen_subtitle_region(region_id, ctx['region'], language, mode=mode,
                                                       series=True, expected_series_impact=impact)
                 else:
                     c.add_onscreen_subtitle_region(ctx['video_id'], ctx['region'], language, series=True,
@@ -263,8 +303,7 @@ class DialogModel:
             except OcrLanguageUnavailable as missing:
                 self.message = str(missing)
                 return
-            self.owner.window.statusBar().showMessage(
-                '자막 대기열에 화면 자막 만들기를 추가했습니다. 시리즈의 다른 화는 자동 대상으로 뒤이어 처리합니다.')
+            self.owner.window.statusBar().showMessage(SERIES_STATUS[mode])
             self.owner.pop(accepted=True)
         impact = measure()
         if impact.replaces_existing and c.onscreen_language_available(language):
@@ -363,7 +402,8 @@ class DialogModel:
                     keep_reviewed=self.keep_pending is not None, id=self.identifier, kind=kind, title=TITLES[kind], description='', rows=[], tags=[], tag_candidates=[], available=[], exports=[],
                     choices=[], values=self.values.copy(), maximum=0.0, locked=False, warning='',
                     confirmation=self.confirmation, confirm_title=self.confirm_title, confirm_destructive=self.confirm_destructive, translation=None, network_busy=False, information=self.information,
-                    series_label='', series_note='', series_information='', move_language='', move_information='')
+                    series_label='', series_note='', series_information='', series_move_information='',
+                    move_language='', move_information='')
         if kind == 'tags':
             highlight = ctx.get('highlight_id')
             tags = c.highlight_tags(highlight) if highlight is not None else c.video_tags(ctx['video_id'])
@@ -444,7 +484,12 @@ class DialogModel:
                     except ValueError:
                         pass  # 영역이나 소속이 사라졌다. 저장하면 코어가 알린다.
                     else:
-                        data['series_information'] = self.series_message(impact).replace('\n', ' ')
+                        data['series_information'] = self.series_message(impact, RegionEdit.REBUILD).replace('\n', ' ')
+                        if self.reviewed is not None:
+                            # 자리만 바꾸기·다시 읽기를 고를 수 있을 때 보이는 시리즈 범위. 두 방식의 사라질 검수 수는 같다.
+                            moved = c.onscreen_subtitle_region_series_impact(ctx['video_id'], editing.id,
+                                                                             mode=RegionEdit.MOVE)
+                            data['series_move_information'] = self.series_move_message(moved)
         elif kind == 'review':
             providers = c.translation_line_providers(ctx['video_id'], source=source)
             lines = c.review_lines(ctx['video_id']) if region_id is None else c.onscreen_review_lines(region_id)
@@ -627,7 +672,7 @@ class DialogModel:
             if not data.get('choice'):
                 raise ValueError('읽을 언어를 고르세요.')
             if data.get('series') and self.video_series is not None:
-                self.save_to_series(data['choice'])
+                self.save_to_series(data['choice'], RegionEdit(data.get('mode') or RegionEdit.REBUILD))
                 return
             if ctx.get('region_id') is None:
                 self.save_region(lambda: c.add_onscreen_subtitle_region(ctx['video_id'], ctx['region'], data['choice']))

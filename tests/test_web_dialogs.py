@@ -760,6 +760,35 @@ def test_series_region_edit_information_follows_the_series_option(screen_window)
     assert seen['confirmation'].replace('\n', ' ') == seen['information']
 
 
+@pytest.mark.parametrize('mode', ['move', 'reread'])
+def test_series_region_move_and_reread_ask_for_the_other_episodes_without_losing_reviews(screen_window, mode):
+    """#428: 선택지를 켜도 자리만 바꾸기·다시 읽기를 고를 수 있고, 확인 창은 다른 화 수를 묻되 잃는 것이 없어 파괴 표시가 없다."""
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, b = series_episodes(core, media)
+    region, = core.onscreen_subtitle_regions(a)
+    before = [(core.onscreen_subtitles(v)[0].lines, core.onscreen_translation_reviewed_lines(v)) for v in (a, b)]
+    dialogs = window.web_host.dialogs
+    core.playback.start(a, 0)
+
+    def check():
+        data = state(dialogs)
+        assert data['move_language'] == 'en'
+        assert '이 화와 시리즈 영역을 받은 다른 화 1개에 고른 방식을 똑같이 적용합니다' in data['series_move_information']
+        assert '사라집니다' not in data['series_move_information']
+        data = act(dialogs, 'save', choice='en', series=True, mode=mode)
+        assert not data['confirm_destructive'] and '다른 화 1개' in data['confirmation']
+        assert data['confirm_title'] == {'move': '시리즈 화면 자막 영역 자리만 바꾸기',
+                                         'reread': '시리즈 화면 자막 영역 다시 읽기'}[mode]
+        assert '사라집니다' not in data['confirmation']
+        act(dialogs, 'confirm')
+        assert not dialogs.active
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window, region_id=region.id).exec(), dialogs, check)
+    assert [r.rect for v in (a, b) for r in core.onscreen_subtitle_regions(v)] == [CORNER, CORNER]
+    assert [(core.onscreen_subtitles(v)[0].lines, core.onscreen_translation_reviewed_lines(v)) for v in (a, b)] == before
+    assert len(core.subtitle_queue(kind=ONSCREEN_SUBTITLE)) == (0 if mode == 'move' else 2)
+
+
 def read_region_with_review(core, media):
     """한 화에 읽기를 마친 영역 하나(두 줄)와 검수로 고친 줄 하나."""
     a = core.videos()[0].id

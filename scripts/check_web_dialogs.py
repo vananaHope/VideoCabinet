@@ -478,6 +478,9 @@ def onscreen_series_regions():
                 assert data['values']['series'] is True
                 # 선택지가 켜져 있으면 정보 줄은 이 화만이 아니라 확인 창과 같은 시리즈 범위의 숫자를 말한다(#365).
                 assert f'검수로 고친 줄 {reviewed:,}개' in data['series_information'], data
+                # #428 읽은 영역이면 선택지를 켜도 자리만 바꾸기·다시 읽기를 고르고, 정보 줄은 두 방식의 시리즈 범위를 말한다.
+                text = js("document.querySelector('[role=dialog]').textContent")
+                assert '고른 방식을 똑같이 적용합니다' in text and '수정이 사라집니다' not in text, text
                 footer_layout(f'onscreen-series-edit-{name}')
                 capture(f'container-onscreen-series-edit-{name}', container)
                 before = saved()
@@ -491,6 +494,16 @@ def onscreen_series_regions():
                 capture(f'container-onscreen-series-edit-confirm-{name}', dialogs.container)
                 cancel_confirmation()
                 assert dialogs.active and not current()['confirmation'] and saved() == before
+                click('자리만 바꾸기')
+                wait(lambda: bool(current()['confirmation']))
+                data = current()
+                assert data['confirm_title'] == '시리즈 화면 자막 영역 자리만 바꾸기' and not data['confirm_destructive'], data
+                assert episodes_text in data['confirmation'] and '사라집니다' not in data['confirmation'], data
+                settle(300)
+                capture(f'container-onscreen-series-move-confirm-{name}', dialogs.container)
+                cancel_confirmation()
+                wait(lambda: not current()['confirmation'])
+                assert saved() == before
             web_modal('onscreen-region', {'video_id': target, 'region': band, 'region_id': region.id}, edit_check)
 
             def delete_check(name=name, others=others, reviewed=reviewed):

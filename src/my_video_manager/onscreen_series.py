@@ -12,8 +12,8 @@
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from .onscreen_subtitles import (OnScreenRegionChanged, OnScreenSubtitleQueueEntry, RegionRect, insert_region,
-                                 reread_region)
+from .onscreen_subtitles import (OnScreenRegionChanged, OnScreenSubtitleQueueEntry, RegionEdit, RegionRect,
+                                 insert_region, place_region, require_read, reread_region)
 
 
 def migrate_onscreen_series(db) -> None:
@@ -120,9 +120,14 @@ class OnScreenSeriesRegions:
 
     # 영향 범위
 
-    def _plan(self, db, video_id, region_id=None, *, delete=False):
+    def _plan(self, db, video_id, region_id=None, *, delete=False, mode=RegionEdit.REBUILD):
         """(시리즈 상태, 이 변경으로 영역이 바뀌는 다른 화, 사라질 영역 ID들, 지금 화가 시리즈에서 왔는지, 기존 시리즈 영역을
-        바꾸는지, 변경 종류). 영향 범위와 적용이 이 판정 하나를 쓴다."""
+        바꾸는지, 변경 종류). 영향 범위와 적용이 이 판정 하나를 쓴다.
+
+        고치기 방식(mode)은 고친 영역의 줄이 사라지는지만 바꾼다. 자리만 바꾸기와 다시 읽기는 시리즈 영역의 복사본과 지금 화의
+        영역에서 검수로 고친 줄을 지킨다. 직접 정한 화의 묶음으로 시리즈 영역을 바꾸면 시리즈에서 온 다른 화는 어느 방식이든
+        이전 영역을 잃는다."""
+        rebuild = mode == RegionEdit.REBUILD
         state = _state(db, video_id)
         current = state.linked.get(video_id)
         if region_id is not None:
@@ -136,7 +141,7 @@ class OnScreenSeriesRegions:
             if region_id is None or linked_region is None:
                 raise ValueError("시리즈에서 온 영역이 아닙니다.")
             others = [w for w in state.linked if w != video_id]
-            lost = [regions[linked_region] for regions in state.linked.values() if linked_region in regions]
+            lost = [regions[linked_region] for regions in state.linked.values() if linked_region in regions] if rebuild else []
             return state, others, lost, True, True, "delete" if delete else "update"
         if current:
             # 시리즈에서 온 화에 새 영역: 시리즈 영역에 하나를 더한다. 잃는 것이 없다.
@@ -145,15 +150,16 @@ class OnScreenSeriesRegions:
         # 직접 정한 화(또는 영역 없는 화)의 묶음을 시리즈 영역으로 삼는다. 이미 있던 시리즈 영역은 통째로 바뀐다.
         others = [w for w in (*state.linked, *state.empty) if w != video_id]
         lost = [rid for w in state.linked if w != video_id for rid in state.linked[w].values()]
-        if region_id is not None:
-            lost.append(region_id)  # 고친 영역은 지금 화에서도 다시 읽는다.
+        if region_id is not None and rebuild:
+            lost.append(region_id)  # 처음부터 다시 만들면 고친 영역은 지금 화에서도 다시 읽는다.
         return state, others, lost, False, bool(state.regions), "replace"
 
-    def impact(self, video_id, region_id=None, *, delete=False, connection=None) -> OnScreenSeriesImpact:
-        """지금 화(video_id)에서 시리즈 전체에 적용하면 바뀌는 범위. region_id가 없으면 새 영역, 있으면 그 영역 고치기
-        (delete면 지우기)다."""
+    def impact(self, video_id, region_id=None, *, delete=False, mode=RegionEdit.REBUILD,
+               connection=None) -> OnScreenSeriesImpact:
+        """지금 화(video_id)에서 시리즈 전체에 적용하면 바뀌는 범위. region_id가 없으면 새 영역, 있으면 그 영역을 고치기
+        방식(mode)대로 고치기(delete면 지우기)다."""
         def read(db):
-            _, others, lost, _, replaces, change = self._plan(db, video_id, region_id, delete=delete)
+            _, others, lost, _, replaces, change = self._plan(db, video_id, region_id, delete=delete, mode=mode)
             return OnScreenSeriesImpact(len(others), self._lost(db, lost), replaces, change)
         if connection is not None:
             return read(connection)
@@ -161,17 +167,17 @@ class OnScreenSeriesRegions:
             db.execute("BEGIN")  # 화마다의 출처와 검수 수를 같은 스냅샷에서 센다.
             return read(db)
 
-    def _check(self, db, video_id, region_id, delete, expected) -> None:
+    def _check(self, db, video_id, region_id, delete, mode, expected) -> None:
         """확인 창이 본 범위(expected)와 지금 범위가 다르면 OnScreenSeriesChanged를 던진다. 변경 종류는 확인 창이 본 값이
         있을 때만 대조한다."""
         if expected is None:
             return
-        current = self.impact(video_id, region_id, delete=delete, connection=db)
+        current = self.impact(video_id, region_id, delete=delete, mode=mode, connection=db)
         if current != expected or (expected.change and current.change != expected.change):
             raise OnScreenSeriesChanged(current)
 
     @contextmanager
-    def _writing(self, video_id, region_id=None, *, delete=False, expected=None):
+    def _writing(self, video_id, region_id=None, *, delete=False, mode=RegionEdit.REBUILD, expected=None):
         """영향받는 화의 진행 중 읽기를 멈추고 쓰기 트랜잭션 하나를 연다. 중간에 실패하면 아무것도 바뀌지 않는다.
         확인 창이 본 범위(expected)와 지금 범위가 다르면 아무것도 바꾸지 않고 OnScreenSeriesChanged를 던진다.
 
@@ -179,13 +185,13 @@ class OnScreenSeriesRegions:
         바뀐 경우). 시리즈에서 온 제외 영상은 이 트랜잭션에서 직접 정함이 된다."""
         with self._connect() as db:
             db.execute("BEGIN")  # 범위 대조와 영향받는 화를 같은 스냅샷에서 읽는다.
-            self._check(db, video_id, region_id, delete, expected)
-            _, others, *_ = self._plan(db, video_id, region_id, delete=delete)
+            self._check(db, video_id, region_id, delete, mode, expected)
+            _, others, *_ = self._plan(db, video_id, region_id, delete=delete, mode=mode)
         for touched in (video_id, *others):
             self._store.cancel_reading(touched)  # 쓰기 트랜잭션 전에 부른다(처리 쪽은 _activity 안에서 DB를 쓴다).
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            self._check(db, video_id, region_id, delete, expected)
+            self._check(db, video_id, region_id, delete, mode, expected)
             state = _state(db, video_id)
             for video in state.excluded:
                 db.execute("UPDATE onscreen_subtitle_regions SET series_region_id = NULL WHERE video_id = ? AND "
@@ -215,15 +221,37 @@ class OnScreenSeriesRegions:
                 self._adopt(connection, state, video_id, others, now)
             return self._store.request_reading(connection, video_id, now)
 
-    def update(self, region_id, rect: RegionRect, language: str, *, video_id,
-               expected=None) -> OnScreenSubtitleQueueEntry:
-        """영역 하나를 고치고 시리즈 전체에 적용한다. 시리즈 영역이면 시리즈에서 온 화마다 그 영역만 다시 읽고, 직접 정한
-        화의 영역이면 그 화의 묶음이 시리즈 영역이 된다."""
-        self._store.check_region(rect, language)
-        with self._writing(video_id, region_id, expected=expected) as connection:
-            state, others, _, from_series, *_ = self._plan(connection, video_id, region_id)
+    def update(self, region_id, rect: RegionRect, language: str, *, video_id, mode=RegionEdit.REBUILD,
+               expected=None) -> OnScreenSubtitleQueueEntry | None:
+        """영역 하나를 고치기 방식(mode)대로 고치고 시리즈 전체에 적용한다. 시리즈 영역이면 시리즈에서 온 화마다 그 영역의
+        복사본에 같은 방식을 적용하고, 직접 정한 화의 영역이면 그 영역에 그 방식을 적용한 뒤 그 화의 묶음이 시리즈 영역이 된다.
+
+        REBUILD는 그 영역을 지우고 다시 읽는다. MOVE는 사각형만 바꾸고, REREAD는 사각형을 바꾸고 영상 전체를 다시 읽어 예전
+        줄과 맞춘다(한 화 고치기와 같다). MOVE·REREAD는 지금 화의 영역을 읽은 적이 있고 읽을 언어가 그대로일 때만 받는다.
+        지금 화는 직접 요청, 다른 화는 자동 대상이다. 지금 화에 넣을 읽기가 없으면(MOVE) None을 돌려준다."""
+        mode = RegionEdit(mode)
+        if mode == RegionEdit.MOVE:
+            if not isinstance(rect, RegionRect):
+                raise ValueError("화면 자막 영역이 올바르지 않습니다.")
+        else:
+            self._store.check_region(rect, language)
+        if mode != RegionEdit.REBUILD and language != self._store.region(region_id).language:
+            raise ValueError("읽을 언어를 바꾸면 처음부터 다시 만들어야 합니다.")
+        reread = mode == RegionEdit.REREAD
+        with self._writing(video_id, region_id, mode=mode, expected=expected) as connection:
+            state, others, _, from_series, *_ = self._plan(connection, video_id, region_id, mode=mode)
             now = self._clock().isoformat()
-            reread_region(connection, region_id, rect, language)
+
+            def edit(video, region, *, current):
+                """한 화의 영역 하나에 고른 방식을 적용하고 그 화의 대기열을 맞춘다."""
+                if mode == RegionEdit.REBUILD:
+                    reread_region(connection, region, rect, language)
+                    return self._store.request_reading(connection, video, now, automatic=not current)
+                place_region(connection, region, rect, language, reread=reread)
+                return self._store.follow_placement(connection, video, region, now, reread=reread,
+                                                    automatic=not current)
+            if mode != RegionEdit.REBUILD:
+                require_read(connection, region_id)
             if from_series:
                 series_region = connection.execute("SELECT series_region_id FROM onscreen_subtitle_regions "
                                                    "WHERE id = ?", (region_id,)).fetchone()[0]
@@ -233,12 +261,13 @@ class OnScreenSeriesRegions:
                     copy = state.linked[other].get(series_region)
                     if copy is None:
                         insert_region(connection, other, rect, language, now, series_region)
+                        self._store.request_reading(connection, other, now, automatic=True)
                     else:
-                        reread_region(connection, copy, rect, language)
-                    self._store.request_reading(connection, other, now, automatic=True)
-            else:
-                self._adopt(connection, state, video_id, others, now)
-            return self._store.request_reading(connection, video_id, now)
+                        edit(other, copy, current=False)
+                return edit(video_id, region_id, current=True)
+            entry = edit(video_id, region_id, current=True)
+            self._adopt(connection, state, video_id, others, now)
+            return entry
 
     def delete(self, region_id, *, video_id, expected=None) -> None:
         """시리즈 영역 하나를 지운다. 시리즈에서 온 모든 화에서 그 영역과 화면 자막·화면 번역 자막·검수 기록을 지운다."""

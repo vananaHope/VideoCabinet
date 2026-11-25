@@ -801,22 +801,20 @@ class AppCore:
         직접 요청한다. 다시 읽는 동안 기존 줄과 화면 번역 자막은 그대로 보이고, 끝나면 글자가 같고 시각이 겹치는 줄과
         검수로 고친 줄은 번역과 함께 지키고 새 줄만 번역한다. 그 영역의 구간 다시 생성 요청은 다시 읽기가 대신한다.
         MOVE·REREAD는 읽은 적이 없거나 읽을 언어가 바뀐 영역이면 아무것도 바꾸지 않고 ValueError를 던진다.
-        시리즈 전체에 적용(series=True)은 아직 REBUILD만 받는다.
 
         series=False면 이 화만 고친다. 시리즈에서 온 화였으면 이 화의 영역 묶음은 직접 정함이 되어 이후 시리즈 영역
         변경을 따르지 않는다. expected_reviewed_line_count는 확인 창이 보인 onscreen_subtitle_region_reviewed_line_count
         값이다. 바꾸는 순간 그 값과 다르면 OnScreenRegionChanged를 던지고 아무것도 바꾸지 않는다.
-        series=True면 시리즈 전체에 적용한다. 시리즈에서 온 영역이면 시리즈 영역을 고치고 시리즈에서 온 화마다 그 영역만
-        다시 읽는다(다른 화는 자동 대상). 직접 정한 화의 영역이면 고친 뒤 이 화의 영역 묶음이 시리즈 영역이 된다
-        (add_onscreen_subtitle_region의 series=True와 같다). expected_series_impact는 add_onscreen_subtitle_region과 같다.
+        series=True면 시리즈 전체에 적용한다. 시리즈에서 온 영역이면 시리즈 영역을 고치고 시리즈에서 온 화마다 그 영역의
+        복사본에 같은 방식을 적용한다(다시 읽을 때 다른 화는 자동 대상). 직접 정한 화의 영역이면 그 방식대로 고친 뒤 이 화의
+        영역 묶음이 시리즈 영역이 된다(add_onscreen_subtitle_region의 series=True와 같다). expected_series_impact는
+        onscreen_subtitle_region_series_impact(..., mode=mode) 값이다.
         """
         mode = RegionEdit(mode)
         video_id = self._onscreen.region(region_id).video_id
         self.playback_location(video_id)
         if series:
-            if mode != RegionEdit.REBUILD:
-                raise ValueError("시리즈 전체에 적용할 때는 처음부터 다시 만들기만 할 수 있습니다.")
-            return self._onscreen_series.update(region_id, rect, language, video_id=video_id,
+            return self._onscreen_series.update(region_id, rect, language, video_id=video_id, mode=mode,
                                                 expected=_expected(expected_series_impact))
         return self._onscreen.update_region(region_id, rect, language, mode,
                                             guard=self._reviewed_guard(region_id, expected_reviewed_line_count))
@@ -836,13 +834,14 @@ class AppCore:
         self._onscreen.delete_region(region_id, guard=self._reviewed_guard(region_id, expected_reviewed_line_count))
 
     def onscreen_subtitle_region_series_impact(self, video_id: int, region_id: int | None = None, *,
-                                               delete=False) -> OnScreenSeriesImpact:
+                                               delete=False, mode=RegionEdit.REBUILD) -> OnScreenSeriesImpact:
         """지금 화(video_id)에서 시리즈 전체에 적용하면 바뀌는 범위: 영역이 바뀌는 다른 화 수, 지금 화를 포함해 사라질
         검수로 고친 줄 수의 합, 기존 시리즈 영역을 고치거나 지우거나 바꾸는지(확인 창을 거친다).
 
-        region_id가 없으면 새 영역, 있으면 그 영역 고치기, delete면 시리즈에서 온 그 영역 지우기다. 시리즈에 속하지 않은
-        영상이면 ValueError다."""
-        return self._onscreen_series.impact(video_id, region_id, delete=delete)
+        region_id가 없으면 새 영역, 있으면 그 영역을 고치기 방식(mode)대로 고치기, delete면 시리즈에서 온 그 영역 지우기다.
+        사라질 검수 줄은 고친 영역에서는 처음부터 다시 만들기일 때만 센다. 직접 정한 화의 묶음으로 시리즈 영역을 바꾸면
+        시리즈에서 온 다른 화의 이전 영역은 어느 방식이든 사라져 센다. 시리즈에 속하지 않은 영상이면 ValueError다."""
+        return self._onscreen_series.impact(video_id, region_id, delete=delete, mode=RegionEdit(mode))
 
     def _reviewed_guard(self, region_id, expected):
         if expected is UNCHECKED:

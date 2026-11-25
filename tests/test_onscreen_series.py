@@ -338,14 +338,110 @@ def test_rereading_a_series_region_in_one_episode_only_makes_it_directly_set_and
     assert regions(core, second) == [(BAND, "en", SERIES), (TOP, "ja", SERIES)] and state(core, second) == others
 
 
+def test_moving_a_series_region_moves_every_series_copy_and_keeps_their_lines(series):
+    """#428: 시리즈 영역 자리만 바꾸기는 시리즈에서 온 화마다 사각형만 바꾸고 줄·번역·검수가 그대로이며 대기열에 넣지 않는다."""
+    core, media, _, (first, second, third), _ = series
+    series_with_direct_episode(core, first, third)
+    edited = core.onscreen_subtitle_regions(first)[0]
+    kept = {video: (state(core, video), core.translation(video, source=ONSCREEN)) for video in (first, second, third)}
+    direct = regions(core, third)
+    impact = core.onscreen_subtitle_region_series_impact(first, edited.id, mode=RegionEdit.MOVE)
+    assert impact == OnScreenSeriesImpact(1, 0, True) and impact.change == "update"
+    assert core.onscreen_subtitle_region_series_impact(first, edited.id).reviewed_line_count == 2  # 다시 만들기만 센다
+    media.calls.clear()
+
+    assert core.update_onscreen_subtitle_region(edited.id, CORNER, "en", series=True, mode=RegionEdit.MOVE,
+                                                expected_series_impact=impact) is None
+
+    assert regions(core, first) == regions(core, second) == [(CORNER, "en", SERIES), (TOP, "ja", SERIES)]
+    assert regions(core, third) == direct
+    assert {video: (state(core, video), core.translation(video, source=ONSCREEN))
+            for video in (first, second, third)} == kept
+    assert queue(core) == [] and core.process_next_onscreen_subtitle() is None and media.calls == []
+
+
+def test_rereading_a_series_region_rereads_it_in_every_series_episode_keeping_matching_lines(series):
+    """#428: 시리즈 영역 다시 읽기는 시리즈에서 온 화마다 그 영역만 다시 읽고(지금 화는 직접 요청, 다른 화는 자동 대상)
+    글자가 같은 줄과 검수한 줄의 번역을 지킨다."""
+    core, media, _, (first, second, third), other = series
+    series_with_direct_episode(core, first, third)
+    edited = core.onscreen_subtitle_regions(first)[0]
+    kept = {video: (state(core, video), core.translation(video, source=ONSCREEN)) for video in (first, second, third)}
+    impact = core.onscreen_subtitle_region_series_impact(first, edited.id, mode=RegionEdit.REREAD)
+    assert impact == OnScreenSeriesImpact(1, 0, True)
+
+    entry = core.update_onscreen_subtitle_region(edited.id, CORNER, "en", series=True, mode=RegionEdit.REREAD,
+                                                 expected_series_impact=impact)
+
+    assert (entry.video_id, entry.state) == (first, "queued")
+    assert queue(core) == [(first, "queued"), (second, "queued")]
+    core.add_onscreen_subtitle_region(other, CORNER, "en")  # 나중에 한 직접 요청은 자동 대상(2화)보다 앞선다
+    assert queue(core) == [(first, "queued"), (other, "queued"), (second, "queued")]
+    # 기다리는 동안에도 줄과 번역이 그대로 보인다.
+    assert {video: (state(core, video), core.translation(video, source=ONSCREEN))
+            for video in (first, second, third)} == kept
+    media.calls.clear()
+    read_all(core)
+    assert [(call[0].name, call[1]) for call in media.calls] == [
+        ("드라마 01화.mkv", CORNER), ("따로.mkv", CORNER), ("드라마 02화.mkv", CORNER)]
+    # 같은 글자를 읽어 줄 ID·번역·검수가 그대로이고 새로 번역할 줄이 없다.
+    assert {video: (state(core, video), core.translation(video, source=ONSCREEN))
+            for video in (first, second, third)} == kept
+    assert regions(core, second) == [(CORNER, "en", SERIES), (TOP, "ja", SERIES)]
+
+
 @pytest.mark.parametrize("mode", [RegionEdit.MOVE, RegionEdit.REREAD])
-def test_series_wide_edit_accepts_only_rebuild_for_now(series, mode):
+def test_series_move_and_reread_are_refused_for_a_changed_language_or_an_unread_region(series, mode):
     core, _, _, (first, second, third), _ = series
     series_with_direct_episode(core, first, third)
     band = core.onscreen_subtitle_regions(first)[0]
     before = everything(core, (first, second, third))
-    with pytest.raises(ValueError, match="처음부터 다시 만들기"):
-        core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True, mode=mode)
+    with pytest.raises(ValueError, match="처음부터 다시 만들어야"):
+        core.update_onscreen_subtitle_region(band.id, CORNER, "ja", series=True, mode=mode)
+    assert everything(core, (first, second, third)) == before
+    core.add_onscreen_subtitle_region(first, RegionRect(0, 0.4, 0.5, 0.2), "en", series=True)
+    waiting = core.onscreen_subtitle_regions(first)[2]
+    before = everything(core, (first, second, third))
+    with pytest.raises(ValueError, match="처음부터 다시 만들어야"):
+        core.update_onscreen_subtitle_region(waiting.id, CORNER, "en", series=True, mode=mode)
+    assert everything(core, (first, second, third)) == before
+
+
+@pytest.mark.parametrize("mode", [RegionEdit.MOVE, RegionEdit.REREAD])
+def test_editing_a_direct_region_into_the_series_applies_the_mode_to_this_episode(series, mode):
+    """#428: 직접 정한 화의 영역을 시리즈 전체에 적용하면 그 화에는 고른 방식이 적용되고, 묶음이 시리즈 영역이 된다.
+    시리즈에서 온 다른 화는 지금처럼 이전 영역을 잃고 새 묶음을 받는다."""
+    core, media, _, (first, second, third), _ = series
+    series_with_direct_episode(core, first, third)
+    corner, = core.onscreen_subtitle_regions(third)
+    kept = state(core, third), core.translation(third, source=ONSCREEN)
+    impact = core.onscreen_subtitle_region_series_impact(third, corner.id, mode=mode)
+    # 다른 화 둘(1·2화)이 이전 시리즈 영역 둘씩과 그 검수 한 줄씩을 잃는다. 이 화의 검수는 사라지지 않는다.
+    assert impact == OnScreenSeriesImpact(2, 4, True) and impact.change == "replace"
+    assert core.onscreen_subtitle_region_series_impact(third, corner.id).reviewed_line_count == 5
+
+    core.update_onscreen_subtitle_region(corner.id, TOP, "en", series=True, mode=mode, expected_series_impact=impact)
+
+    assert regions(core, first) == regions(core, second) == regions(core, third) == [(TOP, "en", SERIES)]
+    assert (state(core, third), core.translation(third, source=ONSCREEN)) == kept
+    expected = [(first, "queued"), (second, "queued")]
+    assert queue(core) == (expected if mode == RegionEdit.MOVE else [(third, "queued"), *expected])
+    read_all(core)
+    assert (state(core, third), core.translation(third, source=ONSCREEN)) == kept
+
+
+def test_a_series_move_that_saw_an_outdated_range_changes_nothing(series):
+    core, _, folder, (first, second, third), _ = series
+    series_with_direct_episode(core, first, third)
+    band = core.onscreen_subtitle_regions(first)[0]
+    seen = core.onscreen_subtitle_region_series_impact(first, band.id, mode=RegionEdit.MOVE)
+    (folder / "드라마 04화.mkv").write_bytes(b"episode 4")
+    core.scan()  # 4화가 시리즈 영역을 받아 다른 화가 하나 늘었다
+    before = everything(core, (first, second, third))
+    with pytest.raises(OnScreenSeriesChanged) as changed:
+        core.update_onscreen_subtitle_region(band.id, CORNER, "en", series=True, mode=RegionEdit.MOVE,
+                                             expected_series_impact=seen)
+    assert changed.value.impact == OnScreenSeriesImpact(2, 0, True)
     assert everything(core, (first, second, third)) == before
 
 
