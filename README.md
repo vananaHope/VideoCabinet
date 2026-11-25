@@ -64,52 +64,24 @@ VideoCabinet은 Windows용 개인 영상 라이브러리입니다. 폴더의 영
 
 재생 화면 아래 조작 줄의 ⏮ ⏸ ⏭·◆ 지점·【 구간·속도 목록·자막·⌨ 키 안내·⛶ 전체 화면 단추도 같은 명령을 실행하며, 툴팁에 지금 키가 보입니다. 재생 메뉴(⋯)의 **설정**은 Alt+S와 같습니다.
 
-자세한 사용법은 **[사용 설명서](docs/user-guide.md)**를 보세요. 기능별 동작, 시청 상태 판정, 자막 검수와 SRT 내보내기, 백업 복원 등을 설명합니다.
+자세한 사용법은 **[사용 설명서](docs/user-guide.md)**를 보세요.
 
-## 개발
-
-### 환경 준비
-
-Windows x64, 64비트 Python 3.10 이상, Node.js 22.12 이상, `winget`이 필요합니다. 저장소 루트의 PowerShell에서 실행합니다.
-
-```powershell
-# 처음 쓰는 PC: uv·FFmpeg·7-Zip·libmpv 준비, 웹 빌드, 전체 테스트까지
-powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
-# 도구가 이미 있는 PC의 새 worktree(빠른 모드)
-powershell -ExecutionPolicy Bypass -File scripts/setup.ps1 -Worktree
-```
-
-### 자주 쓰는 명령
-
-| 할 일 | 명령 |
-|---|---|
-| 실행 | `.venv/Scripts/python -m my_video_manager` |
-| 웹 개발 서버로 실행 | `npm --prefix frontend run dev` 뒤 `$env:MVM_WEB_DEV_URL='http://127.0.0.1:5173/'`로 실행 |
-| 테스트 | `.venv/Scripts/python -m pytest -n auto` |
-| 웹 검사 | `npm --prefix frontend run lint` · `typecheck` · `build` |
-| 브리지 타입 생성 | `.venv/Scripts/python scripts/generate_web_types.py`(검사만: `--check`) |
-| 설치 파일 빌드 | `powershell -ExecutionPolicy Bypass -File scripts/build.ps1` |
-| Release 발행 | `powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version x.y.z`(먼저 `-DryRun`, 빌드 전에 전체 테스트 실행) |
-
-### 완료 조건
-
-- `frontend/`를 바꾸면 lint·typecheck·build가 모두 통과해야 합니다.
-- 브리지 계약을 바꾸면 타입을 생성하고 pytest를 돌립니다.
-- 화면은 `scripts/check_web_*.py --offscreen`으로 1100×720을 확인합니다.
-
-### CI
-
-PR과 `main` push마다 GitHub Actions의 **Windows tests**(`.github/workflows/windows-tests.yml`)가 Windows 러너에서 전체 pytest를 10개 조각으로 나눠 돌립니다. 문서만 바꾼 변경은 건너뜁니다. 실창 검사와 CUDA는 러너에서 확인할 수 없으므로 로컬 Windows에서 확인합니다. 자세한 내용은 [개발 문서](docs/development.md#ci)를 보세요.
-
-### 문서
+## 문서
 
 | 문서 | 내용 |
 |---|---|
-| [개발 문서](docs/development.md) | 환경 준비 상세, 테스트, 설치 파일 빌드, Release, 새 웹 페이지 추가, 웹 검증 스크립트, 직접 확인할 항목 |
-| [사용 설명서](docs/user-guide.md) | 기능별 상세 동작과 내부 API |
-| [GLOSSARY.md](GLOSSARY.md) | 도메인 용어 |
-| [docs/adr/](docs/adr/) | 설계 결정 기록 |
-| [AGENTS.md](AGENTS.md) | 작업 규칙(커밋·PR 메시지는 한국어) |
+| [사용 설명서](docs/user-guide.md) | 기능별 동작, 시청 상태 판정, 자막 검수와 SRT 내보내기, 백업 복원 |
+| [개발 문서](docs/development.md) | 소스에서 준비·실행·테스트, CI, 웹 개발 서버, 새 웹 페이지 추가 |
+| [릴리스 문서](docs/release.md) | 설치 파일 빌드, Release 발행, 업데이트 서명 키 |
+| [검증 문서](docs/verification.md) | 화면 검사 스크립트와 실창에서 직접 확인할 항목 |
+| [내부 동작](docs/internals/README.md) | 모듈 구조, 코어 API, DB 이전, 기능별 구현 메모 |
+| [GLOSSARY.md](GLOSSARY.md) · [docs/adr/](docs/adr/) | 도메인 용어 · 설계 결정 기록 |
+| [AGENTS.md](AGENTS.md) | 에이전트 작업 규칙(커밋·PR 메시지는 한국어) |
+
+## 개발
+
+Windows x64에서 저장소 루트의 PowerShell로 `scripts/setup.ps1`을 실행하면 개발 환경을 준비하고 테스트까지 돌립니다.
+필요한 도구, 자주 쓰는 명령, 완료 조건은 [개발 문서](docs/development.md)를 보세요.
 
 ## 라이선스
 
