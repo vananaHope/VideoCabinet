@@ -785,7 +785,8 @@ def test_region_edit_offers_move_only_for_a_read_region_and_keeps_everything(scr
     def check():
         data = state(dialogs)
         assert data['move_language'] == 'en'
-        assert '자리만 바꿉니다' in data['move_information'] and '사라집니다' not in data['move_information']
+        assert '자리만 바꾸기' in data['move_information'] and '다시 읽기' in data['move_information']
+        assert '사라집니다' not in data['move_information']
         assert '검수로 고친 줄 1개의 수정이 사라집니다' in data['information']
         act(dialogs, 'save', choice='en', mode='move')
         assert not dialogs.active
@@ -818,6 +819,26 @@ def test_region_rebuild_from_more_confirms_the_lost_reviews(screen_window, answe
         assert core.onscreen_subtitles(a) == () and len(core.subtitle_queue(kind=ONSCREEN_SUBTITLE)) == 1
     else:
         assert core.onscreen_subtitles(a)[0].lines == lines and core.subtitle_queue(kind=ONSCREEN_SUBTITLE) == ()
+
+
+def test_region_reread_queues_only_that_region_without_a_confirmation(screen_window):
+    """#427: 다시 읽기는 검수한 줄을 지키므로 확인 창 없이 그 영역만 다시 읽도록 넣고, 기존 번역은 그대로 보인다."""
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, region = read_region_with_review(core, media)
+    before = (core.onscreen_subtitles(a)[0].lines, core.translation(a, source=ONSCREEN))
+    dialogs = window.web_host.dialogs
+    core.playback.start(a, 0)
+
+    def check():
+        result = act(dialogs, 'save', choice='en', mode='reread')
+        assert result is None or not result['confirmation']
+        assert not dialogs.active
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window, region_id=region.id).exec(), dialogs, check)
+    assert [r.rect for r in core.onscreen_subtitle_regions(a)] == [CORNER]
+    assert (core.onscreen_subtitles(a)[0].lines, core.translation(a, source=ONSCREEN)) == before
+    assert len(core.subtitle_queue(kind=ONSCREEN_SUBTITLE)) == 1
+    assert '다시 읽도록' in window.statusBar().currentMessage()
 
 
 def test_region_edit_of_an_unread_region_offers_only_rebuild_without_a_confirmation(screen_window):

@@ -431,8 +431,9 @@ class DialogModel:
                     f'{self.reviewed:,}개의 수정이 사라집니다. 다른 영역은 그대로입니다.')
                 if self.reviewed is not None:
                     data.update(move_language=editing.language, move_information=(
-                        f"'{title}'의 이 영역 자리만 바꿉니다. 다시 읽지 않아 화면 자막·화면 번역 자막·검수 기록이 "
-                        '그대로 남고 번역 띠는 새 자리에 보입니다. 다른 영역은 그대로입니다.'))
+                        f"'{title}'의 이 영역만 고칩니다. 자리만 바꾸기는 다시 읽지 않아 화면 자막·화면 번역 자막·검수 "
+                        '기록이 그대로 남고 번역 띠는 새 자리에 보입니다. 다시 읽기는 새 자리로 영상 전체를 다시 읽고, '
+                        '글자가 같은 줄과 검수로 고친 줄의 번역은 지킵니다. 다른 영역은 그대로입니다.'))
             if self.video_series is not None:
                 data.update(series_label=f'시리즈 전체에 적용 · {self.video_series.name}',
                             series_note=SERIES_OPT_OUT if self.from_series else SERIES_OPT_IN)
@@ -631,7 +632,7 @@ class DialogModel:
             if ctx.get('region_id') is None:
                 self.save_region(lambda: c.add_onscreen_subtitle_region(ctx['video_id'], ctx['region'], data['choice']))
                 return
-            # 자리만 바꾸기와 더 보기의 처음부터 다시 만들기는 방식을 적어 보낸다. 방식이 없으면 그 창에 단추가
+            # 자리만 바꾸기·다시 읽기와 더 보기의 처음부터 다시 만들기는 방식을 적어 보낸다. 방식이 없으면 그 창에 단추가
             # "화면 자막 만들기" 하나뿐이었고, 잃을 것은 정보 줄이 이미 알렸다.
             chosen = data.get('mode')
             mode, reviewed = RegionEdit(chosen or RegionEdit.REBUILD), self.reviewed
@@ -640,6 +641,10 @@ class DialogModel:
                                                   expected_reviewed_line_count=reviewed)
             if mode == RegionEdit.MOVE:
                 self.save_region(update, '화면 자막 영역의 자리만 바꿨습니다. 화면 자막과 화면 번역 자막은 그대로입니다.')
+            elif mode == RegionEdit.REREAD:
+                # 검수로 고친 줄은 지키므로 잃을 것을 다시 묻지 않는다.
+                self.save_region(update, '화면 자막 영역을 다시 읽도록 자막 대기열에 넣었습니다. 다 읽을 때까지 지금 화면 '
+                                         '번역 자막이 그대로 보입니다.')
             elif chosen is not None and reviewed is not None and data['choice'] == self.editing.language:
                 # 자리만 바꾸기를 두고 더 보기에서 처음부터 다시 만들기를 골랐다. 잃는 것을 확인 창으로 한 번 더 묻는다.
                 title = c.video(ctx['video_id']).title

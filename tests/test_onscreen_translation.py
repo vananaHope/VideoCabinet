@@ -516,7 +516,7 @@ def test_v9_migration_failure_rolls_back_and_preserves_backup(screen):
     assert restored.translation_queue()[0].source == ONSCREEN
 
 
-@pytest.mark.parametrize('version', [7, 8, 9, 10, 11])
+@pytest.mark.parametrize('version', [7, 8, 9, 10, 11, 12])
 def test_upgrade_backup_restore_keeps_onscreen_results_protection_progress_and_video_glossary(screen, tmp_path, version):
     core, media, adapter, _, _, _, _, reopen = screen
     a, b = core.videos()
@@ -529,7 +529,7 @@ def test_upgrade_backup_restore_keeps_onscreen_results_protection_progress_and_v
     read_screen(core, media, b.id)
     core.process_next_translation()
     if version < LIBRARY_DB_VERSION:
-        # 고정된 이전 버전 DDL에는 화면 번역·보호·영상 용어집(v9), 원문 검수·구간 요청(v10), 시리즈 영역(v11), 검수 전 원어 원문(v12)이 아직 없다.
+        # 고정된 이전 버전 DDL에는 화면 번역·보호·영상 용어집(v9), 원문 검수·구간 요청(v10), 시리즈 영역(v11), 검수 전 원어 원문(v12), 다시 읽기 요청(v13)이 아직 없다.
         replace_with_frozen(core.database, version)
     archive = core.create_backup(tmp_path / f'v{version}.zip')
     assert archive.metadata.db_version == version
@@ -685,7 +685,8 @@ def test_moving_a_region_while_its_video_is_translated_keeps_the_inflight_respon
     assert translated(core, video) == {l.id: '번역 ' + l.text for s in (bottom, top) for l in s.lines}
 
 
-def test_move_is_refused_for_a_changed_language_or_an_unread_region(screen):
+@pytest.mark.parametrize('mode', [RegionEdit.MOVE, RegionEdit.REREAD])
+def test_move_and_reread_are_refused_for_a_changed_language_or_an_unread_region(screen, mode):
     core, media, *_ = screen
     video = core.videos()[0].id
     bottom, top = read_two_regions(core, media, video)
@@ -696,9 +697,9 @@ def test_move_is_refused_for_a_changed_language_or_an_unread_region(screen):
     before = (core.onscreen_subtitle_regions(video), screen_state(core, video))
     moved = RegionRect(0.1, 0.4, 0.8, 0.2)
     with pytest.raises(ValueError, match='처음부터 다시 만들어야'):
-        core.update_onscreen_subtitle_region(top.region.id, moved, 'en', mode=RegionEdit.MOVE)
+        core.update_onscreen_subtitle_region(top.region.id, moved, 'en', mode=mode)
     with pytest.raises(ValueError, match='처음부터 다시 만들어야'):
-        core.update_onscreen_subtitle_region(waiting.id, moved, 'en', mode=RegionEdit.MOVE)
+        core.update_onscreen_subtitle_region(waiting.id, moved, 'en', mode=mode)
     assert (core.onscreen_subtitle_regions(video), screen_state(core, video)) == before
 
 
@@ -1229,3 +1230,145 @@ def test_removing_the_queue_item_drops_the_range_request(screen):
     assert core.process_next_onscreen_subtitle().state == 'completed'
     assert media.intervals == [(extra, None, None)]
     assert core.onscreen_subtitles(video)[:2] == (bottom, top)
+
+
+# #427 다시 읽기: 새 자리로 영상 전체를 다시 읽고 글자가 같은 줄·검수한 줄의 번역을 지킨다.
+MOVED = RegionRect(0.1, 0.4, 0.8, 0.2)
+
+
+def lines_of(core, video, index=0):
+    return [(l.start, l.end, l.text) for l in core.onscreen_subtitles(video)[index].lines]
+
+
+def test_rereading_a_region_keeps_same_and_reviewed_lines_and_translates_only_new_ones(screen):
+    core, media, adapter, *_, reopen = screen
+    video = core.videos()[0].id
+    media.captions_by_region = {BAND: ((10, 12, 'Jon show'), (13, 15, 'Jon show'), (20, 22, 'Next'), (30, 32, 'End'),
+                                       (40, 42, 'Old')),
+                                TOP: ((5, 7, 'Corner'),)}
+    core.add_onscreen_subtitle_region(video, BAND, 'en')
+    core.add_onscreen_subtitle_region(video, TOP, 'ja')
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    finish(core)
+    bottom, top = core.onscreen_subtitles(video)
+    first, second, nxt, end, old = bottom.lines
+    core.edit_onscreen_subtitle_line(nxt.id, 'Next one')  # 원문 검수
+    finish(core)
+    core.edit_onscreen_translation_line(end.id, '고친 끝')  # 번역 검수
+    before, reviewed = translated(core, video), core.onscreen_translation_reviewed_lines(video)
+    media.captions_by_region[MOVED] = (
+        (11.5, 14.5, 'Jon show'),  # 두 예전 줄과 겹치지만 더 많이 겹치는 두 번째 줄의 짝이다
+        (20, 22, 'Next'), (31, 33, 'End'),  # 검수한 줄과 겹쳐 버린다
+        (40, 42, 'Old!'),  # 한 자라도 다르면 새 줄이다
+        (50, 52, 'Fresh'))
+    media.intervals.clear()
+
+    entry = core.update_onscreen_subtitle_region(bottom.region.id, MOVED, 'en', mode=RegionEdit.REREAD)
+
+    assert (entry.state, entry.queue_kind) == ('queued', ONSCREEN_SUBTITLE)
+    # 기다리는 동안 재생 화면은 새 자리에 기존 줄과 번역을 그대로 보인다.
+    assert translated(core, video) == before
+    assert [(b.rect, [l.id for l in b.lines]) for b in core.onscreen_translation_regions(video)] == [
+        (MOVED, [l.id for l in bottom.lines]), (TOP, [top.lines[0].id])]
+    adapter.calls.clear()
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(MOVED, None, None)]  # 다른 영역은 다시 읽지 않는다
+    new_bottom, new_top = core.onscreen_subtitles(video)
+    assert new_top == top and new_bottom.id == bottom.id
+    assert [(l.start, l.end, l.text) for l in new_bottom.lines] == [
+        (11.5, 14.5, 'Jon show'), (20, 22, 'Next one'), (30, 32, 'End'), (40, 42, 'Old!'), (50, 52, 'Fresh')]
+    kept = [l.id for l in new_bottom.lines[:3]]
+    assert kept == [second.id, nxt.id, end.id]
+    fresh = {l.id for l in new_bottom.lines[3:]}
+    assert not fresh & {l.id for l in bottom.lines}
+    finish(core)
+    assert sorted(line.text for call in adapter.calls for line in call[0]) == ['Fresh', 'Old!']
+    expected = {second.id: before[second.id], nxt.id: before[nxt.id], end.id: '고친 끝', top.lines[0].id: '번역 Corner',
+                **{l.id: '번역 ' + l.text for l in new_bottom.lines[3:]}}
+    assert translated(core, video) == expected
+    assert core.onscreen_translation_reviewed_lines(video) == reviewed
+    reopened = reopen()
+    assert reopened.onscreen_subtitles(video) == (new_bottom, new_top)
+    assert translated(reopened, video) == expected
+    assert reopened.process_next_onscreen_subtitle() is None
+
+
+def test_rereading_replaces_the_regions_range_request_and_reads_once(screen):
+    core, media, *_ = screen
+    video = core.videos()[0].id
+    bottom, top = three_line_regions(core, media, video)
+    core.request_onscreen_subtitle_range(bottom.region.id, 20.5, 21.5)
+    media.captions_by_region[MOVED] = ((10, 12, 'Jon show'), (20, 22, 'Next'))
+    media.intervals.clear()
+    core.update_onscreen_subtitle_region(bottom.region.id, MOVED, 'en', mode=RegionEdit.REREAD)
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(MOVED, None, None)]
+    assert core.process_next_onscreen_subtitle() is None
+    assert core.onscreen_subtitles(video)[0].lines == bottom.lines  # 글자·시각이 같아 줄이 그대로다
+
+
+def test_inflight_response_for_a_line_the_reread_drops_is_not_saved(screen):
+    core, media, adapter, *_ = screen
+    video = core.videos()[0].id
+    media.captions_by_region = {BAND: ((10, 12, 'Jon show'), (20, 22, 'Next'))}
+    core.add_onscreen_subtitle_region(video, BAND, 'en')
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    kept, dropped = core.onscreen_subtitles(video)[0].lines
+    media.captions_by_region[MOVED] = ((10, 12, 'Jon show'), (20, 22, 'Changed'))
+    def reread_meanwhile(lines, kwargs):
+        adapter.action = None
+        core.update_onscreen_subtitle_region(kept_region, MOVED, 'en', mode=RegionEdit.REREAD)
+        assert core.process_next_onscreen_subtitle().state == 'completed'
+    kept_region = core.onscreen_subtitle_regions(video)[0].id
+    adapter.action = reread_meanwhile
+    core.process_next_translation()
+    finish(core)
+    lines = core.onscreen_subtitles(video)[0].lines
+    assert [l.text for l in lines] == ['Jon show', 'Changed'] and lines[0].id == kept.id
+    assert translated(core, video) == {kept.id: '번역 Jon show', lines[1].id: '번역 Changed'}
+    assert dropped.id not in translated(core, video)
+
+
+@pytest.mark.parametrize('change', ['move', 'delete'])
+def test_changing_a_region_while_it_is_reread_discards_that_reading(screen, change):
+    core, media, *_ = screen
+    video = core.videos()[0].id
+    bottom, _ = three_line_regions(core, media, video)
+    elsewhere = RegionRect(0, 0.4, 0.5, 0.2)
+    media.captions_by_region[MOVED] = ((10, 12, 'Wrong place'),)
+    media.captions_by_region[elsewhere] = ((10, 12, 'Jon show'), (20, 22, 'Next'))
+    core.update_onscreen_subtitle_region(bottom.region.id, MOVED, 'en', mode=RegionEdit.REREAD)
+    region_frames = media.region_frames
+    def change_while_reading(path, rect, **kwargs):
+        if rect == MOVED:
+            if change == 'move':
+                core.update_onscreen_subtitle_region(bottom.region.id, elsewhere, 'en', mode=RegionEdit.MOVE)
+            else:
+                core.delete_onscreen_subtitle_region(bottom.region.id)
+        yield from region_frames(path, rect, **kwargs)
+    media.region_frames = change_while_reading
+    result = core.process_next_onscreen_subtitle()
+    media.region_frames = region_frames
+    assert result.state == 'queued'  # 그 읽기 결과는 버린다
+    if change == 'delete':
+        assert [s.region.rect for s in core.onscreen_subtitles(video)] == [TOP]
+        assert core.process_next_onscreen_subtitle() is None
+        return
+    assert core.onscreen_subtitles(video)[0].lines == bottom.lines
+    assert core.process_next_onscreen_subtitle().state == 'completed'
+    assert core.onscreen_subtitles(video)[0].lines == bottom.lines  # 새 자리에서 같은 글자를 읽었다
+
+
+def test_v12_library_upgrades_keeping_a_pending_range_request(screen):
+    core, media, *_, reopen = screen
+    video = core.videos()[0].id
+    bottom, _ = three_line_regions(core, media, video)
+    core.request_onscreen_subtitle_range(bottom.region.id, 20.5, 21.5)
+    replace_with_frozen(core.database, 12)
+    upgraded = reopen()
+    with closing(sqlite3.connect(core.database)) as db:
+        assert db.execute('PRAGMA user_version').fetchone()[0] == LIBRARY_DB_VERSION
+        assert db.execute('SELECT whole FROM onscreen_subtitle_review_ranges').fetchall() == [(0,)]
+    media.intervals.clear()
+    assert upgraded.process_next_onscreen_subtitle().state == 'completed'
+    assert media.intervals == [(BAND, 20, 22)]

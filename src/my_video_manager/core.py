@@ -797,8 +797,11 @@ class AppCore:
         RegionEdit.REBUILD는 자리·크기·읽을 언어를 고치고 그 영역의 화면 자막과 화면 번역 자막(검수로 고친 줄 포함)만
         지우고 다시 읽도록 직접 요청한다. 읽기가 끝나면 그 영역의 줄만 다시 번역된다.
         RegionEdit.MOVE는 다시 읽지 않고 사각형만 바꾼다. 그 영역의 줄·화면 번역 자막·검수 기록이 그대로이고 대기열에
-        아무것도 넣지 않는다(None을 돌려준다). 읽은 적이 없거나 읽을 언어가 바뀐 영역이면 아무것도 바꾸지 않고
-        ValueError를 던진다. 시리즈 전체에 적용(series=True)은 아직 REBUILD만 받는다.
+        아무것도 넣지 않는다(None을 돌려준다). RegionEdit.REREAD는 사각형을 바꾸고 그 영역만 영상 전체를 다시 읽도록
+        직접 요청한다. 다시 읽는 동안 기존 줄과 화면 번역 자막은 그대로 보이고, 끝나면 글자가 같고 시각이 겹치는 줄과
+        검수로 고친 줄은 번역과 함께 지키고 새 줄만 번역한다. 그 영역의 구간 다시 생성 요청은 다시 읽기가 대신한다.
+        MOVE·REREAD는 읽은 적이 없거나 읽을 언어가 바뀐 영역이면 아무것도 바꾸지 않고 ValueError를 던진다.
+        시리즈 전체에 적용(series=True)은 아직 REBUILD만 받는다.
 
         series=False면 이 화만 고친다. 시리즈에서 온 화였으면 이 화의 영역 묶음은 직접 정함이 되어 이후 시리즈 영역
         변경을 따르지 않는다. expected_reviewed_line_count는 확인 창이 보인 onscreen_subtitle_region_reviewed_line_count

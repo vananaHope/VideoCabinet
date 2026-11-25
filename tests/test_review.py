@@ -1123,7 +1123,7 @@ def test_v11_library_upgrades_keeping_review_and_starts_recording(setup):
     upgraded = reopen()
 
     with closing(sqlite3.connect(core.database)) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == LIBRARY_DB_VERSION == 12
+        assert db.execute("PRAGMA user_version").fetchone()[0] == LIBRARY_DB_VERSION
     assert upgraded.inspect_backup(upgraded.automatic_backups()[0]).db_version == 11
     assert (upgraded.transcript(vid), upgraded.translation(vid), upgraded.review_lines(vid)) == expected
     # 이전 전에 덮어쓴 원문은 알 수 없다. 이전 뒤 처음 고친 줄부터 남는다.
