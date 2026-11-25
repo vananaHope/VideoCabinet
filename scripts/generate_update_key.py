@@ -96,7 +96,7 @@ def print_acl_guidance() -> None:
           'icacls $keyFile /grant:r "*${keyUserSid}:F" "*S-1-5-18:F" /inheritance:r\n'
           'Inspect with icacls $keyFolder and icacls $keyFile; remove explicit SIDs other than '
           'the current user and SYSTEM with icacls $keyFolder /remove "*<SID>" and '
-          'icacls $keyFile /remove "*<SID>" (see docs/development.md).', file=sys.stderr)
+          'icacls $keyFile /remove "*<SID>" (see docs/release.md).', file=sys.stderr)
 
 
 def default_key_path() -> Path:

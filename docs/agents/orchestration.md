@@ -24,7 +24,7 @@
 ## 스펙과 먼저 읽을 문서
 
 - `gh issue view 1` : 전체 스펙. 특히 "Implementation Decisions", "Testing Decisions", "Out of Scope".
-- `AGENTS.md`, `GLOSSARY.md`(용어집), `docs/adr/`, `README.md`(요약), `docs/development.md`(환경 준비·테스트·빌드 상세)
+- `AGENTS.md`, `GLOSSARY.md`(용어집), `docs/adr/`, `README.md`(요약), `docs/development.md`(환경 준비·테스트·CI 상세), `docs/release.md`(빌드·Release), `docs/verification.md`(화면 검사), `docs/internals/`(구조·내부 API)
 
 ## 구현 제약
 
