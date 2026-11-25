@@ -306,7 +306,8 @@ class DialogModel:
             self.owner.window.statusBar().showMessage(SERIES_STATUS[mode])
             self.owner.pop(accepted=True)
         impact = measure()
-        if impact.replaces_existing and c.onscreen_language_available(language):
+        # 자리만 바꾸기는 언어 팩을 쓰지 않아 없어도 저장되므로 언어 팩과 상관없이 확인 창을 거친다.
+        if impact.replaces_existing and (mode == RegionEdit.MOVE or c.onscreen_language_available(language)):
             self.ask_series(measure, impact, save)
         else:
             save(impact)  # 잃는 것이 없거나(언어 팩이 없으면 아무것도 바꾸지 않고 안내한다) 바로 저장한다.

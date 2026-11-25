@@ -789,6 +789,26 @@ def test_series_region_move_and_reread_ask_for_the_other_episodes_without_losing
     assert len(core.subtitle_queue(kind=ONSCREEN_SUBTITLE)) == (0 if mode == 'move' else 2)
 
 
+def test_series_move_asks_even_without_the_language_pack(screen_window):
+    """#428: 자리만 바꾸기는 언어 팩 없이도 저장되므로, 언어 팩이 없어도 기존 시리즈 영역을 바꾸기 전에 확인 창을 거친다."""
+    from my_video_manager.web_dialogs_entries import OnScreenRegionDialog
+    window, (core, media, *_) = screen_window
+    a, b = series_episodes(core, media)
+    region, = core.onscreen_subtitle_regions(a)
+    before = onscreen_saved(core, (a, b))
+    core.onscreen_language_available = lambda language: False
+    dialogs = window.web_host.dialogs
+    core.playback.start(a, 0)
+
+    def check():
+        data = act(dialogs, 'save', choice='en', series=True, mode='move')
+        assert data['confirmation'] and onscreen_saved(core, (a, b)) == before
+        act(dialogs, 'cancel-confirm')
+        act(dialogs, 'close')
+    within(lambda: OnScreenRegionDialog(core, a, CORNER, window, region_id=region.id).exec(), dialogs, check)
+    assert onscreen_saved(core, (a, b)) == before
+
+
 def read_region_with_review(core, media):
     """한 화에 읽기를 마친 영역 하나(두 줄)와 검수로 고친 줄 하나."""
     a = core.videos()[0].id
